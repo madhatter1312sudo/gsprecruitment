@@ -1,0 +1,42 @@
+# Environment
+.env
+**/.env
+*.env.local
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+*.egg
+.venv/
+venv/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker
+.docker/
+
+# Logs
+*.log
+
+# Uploads
+uploads/
+*.dump
+*.sql
+backups/
+
+# Docs with secrets
+SETUP_SUMMARY.md
+COMPETITOR-ANALYSIS.md
+ENTERPRISE-ARCHITECTURE-SPEC.md
+SITE-DESIGN-SPEC.md

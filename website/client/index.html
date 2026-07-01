@@ -1,0 +1,811 @@
+<!DOCTYPE html>
+<html lang="en" data-lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Client Portal — GSP Recruitment</title>
+  <meta name="robots" content="noindex,nofollow">
+  <link rel="icon" type="image/png" sizes="32x32" href="../favicon-32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="../favicon-16.png">
+  <link rel="icon" type="image/x-icon" href="../favicon.ico">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" crossorigin="anonymous" referrerpolicy="no-referrer">
+  <link rel="stylesheet" href="../theme.css">
+  <link rel="stylesheet" href="../styles.css">
+  <style>
+    .portal-layout { display: flex; min-height: 100vh; }
+    .sidebar { width: var(--sidebar-width); background: var(--navy-900); border-right: 1px solid rgba(74,111,159,0.1); display: flex; flex-direction: column; position: fixed; top: 0; left: 0; bottom: 0; z-index: 100; overflow-y: auto; }
+    .sidebar-logo { padding: var(--space-lg) var(--space-xl); border-bottom: 1px solid rgba(74,111,159,0.1); }
+    .sidebar-logo a { display: flex; align-items: center; gap: var(--space-sm); }
+    .sidebar-nav { flex: 1; padding: var(--space-md) 0; }
+    .sidebar-nav-item { display: flex; align-items: center; gap: var(--space-md); padding: 0.75rem var(--space-xl); font-size: var(--font-size-sm); font-weight: 500; color: var(--navy-200); text-decoration: none; transition: all var(--transition-fast); border-left: 3px solid transparent; cursor: pointer; background: none; width: 100%; font-family: var(--font-primary); text-align: left; }
+    .sidebar-nav-item i { width: 20px; text-align: center; font-size: 1rem; color: var(--navy-300); transition: color var(--transition-fast); }
+    .sidebar-nav-item:hover { color: var(--white); background: rgba(74,111,159,0.08); }
+    .sidebar-nav-item.active { color: var(--gold-500); border-left-color: var(--gold-500); background: rgba(250,200,0,0.06); }
+    .sidebar-nav-item.active i { color: var(--gold-500); }
+    .sidebar-nav-label { padding: 0.5rem var(--space-xl); font-size: var(--font-size-xs); font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: var(--navy-400); }
+    .sidebar-footer { padding: var(--space-lg) var(--space-xl); border-top: 1px solid rgba(74,111,159,0.1); }
+    .sidebar-user { display: flex; align-items: center; gap: var(--space-md); }
+    .sidebar-user-info { flex: 1; min-width: 0; }
+    .sidebar-user-name { font-size: var(--font-size-sm); font-weight: 600; color: var(--white); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .sidebar-user-email { font-size: var(--font-size-xs); color: var(--navy-300); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .main-content { flex: 1; margin-left: var(--sidebar-width); min-height: 100vh; background: var(--navy-800); }
+    .portal-header { display: flex; align-items: center; justify-content: space-between; padding: var(--space-lg) var(--space-2xl); background: rgba(10,22,40,0.9); backdrop-filter: blur(12px); border-bottom: 1px solid rgba(74,111,159,0.1); position: sticky; top: 0; z-index: 50; }
+    .portal-header h1 { font-size: var(--font-size-xl); font-weight: 700; color: var(--white); }
+    .portal-header-actions { display: flex; align-items: center; gap: var(--space-md); }
+    .portal-content { padding: var(--space-2xl); }
+    .stats-grid { display: grid; grid-template-columns: repeat(4,1fr); gap: var(--space-lg); margin-bottom: var(--space-2xl); }
+    .dashboard-grid { display: grid; grid-template-columns: 2fr 1fr; gap: var(--space-xl); }
+    .dashboard-grid-wide { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-xl); }
+    .portal-section { display: none; }
+    .portal-section.active { display: block; }
+
+    /* ---- Kanban pipeline ---- */
+    .kanban-board { display: grid; grid-template-columns: repeat(4,1fr); gap: var(--space-md); margin-top: var(--space-lg); }
+    .kanban-column { background: rgba(6,13,26,0.3); border-radius: var(--radius-lg); padding: var(--space-md); }
+    .kanban-column h4 { font-size: var(--font-size-sm); font-weight: 600; color: var(--white); margin-bottom: var(--space-md); padding: 0 var(--space-sm); display: flex; align-items: center; justify-content: space-between; }
+    .kanban-column h4 span { font-size: var(--font-size-xs); color: var(--navy-300); background: rgba(74,111,159,0.15); padding: 2px 8px; border-radius: var(--radius-full); }
+    .kanban-card { background: linear-gradient(145deg,rgba(21,43,74,0.5),rgba(15,29,53,0.7)); border: 1px solid rgba(74,111,159,0.12); border-radius: var(--radius-md); padding: var(--space-md); margin-bottom: var(--space-sm); cursor: pointer; transition: all var(--transition-fast); }
+    .kanban-card:hover { border-color: rgba(250,200,0,0.2); }
+    .kanban-card h5 { font-size: var(--font-size-sm); font-weight: 600; color: var(--white); margin-bottom: 2px; }
+    .kanban-card p { font-size: var(--font-size-xs); color: var(--navy-300); }
+
+    /* ---- Candidate search ---- */
+    .candidate-result { display: flex; align-items: center; gap: var(--space-lg); padding: var(--space-lg); background: linear-gradient(145deg,rgba(21,43,74,0.4),rgba(15,29,53,0.6)); border: 1px solid rgba(74,111,159,0.12); border-radius: var(--radius-lg); margin-bottom: var(--space-md); transition: all var(--transition-fast); }
+    .candidate-result:hover { border-color: rgba(250,200,0,0.2); }
+
+    /* ---- Job card ---- */
+    .job-card { padding: var(--space-xl); background: linear-gradient(145deg,rgba(21,43,74,0.4),rgba(15,29,53,0.6)); border: 1px solid rgba(74,111,159,0.12); border-radius: var(--radius-lg); margin-bottom: var(--space-md); transition: all var(--transition-fast); }
+    .job-card:hover { border-color: rgba(250,200,0,0.2); }
+
+    .search-bar { display: flex; align-items: center; gap: var(--space-sm); background: rgba(6,13,26,0.5); border: 1px solid rgba(74,111,159,0.25); border-radius: var(--radius-md); padding: 0.5rem 1rem; transition: border-color var(--transition-fast); }
+    .search-bar:focus-within { border-color: var(--gold-500); box-shadow: 0 0 0 3px rgba(250,200,0,0.1); }
+    .search-bar input { flex: 1; background: transparent; border: none; outline: none; color: var(--white); font-family: var(--font-primary); font-size: var(--font-size-sm); }
+    .search-bar input::placeholder { color: var(--navy-300); }
+
+    .stat-card { background: linear-gradient(145deg,rgba(21,43,74,0.5),rgba(15,29,53,0.7)); border: 1px solid rgba(74,111,159,0.12); border-radius: var(--radius-xl); padding: var(--space-lg); text-align: center; }
+    .stat-card .stat-value { font-size: var(--font-size-3xl); font-weight: 800; color: var(--gold-500); line-height: 1.1; margin-bottom: 2px; }
+    .stat-card .stat-label { font-size: var(--font-size-sm); color: var(--navy-200); }
+    .stat-card .stat-icon { font-size: 1.5rem; color: var(--gold-400); margin-bottom: var(--space-md); }
+    .card { background: linear-gradient(145deg,rgba(21,43,74,0.6),rgba(15,29,53,0.8)); border: 1px solid rgba(74,111,159,0.12); border-radius: var(--radius-xl); padding: var(--space-xl); transition: all var(--transition-base); }
+    .activity-item { display: flex; align-items: flex-start; gap: var(--space-md); padding: var(--space-md) 0; border-bottom: 1px solid rgba(74,111,159,0.06); }
+    .activity-item:last-child { border-bottom: none; }
+    .activity-icon { width: 36px; height: 36px; border-radius: 50%; display: flex; align-items: center; justify-content: center; flex-shrink: 0; font-size: 0.8rem; }
+    .activity-text { font-size: var(--font-size-sm); color: var(--navy-100); }
+    .activity-time { font-size: var(--font-size-xs); color: var(--navy-300); margin-top: 2px; }
+
+    @media (max-width:1024px){ .stats-grid { grid-template-columns: repeat(2,1fr); } .dashboard-grid, .dashboard-grid-wide { grid-template-columns: 1fr; } .kanban-board { grid-template-columns: repeat(2,1fr); } }
+    @media (max-width:768px){ .sidebar { width: 100%; position: fixed; left: -100%; transition: left var(--transition-base); } .sidebar.open { left: 0; } .main-content { margin-left: 0; } .stats-grid { grid-template-columns: 1fr 1fr; } .portal-content { padding: var(--space-lg); } .kanban-board { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <div class="portal-layout">
+    <!-- Sidebar -->
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar-logo">
+        <a href="../"><img src="../logo.png" alt="GSP Recruitment" height="28" width="auto"></a>
+      </div>
+      <nav class="sidebar-nav">
+        <div class="sidebar-nav-label lang-en">Main Menu</div>
+        <div class="sidebar-nav-label lang-nl">Hoofdmenu</div>
+        <button class="sidebar-nav-item active" data-section="dashboard"><i class="fa-regular fa-chart-pie"></i> <span class="lang-en">Dashboard</span><span class="lang-nl">Dashboard</span></button>
+        <button class="sidebar-nav-item" data-section="jobs"><i class="fa-regular fa-briefcase"></i> <span class="lang-en">Job Management</span><span class="lang-nl">Vacatures</span></button>
+        <button class="sidebar-nav-item" data-section="candidates"><i class="fa-regular fa-users"></i> <span class="lang-en">Candidate Search</span><span class="lang-nl">Kandidaten Zoeken</span></button>
+        <button class="sidebar-nav-item" data-section="analytics"><i class="fa-regular fa-chart-line"></i> <span class="lang-en">Analytics</span><span class="lang-nl">Analytics</span></button>
+        <button class="sidebar-nav-item" data-section="team"><i class="fa-regular fa-user-group"></i> <span class="lang-en">Team</span><span class="lang-nl">Team</span></button>
+        <button class="sidebar-nav-item" data-section="settings"><i class="fa-regular fa-gear"></i> <span class="lang-en">Settings</span><span class="lang-nl">Instellingen</span></button>
+      </nav>
+      <div class="sidebar-footer">
+        <div class="sidebar-user">
+          <div class="avatar avatar-gold avatar-sm" id="sidebarAvatar">CL</div>
+          <div class="sidebar-user-info">
+            <div class="sidebar-user-name" id="sidebarName">Client</div>
+            <div class="sidebar-user-email" id="sidebarEmail">client@company.com</div>
+          </div>
+        </div>
+        <button class="btn btn-sm btn-ghost" style="width:100%;margin-top:var(--space-sm);justify-content:center;" id="sidebarLogoutBtn">
+          <i class="fa-regular fa-arrow-right-from-bracket"></i> <span class="lang-en">Logout</span><span class="lang-nl">Uitloggen</span>
+        </button>
+      </div>
+    </aside>
+
+    <!-- Main Content -->
+    <main class="main-content">
+      <header class="portal-header">
+        <button class="btn btn-sm btn-ghost" id="mobileMenuBtn" style="display:none;"><i class="fa-solid fa-bars"></i></button>
+        <h1 id="pageTitle"><span class="lang-en">Dashboard</span><span class="lang-nl">Dashboard</span></h1>
+        <div class="portal-header-actions">
+          <a href="../" class="btn btn-sm btn-ghost"><i class="fa-regular fa-arrow-left"></i> <span class="lang-en">Back</span><span class="lang-nl">Terug</span></a>
+        </div>
+      </header>
+
+      <div class="portal-content">
+
+        <!-- ==================== DASHBOARD ==================== -->
+        <section class="portal-section active" id="section-dashboard">
+          <div class="stats-grid">
+            <div class="stat-card"><div class="stat-icon"><i class="fa-regular fa-briefcase"></i></div><div class="stat-value">8</div><div class="stat-label lang-en">Active Jobs</div><div class="stat-label lang-nl">Actieve Vacatures</div></div>
+            <div class="stat-card"><div class="stat-icon"><i class="fa-regular fa-users"></i></div><div class="stat-value">24</div><div class="stat-label lang-en">Total Candidates</div><div class="stat-label lang-nl">Totaal Kandidaten</div></div>
+            <div class="stat-card"><div class="stat-icon"><i class="fa-regular fa-file-lines"></i></div><div class="stat-value">47</div><div class="stat-label lang-en">Applications</div><div class="stat-label lang-nl">Sollicitaties</div></div>
+            <div class="stat-card"><div class="stat-icon"><i class="fa-regular fa-calendar-check"></i></div><div class="stat-value">6</div><div class="stat-label lang-en">Interviews Scheduled</div><div class="stat-label lang-nl">Gesprekken Gepland</div></div>
+          </div>
+
+          <div class="dashboard-grid">
+            <div>
+              <div class="card" style="margin-bottom:var(--space-xl);">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:var(--space-lg);">
+                  <h3 style="font-size:var(--font-size-lg);font-weight:600;color:var(--white);"><span class="lang-en">Candidate Pipeline</span><span class="lang-nl">Kandidaat Pipeline</span></h3>
+                  <span class="badge badge-gold lang-en">Live</span>
+                  <span class="badge badge-gold lang-nl">Actief</span>
+                </div>
+                <div class="kanban-board">
+                  <div class="kanban-column">
+                    <h4><span class="lang-en">New</span><span class="lang-nl">Nieuw</span> <span>8</span></h4>
+                    <div class="kanban-card"><h5>J. Bakker</h5><p>Embedded Engineer</p><span class="badge badge-blue" style="font-size:0.6rem;">5d ago</span></div>
+                    <div class="kanban-card"><h5>L. Meijer</h5><p>C++ Developer</p><span class="badge badge-blue" style="font-size:0.6rem;">2d ago</span></div>
+                  </div>
+                  <div class="kanban-column">
+                    <h4><span class="lang-en">Screening</span><span class="lang-nl">Screening</span> <span>5</span></h4>
+                    <div class="kanban-card"><h5>M. Jansen</h5><p>Embedded Engineer</p><span class="badge badge-gold" style="font-size:0.6rem;">Screening</span></div>
+                    <div class="kanban-card"><h5>P. de Wit</h5><p>Mechatronics</p></div>
+                  </div>
+                  <div class="kanban-column">
+                    <h4><span class="lang-en">Interview</span><span class="lang-nl">Gesprek</span> <span>3</span></h4>
+                    <div class="kanban-card"><h5>S. Visser</h5><p>C++ Engineer</p><span class="badge badge-purple" style="font-size:0.6rem;">Interview Fri</span></div>
+                  </div>
+                  <div class="kanban-column">
+                    <h4><span class="lang-en">Offer</span><span class="lang-nl">Aanbod</span> <span>2</span></h4>
+                    <div class="kanban-card"><h5>K. Vermeer</h5><p>Embedded Lead</p><span class="badge badge-green" style="font-size:0.6rem;">Offer sent</span></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div>
+              <div class="card">
+                <h3 style="font-size:var(--font-size-lg);font-weight:600;color:var(--white);margin-bottom:var(--space-md);">
+                  <span class="lang-en">Recent Activity</span>
+                  <span class="lang-nl">Recente Activiteit</span>
+                </h3>
+                <div class="activity-item">
+                  <div class="activity-icon" style="background:rgba(34,197,94,0.1);color:#4ade80;"><i class="fa-regular fa-user-plus"></i></div>
+                  <div class="activity-content">
+                    <div class="activity-text lang-en">New candidate match for Embedded Engineer</div>
+                    <div class="activity-text lang-nl">Nieuwe kandidaat match voor Embedded Engineer</div>
+                    <div class="activity-time lang-en">1 hour ago</div>
+                    <div class="activity-time lang-nl">1 uur geleden</div>
+                  </div>
+                </div>
+                <div class="activity-item">
+                  <div class="activity-icon" style="background:rgba(250,200,0,0.1);color:var(--gold-500);"><i class="fa-regular fa-file-lines"></i></div>
+                  <div class="activity-content">
+                    <div class="activity-text lang-en">New application received for C++ role</div>
+                    <div class="activity-text lang-nl">Nieuwe sollicitatie ontvangen voor C++ rol</div>
+                    <div class="activity-time lang-en">3 hours ago</div>
+                    <div class="activity-time lang-nl">3 uur geleden</div>
+                  </div>
+                </div>
+                <div class="activity-item">
+                  <div class="activity-icon" style="background:rgba(59,130,246,0.1);color:#60a5fa;"><i class="fa-regular fa-calendar"></i></div>
+                  <div class="activity-content">
+                    <div class="activity-text lang-en">Interview scheduled with S. Visser</div>
+                    <div class="activity-text lang-nl">Gesprek gepland met S. Visser</div>
+                    <div class="activity-time lang-en">Yesterday</div>
+                    <div class="activity-time lang-nl">Gisteren</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ==================== JOB MANAGEMENT ==================== -->
+        <section class="portal-section" id="section-jobs">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:var(--space-xl);">
+            <div class="search-bar" style="flex:1;max-width:400px;">
+              <i class="fa-solid fa-magnifying-glass search-icon"></i>
+              <input type="text" placeholder="Search jobs..." class="lang-en">
+              <input type="text" placeholder="Zoek vacatures..." class="lang-nl">
+            </div>
+            <button class="btn btn-primary" id="createJobBtn">
+              <i class="fa-regular fa-plus"></i> <span class="lang-en">New Job</span><span class="lang-nl">Nieuwe Vacature</span>
+            </button>
+          </div>
+
+          <div id="jobsList">
+            <div class="job-card">
+              <div style="display:flex;justify-content:space-between;align-items:flex-start;">
+                <div>
+                  <h4 style="font-size:var(--font-size-lg);font-weight:600;color:var(--white);">Senior Embedded Engineer</h4>
+                  <p style="font-size:var(--font-size-sm);color:var(--navy-200);margin:4px 0;">€75K – €100K · Veldhoven · Permanent</p>
+                  <div style="display:flex;gap:var(--space-sm);margin-top:var(--space-sm);">
+                    <span class="badge badge-green lang-en">Active</span>
+                    <span class="badge badge-green lang-nl">Actief</span>
+                    <span class="badge badge-blue">12 applicants</span>
+                    <span class="badge badge-gold" style="font-size:0.65rem;">85% match score</span>
+                  </div>
+                </div>
+                <div style="display:flex;gap:var(--space-sm);">
+                  <button class="btn btn-sm btn-outline"><i class="fa-regular fa-pen-to-square"></i></button>
+                  <button class="btn btn-sm btn-ghost" style="color:#f87171;"><i class="fa-regular fa-trash-can"></i></button>
+                </div>
+              </div>
+            </div>
+            <div class="job-card">
+              <div style="display:flex;justify-content:space-between;align-items:flex-start;">
+                <div>
+                  <h4 style="font-size:var(--font-size-lg);font-weight:600;color:var(--white);">C++ Software Engineer</h4>
+                  <p style="font-size:var(--font-size-sm);color:var(--navy-200);margin:4px 0;">€65K – €85K · Best · Contract</p>
+                  <div style="display:flex;gap:var(--space-sm);margin-top:var(--space-sm);">
+                    <span class="badge badge-green lang-en">Active</span>
+                    <span class="badge badge-green lang-nl">Actief</span>
+                    <span class="badge badge-blue">8 applicants</span>
+                    <span class="badge badge-gold" style="font-size:0.65rem;">92% match score</span>
+                  </div>
+                </div>
+                <div style="display:flex;gap:var(--space-sm);">
+                  <button class="btn btn-sm btn-outline"><i class="fa-regular fa-pen-to-square"></i></button>
+                  <button class="btn btn-sm btn-ghost" style="color:#f87171;"><i class="fa-regular fa-trash-can"></i></button>
+                </div>
+              </div>
+            </div>
+            <div class="job-card">
+              <div style="display:flex;justify-content:space-between;align-items:flex-start;">
+                <div>
+                  <h4 style="font-size:var(--font-size-lg);font-weight:600;color:var(--white);">Mechatronics Architect</h4>
+                  <p style="font-size:var(--font-size-sm);color:var(--navy-200);margin:4px 0;">€85K – €120K · Eindhoven · Permanent</p>
+                  <div style="display:flex;gap:var(--space-sm);margin-top:var(--space-sm);">
+                    <span class="badge badge-gray lang-en">Draft</span>
+                    <span class="badge badge-gray lang-nl">Concept</span>
+                    <span class="badge badge-blue">0 applicants</span>
+                  </div>
+                </div>
+                <div style="display:flex;gap:var(--space-sm);">
+                  <button class="btn btn-sm btn-primary lang-en">Publish</button>
+                  <button class="btn btn-sm btn-primary lang-nl">Publiceren</button>
+                  <button class="btn btn-sm btn-ghost"><i class="fa-regular fa-pen-to-square"></i></button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ==================== CANDIDATE SEARCH ==================== -->
+        <section class="portal-section" id="section-candidates">
+          <div style="display:flex;gap:var(--space-lg);margin-bottom:var(--space-xl);flex-wrap:wrap;align-items:center;">
+            <div class="search-bar" style="flex:1;min-width:220px;">
+              <i class="fa-solid fa-magnifying-glass search-icon"></i>
+              <input type="text" placeholder="Search candidates by skill, role..." class="lang-en">
+              <input type="text" placeholder="Zoek kandidaten op vaardigheid..." class="lang-nl">
+            </div>
+            <select style="padding:0.5rem 1rem;background:rgba(6,13,26,0.5);border:1px solid rgba(74,111,159,0.25);border-radius:var(--radius-md);color:var(--white);font-family:var(--font-primary);font-size:var(--font-size-sm);outline:none;">
+              <option class="lang-en">All Specialisations</option>
+              <option class="lang-nl">Alle Specialisaties</option>
+              <option>Embedded</option>
+              <option>C++</option>
+              <option>Mechatronics</option>
+              <option>Cybersecurity</option>
+            </select>
+            <select style="padding:0.5rem 1rem;background:rgba(6,13,26,0.5);border:1px solid rgba(74,111,159,0.25);border-radius:var(--radius-md);color:var(--white);font-family:var(--font-primary);font-size:var(--font-size-sm);outline:none;">
+              <option class="lang-en">All Levels</option>
+              <option class="lang-nl">Alle Niveaus</option>
+              <option>Junior</option>
+              <option>Mid</option>
+              <option>Senior</option>
+            </select>
+          </div>
+
+          <div class="candidate-result">
+            <div class="avatar avatar-navy">MJ</div>
+            <div style="flex:1;min-width:0;">
+              <div style="display:flex;justify-content:space-between;align-items:center;">
+                <h4 style="font-size:var(--font-size-sm);font-weight:600;color:var(--white);">M. Jansen</h4>
+                <span class="badge badge-gold" style="font-size:0.6rem;">95% match</span>
+              </div>
+              <p style="font-size:var(--font-size-xs);color:var(--navy-200);margin:2px 0;">Senior Embedded Engineer · 8 yrs · C/C++, RTOS, ARM</p>
+              <div style="display:flex;gap:4px;margin-top:4px;">
+                <span class="tag tag-gold">Embedded</span>
+                <span class="tag tag-blue">Available in 1 month</span>
+              </div>
+            </div>
+            <div style="display:flex;gap:var(--space-sm);">
+              <button class="btn btn-sm btn-outline"><i class="fa-regular fa-bookmark"></i></button>
+              <button class="btn btn-sm btn-primary lang-en">Contact</button>
+              <button class="btn btn-sm btn-primary lang-nl">Contact</button>
+            </div>
+          </div>
+
+          <div class="candidate-result">
+            <div class="avatar avatar-navy">PV</div>
+            <div style="flex:1;min-width:0;">
+              <div style="display:flex;justify-content:space-between;align-items:center;">
+                <h4 style="font-size:var(--font-size-sm);font-weight:600;color:var(--white);">P. de Vries</h4>
+                <span class="badge badge-gold" style="font-size:0.6rem;">92% match</span>
+              </div>
+              <p style="font-size:var(--font-size-xs);color:var(--navy-200);margin:2px 0;">C++ Software Engineer · 6 yrs · Modern C++, Qt, ROS</p>
+              <div style="display:flex;gap:4px;margin-top:4px;">
+                <span class="tag tag-gold">C++</span>
+                <span class="tag tag-blue">Available now</span>
+              </div>
+            </div>
+            <div style="display:flex;gap:var(--space-sm);">
+              <button class="btn btn-sm btn-outline"><i class="fa-regular fa-bookmark"></i></button>
+              <button class="btn btn-sm btn-primary">Contact</button>
+            </div>
+          </div>
+
+          <div class="candidate-result">
+            <div class="avatar avatar-navy">AK</div>
+            <div style="flex:1;min-width:0;">
+              <div style="display:flex;justify-content:space-between;align-items:center;">
+                <h4 style="font-size:var(--font-size-sm);font-weight:600;color:var(--white);">A. Kowalski</h4>
+                <span class="badge badge-gold" style="font-size:0.6rem;">88% match</span>
+              </div>
+              <p style="font-size:var(--font-size-xs);color:var(--navy-200);margin:2px 0;">Mechatronics Architect · 12 yrs · Motion control</p>
+              <div style="display:flex;gap:4px;margin-top:4px;">
+                <span class="tag tag-gold">Mechatronics</span>
+                <span class="tag tag-green">Passive</span>
+              </div>
+            </div>
+            <div style="display:flex;gap:var(--space-sm);">
+              <button class="btn btn-sm btn-outline"><i class="fa-regular fa-bookmark"></i></button>
+              <button class="btn btn-sm btn-primary">Contact</button>
+            </div>
+          </div>
+
+          <div class="pagination" style="margin-top:var(--space-xl);">
+            <button disabled><i class="fa-regular fa-chevron-left"></i></button>
+            <button class="active">1</button>
+            <button>2</button>
+            <button>3</button>
+            <button><i class="fa-regular fa-chevron-right"></i></button>
+          </div>
+        </section>
+
+        <!-- ==================== ANALYTICS ==================== -->
+        <section class="portal-section" id="section-analytics">
+          <div class="stats-grid" style="margin-bottom:var(--space-xl);">
+            <div class="stat-card"><div class="stat-value">28 days</div><div class="stat-label lang-en">Avg Time-to-Hire</div><div class="stat-label lang-nl">Gem. Time-to-Hire</div></div>
+            <div class="stat-card"><div class="stat-value">64%</div><div class="stat-label lang-en">Interview Rate</div><div class="stat-label lang-nl">Gesprek Rate</div></div>
+            <div class="stat-card"><div class="stat-value">3.2:1</div><div class="stat-label lang-en">Applicant per Job</div><div class="stat-label lang-nl">Sollicitaties per Vacature</div></div>
+            <div class="stat-card"><div class="stat-value">85%</div><div class="stat-label lang-en">Offer Acceptance</div><div class="stat-label lang-nl">Aanbod Acceptatie</div></div>
+          </div>
+          <div class="dashboard-grid-wide">
+            <div class="card">
+              <h3 style="font-size:var(--font-size-lg);font-weight:600;color:var(--white);margin-bottom:var(--space-lg);"><span class="lang-en">Time-to-Hire Trend</span><span class="lang-nl">Time-to-Hire Trend</span></h3>
+              <div class="chart-placeholder" style="height:200px;">
+                <div style="text-align:center;color:var(--navy-300);font-size:var(--font-size-sm);">
+                  <i class="fa-regular fa-chart-line" style="font-size:2rem;margin-bottom:var(--space-md);display:block;"></i>
+                  <span class="lang-en">Chart: Avg days to hire per quarter</span>
+                  <span class="lang-nl">Grafiek: Gemiddelde dagen per kwartaal</span>
+                </div>
+              </div>
+            </div>
+            <div class="card">
+              <h3 style="font-size:var(--font-size-lg);font-weight:600;color:var(--white);margin-bottom:var(--space-lg);"><span class="lang-en">Pipeline Funnel</span><span class="lang-nl">Pipeline Trechter</span></h3>
+              <div class="chart-placeholder" style="height:200px;">
+                <div style="text-align:center;color:var(--navy-300);font-size:var(--font-size-sm);">
+                  <i class="fa-regular fa-chart-bar" style="font-size:2rem;margin-bottom:var(--space-md);display:block;"></i>
+                  <span class="lang-en">Chart: Application → Screening → Interview → Offer</span>
+                  <span class="lang-nl">Grafiek: Sollicitatie → Screening → Gesprek → Aanbod</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ==================== TEAM ==================== -->
+        <section class="portal-section" id="section-team">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:var(--space-xl);">
+            <h3 style="font-size:var(--font-size-lg);font-weight:600;color:var(--white);">
+              <span class="lang-en">Team Members</span>
+              <span class="lang-nl">Teamleden</span>
+            </h3>
+            <button class="btn btn-primary" onclick="Auth.toast('Invite link copied!')">
+              <i class="fa-regular fa-user-plus"></i> <span class="lang-en">Invite Member</span><span class="lang-nl">Lid Uitnodigen</span>
+            </button>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th class="lang-en">Name</th>
+                  <th class="lang-nl">Naam</th>
+                  <th>Email</th>
+                  <th class="lang-en">Role</th>
+                  <th class="lang-nl">Rol</th>
+                  <th class="lang-en">Status</th>
+                  <th class="lang-nl">Status</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td style="font-weight:600;color:var(--white);">Jan de Vries</td>
+                  <td style="color:var(--navy-200);">jan@company.com</td>
+                  <td><span class="badge badge-gold lang-en">Admin</span><span class="badge badge-gold lang-nl">Beheerder</span></td>
+                  <td><span class="badge badge-green lang-en">Active</span><span class="badge badge-green lang-nl">Actief</span></td>
+                  <td><button class="btn btn-sm btn-ghost"><i class="fa-regular fa-ellipsis-vertical"></i></button></td>
+                </tr>
+                <tr>
+                  <td style="font-weight:600;color:var(--white);">Lisa Bakker</td>
+                  <td style="color:var(--navy-200);">lisa@company.com</td>
+                  <td><span class="badge badge-blue lang-en">Recruiter</span><span class="badge badge-blue lang-nl">Recruiter</span></td>
+                  <td><span class="badge badge-green lang-en">Active</span><span class="badge badge-green lang-nl">Actief</span></td>
+                  <td><button class="btn btn-sm btn-ghost"><i class="fa-regular fa-ellipsis-vertical"></i></button></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <!-- ==================== SETTINGS ==================== -->
+        <section class="portal-section" id="section-settings">
+          <div class="dashboard-grid-wide">
+            <div class="card">
+              <h3 style="font-size:var(--font-size-lg);font-weight:600;color:var(--white);margin-bottom:var(--space-lg);">
+                <span class="lang-en">Company Profile</span>
+                <span class="lang-nl">Bedrijfsprofiel</span>
+              </h3>
+              <form>
+                <div class="form-group">
+                  <label class="lang-en">Company name</label>
+                  <label class="lang-nl">Bedrijfsnaam</label>
+                  <input type="text" value="Tech Corp BV" placeholder="Company name">
+                </div>
+                <div class="form-group">
+                  <label>Website</label>
+                  <input type="url" value="https://techcorp.nl" placeholder="https://">
+                </div>
+                <div class="form-group">
+                  <label class="lang-en">Industry</label>
+                  <label class="lang-nl">Industrie</label>
+                  <select>
+                    <option>High-Tech Equipment</option>
+                    <option>Semiconductor</option>
+                    <option>Automotive</option>
+                    <option>Healthcare</option>
+                    <option>Security</option>
+                  </select>
+                </div>
+                <button type="submit" class="btn btn-primary"><i class="fa-regular fa-floppy-disk"></i> <span class="lang-en">Save</span><span class="lang-nl">Opslaan</span></button>
+              </form>
+            </div>
+            <div>
+              <div class="card" style="margin-bottom:var(--space-xl);">
+                <h3 style="font-size:var(--font-size-lg);font-weight:600;color:var(--white);margin-bottom:var(--space-lg);">
+                  <span class="lang-en">Notification Preferences</span>
+                  <span class="lang-nl">Notificatievoorkeuren</span>
+                </h3>
+                <div style="display:flex;flex-direction:column;gap:var(--space-lg);">
+                  <label class="toggle-switch"><input type="checkbox" checked> <span style="font-size:var(--font-size-sm);color:var(--navy-100);" class="lang-en">New candidate matches</span><span style="font-size:var(--font-size-sm);color:var(--navy-100);" class="lang-nl">Nieuwe kandidaat matches</span></label>
+                  <label class="toggle-switch"><input type="checkbox" checked> <span style="font-size:var(--font-size-sm);color:var(--navy-100);" class="lang-en">New applications</span><span style="font-size:var(--font-size-sm);color:var(--navy-100);" class="lang-nl">Nieuwe sollicitaties</span></label>
+                  <label class="toggle-switch"><input type="checkbox" checked> <span style="font-size:var(--font-size-sm);color:var(--navy-100);" class="lang-en">Interview reminders</span><span style="font-size:var(--font-size-sm);color:var(--navy-100);" class="lang-nl">Gesprek herinneringen</span></label>
+                </div>
+              </div>
+              <div class="card">
+                <h3 style="font-size:var(--font-size-lg);font-weight:600;color:var(--white);margin-bottom:var(--space-md);">
+                  <span class="lang-en">Danger Zone</span>
+                  <span class="lang-nl">Gevarenzone</span>
+                </h3>
+                <p style="font-size:var(--font-size-sm);color:var(--navy-300);margin-bottom:var(--space-lg);">
+                  <span class="lang-en">This will permanently deactivate your account.</span>
+                  <span class="lang-nl">Dit zal uw account permanent deactiveren.</span>
+                </p>
+                <button class="btn btn-sm btn-outline" style="border-color:#ef4444;color:#f87171;" onclick="Auth.toast('Contact Gijs for account deactivation','warning')">
+                  <span class="lang-en">Deactivate Account</span>
+                  <span class="lang-nl">Account Deactiveren</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </section>
+
+      </div>
+    </main>
+  </div>
+
+  <script src="../auth.js"></script>
+  <script>
+    /* ================================================================
+       Client Portal — Full API integration
+       ================================================================ */
+
+    const user = Auth.requireAuth(['client']);
+    if (!user) {}
+
+    const sectionTitles = {
+      dashboard: { en: 'Dashboard', nl: 'Dashboard' },
+      jobs: { en: 'Job Management', nl: 'Vacatures' },
+      candidates: { en: 'Candidate Search', nl: 'Kandidaten Zoeken' },
+      analytics: { en: 'Analytics', nl: 'Analytics' },
+      team: { en: 'Team', nl: 'Team' },
+      settings: { en: 'Settings', nl: 'Instellingen' }
+    };
+
+    function navigateTo(section) {
+      document.querySelectorAll('.sidebar-nav-item').forEach(item => {
+        item.classList.toggle('active', item.dataset.section === section);
+      });
+      document.querySelectorAll('.portal-section').forEach(s => {
+        s.classList.toggle('active', s.id === `section-${section}`);
+      });
+      const title = sectionTitles[section] || sectionTitles.dashboard;
+      const enEl = document.querySelector('#pageTitle .lang-en');
+      const nlEl = document.querySelector('#pageTitle .lang-nl');
+      if (enEl) enEl.textContent = title.en;
+      if (nlEl) nlEl.textContent = title.nl;
+      window.location.hash = section;
+      document.getElementById('sidebar').classList.remove('open');
+      // Load section data
+      if (section === 'dashboard') loadDashboard();
+      else if (section === 'jobs') loadJobs();
+      else if (section === 'analytics') loadAnalytics();
+    }
+
+    document.querySelectorAll('.sidebar-nav-item').forEach(item => {
+      item.addEventListener('click', () => navigateTo(item.dataset.section));
+    });
+
+    const hash = window.location.hash.replace('#', '');
+    if (hash && sectionTitles[hash]) navigateTo(hash);
+
+    const mobileBtn = document.getElementById('mobileMenuBtn');
+    const sidebar = document.getElementById('sidebar');
+    if (window.innerWidth <= 768) mobileBtn.style.display = '';
+    window.addEventListener('resize', () => { mobileBtn.style.display = window.innerWidth <= 768 ? '' : 'none'; });
+    mobileBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+
+    /* ---- Populate sidebar user ---- */
+    if (user) {
+      const name = user.full_name || user.name || 'Client';
+      const email = user.email || 'client@company.com';
+      const initials = name.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase();
+      document.getElementById('sidebarName').textContent = name;
+      document.getElementById('sidebarEmail').textContent = email;
+      document.getElementById('sidebarAvatar').textContent = initials;
+    }
+
+    /* ================================================================
+       API: Load Dashboard
+       ================================================================ */
+    async function loadDashboard() {
+      try {
+        const [dashRes, jobsRes, pipelineRes] = await Promise.all([
+          Auth.fetch('/client/dashboard'),
+          Auth.fetch('/client/jobs?limit=5'),
+          Auth.fetch('/client/pipeline?limit=10'),
+        ]);
+        const dash = dashRes ? await dashRes.json() : {};
+        const jobsData = jobsRes ? await jobsRes.json() : { items: [] };
+        const pipelineData = pipelineRes ? await pipelineRes.json() : { items: [] };
+
+        // Stats
+        document.querySelectorAll('#section-dashboard .stats-grid .stat-card .stat-value')[0].textContent = dash.active_jobs ?? 0;
+        document.querySelectorAll('#section-dashboard .stats-grid .stat-card .stat-value')[1].textContent = dash.total_candidates_matched ?? 0;
+        document.querySelectorAll('#section-dashboard .stats-grid .stat-card .stat-value')[2].textContent = dash.candidates_in_pipeline ?? 0;
+        document.querySelectorAll('#section-dashboard .stats-grid .stat-card .stat-value')[3].textContent = dash.placements ?? 0;
+
+        // Pipeline kanban columns
+        const stages = { 'new': [], 'screening': [], 'interview': [], 'offer': [] };
+        (pipelineData.items || []).forEach(pe => {
+          const stage = (pe.stage || 'new').toLowerCase();
+          if (stages[stage]) stages[stage].push(pe);
+          else stages['new'].push(pe);
+        });
+
+        // Update kanban column counts
+        document.querySelectorAll('.kanban-column h4 span').forEach((span, idx) => {
+          const keys = Object.keys(stages);
+          const count = stages[keys[idx]]?.length || 0;
+          span.textContent = count;
+        });
+
+        // Update kanban cards (first few per column)
+        document.querySelectorAll('.kanban-column').forEach((col, idx) => {
+          const keys = Object.keys(stages);
+          const stageName = keys[idx];
+          const items = stages[stageName] || [];
+          const cards = col.querySelectorAll('.kanban-card');
+          cards.forEach((card, ci) => {
+            const item = items[ci];
+            if (item) {
+              const nameEl = card.querySelector('h5');
+              const roleEl = card.querySelector('p');
+              if (nameEl) nameEl.textContent = item.full_name || item.name || 'Candidate';
+              if (roleEl) roleEl.textContent = item.current_title || item.job_title || '';
+            }
+          });
+        });
+
+        // Recent activity
+        const activityContainer = document.querySelector('#section-dashboard .card .activity-item')?.parentElement;
+        if (activityContainer && pipelineData.items?.length > 0) {
+          const recent = pipelineData.items.slice(0, 3);
+          activityContainer.innerHTML = recent.map(pe => {
+            const time = pe.created_at ? new Date(pe.created_at).toLocaleDateString() : '';
+            return `<div class="activity-item">
+              <div class="activity-icon" style="background:rgba(34,197,94,0.1);color:#4ade80;"><i class="fa-regular fa-user-plus"></i></div>
+              <div class="activity-content">
+                <div class="activity-text lang-en">${pe.full_name || 'Candidate'} added to ${pe.job_title || 'pipeline'}</div>
+                <div class="activity-text lang-nl">${pe.full_name || 'Kandidaat'} toegevoegd aan ${pe.job_title || 'pipeline'}</div>
+                <div class="activity-time">${time}</div>
+              </div>
+            </div>`;
+          }).join('');
+        }
+      } catch (err) {
+        console.error('Dashboard load error:', err);
+      }
+    }
+
+    /* ================================================================
+       API: Load Jobs
+       ================================================================ */
+    async function loadJobs() {
+      try {
+        const res = await Auth.fetch('/client/jobs?limit=50');
+        if (!res) return;
+        const data = await res.json();
+        const list = document.getElementById('jobsList');
+        if (!data.items || data.items.length === 0) {
+          list.innerHTML = '<p style="color:var(--navy-300);text-align:center;padding:var(--space-2xl);">No jobs yet. Create your first job!</p>';
+          return;
+        }
+        list.innerHTML = data.items.map(j => {
+          const statusClass = {
+            'open': 'badge-green', 'draft': 'badge-gray', 'closed': 'badge-red', 'filled': 'badge-purple'
+          }[j.status] || 'badge-blue';
+          const salary = j.salary_min && j.salary_max
+            ? `€${(j.salary_min/1000).toFixed(0)}K – €${(j.salary_max/1000).toFixed(0)}K`
+            : '';
+          const location = j.location_type || '';
+          return `<div class="job-card">
+            <div style="display:flex;justify-content:space-between;align-items:flex-start;">
+              <div>
+                <h4 style="font-size:var(--font-size-lg);font-weight:600;color:var(--white);">${j.title || 'Untitled'}</h4>
+                <p style="font-size:var(--font-size-sm);color:var(--navy-200);margin:4px 0;">${salary ? salary + ' · ' : ''}${location}${j.seniority ? ' · ' + j.seniority : ''}</p>
+                <div style="display:flex;gap:var(--space-sm);margin-top:var(--space-sm);">
+                  <span class="badge ${statusClass} lang-en">${j.status || 'draft'}</span>
+                  <span class="badge ${statusClass} lang-nl">${j.status === 'open' ? 'Actief' : j.status === 'draft' ? 'Concept' : j.status}</span>
+                  ${j.department ? `<span class="badge badge-blue">${j.department}</span>` : ''}
+                </div>
+              </div>
+              <div style="display:flex;gap:var(--space-sm);">
+                <button class="btn btn-sm btn-outline" onclick="Auth.toast('Edit job: ${j.id}')"><i class="fa-regular fa-pen-to-square"></i></button>
+                <button class="btn btn-sm btn-ghost" style="color:#f87171;" onclick="deleteJob(${j.id})"><i class="fa-regular fa-trash-can"></i></button>
+              </div>
+            </div>
+          </div>`;
+        }).join('');
+      } catch (err) {
+        console.error('Jobs load error:', err);
+      }
+    }
+
+    /* ---- Delete job ---- */
+    window.deleteJob = async function(jobId) {
+      if (!confirm('Delete this job?')) return;
+      try {
+        const res = await Auth.fetch(`/client/jobs/${jobId}`, { method: 'DELETE' });
+        if (res && res.ok) {
+          Auth.toast('Job deleted', 'success');
+          loadJobs();
+        } else {
+          Auth.toast('Failed to delete job', 'error');
+        }
+      } catch (err) {
+        Auth.toast('Error deleting job', 'error');
+      }
+    };
+
+    /* ---- Create job (placeholder) ---- */
+    document.getElementById('createJobBtn').addEventListener('click', () => {
+      Auth.toast('Job creation form opened', 'success');
+    });
+
+    /* ================================================================
+       API: Load Analytics
+       ================================================================ */
+    async function loadAnalytics() {
+      try {
+        const [analyticsRes, jobsRes] = await Promise.all([
+          Auth.fetch('/client/analytics'),
+          Auth.fetch('/client/jobs?limit=50'),
+        ]);
+        const analytics = analyticsRes ? await analyticsRes.json() : {};
+        const jobsData = jobsRes ? await jobsRes.json() : { items: [] };
+
+        // Stats
+        const statValues = document.querySelectorAll('#section-analytics .stat-card .stat-value');
+        if (statValues.length >= 4) {
+          statValues[0].textContent = analytics.time_to_hire_avg_days
+            ? analytics.time_to_hire_avg_days + ' days'
+            : 'N/A';
+          statValues[1].textContent = analytics.offer_rate != null
+            ? analytics.offer_rate + '%'
+            : 'N/A';
+          const totalJobs = jobsData.total || jobsData.items?.length || 0;
+          const totalApps = jobsData.items ? jobsData.items.reduce((sum, j) => sum + (j.applicant_count || 0), 0) : 0;
+          statValues[2].textContent = totalJobs > 0
+            ? (totalApps / totalJobs).toFixed(1) + ':1'
+            : 'N/A';
+          statValues[3].textContent = analytics.cost_per_hire_avg
+            ? '€' + analytics.cost_per_hire_avg.toFixed(0)
+            : 'N/A';
+        }
+
+        // Pipeline funnel
+        const funnel = analytics.pipeline_funnel || {};
+        const stages = Object.entries(funnel);
+        if (stages.length > 0) {
+          const chartEls = document.querySelectorAll('#section-analytics .chart-placeholder');
+          if (chartEls.length >= 2) {
+            chartEls[1].innerHTML = `<div style="padding:var(--space-md);">
+              ${stages.map(([stage, count]) =>
+                `<div style="display:flex;justify-content:space-between;padding:4px 0;color:var(--navy-200);font-size:var(--font-size-sm);">
+                  <span>${stage}</span><span style="font-weight:600;color:var(--gold-500);">${count}</span>
+                </div>`
+              ).join('')}
+            </div>`;
+          }
+        }
+      } catch (err) {
+        console.error('Analytics load error:', err);
+      }
+    }
+
+    /* ================================================================
+       Candidate Search (basic)
+       ================================================================ */
+    document.querySelector('#section-candidates .btn-primary')?.addEventListener('click', async (e) => {
+      const searchInput = document.querySelector('#section-candidates .search-bar input');
+      const query = searchInput ? searchInput.value.trim() : '';
+      try {
+        const res = await Auth.fetch(`/client/candidates?limit=20${query ? '&specialisation=' + encodeURIComponent(query) : ''}`);
+        if (!res) return;
+        const data = await res.json();
+        const container = document.querySelector('#section-candidates');
+        const results = container.querySelectorAll('.candidate-result');
+        if (!data.items || data.items.length === 0) {
+          results.forEach(r => r.style.display = 'none');
+          container.querySelector('.pagination')?.insertAdjacentHTML('beforebegin',
+            '<p style="color:var(--navy-300);text-align:center;padding:var(--space-lg);">No candidates found.</p>');
+          return;
+        }
+        results.forEach((r, i) => {
+          const c = data.items[i];
+          if (c) {
+            r.style.display = 'flex';
+            const avatar = r.querySelector('.avatar');
+            const name = r.querySelector('h4');
+            const desc = r.querySelector('p');
+            const tags = r.querySelectorAll('.tag');
+            if (avatar) avatar.textContent = (c.full_name || '').split(' ').map(w => w[0]).join('').slice(0,2).toUpperCase() || '?';
+            if (name) name.textContent = c.full_name || 'Unknown';
+            if (desc) desc.textContent = c.current_title || c.skills?.join(', ') || '';
+          } else {
+            r.style.display = 'none';
+          }
+        });
+      } catch (err) {
+        console.error('Candidate search error:', err);
+      }
+    });
+
+    /* ================================================================
+       Initial load
+       ================================================================ */
+    document.addEventListener('DOMContentLoaded', () => {
+      loadDashboard();
+      loadJobs();
+    });
+
+    document.getElementById('sidebarLogoutBtn').addEventListener('click', () => Auth.logout());
+
+    const savedLang = localStorage.getItem('gsp-lang');
+    if (savedLang === 'nl' || savedLang === 'en') document.documentElement.setAttribute('data-lang', savedLang);
+  </script>
+</body>
+</html>
