@@ -20,8 +20,20 @@ logger = logging.getLogger("talent_os.candidate_portal")
 
 router = APIRouter(prefix="/api/v1/candidate", tags=["candidate-portal"])
 
+# ── Legacy redirect router ──────────────────────────────────────────
+old_router = APIRouter(prefix="/api/candidate", tags=["candidate-portal-legacy"])
+
+
+@old_router.api_route("/{path:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE"])
+async def redirect_old_candidate_paths(path: str):
+    from fastapi.responses import RedirectResponse
+    return RedirectResponse(url=f"/api/v1/candidate/{path}", status_code=307)
+
 UPLOAD_DIR = "/app/uploads/cv"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
+
+UPLOAD_DIR_LOCAL = "uploads/cv"
+os.makedirs(UPLOAD_DIR_LOCAL, exist_ok=True)
 
 
 # ── Profile ─────────────────────────────────────────────────────────────
@@ -96,10 +108,10 @@ async def update_candidate_profile(
     )
 
     # Also update users table full_name if provided
-    if updates.current_title:
+    if updates.full_name:
         await execute(
             "UPDATE users SET full_name = $1 WHERE id = $2",
-            updates.current_title, current_user["id"],
+            updates.full_name, current_user["id"],
         )
 
     return await get_candidate_profile(current_user)
@@ -124,7 +136,20 @@ async def upload_cv(
 
     # Generate unique filename
     filename = f"{uuid.uuid4().hex}{ext}"
-    file_path = os.path.join(UPLOAD_DIR, filename)
+    
+    # Determine upload dir — fall back to local if /app/uploads/cv not available
+    upload_dir = UPLOAD_DIR
+    try:
+        os.makedirs(upload_dir, exist_ok=True)
+        test_file = os.path.join(upload_dir, ".write_test")
+        with open(test_file, "w") as f:
+            f.write("test")
+        os.remove(test_file)
+    except (OSError, PermissionError):
+        upload_dir = UPLOAD_DIR_LOCAL
+        os.makedirs(upload_dir, exist_ok=True)
+    
+    file_path = os.path.join(upload_dir, filename)
 
     # Save file
     content = await file.read()

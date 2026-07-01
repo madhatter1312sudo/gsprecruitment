@@ -57,7 +57,7 @@ class Settings(BaseSettings):
 
     log_level: str = "INFO"
 
-    WEBHOOK_SECRET: str = "CHANGE_ME_TO_A_UNIQUE_WEBHOOK_SECRET"
+    webhook_secret: str = "CHANGE_ME_TO_A_UNIQUE_WEBHOOK_SECRET"
     api_key: str = "CHANGE_ME"  # For internal API authentication
 
     # ── Google OAuth (for Gmail API) ──────────────────────────────────────

@@ -573,9 +573,9 @@
     async function loadDashboard() {
       try {
         const [dashRes, jobsRes, pipelineRes] = await Promise.all([
-          Auth.fetch('/client/dashboard'),
-          Auth.fetch('/client/jobs?limit=5'),
-          Auth.fetch('/client/pipeline?limit=10'),
+          Auth.fetch('/v1/client/dashboard'),
+          Auth.fetch('/v1/client/jobs?limit=5'),
+          Auth.fetch('/v1/client/pipeline?limit=10'),
         ]);
         const dash = dashRes ? await dashRes.json() : {};
         const jobsData = jobsRes ? await jobsRes.json() : { items: [] };
@@ -645,7 +645,7 @@
        ================================================================ */
     async function loadJobs() {
       try {
-        const res = await Auth.fetch('/client/jobs?limit=50');
+        const res = await Auth.fetch('/v1/client/jobs?limit=50');
         if (!res) return;
         const data = await res.json();
         const list = document.getElementById('jobsList');
@@ -688,7 +688,7 @@
     window.deleteJob = async function(jobId) {
       if (!confirm('Delete this job?')) return;
       try {
-        const res = await Auth.fetch(`/client/jobs/${jobId}`, { method: 'DELETE' });
+        const res = await Auth.fetch(`/v1/client/jobs/${jobId}`, { method: 'DELETE' });
         if (res && res.ok) {
           Auth.toast('Job deleted', 'success');
           loadJobs();
@@ -711,8 +711,8 @@
     async function loadAnalytics() {
       try {
         const [analyticsRes, jobsRes] = await Promise.all([
-          Auth.fetch('/client/analytics'),
-          Auth.fetch('/client/jobs?limit=50'),
+          Auth.fetch('/v1/client/analytics'),
+          Auth.fetch('/v1/client/jobs?limit=50'),
         ]);
         const analytics = analyticsRes ? await analyticsRes.json() : {};
         const jobsData = jobsRes ? await jobsRes.json() : { items: [] };
@@ -763,7 +763,7 @@
       const searchInput = document.querySelector('#section-candidates .search-bar input');
       const query = searchInput ? searchInput.value.trim() : '';
       try {
-        const res = await Auth.fetch(`/client/candidates?limit=20${query ? '&specialisation=' + encodeURIComponent(query) : ''}`);
+        const res = await Auth.fetch(`/v1/client/candidates?limit=20${query ? '&specialisation=' + encodeURIComponent(query) : ''}`);
         if (!res) return;
         const data = await res.json();
         const container = document.querySelector('#section-candidates');

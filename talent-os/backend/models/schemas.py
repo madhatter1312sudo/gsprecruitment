@@ -39,6 +39,7 @@ class UserResponse(BaseModel):
 class UserUpdate(BaseModel):
     full_name: Optional[str] = Field(None, min_length=1, max_length=255)
     email: Optional[EmailStr] = None
+    password: Optional[str] = Field(None, min_length=8, max_length=128)
 
 
 class ForgotPasswordRequest(BaseModel):
@@ -128,6 +129,7 @@ class CandidatePortalProfile(BaseModel):
 
 
 class CandidateProfileUpdate(BaseModel):
+    full_name: Optional[str] = Field(None, min_length=1, max_length=255)
     phone: Optional[str] = None
     linkedin_url: Optional[str] = None
     github_url: Optional[str] = None

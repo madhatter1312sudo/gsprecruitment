@@ -198,55 +198,36 @@
     modal?.addEventListener('click', (e) => { if (e.target === modal) modal.classList.remove('active'); });
     tabs.forEach(tab => tab.addEventListener('click', () => openModal(tab.dataset.tab)));
 
-    // Login submit
+    // Login submit — use Auth.login() from auth.js
     loginForm?.addEventListener('submit', async (e) => {
       e.preventDefault();
       if (errEl) errEl.style.display = 'none';
       if (successEl) successEl.style.display = 'none';
-      try {
-        const res = await fetch(`${API}/api/auth/login`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            email: $('loginEmail')?.value,
-            password: $('loginPassword')?.value
-          })
-        });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.detail || 'Login failed');
-        localStorage.setItem(TOKEN_KEY, data.access_token);
-        localStorage.setItem(USER_KEY, JSON.stringify(data.user));
+      const result = await Auth.login($('loginEmail')?.value, $('loginPassword')?.value);
+      if (result.error) {
+        if (errEl) { errEl.textContent = result.error; errEl.style.display = 'block'; }
+      } else {
         if (modal) modal.classList.remove('active');
         window.location.reload();
-      } catch (err) {
-        if (errEl) { errEl.textContent = err.message; errEl.style.display = 'block'; }
       }
     });
 
-    // Register submit
+    // Register submit — use Auth.register() from auth.js
     registerForm?.addEventListener('submit', async (e) => {
       e.preventDefault();
       if (errEl) errEl.style.display = 'none';
       if (successEl) successEl.style.display = 'none';
-      try {
-        const res = await fetch(`${API}/api/auth/register`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            email: $('regEmail')?.value,
-            password: $('regPassword')?.value,
-            full_name: $('regName')?.value,
-            role: $('regRole')?.value || 'candidate'
-          })
-        });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.detail || 'Registration failed');
-        localStorage.setItem(TOKEN_KEY, data.access_token);
-        localStorage.setItem(USER_KEY, JSON.stringify(data.user));
+      const result = await Auth.register({
+        email: $('regEmail')?.value,
+        password: $('regPassword')?.value,
+        full_name: $('regName')?.value,
+        role: $('regRole')?.value || 'candidate'
+      });
+      if (result.error) {
+        if (errEl) { errEl.textContent = result.error; errEl.style.display = 'block'; }
+      } else {
         if (modal) modal.classList.remove('active');
         window.location.reload();
-      } catch (err) {
-        if (errEl) { errEl.textContent = err.message; errEl.style.display = 'block'; }
       }
     });
   }

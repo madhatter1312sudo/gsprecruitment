@@ -103,6 +103,12 @@ async def login(data: UserLogin):
             detail="Invalid email or password",
         )
 
+    if not user.get("is_verified"):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Email not verified. Please check your inbox.",
+        )
+
     return _build_token_response(user)
 
 
@@ -247,6 +253,12 @@ async def update_me(
             raise HTTPException(status_code=409, detail="Email already in use")
         set_parts.append(f"email = ${idx}")
         values.append(email)
+        idx += 1
+
+    if updates.password is not None:
+        new_hash = hash_password(updates.password)
+        set_parts.append(f"password_hash = ${idx}")
+        values.append(new_hash)
         idx += 1
 
     if not set_parts:

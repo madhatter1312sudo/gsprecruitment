@@ -256,15 +256,15 @@
     <div id="authSuccess" class="form-success"></div>
     <form id="loginForm" class="modal-form">
       <input type="email" id="loginEmail" placeholder="Email address" data-lang-en="Email address" data-lang-nl="E-mailadres" required>
-      <input type="password" id="loginPassword" placeholder="Password" data-lang-en="Password" data-lang-nl="Wachtwoord" required minlength="6">
+      <input type="password" id="loginPassword" placeholder="Password" data-lang-en="Password" data-lang-nl="Wachtwoord" required minlength="8">
+      <a href="#" onclick="event.preventDefault(); showForgotPassword()" style="display:block;text-align:right;font-size:0.82rem;color:var(--gold-dark);margin-top:-6px;margin-bottom:8px" class="lang-en">Forgot password?</a>
+      <a href="#" onclick="event.preventDefault(); showForgotPassword()" style="display:block;text-align:right;font-size:0.82rem;color:var(--gold-dark);margin-top:-6px;margin-bottom:8px" class="lang-nl">Wachtwoord vergeten?</a>
       <button type="submit" class="btn btn-primary"><i class="fas fa-sign-in-alt"></i> <span class="lang-en">Sign In</span><span class="lang-nl">Inloggen</span></button>
-      <div class="modal-divider"><span class="lang-en">or</span><span class="lang-nl">of</span></div>
-      <div class="social-btns"><button type="button" class="btn btn-ghost btn-sm"><i class="fab fa-linkedin"></i> LinkedIn</button><button type="button" class="btn btn-ghost btn-sm"><i class="fab fa-google"></i> Google</button></div>
     </form>
     <form id="registerForm" class="modal-form" style="display:none">
       <input type="text" id="regName" placeholder="Full name" data-lang-en="Full name" data-lang-nl="Volledige naam" required>
       <input type="email" id="regEmail" placeholder="Email address" data-lang-en="Email address" data-lang-nl="E-mailadres" required>
-      <input type="password" id="regPassword" placeholder="Password (min 6 chars)" data-lang-en="Password (min 6 chars)" data-lang-nl="Wachtwoord (min 6 tekens)" required minlength="6">
+      <input type="password" id="regPassword" placeholder="Password (min 8 chars)" data-lang-en="Password (min 8 chars)" data-lang-nl="Wachtwoord (min 8 tekens)" required minlength="8">
       <select id="regRole"><option value="candidate"><span class="lang-en">I'm looking for a role</span><span class="lang-nl">Ik zoek een rol</span></option><option value="client"><span class="lang-en">I'm looking to hire</span><span class="lang-nl">Ik wil aannemen</span></option></select>
       <button type="submit" class="btn btn-gold"><i class="fas fa-user-plus"></i> <span class="lang-en">Create Account</span><span class="lang-nl">Account aanmaken</span></button>
     </form>
