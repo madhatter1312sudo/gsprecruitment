@@ -232,6 +232,50 @@
     });
   }
 
+  // ── Forgot Password Modal ──────────────────────────────
+  function showForgotPassword() {
+    const modal = $('forgotPasswordModal');
+    const closeBtn = $('forgotPwClose');
+    const form = $('forgotPwForm');
+    const email = $('forgotPwEmail');
+    const errEl = $('forgotPwError');
+    const successEl = $('forgotPwSuccess');
+    if (!modal) return;
+
+    // Hide auth modal, show forgot-pw modal
+    $('authModal')?.classList.remove('active');
+    if (errEl) errEl.textContent = '';
+    if (successEl) successEl.textContent = '';
+    modal.classList.add('active');
+
+    closeBtn?.addEventListener('click', () => modal.classList.remove('active'));
+    modal.addEventListener('click', (e) => { if (e.target === modal) modal.classList.remove('active'); });
+
+    form?.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const val = email?.value?.trim();
+      if (!val) return;
+      if (errEl) errEl.style.display = 'none';
+      if (successEl) successEl.style.display = 'none';
+      try {
+        const res = await fetch('/api/auth/forgot-password', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: val }),
+        });
+        const data = await res.json();
+        if (res.ok) {
+          if (successEl) { successEl.textContent = 'If that email exists, a reset link has been sent.'; successEl.style.display = 'block'; }
+          setTimeout(() => { modal.classList.remove('active'); }, 2500);
+        } else {
+          if (errEl) { errEl.textContent = data.detail || 'Error sending reset link.'; errEl.style.display = 'block'; }
+        }
+      } catch (err) {
+        if (errEl) { errEl.textContent = 'Network error. Please try again.'; errEl.style.display = 'block'; }
+      }
+    });
+  }
+
   // ── Job Board ──────────────────────────────────────────
   function initJobBoard() {
     const grid = $('jobsGrid');
