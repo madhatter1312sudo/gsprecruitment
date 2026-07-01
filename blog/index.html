@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="nl" data-lang="nl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="theme-color" content="#0E1B2E">
+<title>Blog — GSP Recruitment | Tech & IT Recruitment in de Brainport</title>
+<meta name="description" content="Het GSP Recruitment blog. Artikelen over tech & IT recruitment, embedded software, C++, cloud engineering en de Brainport Eindhoven arbeidsmarkt.">
+<link rel="canonical" href="https://gsp-recruitment.nl/blog/">
+<link rel="alternate" hreflang="nl" href="https://gsp-recruitment.nl/blog/">
+<link rel="alternate" hreflang="en" href="https://gsp-recruitment.nl/blog/">
+<meta property="og:type" content="website">
+<meta property="og:title" content="Blog — GSP Recruitment | Tech & IT Recruitment Brainport">
+<meta property="og:description" content="Artikelen over tech recruitment, embedded software, C++, cloud & de Brainport arbeidsmarkt.">
+<meta property="og:url" content="https://gsp-recruitment.nl/blog/">
+<meta property="og:image" content="https://gsp-recruitment.nl/og-image.png">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Blog — GSP Recruitment">
+<meta name="twitter:description" content="Tech & IT recruitment insights voor de Brainport regio.">
+<link rel="icon" type="image/png" sizes="32x32" href="../favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="../favicon-16.png">
+<link rel="apple-touch-icon" href="../apple-touch-icon.png">
+<link rel="manifest" href="../site.webmanifest">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+<link rel="stylesheet" href="../styles.css">
+<style>
+.blog-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); gap: 28px; max-width: 1200px; margin: 0 auto; padding: 0 24px; }
+.blog-card { border: 1px solid var(--border); border-radius: var(--radius); padding: 32px; background: var(--bg-card); transition: var(--transition); }
+.blog-card:hover { box-shadow: var(--shadow-md); transform: translateY(-2px); }
+.blog-card .tag { display: inline-block; padding: 3px 10px; border-radius: var(--radius-full); background: var(--gold-light); color: var(--gold-dark); font-size: 0.72rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; margin-right: 4px; margin-bottom: 6px; }
+.blog-card h3 { margin: 12px 0 8px; font-size: 1.25rem; }
+.blog-card .meta { font-size: 0.82rem; color: var(--text-muted); margin-bottom: 12px; }
+.blog-card p { font-size: 0.95rem; color: var(--text-secondary); }
+.blog-card .read-more { display: inline-flex; align-items: center; gap: 6px; margin-top: 16px; color: var(--gold-dark); font-weight: 600; font-size: 0.9rem; }
+.blog-card .read-more:hover { gap: 10px; }
+.section-header { text-align: center; max-width: 640px; margin: 0 auto 48px; padding: 0 24px; }
+</style>
+</head>
+<body>
+<div id="preloader"><img src="../logo-dark.png" alt="GSP Recruitment"><div class="preloader-bar"><div class="preloader-fill" id="preloaderFill"></div></div></div>
+<header class="header" id="header">
+  <div class="header-inner">
+    <a href="../index.html" class="header-logo"><img src="../logo-dark.png" alt="GSP Recruitment" width="120" height="28"></a>
+    <div class="audience-switch" role="tablist" aria-label="Werkgevers of kandidaten">
+      <a href="../werkgevers.html" class="aud-opt"><i class="fas fa-building"></i><span class="lang-en">Employers</span><span class="lang-nl">Werkgevers</span></a>
+      <a href="../kandidaten.html" class="aud-opt"><i class="fas fa-user"></i><span class="lang-en">Candidates</span><span class="lang-nl">Kandidaten</span></a>
+    </div>
+    <nav class="nav" id="nav">
+      <ul class="nav-list">
+        <li class="nav-aud"><a href="../werkgevers.html" class="nav-link"><span class="lang-en">For employers</span><span class="lang-nl">Voor werkgevers</span></a></li>
+        <li class="nav-aud"><a href="../kandidaten.html" class="nav-link"><span class="lang-en">For candidates</span><span class="lang-nl">Voor kandidaten</span></a></li>
+        <li><a href="../vacatures.html" class="nav-link"><span class="lang-en">Vacancies</span><span class="lang-nl">Vacatures</span></a></li>
+        <li><a href="index.html" class="nav-link"><span class="lang-en">Blog</span><span class="lang-nl">Blog</span></a></li>
+        <li><a href="../contact.html" class="nav-link"><span class="lang-en">Contact</span><span class="lang-nl">Contact</span></a></li>
+      </ul>
+    </nav>
+    <div class="header-actions">
+      <button class="lang-btn" id="langEn">EN</button>
+      <button class="lang-btn" id="langNl">NL</button>
+      <button class="btn btn-ghost btn-sm" id="loginBtn"><i class="fas fa-sign-in-alt"></i> <span class="lang-en">Sign In</span><span class="lang-nl">Inloggen</span></button>
+      <button class="hamburger" id="hamburger" aria-label="Menu"><span></span><span></span><span></span></button>
+    </div>
+  </div>
+</header>
+<section class="page-hero" style="padding-bottom:40px">
+  <div class="container" style="text-align:center">
+    <div class="eyebrow"><span class="lang-en">Blog</span><span class="lang-nl">Blog</span></div>
+    <h1 class="lang-en">Tech &amp; IT recruitment insights</h1>
+    <h1 class="lang-nl">Tech &amp; IT-recruitment inzichten</h1>
+    <p class="lang-en">Practical articles about hiring, job hunting, and the Brainport tech market — written by someone who works in it every day.</p>
+    <p class="lang-nl">Praktische artikelen over werven, solliciteren en de Brainport tech markt — geschreven door iemand die er dagelijks mee werkt.</p>
+  </div>
+</section>
+<section style="padding-top:0">
+  <div class="blog-grid" id="blogGrid"></div>
+</section>
+<footer class="footer">
+  <div class="container">
+    <div class="footer-grid">
+      <div class="footer-brand">
+        <img src="../logo.png" alt="GSP Recruitment">
+        <p class="lang-en">Specialist tech &amp; IT recruitment across the Netherlands. Founder-led, personal, and honest.</p>
+        <p class="lang-nl">Gespecialiseerde tech &amp; IT-recruitment in heel Nederland. Founder-led, persoonlijk en eerlijk.</p>
+      </div>
+      <div><h4><span class="lang-en">For employers</span><span class="lang-nl">Voor werkgevers</span></h4>
+        <ul class="footer-links"><li><a href="../werkgevers.html"><span class="lang-en">How we work</span><span class="lang-nl">Werkwijze</span></a></li><li><a href="../werkgevers.html#specialisms"><span class="lang-en">Specialisms</span><span class="lang-nl">Vakgebieden</span></a></li><li><a href="../contact.html"><span class="lang-en">Share a vacancy</span><span class="lang-nl">Deel een vacature</span></a></li></ul></div>
+      <div><h4><span class="lang-en">For candidates</span><span class="lang-nl">Voor kandidaten</span></h4>
+        <ul class="footer-links"><li><a href="../vacatures.html"><span class="lang-en">Vacancies</span><span class="lang-nl">Vacatures</span></a></li><li><a href="../kandidaten.html#salary"><span class="lang-en">Salary data</span><span class="lang-nl">Salarisdata</span></a></li><li><a href="../kandidaten.html#quiz"><span class="lang-en">Match quiz</span><span class="lang-nl">Match quiz</span></a></li></ul></div>
+      <div><h4><span class="lang-en">Company</span><span class="lang-nl">Bedrijf</span></h4>
+        <ul class="footer-links"><li><a href="../contact.html"><span class="lang-en">Contact</span><span class="lang-nl">Contact</span></a></li><li><a href="../privacy.html"><span class="lang-en">Privacy Policy</span><span class="lang-nl">Privacybeleid</span></a></li><li><a href="https://www.linkedin.com/company/gsp-recruitment/" target="_blank" rel="noopener"><i class="fab fa-linkedin"></i> LinkedIn</a></li></ul></div>
+    </div>
+    <div class="footer-bottom">
+      <span>© 2026 GSP Recruitment. <span class="lang-en">All rights reserved.</span><span class="lang-nl">Alle rechten voorbehouden.</span></span>
+      <span class="lang-en">Tech &amp; IT recruitment · Brainport Eindhoven · the Netherlands</span>
+      <span class="lang-nl">Tech &amp; IT-recruitment · Brainport Eindhoven · Nederland</span>
+    </div>
+  </div>
+</footer>
+<script>
+// Blog listing — reads posts.json and renders cards
+(async () => {
+  const grid = document.getElementById('blogGrid');
+  if (!grid) return;
+  try {
+    const res = await fetch('posts.json');
+    const data = await res.json();
+    const lang = localStorage.getItem('gsp_lang') || 'nl';
+    const posts = data.posts || [];
+    grid.innerHTML = posts.map(p => {
+      const title = lang === 'nl' ? p.title_nl : p.title_en;
+      const date = lang === 'nl' ? p.date_nl : p.date_en;
+      const excerpt = lang === 'nl' ? p.excerpt_nl : p.excerpt_en;
+      const tags = (p.tags || []).map(t => `<span class="tag">${t}</span>`).join('');
+      return `<article class="blog-card fade-in">
+        ${tags}
+        <h3>${title}</h3>
+        <div class="meta">${date} · ${p.read_time_min} min read · by ${p.author}</div>
+        <p>${excerpt}</p>
+        <a href="${p.id}.html" class="read-more"><span class="lang-en">Read more</span><span class="lang-nl">Lees meer</span> <i class="fas fa-arrow-right"></i></a>
+      </article>`;
+    }).join('');
+  } catch(e) {
+    grid.innerHTML = '<p style="text-align:center;color:var(--text-muted);padding:40px">Loading...</p>';
+  }
+})();
+</script>
+</body>
+</html>
