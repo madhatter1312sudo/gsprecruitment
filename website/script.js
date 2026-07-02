@@ -1,14 +1,13 @@
 /* ==========================================================================
    GSP Recruitment — Main Application Script
    All features: preloader, lang toggle, hamburger, scroll animations, FAQ,
-   auth modal, job board, salary calculator, match quiz, contact form, live stats
+   auth modal, job board, salary calculator, match quiz, contact form, live stats,
+   testimonials carousel, cookie consent, back-to-top
    ========================================================================== */
 (() => {
   'use strict';
 
   const API = 'https://api.gsprecruitment.nl';
-  const TOKEN_KEY = 'gsp_token';
-  const USER_KEY = 'gsp_user';
 
   // ── DOM helpers ────────────────────────────────────────
   const $ = (id) => document.getElementById(id);
@@ -29,18 +28,15 @@
       localStorage.setItem('gsp_lang', lang);
       document.documentElement.setAttribute('data-lang', lang);
 
-      // Show/hide language-specific elements
       document.querySelectorAll('.lang-en, .lang-nl').forEach(el => {
         el.style.display = el.classList.contains('lang-' + lang) ? '' : 'none';
       });
 
-      // Update hero H1
       const heroTitle = $('heroTitle');
       if (heroTitle && H1_TEXTS[lang]) {
         heroTitle.textContent = H1_TEXTS[lang];
       }
 
-      // Update placeholder attributes for inputs
       document.querySelectorAll('[data-lang-' + lang + ']').forEach(el => {
         const placeholder = el.getAttribute('data-lang-' + lang);
         if (placeholder && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT')) {
@@ -48,12 +44,10 @@
         }
       });
 
-      // Update lang-btn active state
       document.querySelectorAll('.lang-btn').forEach(btn => {
         btn.classList.toggle('active', btn.id === 'lang' + lang.charAt(0).toUpperCase() + lang.slice(1));
       });
 
-      // Update select option text from data-lang attributes
       document.querySelectorAll('option[data-lang-' + lang + ']').forEach(opt => {
         opt.textContent = opt.getAttribute('data-lang-' + lang);
       });
@@ -100,7 +94,6 @@
       }
     });
 
-    // Max 5s timeout
     setTimeout(() => {
       clearInterval(interval);
       if (!preloader.classList.contains('hidden')) {
@@ -182,16 +175,6 @@
     const errEl = $('authError');
     const successEl = $('authSuccess');
 
-    function getDashboardUrl(user) {
-      if (!user) return '/';
-      switch (user.role) {
-        case 'admin': return '/admin/';
-        case 'client': return '/client/';
-        case 'candidate': return '/candidate/';
-        default: return '/';
-      }
-    }
-
     function openModal(tab) {
       if (!modal) return;
       modal.classList.add('active');
@@ -202,22 +185,16 @@
       if (successEl) successEl.style.display = 'none';
     }
 
-    // Check logged-in state
-    const token = localStorage.getItem(TOKEN_KEY);
-    const userData = localStorage.getItem(USER_KEY);
-    if (token && userData) {
-      try {
-        const u = JSON.parse(userData);
-        if (loginBtn) {
-          const url = getDashboardUrl(u);
-          loginBtn.innerHTML = `<i class="fas fa-columns"></i> <span class="lang-en">Dashboard</span><span class="lang-nl">Dashboard</span>`;
-          loginBtn.addEventListener('click', (e) => {
-            e.preventDefault();
-            window.location.href = url;
-          });
-        }
-      } catch (e) {
-        console.warn('[AuthInit] Failed to parse user:', e);
+    // Check logged-in state using Auth module
+    if (Auth.isLoggedIn()) {
+      const u = Auth.getUser();
+      if (loginBtn) {
+        const url = Auth.getDashboardUrl(u);
+        loginBtn.innerHTML = `<i class="fas fa-columns"></i> <span class="lang-en">Dashboard</span><span class="lang-nl">Dashboard</span>`;
+        loginBtn.addEventListener('click', (e) => {
+          e.preventDefault();
+          window.location.href = url;
+        });
       }
     } else {
       loginBtn?.addEventListener('click', () => openModal('login'));
@@ -228,98 +205,97 @@
     modal?.addEventListener('click', (e) => { if (e.target === modal) modal.classList.remove('active'); });
     tabs.forEach(tab => tab.addEventListener('click', () => openModal(tab.dataset.tab)));
 
-    // Login submit
+    // Wire up social login buttons → "Coming soon" toast
+    const socialBtns = qsa('.social-btns button');
+    socialBtns.forEach(btn => {
+      btn.addEventListener('click', () => {
+        const provider = btn.textContent.trim() || 'Social';
+        Auth.toast(`${provider} login coming soon!`, 'info');
+      });
+    });
+
+    // Add "Forgot password?" link to login form
+    const forgotLink = document.createElement('div');
+    forgotLink.style.cssText = 'text-align:right;margin:-8px 0 10px';
+    forgotLink.innerHTML = '<a href="#" id="forgotPwLink" style="font-size:0.85rem;color:var(--gold);text-decoration:none"><span class="lang-en">Forgot password?</span><span class="lang-nl">Wachtwoord vergeten?</span></a>';
+    const loginSubmitBtn = loginForm?.querySelector('button[type="submit"]');
+    if (loginForm && loginSubmitBtn) {
+      loginForm.insertBefore(forgotLink, loginSubmitBtn.nextSibling);
+    }
+    $('forgotPwLink')?.addEventListener('click', (e) => {
+      e.preventDefault();
+      Auth.showForgotPassword();
+    });
+
+    // Login submit — use Auth.login()
     loginForm?.addEventListener('submit', async (e) => {
       e.preventDefault();
       if (errEl) errEl.style.display = 'none';
       if (successEl) successEl.style.display = 'none';
+
+      // Show loading on button
+      const submitBtn = loginForm.querySelector('button[type="submit"]');
+      if (submitBtn) {
+        submitBtn.disabled = true;
+        submitBtn.innerHTML = '<span class="spinner-sm"></span> <span class="lang-en">Signing in...</span><span class="lang-nl">Inloggen...</span>';
+      }
+
       try {
-        const res = await fetch(`${API}/api/auth/login`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            email: $('loginEmail')?.value,
-            password: $('loginPassword')?.value
-          })
-        });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.detail || 'Login failed');
-        localStorage.setItem(TOKEN_KEY, data.access_token);
-        localStorage.setItem(USER_KEY, JSON.stringify(data.user));
-        if (modal) modal.classList.remove('active');
-        window.location.href = getDashboardUrl(data.user);
+        const result = await Auth.login($('loginEmail')?.value, $('loginPassword')?.value);
+        if (result.error) {
+          if (errEl) { errEl.textContent = result.error; errEl.style.display = 'block'; }
+          Auth.toast(result.error, 'error');
+        } else {
+          if (modal) modal.classList.remove('active');
+          window.location.href = Auth.getDashboardUrl(result.user);
+        }
       } catch (err) {
-        if (errEl) { errEl.textContent = err.message; errEl.style.display = 'block'; }
+        if (errEl) { errEl.textContent = 'An unexpected error occurred. Please try again.'; errEl.style.display = 'block'; }
+        Auth.toast('Login failed. Please try again.', 'error');
+      } finally {
+        if (submitBtn) {
+          submitBtn.disabled = false;
+          submitBtn.innerHTML = '<i class="fas fa-sign-in-alt"></i> <span class="lang-en">Sign In</span><span class="lang-nl">Inloggen</span>';
+        }
       }
     });
 
-    // Register submit
+    // Register submit — use Auth.register()
     registerForm?.addEventListener('submit', async (e) => {
       e.preventDefault();
       if (errEl) errEl.style.display = 'none';
       if (successEl) successEl.style.display = 'none';
-      try {
-        const res = await fetch(`${API}/api/auth/register`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            email: $('regEmail')?.value,
-            password: $('regPassword')?.value,
-            full_name: $('regName')?.value,
-            role: $('regRole')?.value || 'candidate'
-          })
-        });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.detail || 'Registration failed');
-        localStorage.setItem(TOKEN_KEY, data.access_token);
-        localStorage.setItem(USER_KEY, JSON.stringify(data.user));
-        if (modal) modal.classList.remove('active');
-        window.location.href = getDashboardUrl(data.user);
-      } catch (err) {
-        if (errEl) { errEl.textContent = err.message; errEl.style.display = 'block'; }
+
+      const submitBtn = registerForm.querySelector('button[type="submit"]');
+      if (submitBtn) {
+        submitBtn.disabled = true;
+        submitBtn.innerHTML = '<span class="spinner-sm"></span> <span class="lang-en">Creating account...</span><span class="lang-nl">Account aanmaken...</span>';
       }
-    });
-  }
 
-  function showForgotPassword() {
-    const modal = $('forgotPasswordModal');
-    const closeBtn = $('forgotPwClose');
-    const form = $('forgotPwForm');
-    const email = $('forgotPwEmail');
-    const errEl = $('forgotPwError');
-    const successEl = $('forgotPwSuccess');
-    if (!modal) return;
-
-    // Hide auth modal, show forgot-pw modal
-    $('authModal')?.classList.remove('active');
-    if (errEl) errEl.textContent = '';
-    if (successEl) successEl.textContent = '';
-    modal.classList.add('active');
-
-    closeBtn?.addEventListener('click', () => modal.classList.remove('active'));
-    modal.addEventListener('click', (e) => { if (e.target === modal) modal.classList.remove('active'); });
-
-    form?.addEventListener('submit', async (e) => {
-      e.preventDefault();
-      const val = email?.value?.trim();
-      if (!val) return;
-      if (errEl) errEl.style.display = 'none';
-      if (successEl) successEl.style.display = 'none';
       try {
-        const res = await fetch(`${API}/api/auth/forgot-password`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email: val }),
+        const result = await Auth.register({
+          email: $('regEmail')?.value,
+          password: $('regPassword')?.value,
+          full_name: $('regName')?.value,
+          role: $('regRole')?.value || 'candidate',
+          avg_consent: true
         });
-        const data = await res.json();
-        if (res.ok) {
-          if (successEl) { successEl.textContent = 'If that email exists, a reset link has been sent.'; successEl.style.display = 'block'; }
-          setTimeout(() => { modal.classList.remove('active'); }, 2500);
+        if (result.error) {
+          if (errEl) { errEl.textContent = result.error; errEl.style.display = 'block'; }
+          Auth.toast(result.error, 'error');
         } else {
-          if (errEl) { errEl.textContent = data.detail || 'Error sending reset link.'; errEl.style.display = 'block'; }
+          Auth.toast('Account created successfully!', 'success');
+          if (modal) modal.classList.remove('active');
+          window.location.href = Auth.getDashboardUrl(result.user);
         }
       } catch (err) {
-        if (errEl) { errEl.textContent = 'Network error. Please try again.'; errEl.style.display = 'block'; }
+        if (errEl) { errEl.textContent = 'An unexpected error occurred. Please try again.'; errEl.style.display = 'block'; }
+        Auth.toast('Registration failed. Please try again.', 'error');
+      } finally {
+        if (submitBtn) {
+          submitBtn.disabled = false;
+          submitBtn.innerHTML = '<i class="fas fa-user-plus"></i> <span class="lang-en">Create Account</span><span class="lang-nl">Account aanmaken</span>';
+        }
       }
     });
   }
@@ -333,19 +309,38 @@
     const searchInput = $('searchInput');
     if (!grid) return;
 
-    // Real vacancies only — loaded from the backend (/api/public/jobs).
-    // Add roles via the admin portal; no placeholder/demo jobs are shown.
     let allJobs = [];
+    let searchTimeout = null;
+
+    function showLoading() {
+      grid.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:60px 20px"><div class="spinner" style="margin:0 auto 16px"></div><p style="color:var(--text-muted)">Loading vacancies...</p></div>';
+    }
+
+    function showError(msg) {
+      const lang = localStorage.getItem('gsp_lang') || 'nl';
+      const text = msg || (lang === 'nl' ? 'Could not load vacancies. Please try again later.' : 'Could not load vacancies. Please try again later.');
+      grid.innerHTML = `<div style="grid-column:1/-1;text-align:center;padding:60px 20px"><i class="fas fa-exclamation-triangle" style="font-size:2rem;color:var(--gold);margin-bottom:12px"></i><p>${text}</p><button class="btn btn-ghost btn-sm" onclick="location.reload()" style="margin-top:16px"><i class="fas fa-redo"></i> Retry</button></div>`;
+    }
 
     async function fetchJobs() {
+      showLoading();
       try {
         const res = await fetch(`${API}/api/public/jobs`);
         if (res.ok) {
           const data = await res.json();
-          if (Array.isArray(data) && data.length > 0) allJobs = data;
+          if (Array.isArray(data) && data.length > 0) {
+            allJobs = data;
+          } else {
+            allJobs = [];
+          }
+        } else {
+          showError();
+          return;
         }
       } catch (e) {
-        console.warn('[Jobs] API fetch failed, using fallback:', e);
+        console.warn('[Jobs] API fetch failed:', e);
+        showError('Network error. Please check your connection.');
+        return;
       }
       renderJobs();
     }
@@ -373,7 +368,7 @@
         if (noneAtAll) {
           emptyMsg = lang === 'nl'
             ? '<p style="font-size:1.15rem;font-weight:600;color:var(--text)">Op dit moment werven we nieuwe rollen</p><p style="margin-top:10px;color:var(--text-secondary)">Stuur je CV in, dan matchen we je zodra de juiste positie binnenkomt.</p><a href="contact.html" class="btn btn-primary" style="margin-top:20px"><i class="fas fa-paper-plane"></i> Stuur je CV in</a>'
-            : '<p style="font-size:1.15rem;font-weight:600;color:var(--text)">We’re currently sourcing new roles</p><p style="margin-top:10px;color:var(--text-secondary)">Send us your CV and we’ll match you the moment the right position lands.</p><a href="contact.html" class="btn btn-primary" style="margin-top:20px"><i class="fas fa-paper-plane"></i> Submit your CV</a>';
+            : '<p style="font-size:1.15rem;font-weight:600;color:var(--text)">We\'re currently sourcing new roles</p><p style="margin-top:10px;color:var(--text-secondary)">Send us your CV and we\'ll match you the moment the right position lands.</p><a href="contact.html" class="btn btn-primary" style="margin-top:20px"><i class="fas fa-paper-plane"></i> Submit your CV</a>';
         } else {
           emptyMsg = lang === 'nl'
             ? '<p style="font-size:1.1rem;font-weight:600;color:var(--text)">Geen vacatures voor deze filters</p><p style="margin-top:8px;color:var(--text-muted)">Pas de filters aan om meer rollen te zien.</p>'
@@ -412,7 +407,7 @@
       if (!job) return;
       const modal = $('jobModal');
       const body = $('jobModalBody');
-      const user = JSON.parse(localStorage.getItem(USER_KEY) || 'null');
+      const user = Auth.getUser();
       if (!body) return;
 
       body.innerHTML = `
@@ -442,7 +437,7 @@
       $('applyFromJobBtn')?.addEventListener('click', () => {
         if (modal) modal.classList.remove('active');
         if (user) {
-          alert('Application submitted! We will contact you soon.');
+          Auth.toast('Application submitted! We will contact you soon.', 'success');
         } else {
           $('authModal')?.classList.add('active');
         }
@@ -456,18 +451,36 @@
     // Filter events
     deptFilter?.addEventListener('change', renderJobs);
     levelFilter?.addEventListener('change', renderJobs);
-    searchInput?.addEventListener('input', renderJobs);
+
+    // Debounced search input
+    searchInput?.addEventListener('input', () => {
+      clearTimeout(searchTimeout);
+      searchTimeout = setTimeout(renderJobs, 300);
+    });
 
     fetchJobs();
   }
 
   // ── Salary Calculator ──────────────────────────────────
+  // Note: key "Embedded Software Engineer" matches the HTML <select> value
   const FALLBACK_SALARIES = {
-    'Embedded Engineer': {
+    'Embedded Software Engineer': {
       Junior: { p25: 40, p50: 47, p75: 52, p90: 55, sample_size: 120 },
       Medior: { p25: 55, p50: 62, p75: 67, p90: 70, sample_size: 180 },
       Senior: { p25: 70, p50: 80, p75: 87, p90: 90, sample_size: 200 },
       Lead: { p25: 90, p50: 100, p75: 107, p90: 110, sample_size: 80 }
+    },
+    'Frontend Developer': {
+      Junior: { p25: 36, p50: 42, p75: 46, p90: 48, sample_size: 90 },
+      Medior: { p25: 48, p50: 55, p75: 60, p90: 62, sample_size: 140 },
+      Senior: { p25: 62, p50: 70, p75: 75, p90: 78, sample_size: 160 },
+      Lead: { p25: 78, p50: 88, p75: 92, p90: 95, sample_size: 50 }
+    },
+    'Backend Developer': {
+      Junior: { p25: 40, p50: 47, p75: 52, p90: 55, sample_size: 100 },
+      Medior: { p25: 52, p50: 62, p75: 67, p90: 72, sample_size: 160 },
+      Senior: { p25: 68, p50: 78, p75: 84, p90: 88, sample_size: 190 },
+      Lead: { p25: 88, p50: 98, p75: 104, p90: 108, sample_size: 60 }
     },
     'C++ Developer': {
       Junior: { p25: 42, p50: 50, p75: 55, p90: 58, sample_size: 140 },
@@ -499,28 +512,72 @@
       Senior: { p25: 82, p50: 93, p75: 100, p90: 105, sample_size: 130 },
       Lead: { p25: 105, p50: 120, p75: 129, p90: 135, sample_size: 40 }
     },
-    'DevOps Engineer': {
+    'DevOps / Cloud Engineer': {
       Junior: { p25: 42, p50: 50, p75: 55, p90: 58, sample_size: 110 },
       Medior: { p25: 58, p50: 66, p75: 72, p90: 75, sample_size: 160 },
       Senior: { p25: 75, p50: 85, p75: 91, p90: 95, sample_size: 180 },
       Lead: { p25: 95, p50: 105, p75: 111, p90: 115, sample_size: 60 }
+    },
+    'Data Engineer': {
+      Junior: { p25: 42, p50: 49, p75: 54, p90: 57, sample_size: 90 },
+      Medior: { p25: 55, p50: 64, p75: 70, p90: 74, sample_size: 130 },
+      Senior: { p25: 72, p50: 82, p75: 88, p90: 92, sample_size: 150 },
+      Lead: { p25: 92, p50: 102, p75: 108, p90: 112, sample_size: 50 }
+    },
+    'Data Scientist / AI Engineer': {
+      Junior: { p25: 45, p50: 53, p75: 59, p90: 62, sample_size: 80 },
+      Medior: { p25: 60, p50: 70, p75: 77, p90: 82, sample_size: 110 },
+      Senior: { p25: 78, p50: 90, p75: 97, p90: 102, sample_size: 130 },
+      Lead: { p25: 98, p50: 112, p75: 120, p90: 125, sample_size: 40 }
+    },
+    'IT Infrastructure Engineer': {
+      Junior: { p25: 32, p50: 38, p75: 42, p90: 44, sample_size: 70 },
+      Medior: { p25: 44, p50: 52, p75: 57, p90: 60, sample_size: 100 },
+      Senior: { p25: 58, p50: 66, p75: 71, p90: 74, sample_size: 110 },
+      Lead: { p25: 72, p50: 80, p75: 85, p90: 88, sample_size: 40 }
     },
     'Systems Architect': {
       Junior: { p25: 50, p50: 57, p75: 62, p90: 65, sample_size: 60 },
       Medior: { p25: 65, p50: 75, p75: 81, p90: 85, sample_size: 100 },
       Senior: { p25: 85, p50: 97, p75: 105, p90: 110, sample_size: 120 },
       Lead: { p25: 110, p50: 125, p75: 134, p90: 140, sample_size: 50 }
+    },
+    'Software Architect': {
+      Junior: { p25: 60, p50: 68, p75: 73, p90: 76, sample_size: 50 },
+      Medior: { p25: 75, p50: 84, p75: 90, p90: 94, sample_size: 80 },
+      Senior: { p25: 92, p50: 105, p75: 112, p90: 118, sample_size: 100 },
+      Lead: { p25: 115, p50: 128, p75: 136, p90: 142, sample_size: 40 }
+    },
+    'Engineering Manager': {
+      Junior: { p25: 55, p50: 64, p75: 70, p90: 73, sample_size: 40 },
+      Medior: { p25: 70, p50: 80, p75: 87, p90: 92, sample_size: 70 },
+      Senior: { p25: 90, p50: 102, p75: 109, p90: 114, sample_size: 90 },
+      Lead: { p25: 110, p50: 125, p75: 134, p90: 140, sample_size: 50 }
     }
   };
 
   function initSalaryCalc() {
     const btn = $('calcBtn');
+    const calcResults = $('calcResults');
     if (!btn) return;
 
+    function showCalcLoading() {
+      if (calcResults) {
+        const els = ['calcP25', 'calcP50', 'calcP75', 'calcP90'];
+        els.forEach(id => { const el = $(id); if (el) el.innerHTML = '<span class="spinner-sm"></span>'; });
+        const range = $('calcRange');
+        if (range) range.style.width = '0%';
+        const sample = $('calcSample');
+        if (sample) sample.textContent = '';
+      }
+    }
+
     async function calculate() {
-      const role = $('calcRole')?.value || 'Embedded Engineer';
+      const role = $('calcRole')?.value || 'Software Engineer';
       const level = $('calcLevel')?.value || 'Senior';
       const location = $('calcLocation')?.value || 'Eindhoven';
+
+      showCalcLoading();
 
       // Try API first
       try {
@@ -584,7 +641,7 @@
     }
 
     btn.addEventListener('click', calculate);
-    // Run on load
+    // Run on load with loading state
     setTimeout(calculate, 300);
   }
 
@@ -625,6 +682,10 @@
 
     function getLang() {
       return localStorage.getItem('gsp_lang') || 'nl';
+    }
+
+    function showQuizLoading() {
+      container.innerHTML = '<div style="text-align:center;padding:40px"><div class="spinner" style="margin:0 auto 16px"></div><p style="color:var(--text-muted)">Loading quiz...</p></div>';
     }
 
     function renderQuestion() {
@@ -674,8 +735,8 @@
       } else {
         if (pct >= 80) label = 'Excellent match! You are in a strong position in the Dutch tech market.';
         else if (pct >= 60) label = 'Great potential! With some focus areas, you could be a strong candidate.';
-        else if (pct >= 40) label = 'Decent match. Let’s look together at where your opportunities are.';
-        else label = 'Good start! Send us your CV and we’ll help you think through your next step.';
+        else if (pct >= 40) label = 'Decent match. Let\'s look together at where your opportunities are.';
+        else label = 'Good start! Send us your CV and we\'ll help you think through your next step.';
       }
 
       container.innerHTML = `
@@ -719,6 +780,13 @@
           return;
         }
 
+        // Show loading state
+        const emailBtn = $('quizEmailBtn');
+        if (emailBtn) {
+          emailBtn.disabled = true;
+          emailBtn.innerHTML = '<span class="spinner-sm"></span> Sending...';
+        }
+
         try {
           const res = await fetch(`${API}/api/public/lead`, {
             method: 'POST',
@@ -747,11 +815,17 @@
             errEl.textContent = lang === 'nl' ? 'Netwerkfout. Probeer opnieuw.' : 'Network error. Please try again.';
             errEl.style.display = 'block';
           }
+        } finally {
+          if (emailBtn) {
+            emailBtn.disabled = false;
+            emailBtn.innerHTML = '<i class="fas fa-envelope"></i> ' + (lang === 'nl' ? 'Stuur mijn resultaten' : 'Send my results');
+          }
         }
       });
     }
 
-    renderQuestion();
+    showQuizLoading();
+    setTimeout(renderQuestion, 300);
   }
 
   // ── Contact Form ───────────────────────────────────────
@@ -764,17 +838,23 @@
       const errEl = $('contactError');
       const successEl = $('contactSuccess');
       const lang = localStorage.getItem('gsp_lang') || 'nl';
+      const submitBtn = form.querySelector('button[type="submit"]');
 
       if (errEl) errEl.style.display = 'none';
       if (successEl) successEl.style.display = 'none';
 
+      // Show loading state
+      if (submitBtn) {
+        submitBtn.disabled = true;
+        submitBtn.innerHTML = '<span class="spinner-sm"></span> Sending...';
+      }
+
       const data = Object.fromEntries(new FormData(form));
-      // Map HTML 'interest' to backend 'interest_type'
       if (data.interest) {
         data.interest_type = data.interest;
         delete data.interest;
       }
-      delete data.gdpr; // don't send checkbox value
+      delete data.gdpr;
 
       try {
         const res = await fetch(`${API}/api/public/lead`, {
@@ -797,6 +877,11 @@
         }
       } catch (err) {
         if (errEl) { errEl.textContent = err.message; errEl.style.display = 'block'; }
+      } finally {
+        if (submitBtn) {
+          submitBtn.disabled = false;
+          submitBtn.innerHTML = '<i class="fas fa-paper-plane"></i> <span class="lang-en">Send message</span><span class="lang-nl">Verstuur bericht</span>';
+        }
       }
     });
   }
@@ -804,31 +889,203 @@
   // ── Live Stats ─────────────────────────────────────────
   function initLiveStats() {
     // Static stats are shown by default in HTML.
-    // If admin is logged in, try to fetch real stats.
-    const token = localStorage.getItem(TOKEN_KEY);
+    // If admin is logged in, try to fetch real stats using Auth module.
+    if (!Auth.isLoggedIn()) return;
+    const u = Auth.getUser();
+    if (!u || u.role !== 'admin') return;
+
+    // Show loading state on stats
+    const p = $('statPlacements');
+    const pt = $('statPartners');
+    if (p) p.textContent = '...';
+    if (pt) pt.textContent = '...';
+
+    const token = Auth.getToken();
     if (!token) return;
 
-    try {
-      const userData = localStorage.getItem(USER_KEY);
-      if (!userData) return;
-      const u = JSON.parse(userData);
+    fetch(`${API}/api/admin/dashboard`, {
+      headers: { 'Authorization': 'Bearer ' + token }
+    })
+      .then(r => {
+        if (!r.ok) throw new Error('Failed to fetch stats');
+        return r.json();
+      })
+      .then(data => {
+        if (p && data.active_jobs) p.textContent = data.active_jobs;
+        if (pt && data.registered_candidates) pt.textContent = data.registered_candidates;
+      })
+      .catch(err => {
+        console.warn('[LiveStats] Failed to fetch admin dashboard:', err);
+        // Restore default static values on error
+        if (p) p.textContent = '150+';
+        if (pt) pt.textContent = '40+';
+      });
+  }
 
-      if (u.role === 'admin') {
-        fetch(`${API}/api/admin/dashboard`, {
-          headers: { 'Authorization': 'Bearer ' + token }
-        })
-          .then(r => r.json())
-          .then(data => {
-            const p = $('statPlacements');
-            const pt = $('statPartners');
-            if (p && data.active_jobs) p.textContent = data.active_jobs;
-            if (pt && data.registered_candidates) pt.textContent = data.registered_candidates;
-          })
-          .catch(() => {});
-      }
-    } catch (e) {
-      console.warn('[LiveStats] Failed to parse user data:', e);
+  // ── Testimonials Carousel ──────────────────────────────
+  function initTestimonials() {
+    const container = $('testimonials');
+    if (!container) return;
+
+    const cards = qsa('.testimonial-card', container);
+    if (cards.length < 2) return;
+
+    let currentIndex = 0;
+    let autoRotate = true;
+    let intervalId = null;
+
+    // Create carousel wrapper
+    const wrapper = document.createElement('div');
+    wrapper.className = 'testimonials-carousel';
+    wrapper.style.cssText = 'position:relative;overflow:hidden;width:100%;max-width:900px;margin:0 auto;min-height:200px';
+
+    // Move cards into carousel track
+    const track = document.createElement('div');
+    track.className = 'testimonials-track';
+    track.style.cssText = 'display:flex;transition:transform 0.5s ease-in-out';
+
+    cards.forEach(card => {
+      const slide = document.createElement('div');
+      slide.className = 'testimonial-slide';
+      slide.style.cssText = 'min-width:100%;box-sizing:border-box;padding:0 16px';
+      slide.appendChild(card.cloneNode(true));
+      track.appendChild(slide);
+      card.remove();
+    });
+
+    wrapper.appendChild(track);
+    container.appendChild(wrapper);
+
+    // Add navigation dots
+    const dotsContainer = document.createElement('div');
+    dotsContainer.className = 'testimonials-dots';
+    dotsContainer.style.cssText = 'display:flex;justify-content:center;gap:10px;margin-top:24px';
+
+    const dots = [];
+    for (let i = 0; i < cards.length; i++) {
+      const dot = document.createElement('button');
+      dot.className = 'testimonial-dot';
+      dot.setAttribute('aria-label', `Testimonial ${i + 1}`);
+      dot.style.cssText = 'width:10px;height:10px;border-radius:50%;border:none;background:var(--border);cursor:pointer;transition:var(--transition)';
+      if (i === 0) dot.style.background = 'var(--gold)';
+      dot.addEventListener('click', () => goToSlide(i));
+      dotsContainer.appendChild(dot);
+      dots.push(dot);
     }
+    container.appendChild(dotsContainer);
+
+    function goToSlide(index) {
+      currentIndex = index;
+      track.style.transform = `translateX(-${currentIndex * 100}%)`;
+      dots.forEach((d, i) => {
+        d.style.background = i === currentIndex ? 'var(--gold)' : 'var(--border)';
+      });
+    }
+
+    function nextSlide() {
+      if (!autoRotate) return;
+      goToSlide((currentIndex + 1) % cards.length);
+    }
+
+    function startAutoRotate() {
+      stopAutoRotate();
+      intervalId = setInterval(nextSlide, 5000);
+    }
+
+    function stopAutoRotate() {
+      if (intervalId) {
+        clearInterval(intervalId);
+        intervalId = null;
+      }
+    }
+
+    // Pause on hover
+    wrapper.addEventListener('mouseenter', () => { autoRotate = false; });
+    wrapper.addEventListener('mouseleave', () => { autoRotate = true; });
+    dotsContainer.addEventListener('mouseenter', () => { autoRotate = false; });
+    dotsContainer.addEventListener('mouseleave', () => { autoRotate = true; });
+
+    startAutoRotate();
+  }
+
+  // ── Cookie Consent Banner ──────────────────────────────
+  function initCookieConsent() {
+    const CONSENT_KEY = 'gsp_cookie_consent';
+    if (localStorage.getItem(CONSENT_KEY) === 'true') return;
+
+    // Check if banner already exists
+    if (document.getElementById('cookieConsentBanner')) return;
+
+    const banner = document.createElement('div');
+    banner.id = 'cookieConsentBanner';
+    banner.style.cssText = `
+      position:fixed;bottom:0;left:0;right:0;z-index:10000;
+      background:var(--bg-card);border-top:1px solid var(--border);
+      padding:16px 24px;box-shadow:0 -4px 20px rgba(0,0,0,0.15);
+      display:flex;flex-wrap:wrap;align-items:center;justify-content:center;
+      gap:16px;font-size:0.9rem;
+    `;
+
+    const lang = localStorage.getItem('gsp_lang') || 'nl';
+    const text = lang === 'nl'
+      ? 'Deze site gebruikt functionele cookies voor authenticatie en taalvoorkeur. Geen tracking.'
+      : 'This site uses functional cookies for authentication and language preference. No tracking.';
+
+    banner.innerHTML = `
+      <span style="color:var(--text-secondary);flex:1;min-width:200px">${text}</span>
+      <div style="display:flex;gap:8px;flex-shrink:0">
+        <a href="privacy.html" style="font-size:0.85rem;color:var(--gold);text-decoration:none">${lang === 'nl' ? 'Privacybeleid' : 'Privacy Policy'}</a>
+        <button id="cookieConsentAccept" class="btn btn-primary btn-sm">${lang === 'nl' ? 'Accepteren' : 'Accept'}</button>
+      </div>
+    `;
+
+    document.body.appendChild(banner);
+
+    $('cookieConsentAccept')?.addEventListener('click', () => {
+      localStorage.setItem(CONSENT_KEY, 'true');
+      banner.remove();
+    });
+  }
+
+  // ── Back-to-Top Button ─────────────────────────────────
+  function initBackToTop() {
+    // Create button if it doesn't exist
+    let btn = $('backToTop');
+    if (!btn) {
+      btn = document.createElement('button');
+      btn.id = 'backToTop';
+      btn.setAttribute('aria-label', 'Back to top');
+      btn.innerHTML = '<i class="fas fa-arrow-up"></i>';
+      btn.style.cssText = `
+        position:fixed;bottom:80px;right:20px;z-index:9999;
+        width:44px;height:44px;border-radius:50%;
+        background:var(--gold);color:var(--bg);border:none;
+        cursor:pointer;box-shadow:var(--shadow-md);
+        display:flex;align-items:center;justify-content:center;
+        font-size:1.1rem;opacity:0;visibility:hidden;
+        transition:opacity 0.3s,visibility 0.3s,transform 0.3s;
+        transform:translateY(10px);
+      `;
+      document.body.appendChild(btn);
+    }
+
+    const scrollHandler = () => {
+      if (window.scrollY > 400) {
+        btn.style.opacity = '1';
+        btn.style.visibility = 'visible';
+        btn.style.transform = 'translateY(0)';
+      } else {
+        btn.style.opacity = '0';
+        btn.style.visibility = 'hidden';
+        btn.style.transform = 'translateY(10px)';
+      }
+    };
+
+    window.addEventListener('scroll', scrollHandler, { passive: true });
+
+    btn.addEventListener('click', () => {
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    });
   }
 
   // ── Init Everything ────────────────────────────────────
@@ -840,10 +1097,13 @@
     initScrollAnimations();
     initFAQ();
     initAuth();
+    initCookieConsent();
     initJobBoard();
     initSalaryCalc();
     initQuiz();
     initContactForm();
     initLiveStats();
+    initTestimonials();
+    initBackToTop();
   });
 })();
