@@ -1,0 +1,1704 @@
+<!DOCTYPE html>
+<html lang="en" data-lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Candidate Portal — GSP Recruitment</title>
+  <meta name="robots" content="noindex,nofollow">
+  <link rel="icon" type="image/png" sizes="32x32" href="../favicon-32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="../favicon-16.png">
+  <link rel="icon" type="image/x-icon" href="../favicon.ico">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" crossorigin="anonymous" referrerpolicy="no-referrer">
+  <link rel="stylesheet" href="../theme.css">
+  <link rel="stylesheet" href="../styles.css">
+  <style>
+    /* ---- Portal Layout ---- */
+    .portal-layout {
+      display: flex;
+      min-height: 100vh;
+    }
+
+    .sidebar {
+      width: var(--sidebar-width);
+      background: var(--navy-900);
+      border-right: 1px solid rgba(74, 111, 159, 0.1);
+      display: flex;
+      flex-direction: column;
+      position: fixed;
+      top: 0;
+      left: 0;
+      bottom: 0;
+      z-index: 100;
+      overflow-y: auto;
+    }
+
+    .sidebar-logo {
+      padding: var(--space-lg) var(--space-xl);
+      border-bottom: 1px solid rgba(74, 111, 159, 0.1);
+    }
+
+    .sidebar-logo a {
+      display: flex;
+      align-items: center;
+      gap: var(--space-sm);
+    }
+
+    .sidebar-nav {
+      flex: 1;
+      padding: var(--space-md) 0;
+    }
+
+    .sidebar-nav-item {
+      display: flex;
+      align-items: center;
+      gap: var(--space-md);
+      padding: 0.75rem var(--space-xl);
+      font-size: var(--font-size-sm);
+      font-weight: 500;
+      color: var(--navy-200);
+      text-decoration: none;
+      transition: all var(--transition-fast);
+      border-left: 3px solid transparent;
+      cursor: pointer;
+      background: none;
+      width: 100%;
+      font-family: var(--font-primary);
+      text-align: left;
+    }
+
+    .sidebar-nav-item i {
+      width: 20px;
+      text-align: center;
+      font-size: 1rem;
+      color: var(--navy-300);
+      transition: color var(--transition-fast);
+    }
+
+    .sidebar-nav-item:hover {
+      color: var(--white);
+      background: rgba(74, 111, 159, 0.08);
+    }
+
+    .sidebar-nav-item.active {
+      color: var(--gold-500);
+      border-left-color: var(--gold-500);
+      background: rgba(250, 200, 0, 0.06);
+    }
+
+    .sidebar-nav-item.active i {
+      color: var(--gold-500);
+    }
+
+    .sidebar-nav-label {
+      padding: 0.5rem var(--space-xl);
+      font-size: var(--font-size-xs);
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--navy-400);
+    }
+
+    .sidebar-footer {
+      padding: var(--space-lg) var(--space-xl);
+      border-top: 1px solid rgba(74, 111, 159, 0.1);
+    }
+
+    .sidebar-user {
+      display: flex;
+      align-items: center;
+      gap: var(--space-md);
+    }
+
+    .sidebar-user-info {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .sidebar-user-name {
+      font-size: var(--font-size-sm);
+      font-weight: 600;
+      color: var(--white);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .sidebar-user-email {
+      font-size: var(--font-size-xs);
+      color: var(--navy-300);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .main-content {
+      flex: 1;
+      margin-left: var(--sidebar-width);
+      min-height: 100vh;
+      background: var(--navy-800);
+    }
+
+    .portal-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: var(--space-lg) var(--space-2xl);
+      background: rgba(10, 22, 40, 0.9);
+      backdrop-filter: blur(12px);
+      border-bottom: 1px solid rgba(74, 111, 159, 0.1);
+      position: sticky;
+      top: 0;
+      z-index: 50;
+    }
+
+    .portal-header h1 {
+      font-size: var(--font-size-xl);
+      font-weight: 700;
+      color: var(--white);
+    }
+
+    .portal-header-actions {
+      display: flex;
+      align-items: center;
+      gap: var(--space-md);
+    }
+
+    .portal-content {
+      padding: var(--space-2xl);
+    }
+
+    /* ---- Dashboard grid ---- */
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: var(--space-lg);
+      margin-bottom: var(--space-2xl);
+    }
+
+    .dashboard-grid {
+      display: grid;
+      grid-template-columns: 2fr 1fr;
+      gap: var(--space-xl);
+    }
+
+    .dashboard-grid-wide {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: var(--space-xl);
+    }
+
+    /* ---- Match cards ---- */
+    .match-card {
+      display: flex;
+      align-items: center;
+      gap: var(--space-lg);
+      padding: var(--space-lg);
+      background: linear-gradient(145deg, rgba(21, 43, 74, 0.4), rgba(15, 29, 53, 0.6));
+      border: 1px solid rgba(74, 111, 159, 0.12);
+      border-radius: var(--radius-lg);
+      margin-bottom: var(--space-md);
+      transition: all var(--transition-fast);
+    }
+
+    .match-card:hover {
+      border-color: rgba(250, 200, 0, 0.2);
+      transform: translateX(4px);
+    }
+
+    .match-score {
+      width: 56px;
+      height: 56px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 800;
+      font-size: var(--font-size-sm);
+      flex-shrink: 0;
+      background: rgba(250, 200, 0, 0.1);
+      color: var(--gold-500);
+      border: 2px solid rgba(250, 200, 0, 0.3);
+    }
+
+    .match-info {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .match-info h4 {
+      font-size: var(--font-size-sm);
+      font-weight: 600;
+      color: var(--white);
+      margin-bottom: 2px;
+    }
+
+    .match-info p {
+      font-size: var(--font-size-xs);
+      color: var(--navy-300);
+    }
+
+    .match-company {
+      font-size: var(--font-size-xs);
+      color: var(--gold-400);
+      font-weight: 500;
+    }
+
+    /* ---- Activity item ---- */
+    .activity-item {
+      display: flex;
+      align-items: flex-start;
+      gap: var(--space-md);
+      padding: var(--space-md) 0;
+      border-bottom: 1px solid rgba(74, 111, 159, 0.06);
+    }
+
+    .activity-item:last-child {
+      border-bottom: none;
+    }
+
+    .activity-icon {
+      width: 36px;
+      height: 36px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      font-size: 0.8rem;
+    }
+
+    .activity-content {
+      flex: 1;
+    }
+
+    .activity-text {
+      font-size: var(--font-size-sm);
+      color: var(--navy-100);
+    }
+
+    .activity-time {
+      font-size: var(--font-size-xs);
+      color: var(--navy-300);
+      margin-top: 2px;
+    }
+
+    /* ---- Application status timeline ---- */
+    .status-timeline {
+      display: flex;
+      align-items: center;
+      gap: 2px;
+      margin: var(--space-sm) 0;
+    }
+
+    .status-dot {
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.7rem;
+      background: rgba(74, 111, 159, 0.1);
+      color: var(--navy-300);
+      border: 2px solid rgba(74, 111, 159, 0.2);
+    }
+
+    .status-dot.completed {
+      background: rgba(34, 197, 94, 0.15);
+      border-color: #22c55e;
+      color: #4ade80;
+    }
+
+    .status-dot.current {
+      background: rgba(250, 200, 0, 0.15);
+      border-color: var(--gold-500);
+      color: var(--gold-500);
+    }
+
+    .status-line {
+      width: 24px;
+      height: 2px;
+      background: rgba(74, 111, 159, 0.2);
+    }
+
+    .status-line.completed {
+      background: #22c55e;
+    }
+
+    /* ---- Profile page ---- */
+    .profile-header {
+      display: flex;
+      align-items: center;
+      gap: var(--space-xl);
+      margin-bottom: var(--space-2xl);
+    }
+
+    .profile-avatar-large {
+      width: 80px;
+      height: 80px;
+      border-radius: 50%;
+      background: var(--gold-gradient);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: var(--font-size-3xl);
+      font-weight: 700;
+      color: var(--navy-900);
+      flex-shrink: 0;
+    }
+
+    /* ---- Chart placeholder ---- */
+    .chart-placeholder {
+      width: 100%;
+      height: 200px;
+      background: linear-gradient(145deg, rgba(21, 43, 74, 0.3), rgba(15, 29, 53, 0.5));
+      border-radius: var(--radius-lg);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--navy-300);
+      font-size: var(--font-size-sm);
+      position: relative;
+      overflow: hidden;
+    }
+
+    .chart-placeholder .chart-bars {
+      display: flex;
+      align-items: flex-end;
+      gap: 8px;
+      height: 120px;
+    }
+
+    .chart-placeholder .chart-bar {
+      width: 24px;
+      border-radius: 4px 4px 0 0;
+      background: var(--gold-gradient);
+      opacity: 0.6;
+      transition: height 0.5s ease;
+    }
+
+    /* ---- Salary tool ---- */
+    .salary-filters {
+      display: flex;
+      gap: var(--space-lg);
+      margin-bottom: var(--space-xl);
+      flex-wrap: wrap;
+    }
+
+    /* ---- Messages ---- */
+    .message-item {
+      display: flex;
+      align-items: flex-start;
+      gap: var(--space-md);
+      padding: var(--space-lg);
+      background: linear-gradient(145deg, rgba(21, 43, 74, 0.3), rgba(15, 29, 53, 0.5));
+      border: 1px solid rgba(74, 111, 159, 0.1);
+      border-radius: var(--radius-lg);
+      margin-bottom: var(--space-md);
+      cursor: pointer;
+      transition: all var(--transition-fast);
+    }
+
+    .message-item:hover {
+      border-color: rgba(74, 111, 159, 0.2);
+    }
+
+    .message-item.unread {
+      border-left: 3px solid var(--gold-500);
+    }
+
+    /* ---- Settings ---- */
+    .settings-section {
+      margin-bottom: var(--space-2xl);
+    }
+
+    .settings-section h3 {
+      font-size: var(--font-size-lg);
+      font-weight: 600;
+      color: var(--white);
+      margin-bottom: var(--space-lg);
+    }
+
+    .toggle-switch {
+      display: flex;
+      align-items: center;
+      gap: var(--space-md);
+    }
+
+    .toggle-switch input[type="checkbox"] {
+      appearance: none;
+      width: 44px;
+      height: 24px;
+      background: rgba(74, 111, 159, 0.3);
+      border-radius: 12px;
+      position: relative;
+      cursor: pointer;
+      transition: background var(--transition-fast);
+    }
+
+    .toggle-switch input[type="checkbox"]::before {
+      content: '';
+      position: absolute;
+      top: 3px;
+      left: 3px;
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      background: var(--white);
+      transition: transform var(--transition-fast);
+    }
+
+    .toggle-switch input[type="checkbox"]:checked {
+      background: var(--gold-500);
+    }
+
+    .toggle-switch input[type="checkbox"]:checked::before {
+      transform: translateX(20px);
+    }
+
+    /* ---- Section visibility ---- */
+    .portal-section {
+      display: none;
+    }
+    .portal-section.active {
+      display: block;
+    }
+
+    /* ---- Responsive ---- */
+    @media (max-width: 1024px) {
+      .stats-grid {
+        grid-template-columns: repeat(2, 1fr);
+      }
+      .dashboard-grid {
+        grid-template-columns: 1fr;
+      }
+      .dashboard-grid-wide {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    @media (max-width: 768px) {
+      .sidebar {
+        width: 100%;
+        position: fixed;
+        left: -100%;
+        transition: left var(--transition-base);
+      }
+      .sidebar.open {
+        left: 0;
+      }
+      .main-content {
+        margin-left: 0;
+      }
+      .stats-grid {
+        grid-template-columns: 1fr 1fr;
+      }
+      .portal-content {
+        padding: var(--space-lg);
+      }
+      .profile-header {
+        flex-direction: column;
+        text-align: center;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="portal-layout">
+    <!-- Sidebar -->
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar-logo">
+        <a href="../">
+          <img src="../logo.png" alt="GSP Recruitment" height="28" width="auto">
+        </a>
+      </div>
+      <nav class="sidebar-nav">
+        <div class="sidebar-nav-label lang-en">Main Menu</div>
+        <div class="sidebar-nav-label lang-nl">Hoofdmenu</div>
+        <button class="sidebar-nav-item active" data-section="dashboard"><i class="fa-regular fa-chart-pie"></i> <span class="lang-en">Dashboard</span><span class="lang-nl">Dashboard</span></button>
+        <button class="sidebar-nav-item" data-section="profile"><i class="fa-regular fa-user"></i> <span class="lang-en">My Profile</span><span class="lang-nl">Mijn Profiel</span></button>
+        <button class="sidebar-nav-item" data-section="salary"><i class="fa-regular fa-euro-sign"></i> <span class="lang-en">Salary Tool</span><span class="lang-nl">Salaristool</span></button>
+        <button class="sidebar-nav-item" data-section="matches"><i class="fa-regular fa-bolt"></i> <span class="lang-en">My Matches</span><span class="lang-nl">Mijn Matches</span></button>
+        <button class="sidebar-nav-item" data-section="applications"><i class="fa-regular fa-file-lines"></i> <span class="lang-en">Applications</span><span class="lang-nl">Sollicitaties</span></button>
+        <button class="sidebar-nav-item" data-section="messages"><i class="fa-regular fa-envelope"></i> <span class="lang-en">Messages</span><span class="lang-nl">Berichten</span></button>
+        <button class="sidebar-nav-item" data-section="settings"><i class="fa-regular fa-gear"></i> <span class="lang-en">Settings</span><span class="lang-nl">Instellingen</span></button>
+      </nav>
+      <div class="sidebar-footer">
+        <div class="sidebar-user">
+          <div class="avatar avatar-gold avatar-sm" id="sidebarAvatar">GS</div>
+          <div class="sidebar-user-info">
+            <div class="sidebar-user-name" id="sidebarName">Candidate</div>
+            <div class="sidebar-user-email" id="sidebarEmail">candidate@email.com</div>
+          </div>
+        </div>
+        <button class="btn btn-sm btn-ghost" style="width:100%;margin-top:var(--space-sm);justify-content:center;" id="sidebarLogoutBtn">
+          <i class="fa-regular fa-arrow-right-from-bracket"></i>
+          <span class="lang-en">Logout</span>
+          <span class="lang-nl">Uitloggen</span>
+        </button>
+      </div>
+    </aside>
+
+    <!-- Main Content -->
+    <main class="main-content">
+      <header class="portal-header">
+        <button class="btn btn-sm btn-ghost" id="mobileMenuBtn" style="display:none;">
+          <i class="fa-solid fa-bars"></i>
+        </button>
+        <h1 id="pageTitle"><span class="lang-en">Dashboard</span><span class="lang-nl">Dashboard</span></h1>
+        <div class="portal-header-actions">
+          <a href="../" class="btn btn-sm btn-ghost"><i class="fa-regular fa-arrow-left"></i> <span class="lang-en">Back to site</span><span class="lang-nl">Terug</span></a>
+        </div>
+      </header>
+
+      <div class="portal-content">
+
+        <!-- ==================== DASHBOARD ==================== -->
+        <section class="portal-section active" id="section-dashboard">
+          <div class="stats-grid">
+            <div class="stat-card">
+              <div class="stat-icon"><i class="fa-regular fa-bolt"></i></div>
+              <div class="stat-value" id="statMatches">12</div>
+              <div class="stat-label lang-en">Job Matches</div>
+              <div class="stat-label lang-nl">Vacature Matches</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-icon"><i class="fa-regular fa-eye"></i></div>
+              <div class="stat-value" id="statViews">47</div>
+              <div class="stat-label lang-en">Profile Views</div>
+              <div class="stat-label lang-nl">Profielweergaven</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-icon"><i class="fa-regular fa-envelope"></i></div>
+              <div class="stat-value" id="statMessages">5</div>
+              <div class="stat-label lang-en">Messages</div>
+              <div class="stat-label lang-nl">Berichten</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-icon"><i class="fa-regular fa-bookmark"></i></div>
+              <div class="stat-value" id="statSaved">3</div>
+              <div class="stat-label lang-en">Saved Jobs</div>
+              <div class="stat-label lang-nl">Opgeslagen Vacatures</div>
+            </div>
+          </div>
+
+          <div class="dashboard-grid">
+            <div>
+              <div class="card" style="margin-bottom:var(--space-xl);">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:var(--space-lg);">
+                  <h3 style="font-size:var(--font-size-lg);font-weight:600;color:var(--white);">
+                    <span class="lang-en">Market Value Compass</span>
+                    <span class="lang-nl">Marktwaarde Kompas</span>
+                  </h3>
+                  <span class="badge badge-gold lang-en">Based on NL market data</span>
+                  <span class="badge badge-gold lang-nl">Gebaseerd op NL-marktdata</span>
+                </div>
+                <div class="chart-placeholder">
+                  <div class="chart-bars">
+                    <div class="chart-bar" style="height:60px;"></div>
+                    <div class="chart-bar" style="height:90px;"></div>
+                    <div class="chart-bar" style="height:110px;"></div>
+                    <div class="chart-bar" style="height:75px;"></div>
+                    <div class="chart-bar" style="height:120px;"></div>
+                    <div class="chart-bar" style="height:85px;"></div>
+                    <div class="chart-bar" style="height:100px;"></div>
+                  </div>
+                </div>
+                <div style="display:flex;justify-content:space-between;margin-top:var(--space-sm);font-size:var(--font-size-xs);color:var(--navy-300);padding:0 4px;">
+                  <span class="lang-en">Junior</span><span>Mid</span><span>Senior</span><span>Lead</span><span class="lang-nl">Junior</span><span class="lang-nl">Medior</span><span class="lang-nl">Senior</span><span class="lang-nl">Lead</span>
+                </div>
+              </div>
+
+              <div class="card">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:var(--space-lg);">
+                  <h3 style="font-size:var(--font-size-lg);font-weight:600;color:var(--white);">
+                    <span class="lang-en">Top Matches</span>
+                    <span class="lang-nl">Beste Matches</span>
+                  </h3>
+                  <button class="btn btn-sm btn-ghost" onclick="navigateTo('matches')">
+                    <span class="lang-en">View all</span>
+                    <span class="lang-nl">Bekijk alles</span>
+                  </button>
+                </div>
+                <div id="topMatchesList">
+                  <div class="match-card">
+                    <div class="match-score">95%</div>
+                    <div class="match-info">
+                      <h4>Senior Embedded Engineer</h4>
+                      <p class="match-company">ASML — Veldhoven</p>
+                      <p>€75K – €100K · Permanent</p>
+                    </div>
+                    <button class="btn btn-sm btn-primary lang-en" onclick="Auth.toast('Applied successfully!')">Apply</button>
+                    <button class="btn btn-sm btn-primary lang-nl" onclick="Auth.toast('Sollicitatie verstuurd!')">Solliciteer</button>
+                  </div>
+                  <div class="match-card">
+                    <div class="match-score">91%</div>
+                    <div class="match-info">
+                      <h4>C++ Software Engineer</h4>
+                      <p class="match-company">Philips — Best</p>
+                      <p>€65K – €85K · Contract</p>
+                    </div>
+                    <button class="btn btn-sm btn-primary lang-en" onclick="Auth.toast('Applied successfully!')">Apply</button>
+                    <button class="btn btn-sm btn-primary lang-nl" onclick="Auth.toast('Sollicitatie verstuurd!')">Solliciteer</button>
+                  </div>
+                  <div class="match-card">
+                    <div class="match-score">88%</div>
+                    <div class="match-info">
+                      <h4>Mechatronics Architect</h4>
+                      <p class="match-company">VDL ETG — Eindhoven</p>
+                      <p>€85K – €115K · Permanent</p>
+                    </div>
+                    <button class="btn btn-sm btn-primary">Apply</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div>
+              <div class="card" style="margin-bottom:var(--space-xl);">
+                <h3 style="font-size:var(--font-size-lg);font-weight:600;color:var(--white);margin-bottom:var(--space-md);">
+                  <span class="lang-en">Profile Completion</span>
+                  <span class="lang-nl">Profiel Compleet</span>
+                </h3>
+                <div style="text-align:center;padding:var(--space-md) 0;">
+                  <div style="font-size:var(--font-size-5xl);font-weight:800;color:var(--gold-500);">65%</div>
+                  <div class="progress-bar" style="margin:var(--space-md) 0;">
+                    <div class="progress-bar-fill" style="width:65%;"></div>
+                  </div>
+                  <p style="font-size:var(--font-size-xs);color:var(--navy-300);">
+                    <span class="lang-en">Add your CV and preferences to increase matches</span>
+                    <span class="lang-nl">Voeg CV en voorkeuren toe voor betere matches</span>
+                  </p>
+                  <button class="btn btn-sm btn-primary" style="margin-top:var(--space-md);" onclick="navigateTo('profile')">
+                    <span class="lang-en"><i class="fa-regular fa-pen-to-square"></i> Complete Profile</span>
+                    <span class="lang-nl"><i class="fa-regular fa-pen-to-square"></i> Vul Profiel Aan</span>
+                  </button>
+                </div>
+              </div>
+
+              <div class="card">
+                <h3 style="font-size:var(--font-size-lg);font-weight:600;color:var(--white);margin-bottom:var(--space-md);">
+                  <span class="lang-en">Recent Activity</span>
+                  <span class="lang-nl">Recente Activiteit</span>
+                </h3>
+                <div id="recentActivity">
+                  <div class="activity-item">
+                    <div class="activity-icon" style="background:rgba(250,200,0,0.1);color:var(--gold-500);"><i class="fa-regular fa-bolt"></i></div>
+                    <div class="activity-content">
+                      <div class="activity-text lang-en">New match: Senior Embedded Engineer at ASML</div>
+                      <div class="activity-text lang-nl">Nieuwe match: Senior Embedded Engineer bij ASML</div>
+                      <div class="activity-time lang-en">2 hours ago</div>
+                      <div class="activity-time lang-nl">2 uur geleden</div>
+                    </div>
+                  </div>
+                  <div class="activity-item">
+                    <div class="activity-icon" style="background:rgba(34,197,94,0.1);color:#4ade80;"><i class="fa-regular fa-eye"></i></div>
+                    <div class="activity-content">
+                      <div class="activity-text lang-en">Your profile was viewed by Philips</div>
+                      <div class="activity-text lang-nl">Uw profiel is bekeken door Philips</div>
+                      <div class="activity-time lang-en">Yesterday</div>
+                      <div class="activity-time lang-nl">Gisteren</div>
+                    </div>
+                  </div>
+                  <div class="activity-item">
+                    <div class="activity-icon" style="background:rgba(59,130,246,0.1);color:#60a5fa;"><i class="fa-regular fa-message"></i></div>
+                    <div class="activity-content">
+                      <div class="activity-text lang-en">New message from Gijs</div>
+                      <div class="activity-text lang-nl">Nieuw bericht van Gijs</div>
+                      <div class="activity-time lang-en">3 days ago</div>
+                      <div class="activity-time lang-nl">3 dagen geleden</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ==================== PROFILE ==================== -->
+        <section class="portal-section" id="section-profile">
+          <div class="profile-header">
+            <div class="profile-avatar-large" id="profileAvatar">GS</div>
+            <div>
+              <h2 style="font-size:var(--font-size-2xl);font-weight:700;color:var(--white);" id="profileName">Candidate Name</h2>
+              <p style="color:var(--navy-200);font-size:var(--font-size-sm);" id="profileEmail">candidate@email.com</p>
+              <p style="color:var(--gold-400);font-size:var(--font-size-sm);font-weight:500;">
+                <span class="lang-en">Candidate</span>
+                <span class="lang-nl">Kandidaat</span>
+              </p>
+            </div>
+          </div>
+
+          <div class="dashboard-grid-wide">
+            <div class="card">
+              <h3 style="font-size:var(--font-size-lg);font-weight:600;color:var(--white);margin-bottom:var(--space-lg);">
+                <span class="lang-en">Personal Information</span>
+                <span class="lang-nl">Persoonlijke Informatie</span>
+              </h3>
+              <form id="profileForm">
+                <div class="form-row">
+                  <div class="form-group">
+                    <label class="lang-en">First name</label>
+                    <label class="lang-nl">Voornaam</label>
+                    <input type="text" id="profFirstName" placeholder="Jan">
+                  </div>
+                  <div class="form-group">
+                    <label class="lang-en">Last name</label>
+                    <label class="lang-nl">Achternaam</label>
+                    <input type="text" id="profLastName" placeholder="de Vries">
+                  </div>
+                </div>
+                <div class="form-group">
+                  <label>Email</label>
+                  <input type="email" id="profEmail" placeholder="jan@email.com">
+                </div>
+                <div class="form-group">
+                  <label class="lang-en">Phone</label>
+                  <label class="lang-nl">Telefoon</label>
+                  <input type="tel" id="profPhone" placeholder="+31 6 12345678">
+                </div>
+                <div class="form-group">
+                  <label class="lang-en">Current role / title</label>
+                  <label class="lang-nl">Huidige functie</label>
+                  <input type="text" id="profRole" placeholder="Senior Embedded Engineer">
+                </div>
+                <div class="form-row">
+                  <div class="form-group">
+                    <label class="lang-en">Years experience</label>
+                    <label class="lang-nl">Jaren ervaring</label>
+                    <select id="profExperience">
+                      <option value="0-2">0-2</option>
+                      <option value="3-5">3-5</option>
+                      <option value="6-10">6-10</option>
+                      <option value="10+" selected>10+</option>
+                    </select>
+                  </div>
+                  <div class="form-group">
+                    <label class="lang-en">Specialisation</label>
+                    <label class="lang-nl">Specialisatie</label>
+                    <select id="profSpecialisation">
+                      <option value="embedded">Embedded</option>
+                      <option value="cpp">C++ / Software</option>
+                      <option value="mechatronics">Mechatronics</option>
+                      <option value="cybersecurity">Cybersecurity</option>
+                    </select>
+                  </div>
+                </div>
+                <button type="submit" class="btn btn-primary">
+                  <span class="lang-en"><i class="fa-regular fa-floppy-disk"></i> Save Changes</span>
+                  <span class="lang-nl"><i class="fa-regular fa-floppy-disk"></i> Opslaan</span>
+                </button>
+              </form>
+            </div>
+
+            <div>
+              <div class="card" style="margin-bottom:var(--space-xl);">
+                <h3 style="font-size:var(--font-size-lg);font-weight:600;color:var(--white);margin-bottom:var(--space-lg);">
+                  <span class="lang-en">CV / Resume</span>
+                  <span class="lang-nl">CV / Resume</span>
+                </h3>
+                <div style="border:2px dashed rgba(74,111,159,0.3);border-radius:var(--radius-lg);padding:var(--space-2xl);text-align:center;cursor:pointer;" id="profileCvZone">
+                  <i class="fa-regular fa-cloud-arrow-up" style="font-size:2rem;color:var(--navy-300);display:block;margin-bottom:var(--space-md);"></i>
+                  <p style="font-size:var(--font-size-sm);color:var(--navy-300);margin-bottom:var(--space-sm);">
+                    <span class="lang-en">Drop your CV or click to upload</span>
+                    <span class="lang-nl">Sleep CV hierheen of klik om te uploaden</span>
+                  </p>
+                  <p style="font-size:var(--font-size-xs);color:var(--navy-400);">PDF, DOC — Max 5MB</p>
+                  <input type="file" accept=".pdf,.doc,.docx" style="display:none;" id="profileCvInput">
+                </div>
+                <div id="profileCvStatus" style="display:none;margin-top:var(--space-md);padding:var(--space-md);background:rgba(34,197,94,0.1);border-radius:var(--radius-md);">
+                  <i class="fa-regular fa-circle-check" style="color:#4ade80;"></i>
+                  <span style="font-size:var(--font-size-sm);color:var(--navy-200);margin-left:var(--space-sm);" id="profileCvName">cv_2025.pdf</span>
+                </div>
+              </div>
+
+              <div class="card">
+                <h3 style="font-size:var(--font-size-lg);font-weight:600;color:var(--white);margin-bottom:var(--space-lg);">
+                  <span class="lang-en">Skills & Experience</span>
+                  <span class="lang-nl">Vaardigheden & Ervaring</span>
+                </h3>
+                <div style="display:flex;flex-wrap:wrap;gap:var(--space-sm);margin-bottom:var(--space-lg);">
+                  <span class="tag tag-gold">C++ <i class="fa-regular fa-xmark" style="cursor:pointer;margin-left:4px;"></i></span>
+                  <span class="tag tag-gold">Embedded <i class="fa-regular fa-xmark" style="cursor:pointer;margin-left:4px;"></i></span>
+                  <span class="tag tag-gold">RTOS <i class="fa-regular fa-xmark" style="cursor:pointer;margin-left:4px;"></i></span>
+                  <span class="tag tag-gold">ARM <i class="fa-regular fa-xmark" style="cursor:pointer;margin-left:4px;"></i></span>
+                  <span class="tag tag-gold">FPGA <i class="fa-regular fa-xmark" style="cursor:pointer;margin-left:4px;"></i></span>
+                </div>
+                <div style="display:flex;gap:var(--space-sm);">
+                  <input type="text" placeholder="Add skill..." style="flex:1;padding:0.5rem 0.75rem;font-family:var(--font-primary);font-size:var(--font-size-sm);background:rgba(6,13,26,0.5);border:1px solid rgba(74,111,159,0.25);border-radius:var(--radius-md);color:var(--white);outline:none;">
+                  <button class="btn btn-sm btn-outline">
+                    <i class="fa-regular fa-plus"></i>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ==================== SALARY TOOL ==================== -->
+        <section class="portal-section" id="section-salary">
+          <div class="card" style="margin-bottom:var(--space-xl);">
+            <h3 style="font-size:var(--font-size-lg);font-weight:600;color:var(--white);margin-bottom:var(--space-lg);">
+              <span class="lang-en">Salary Explorer (NL)</span>
+              <span class="lang-nl">Salarisverkenner (NL)</span>
+            </h3>
+            <div class="salary-filters">
+              <div style="flex:1;min-width:180px;">
+                <label style="display:block;font-size:var(--font-size-xs);color:var(--navy-300);margin-bottom:4px;" class="lang-en">Role</label>
+                <label style="display:block;font-size:var(--font-size-xs);color:var(--navy-300);margin-bottom:4px;" class="lang-nl">Functie</label>
+                <select id="salaryRole" style="width:100%;padding:0.5rem 0.75rem;background:rgba(6,13,26,0.5);border:1px solid rgba(74,111,159,0.25);border-radius:var(--radius-md);color:var(--white);font-family:var(--font-primary);font-size:var(--font-size-sm);outline:none;">
+                  <option value="embedded">Embedded Engineer</option>
+                  <option value="cpp">C++ Software Engineer</option>
+                  <option value="mechatronics">Mechatronics Architect</option>
+                  <option value="cybersecurity">Cybersecurity Engineer</option>
+                  <option value="motion">Motion Control Engineer</option>
+                </select>
+              </div>
+              <div style="flex:1;min-width:140px;">
+                <label style="display:block;font-size:var(--font-size-xs);color:var(--navy-300);margin-bottom:4px;" class="lang-en">Level</label>
+                <label style="display:block;font-size:var(--font-size-xs);color:var(--navy-300);margin-bottom:4px;" class="lang-nl">Niveau</label>
+                <select id="salaryLevel" style="width:100%;padding:0.5rem 0.75rem;background:rgba(6,13,26,0.5);border:1px solid rgba(74,111,159,0.25);border-radius:var(--radius-md);color:var(--white);font-family:var(--font-primary);font-size:var(--font-size-sm);outline:none;">
+                  <option value="junior">Junior</option>
+                  <option value="mid">Mid</option>
+                  <option value="senior" selected>Senior</option>
+                  <option value="lead">Lead / Principal</option>
+                </select>
+              </div>
+              <div style="display:flex;align-items:flex-end;">
+                <button class="btn btn-primary" id="exportPdfBtn">
+                  <i class="fa-regular fa-file-pdf"></i>
+                  <span class="lang-en">Export PDF</span>
+                  <span class="lang-nl">Exporteer PDF</span>
+                </button>
+              </div>
+            </div>
+            <div class="chart-placeholder" style="height:300px;">
+              <div style="text-align:center;">
+                <div style="font-size:var(--font-size-4xl);font-weight:800;color:var(--gold-500);">€75K – €100K</div>
+                <p style="color:var(--navy-300);font-size:var(--font-size-sm);">
+                  <span class="lang-en">Senior Software Engineer — Netherlands 2026</span>
+                  <span class="lang-nl">Senior Software Engineer — Netherlands 2026</span>
+                </p>
+              </div>
+            </div>
+            <div style="margin-top:var(--space-lg);display:grid;grid-template-columns:1fr 1fr 1fr;gap:var(--space-md);">
+              <div class="stat-card"><div class="stat-label lang-en" style="color:var(--navy-200);">25th Percentile</div><div class="stat-value" style="font-size:var(--font-size-lg);">€75K</div></div>
+              <div class="stat-card" style="border-color:rgba(250,200,0,0.2);"><div class="stat-label lang-en" style="color:var(--navy-200);">Median</div><div class="stat-value" style="font-size:var(--font-size-lg);color:var(--gold-500);">€88K</div></div>
+              <div class="stat-card"><div class="stat-label lang-en" style="color:var(--navy-200);">75th Percentile</div><div class="stat-value" style="font-size:var(--font-size-lg);">€100K</div></div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ==================== MATCHES ==================== -->
+        <section class="portal-section" id="section-matches">
+          <div style="display:flex;gap:var(--space-lg);margin-bottom:var(--space-xl);flex-wrap:wrap;align-items:center;">
+            <div class="search-bar" style="flex:1;min-width:220px;">
+              <i class="fa-solid fa-magnifying-glass search-icon"></i>
+              <input type="text" placeholder="Search matches..." class="lang-en">
+              <input type="text" placeholder="Zoek matches..." class="lang-nl">
+            </div>
+            <select style="padding:0.5rem 1rem;background:rgba(6,13,26,0.5);border:1px solid rgba(74,111,159,0.25);border-radius:var(--radius-md);color:var(--white);font-family:var(--font-primary);font-size:var(--font-size-sm);outline:none;">
+              <option class="lang-en">All Levels</option>
+              <option class="lang-nl">Alle Niveaus</option>
+              <option>Junior</option>
+              <option>Mid</option>
+              <option>Senior</option>
+              <option>Lead</option>
+            </select>
+            <select style="padding:0.5rem 1rem;background:rgba(6,13,26,0.5);border:1px solid rgba(74,111,159,0.25);border-radius:var(--radius-md);color:var(--white);font-family:var(--font-primary);font-size:var(--font-size-sm);outline:none;">
+              <option class="lang-en">Sort by Match</option>
+              <option class="lang-nl">Sorteer op Match</option>
+              <option>Date</option>
+              <option>Salary</option>
+            </select>
+          </div>
+
+          <div id="matchesList">
+            <div class="match-card">
+              <div class="match-score">95%</div>
+              <div class="match-info">
+                <h4>Senior Embedded Engineer</h4>
+                <p class="match-company">ASML — Veldhoven</p>
+                <p>€75K – €100K · Permanent · Embedded C/C++, RTOS</p>
+                <div style="margin-top:6px;display:flex;gap:4px;">
+                  <span class="tag tag-blue">Embedded</span>
+                  <span class="tag tag-gold">Senior</span>
+                  <span class="tag tag-green">New</span>
+                </div>
+              </div>
+              <button class="btn btn-sm btn-primary lang-en" onclick="Auth.toast('Applied successfully!')">Apply Now</button>
+              <button class="btn btn-sm btn-primary lang-nl" onclick="Auth.toast('Sollicitatie verstuurd!')">Solliciteer</button>
+            </div>
+            <div class="match-card">
+              <div class="match-score">91%</div>
+              <div class="match-info">
+                <h4>C++ Software Engineer</h4>
+                <p class="match-company">Philips — Best</p>
+                <p>€65K – €85K · Contract · Modern C++, Qt, ROS</p>
+                <div style="margin-top:6px;display:flex;gap:4px;">
+                  <span class="tag tag-blue">C++</span>
+                  <span class="tag tag-gold">Mid</span>
+                </div>
+              </div>
+              <button class="btn btn-sm btn-primary">Apply Now</button>
+            </div>
+            <div class="match-card">
+              <div class="match-score">88%</div>
+              <div class="match-info">
+                <h4>Mechatronics Architect</h4>
+                <p class="match-company">VDL ETG — Eindhoven</p>
+                <p>€85K – €115K · Permanent · Motion control, precision</p>
+                <div style="margin-top:6px;display:flex;gap:4px;">
+                  <span class="tag tag-blue">Mechatronics</span>
+                  <span class="tag tag-gold">Senior</span>
+                </div>
+              </div>
+              <button class="btn btn-sm btn-primary">Apply Now</button>
+            </div>
+            <div class="match-card">
+              <div class="match-score">82%</div>
+              <div class="match-info">
+                <h4>Cybersecurity Engineer (OT/IoT)</h4>
+                <p class="match-company">Simac — Eindhoven</p>
+                <p>€70K – €95K · Permanent · OT security, IoT</p>
+                <div style="margin-top:6px;display:flex;gap:4px;">
+                  <span class="tag tag-blue">Security</span>
+                  <span class="tag tag-gold">Mid</span>
+                </div>
+              </div>
+              <button class="btn btn-sm btn-outline lang-en">Save</button>
+              <button class="btn btn-sm btn-outline lang-nl">Opslaan</button>
+            </div>
+          </div>
+
+          <div class="pagination">
+            <button disabled><i class="fa-regular fa-chevron-left"></i></button>
+            <button class="active">1</button>
+            <button>2</button>
+            <button>3</button>
+            <button><i class="fa-regular fa-chevron-right"></i></button>
+          </div>
+        </section>
+
+        <!-- ==================== APPLICATIONS ==================== -->
+        <section class="portal-section" id="section-applications">
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th class="lang-en">Job</th>
+                  <th class="lang-nl">Vacature</th>
+                  <th class="lang-en">Company</th>
+                  <th class="lang-nl">Bedrijf</th>
+                  <th class="lang-en">Applied</th>
+                  <th class="lang-nl">Gesolliciteerd</th>
+                  <th>Status</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td style="font-weight:600;color:var(--white);">Senior Embedded Engineer</td>
+                  <td>ASML</td>
+                  <td style="font-size:var(--font-size-xs);color:var(--navy-300);">Mar 15, 2025</td>
+                  <td>
+                    <span class="badge badge-gold lang-en">Interview</span>
+                    <span class="badge badge-gold lang-nl">Gesprek</span>
+                  </td>
+                  <td>
+                    <div class="status-timeline">
+                      <div class="status-dot completed"><i class="fa-regular fa-check"></i></div>
+                      <div class="status-line completed"></div>
+                      <div class="status-dot completed"><i class="fa-regular fa-check"></i></div>
+                      <div class="status-line completed"></div>
+                      <div class="status-dot current"><i class="fa-regular fa-clock"></i></div>
+                      <div class="status-line"></div>
+                      <div class="status-dot"></div>
+                      <div class="status-line"></div>
+                      <div class="status-dot"></div>
+                    </div>
+                  </td>
+                </tr>
+                <tr>
+                  <td style="font-weight:600;color:var(--white);">C++ Software Engineer</td>
+                  <td>Philips</td>
+                  <td style="font-size:var(--font-size-xs);color:var(--navy-300);">Mar 10, 2025</td>
+                  <td>
+                    <span class="badge badge-blue lang-en">Screening</span>
+                    <span class="badge badge-blue lang-nl">Screening</span>
+                  </td>
+                  <td>
+                    <div class="status-timeline">
+                      <div class="status-dot completed"><i class="fa-regular fa-check"></i></div>
+                      <div class="status-line completed"></div>
+                      <div class="status-dot current"><i class="fa-regular fa-clock"></i></div>
+                      <div class="status-line"></div>
+                      <div class="status-dot"></div>
+                      <div class="status-line"></div>
+                      <div class="status-dot"></div>
+                      <div class="status-line"></div>
+                      <div class="status-dot"></div>
+                    </div>
+                  </td>
+                </tr>
+                <tr>
+                  <td style="font-weight:600;color:var(--white);">Mechatronics Architect</td>
+                  <td>VDL ETG</td>
+                  <td style="font-size:var(--font-size-xs);color:var(--navy-300);">Feb 28, 2025</td>
+                  <td>
+                    <span class="badge badge-purple lang-en">Offer</span>
+                    <span class="badge badge-purple lang-nl">Aanbod</span>
+                  </td>
+                  <td>
+                    <div class="status-timeline">
+                      <div class="status-dot completed"><i class="fa-regular fa-check"></i></div>
+                      <div class="status-line completed"></div>
+                      <div class="status-dot completed"><i class="fa-regular fa-check"></i></div>
+                      <div class="status-line completed"></div>
+                      <div class="status-dot completed"><i class="fa-regular fa-check"></i></div>
+                      <div class="status-line completed"></div>
+                      <div class="status-dot completed"><i class="fa-regular fa-check"></i></div>
+                      <div class="status-line completed"></div>
+                      <div class="status-dot current" style="border-color:#a855f7;color:#c084fc;"><i class="fa-regular fa-file"></i></div>
+                    </div>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <!-- ==================== MESSAGES ==================== -->
+        <section class="portal-section" id="section-messages">
+          <div class="dashboard-grid">
+            <div>
+              <div class="message-item unread">
+                <div class="avatar avatar-navy avatar-sm">GV</div>
+                <div style="flex:1;min-width:0;">
+                  <div style="display:flex;justify-content:space-between;align-items:center;">
+                    <h4 style="font-size:var(--font-size-sm);font-weight:600;color:var(--white);">Gijs van den Berg</h4>
+                    <span style="font-size:var(--font-size-xs);color:var(--navy-300);">2h</span>
+                  </div>
+                  <p style="font-size:var(--font-size-xs);color:var(--navy-200);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
+                    Hi! I spotted a great match for you at ASML...
+                  </p>
+                  <span class="badge badge-gold" style="font-size:0.6rem;padding:0.1rem 0.4rem;">
+                    <span class="lang-en">New</span>
+                    <span class="lang-nl">Nieuw</span>
+                  </span>
+                </div>
+              </div>
+              <div class="message-item">
+                <div class="avatar avatar-navy avatar-sm">GV</div>
+                <div style="flex:1;min-width:0;">
+                  <div style="display:flex;justify-content:space-between;align-items:center;">
+                    <h4 style="font-size:var(--font-size-sm);font-weight:600;color:var(--white);">Gijs van den Berg</h4>
+                    <span style="font-size:var(--font-size-xs);color:var(--navy-300);">3d</span>
+                  </div>
+                  <p style="font-size:var(--font-size-xs);color:var(--navy-300);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
+                    Quick update on your application at Philips...
+                  </p>
+                </div>
+              </div>
+            </div>
+            <div class="card">
+              <div style="text-align:center;padding:var(--space-2xl) 0;">
+                <i class="fa-regular fa-message" style="font-size:2.5rem;color:var(--navy-400);margin-bottom:var(--space-lg);display:block;"></i>
+                <h4 style="color:var(--white);font-size:var(--font-size-lg);margin-bottom:var(--space-sm);">
+                  <span class="lang-en">Select a conversation</span>
+                  <span class="lang-nl">Selecteer een gesprek</span>
+                </h4>
+                <p style="color:var(--navy-300);font-size:var(--font-size-sm);">
+                  <span class="lang-en">Choose a message to read the full conversation</span>
+                  <span class="lang-nl">Kies een bericht om het hele gesprek te lezen</span>
+                </p>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ==================== SETTINGS ==================== -->
+        <section class="portal-section" id="section-settings">
+          <div class="dashboard-grid-wide">
+            <div class="card">
+              <div class="settings-section">
+                <h3>
+                  <span class="lang-en">Notification Preferences</span>
+                  <span class="lang-nl">Notificatievoorkeuren</span>
+                </h3>
+                <div style="display:flex;flex-direction:column;gap:var(--space-lg);">
+                  <label class="toggle-switch">
+                    <input type="checkbox" checked>
+                    <span style="font-size:var(--font-size-sm);color:var(--navy-100);" class="lang-en">New job matches</span>
+                    <span style="font-size:var(--font-size-sm);color:var(--navy-100);" class="lang-nl">Nieuwe vacature matches</span>
+                  </label>
+                  <label class="toggle-switch">
+                    <input type="checkbox" checked>
+                    <span style="font-size:var(--font-size-sm);color:var(--navy-100);" class="lang-en">Profile views</span>
+                    <span style="font-size:var(--font-size-sm);color:var(--navy-100);" class="lang-nl">Profielweergaven</span>
+                  </label>
+                  <label class="toggle-switch">
+                    <input type="checkbox" checked>
+                    <span style="font-size:var(--font-size-sm);color:var(--navy-100);" class="lang-en">Messages from recruiters</span>
+                    <span style="font-size:var(--font-size-sm);color:var(--navy-100);" class="lang-nl">Berichten van recruiters</span>
+                  </label>
+                  <label class="toggle-switch">
+                    <input type="checkbox">
+                    <span style="font-size:var(--font-size-sm);color:var(--navy-100);" class="lang-en">Email newsletter (monthly)</span>
+                    <span style="font-size:var(--font-size-sm);color:var(--navy-100);" class="lang-nl">E-mailnieuwsbrief (maandelijks)</span>
+                  </label>
+                  <label class="toggle-switch">
+                    <input type="checkbox">
+                    <span style="font-size:var(--font-size-sm);color:var(--navy-100);" class="lang-en">Salary data updates</span>
+                    <span style="font-size:var(--font-size-sm);color:var(--navy-100);" class="lang-nl">Salarisdata updates</span>
+                  </label>
+                </div>
+              </div>
+            </div>
+
+            <div>
+              <div class="card" style="margin-bottom:var(--space-xl);">
+                <div class="settings-section">
+                  <h3>
+                    <span class="lang-en">Change Password</span>
+                    <span class="lang-nl">Wachtwoord Wijzigen</span>
+                  </h3>
+                  <form id="passwordChangeForm">
+                    <div class="form-group">
+                      <label class="lang-en">Current password</label>
+                      <label class="lang-nl">Huidig wachtwoord</label>
+                      <input type="password" placeholder="••••••••" required>
+                    </div>
+                    <div class="form-group">
+                      <label class="lang-en">New password</label>
+                      <label class="lang-nl">Nieuw wachtwoord</label>
+                      <input type="password" placeholder="Min. 8 characters" required minlength="8">
+                    </div>
+                    <div class="form-group">
+                      <label class="lang-en">Confirm new password</label>
+                      <label class="lang-nl">Bevestig nieuw wachtwoord</label>
+                      <input type="password" placeholder="••••••••" required minlength="8">
+                    </div>
+                    <button type="submit" class="btn btn-primary">
+                      <span class="lang-en"><i class="fa-regular fa-floppy-disk"></i> Update Password</span>
+                      <span class="lang-nl"><i class="fa-regular fa-floppy-disk"></i> Wachtwoord Bijwerken</span>
+                    </button>
+                  </form>
+                </div>
+              </div>
+
+              <div class="card">
+                <h3 style="font-size:var(--font-size-lg);font-weight:600;color:var(--white);margin-bottom:var(--space-md);">
+                  <span class="lang-en">Account</span>
+                  <span class="lang-nl">Account</span>
+                </h3>
+                <p style="font-size:var(--font-size-sm);color:var(--navy-300);margin-bottom:var(--space-lg);">
+                  <span class="lang-en">Want to delete your account? This action cannot be undone.</span>
+                  <span class="lang-nl">Uw account verwijderen? Deze actie kan niet ongedaan worden gemaakt.</span>
+                </p>
+                <button class="btn btn-sm btn-outline" style="border-color:#ef4444;color:#f87171;" onclick="Auth.toast('Contact Gijs to delete your account','warning')">
+                  <span class="lang-en">Delete Account</span>
+                  <span class="lang-nl">Account Verwijderen</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </section>
+
+      </div>
+    </main>
+  </div>
+
+  <script src="../auth.js"></script>
+  <script>
+    /* ================================================================
+       Candidate Portal — Full API integration
+       ================================================================ */
+
+    /* ---- Auth Guard ---- */
+    const user = Auth.requireAuth(['candidate']);
+    if (!user) { /* redirect handled in requireAuth */ }
+
+    /* ---- Sidebar Navigation ---- */
+    const sectionTitles = {
+      dashboard: { en: 'Dashboard', nl: 'Dashboard' },
+      profile: { en: 'My Profile', nl: 'Mijn Profiel' },
+      salary: { en: 'Salary Tool', nl: 'Salaristool' },
+      matches: { en: 'My Matches', nl: 'Mijn Matches' },
+      applications: { en: 'Applications', nl: 'Sollicitaties' },
+      messages: { en: 'Messages', nl: 'Berichten' },
+      settings: { en: 'Settings', nl: 'Instellingen' }
+    };
+
+    function navigateTo(section) {
+      document.querySelectorAll('.sidebar-nav-item').forEach(item => {
+        item.classList.toggle('active', item.dataset.section === section);
+      });
+      document.querySelectorAll('.portal-section').forEach(s => {
+        s.classList.toggle('active', s.id === `section-${section}`);
+      });
+      const title = sectionTitles[section] || sectionTitles.dashboard;
+      const enEl = document.querySelector('#pageTitle .lang-en');
+      const nlEl = document.querySelector('#pageTitle .lang-nl');
+      if (enEl) enEl.textContent = title.en;
+      if (nlEl) nlEl.textContent = title.nl;
+      window.location.hash = section;
+      document.getElementById('sidebar').classList.remove('open');
+    }
+
+    document.querySelectorAll('.sidebar-nav-item').forEach(item => {
+      item.addEventListener('click', () => navigateTo(item.dataset.section));
+    });
+
+    const hash = window.location.hash.replace('#', '');
+    if (hash && sectionTitles[hash]) navigateTo(hash);
+
+    /* ---- Mobile menu ---- */
+    const mobileBtn = document.getElementById('mobileMenuBtn');
+    const sidebar = document.getElementById('sidebar');
+    if (window.innerWidth <= 768) mobileBtn.style.display = '';
+    window.addEventListener('resize', () => { mobileBtn.style.display = window.innerWidth <= 768 ? '' : 'none'; });
+    mobileBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+
+    /* ================================================================
+       API: Load Dashboard
+       ================================================================ */
+    async function loadDashboard() {
+      try {
+        const [profileRes, dashboardRes, matchesRes] = await Promise.all([
+          Auth.fetch('/candidate/profile'),
+          Auth.fetch('/candidate/dashboard'),
+          Auth.fetch('/candidate/matches?limit=5'),
+        ]);
+        const profile = profileRes ? await profileRes.json() : {};
+        const dashboard = dashboardRes ? await dashboardRes.json() : {};
+        const matchesData = matchesRes ? await matchesRes.json() : { items: [] };
+
+        // Stats
+        document.getElementById('statMatches').textContent = dashboard.match_count ?? 12;
+        document.getElementById('statViews').textContent = dashboard.profile_views ?? 0;
+        document.getElementById('statMessages').textContent = dashboard.unread_messages ?? 0;
+        document.getElementById('statSaved').textContent = dashboard.saved_jobs_count ?? 0;
+
+        // Sidebar user
+        const name = user.full_name || profile.full_name || user.email?.split('@')[0] || 'Candidate';
+        const email = user.email || profile.email || '';
+        const initials = name.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase();
+        document.getElementById('sidebarName').textContent = name;
+        document.getElementById('sidebarEmail').textContent = email;
+        document.getElementById('sidebarAvatar').textContent = initials;
+        document.getElementById('profileAvatar').textContent = initials;
+        document.getElementById('profileName').textContent = name;
+        document.getElementById('profileEmail').textContent = email;
+
+        // Top matches
+        const topMatchesEl = document.getElementById('topMatchesList');
+        if (matchesData.items && matchesData.items.length > 0) {
+          topMatchesEl.innerHTML = matchesData.items.map(m => {
+            const score = Math.round(m.match_score || 0);
+            const salary = m.salary_min && m.salary_max ? `€${m.salary_min/1000}K – €${m.salary_max/1000}K` : '';
+            const location = m.location ? ` — ${m.location}` : '';
+            return `<div class="match-card">
+              <div class="match-score">${score}%</div>
+              <div class="match-info">
+                <h4>${m.job_title || 'Job'}</h4>
+                <p class="match-company">${m.company_name || ''}${location}</p>
+                <p>${salary}${m.location_type ? ' · ' + m.location_type : ''}</p>
+              </div>
+              <button class="btn btn-sm btn-primary lang-en" onclick="window.app.matches.apply(${m.job_id})">Apply</button>
+              <button class="btn btn-sm btn-primary lang-nl" onclick="window.app.matches.apply(${m.job_id})">Solliciteer</button>
+            </div>`;
+          }).join('');
+        }
+
+        // Profile completion (estimate)
+        const pct = profile ? calcProfileCompletion(profile) : 65;
+        document.querySelector('#section-dashboard .progress-bar-fill').style.width = pct + '%';
+        document.querySelector('#section-dashboard .progress-bar-fill').parentElement.previousElementSibling.textContent = pct + '%';
+
+        // Recent activity (from profile updated_at)
+        const activityEl = document.getElementById('recentActivity');
+        if (profile && profile.updated_at) {
+          const d = new Date(profile.updated_at);
+          activityEl.innerHTML = `<div class="activity-item">
+            <div class="activity-icon" style="background:rgba(250,200,0,0.1);color:var(--gold-500);"><i class="fa-regular fa-pen-to-square"></i></div>
+            <div class="activity-content">
+              <div class="activity-text lang-en">Profile last updated</div>
+              <div class="activity-text lang-nl">Profiel laatst bijgewerkt</div>
+              <div class="activity-time">${d.toLocaleDateString()}</div>
+            </div>
+          </div>`;
+        }
+
+        // Profile form fields
+        if (profile) {
+          const nameParts = (profile.full_name || name || '').split(' ');
+          if (document.getElementById('profFirstName')) document.getElementById('profFirstName').value = nameParts[0] || '';
+          if (document.getElementById('profLastName')) document.getElementById('profLastName').value = nameParts.slice(1).join(' ') || '';
+          if (document.getElementById('profEmail')) document.getElementById('profEmail').value = email;
+          if (document.getElementById('profPhone')) document.getElementById('profPhone').value = profile.phone || '';
+          if (document.getElementById('profRole')) document.getElementById('profRole').value = profile.current_title || '';
+          if (document.getElementById('profExperience')) {
+            const yrs = profile.years_experience;
+            if (yrs != null) {
+              const opt = yrs <= 2 ? '0-2' : yrs <= 5 ? '3-5' : yrs <= 10 ? '6-10' : '10+';
+              document.getElementById('profExperience').value = opt;
+            }
+          }
+        }
+      } catch (err) {
+        console.error('Dashboard load error:', err);
+      }
+    }
+
+    function calcProfileCompletion(p) {
+      let score = 0;
+      const fields = ['full_name','phone','current_title','years_experience','skills','cv_file_path','location'];
+      const step = Math.floor(100 / fields.length);
+      fields.forEach(f => { if (p[f] && (Array.isArray(p[f]) ? p[f].length > 0 : true)) score += step; });
+      return Math.min(score, 100);
+    }
+
+    /* ================================================================
+       API: Load Profile
+       ================================================================ */
+    async function loadProfile() {
+      try {
+        const res = await Auth.fetch('/candidate/profile');
+        if (!res) return;
+        const profile = await res.json();
+        if (!profile) return;
+
+        const name = profile.full_name || user.full_name || '';
+        const email = profile.email || user.email || '';
+        const initials = name.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase();
+
+        document.getElementById('profileAvatar').textContent = initials;
+        document.getElementById('profileName').textContent = name;
+        document.getElementById('profileEmail').textContent = email;
+
+        const nameParts = name.split(' ');
+        if (document.getElementById('profFirstName')) document.getElementById('profFirstName').value = nameParts[0] || '';
+        if (document.getElementById('profLastName')) document.getElementById('profLastName').value = nameParts.slice(1).join(' ') || '';
+        if (document.getElementById('profEmail')) document.getElementById('profEmail').value = email;
+        if (document.getElementById('profPhone')) document.getElementById('profPhone').value = profile.phone || '';
+        if (document.getElementById('profRole')) document.getElementById('profRole').value = profile.current_title || '';
+
+        // CV status
+        if (profile.cv_file_path) {
+          const cvStatus = document.getElementById('profileCvStatus');
+          const cvName = document.getElementById('profileCvName');
+          if (cvStatus && cvName) {
+            cvStatus.style.display = 'block';
+            cvName.textContent = profile.cv_file_path.split('/').pop();
+          }
+        }
+      } catch (err) {
+        console.error('Profile load error:', err);
+      }
+    }
+
+    /* ---- Profile form submit ---- */
+    document.getElementById('profileForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      try {
+        const data = {
+          full_name: (document.getElementById('profFirstName').value + ' ' + document.getElementById('profLastName').value).trim(),
+          phone: document.getElementById('profPhone').value,
+          current_title: document.getElementById('profRole').value,
+        };
+        const res = await Auth.fetch('/candidate/profile', {
+          method: 'PUT',
+          body: JSON.stringify(data),
+        });
+        if (res && res.ok) {
+          Auth.toast(document.documentElement.getAttribute('data-lang') === 'nl' ? 'Profiel opgeslagen!' : 'Profile saved!');
+        } else {
+          Auth.toast('Failed to save profile', 'error');
+        }
+      } catch (err) {
+        Auth.toast('Error saving profile', 'error');
+      }
+    });
+
+    /* ---- CV Upload ---- */
+    const pCvZone = document.getElementById('profileCvZone');
+    const pCvInput = document.getElementById('profileCvInput');
+    const pCvStatus = document.getElementById('profileCvStatus');
+    const pCvName = document.getElementById('profileCvName');
+
+    if (pCvZone && pCvInput) {
+      pCvZone.addEventListener('click', () => pCvInput.click());
+      pCvZone.addEventListener('dragover', (e) => { e.preventDefault(); pCvZone.style.borderColor = 'var(--gold-500)'; });
+      pCvZone.addEventListener('dragleave', () => { pCvZone.style.borderColor = ''; });
+      pCvZone.addEventListener('drop', async (e) => {
+        e.preventDefault();
+        pCvZone.style.borderColor = '';
+        if (e.dataTransfer.files.length) await uploadCvFile(e.dataTransfer.files[0]);
+      });
+      pCvInput.addEventListener('change', async () => {
+        if (pCvInput.files.length) await uploadCvFile(pCvInput.files[0]);
+      });
+    }
+
+    async function uploadCvFile(file) {
+      const formData = new FormData();
+      formData.append('file', file);
+      try {
+        const token = Auth.getToken();
+        const res = await fetch(`${Auth.API}/v1/candidate/cv`, {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${token}` },
+          body: formData,
+        });
+        if (res.ok) {
+          pCvStatus.style.display = 'block';
+          pCvName.textContent = file.name;
+          pCvZone.querySelector('p').textContent = 'CV uploaded!';
+          Auth.toast('CV uploaded successfully!', 'success');
+        } else {
+          Auth.toast('CV upload failed', 'error');
+        }
+      } catch (err) {
+        Auth.toast('Error uploading CV', 'error');
+      }
+    }
+
+    /* ---- Password change ---- */
+    document.getElementById('passwordChangeForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const inputs = e.target.querySelectorAll('input[type="password"]');
+      const currentPw = inputs[0].value;
+      const newPw = inputs[1].value;
+      const confirmPw = inputs[2].value;
+      if (newPw !== confirmPw) {
+        Auth.toast('Passwords do not match', 'error');
+        return;
+      }
+      try {
+        const res = await Auth.fetch('/auth/me', {
+          method: 'PATCH',
+          body: JSON.stringify({ password: newPw }),
+        });
+        if (res && res.ok) {
+          Auth.toast(document.documentElement.getAttribute('data-lang') === 'nl' ? 'Wachtwoord bijgewerkt!' : 'Password updated!');
+          inputs.forEach(i => i.value = '');
+        } else {
+          Auth.toast('Failed to update password', 'error');
+        }
+      } catch (err) {
+        Auth.toast('Error updating password', 'error');
+      }
+    });
+
+    /* ================================================================
+       API: Load Matches
+       ================================================================ */
+    async function loadMatches() {
+      try {
+        const res = await Auth.fetch('/candidate/matches?limit=50');
+        if (!res) return;
+        const data = await res.json();
+        const list = document.getElementById('matchesList');
+        if (!data.items || data.items.length === 0) {
+          list.innerHTML = '<p style="color:var(--navy-300);text-align:center;padding:var(--space-2xl);">No matches found yet.</p>';
+          return;
+        }
+        list.innerHTML = data.items.map(m => {
+          const score = Math.round(m.match_score || 0);
+          const salary = m.salary_min && m.salary_max ? `€${m.salary_min/1000}K – €${m.salary_max/1000}K` : '';
+          const location = m.location ? ` — ${m.location}` : '';
+          return `<div class="match-card">
+            <div class="match-score">${score}%</div>
+            <div class="match-info">
+              <h4>${m.job_title || 'Job'}</h4>
+              <p class="match-company">${m.company_name || ''}${location}</p>
+              <p>${salary}${m.location_type ? ' · ' + m.location_type : ''}</p>
+              <div style="margin-top:6px;display:flex;gap:4px;">
+                <span class="tag tag-green">${m.status || 'New'}</span>
+              </div>
+            </div>
+            <button class="btn btn-sm btn-primary lang-en" onclick="applyToJob(${m.job_id})">Apply Now</button>
+            <button class="btn btn-sm btn-primary lang-nl" onclick="applyToJob(${m.job_id})">Solliciteer</button>
+          </div>`;
+        }).join('');
+      } catch (err) {
+        console.error('Matches load error:', err);
+      }
+    }
+
+    /* ---- Apply to job ---- */
+    window.applyToJob = async function(jobId) {
+      try {
+        const res = await Auth.fetch('/candidate/applications', {
+          method: 'POST',
+          body: JSON.stringify({ job_id: jobId }),
+        });
+        if (res && res.ok) {
+          Auth.toast(document.documentElement.getAttribute('data-lang') === 'nl' ? 'Sollicitatie verstuurd!' : 'Applied successfully!');
+        } else if (res) {
+          const err = await res.json();
+          Auth.toast(err.detail || 'Application failed', 'error');
+        }
+      } catch (err) {
+        Auth.toast('Error applying', 'error');
+      }
+    };
+
+    /* ---- Namespace for inline onclick compatibility ---- */
+    window.app = window.app || {};
+    window.app.matches = { apply: applyToJob };
+
+    /* ================================================================
+       API: Load Applications
+       ================================================================ */
+    async function loadApplications() {
+      try {
+        const res = await Auth.fetch('/candidate/applications?limit=50');
+        if (!res) return;
+        const data = await res.json();
+        const tbody = document.querySelector('#section-applications table tbody');
+        if (!data.items || data.items.length === 0) {
+          tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--navy-300);padding:var(--space-2xl);">No applications yet.</td></tr>';
+          return;
+        }
+        tbody.innerHTML = data.items.map(a => {
+          const date = a.created_at ? new Date(a.created_at).toLocaleDateString() : '';
+          const statusMap = { 'applied': 'Applied', 'interviewing': 'Interview', 'offered': 'Offer', 'placed': 'Placed', 'rejected': 'Rejected' };
+          const statusBadge = {
+            'applied': 'badge-blue', 'interviewing': 'badge-gold', 'offered': 'badge-purple', 'placed': 'badge-green', 'rejected': 'badge-gray'
+          }[a.status] || 'badge-blue';
+          return `<tr>
+            <td style="font-weight:600;color:var(--white);">${a.job_title || '-'}</td>
+            <td>${a.company_name || '-'}</td>
+            <td style="font-size:var(--font-size-xs);color:var(--navy-300);">${date}</td>
+            <td><span class="badge ${statusBadge}">${statusMap[a.status] || a.status}</span></td>
+            <td><button class="btn btn-sm btn-ghost" onclick="Auth.toast('Details coming soon')"><i class="fa-regular fa-eye"></i></button></td>
+          </tr>`;
+        }).join('');
+      } catch (err) {
+        console.error('Applications load error:', err);
+      }
+    }
+
+    /* ================================================================
+       API: Load Messages
+       ================================================================ */
+    async function loadMessages() {
+      try {
+        const res = await Auth.fetch('/candidate/messages?limit=50');
+        if (!res) return;
+        const data = await res.json();
+        const msgContainer = document.querySelector('#section-messages .dashboard-grid > div:first-child');
+        if (!data.messages || data.messages.length === 0) {
+          msgContainer.innerHTML = '<p style="color:var(--navy-300);text-align:center;padding:var(--space-2xl);">No messages yet.</p>';
+          return;
+        }
+        msgContainer.innerHTML = data.messages.map(m => {
+          const isUnread = !m.opened_at && m.status !== 'draft';
+          const time = m.created_at ? new Date(m.created_at).toLocaleDateString() : '';
+          return `<div class="message-item ${isUnread ? 'unread' : ''}">
+            <div class="avatar avatar-navy avatar-sm">${(m.sender_name || 'GS').slice(0,2).toUpperCase()}</div>
+            <div style="flex:1;min-width:0;">
+              <div style="display:flex;justify-content:space-between;align-items:center;">
+                <h4 style="font-size:var(--font-size-sm);font-weight:600;color:var(--white);">${m.sender_name || 'GSP Recruitment'}</h4>
+                <span style="font-size:var(--font-size-xs);color:var(--navy-300);">${time}</span>
+              </div>
+              <p style="font-size:var(--font-size-xs);color:var(--navy-200);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${m.subject || m.message_text || ''}</p>
+              ${isUnread ? '<span class="badge badge-gold" style="font-size:0.6rem;padding:0.1rem 0.4rem;">New</span>' : ''}
+            </div>
+          </div>`;
+        }).join('');
+      } catch (err) {
+        console.error('Messages load error:', err);
+      }
+    }
+
+    /* ================================================================
+       API: Salary Benchmark
+       ================================================================ */
+    async function updateSalaryDisplay() {
+      const role = document.getElementById('salaryRole').value;
+      const level = document.getElementById('salaryLevel').value;
+      try {
+        const res = await Auth.fetch(`/candidate/salary-benchmark?role_title=${encodeURIComponent(role)}&seniority=${encodeURIComponent(level)}`);
+        if (!res) return;
+        const data = await res.json();
+        const chartEl = document.querySelector('#section-salary .chart-placeholder');
+        if (data && data.length > 0) {
+          const d = data[0];
+          chartEl.innerHTML = `<div style="text-align:center;">
+            <div style="font-size:var(--font-size-4xl);font-weight:800;color:var(--gold-500);">€${(d.p25/1000).toFixed(0)}K – €${(d.p75/1000).toFixed(0)}K</div>
+            <p style="color:var(--navy-300);font-size:var(--font-size-sm);">${d.role_title} — Netherlands 2026</p>
+          </div>`;
+          // Update percentile cards
+          const cards = document.querySelectorAll('#section-salary .stat-card .stat-value');
+          if (cards.length >= 3) {
+            cards[0].textContent = '€' + (d.p25/1000).toFixed(0) + 'K';
+            cards[1].textContent = '€' + (d.p50/1000).toFixed(0) + 'K';
+            cards[2].textContent = '€' + (d.p75/1000).toFixed(0) + 'K';
+          }
+        } else {
+          chartEl.innerHTML = `<div style="text-align:center;color:var(--navy-300);padding:var(--space-lg);">No benchmark data available for this selection.</div>`;
+        }
+      } catch (err) {
+        console.error('Salary benchmark error:', err);
+      }
+    }
+
+    document.getElementById('salaryRole').addEventListener('change', updateSalaryDisplay);
+    document.getElementById('salaryLevel').addEventListener('change', updateSalaryDisplay);
+
+    /* ---- Export PDF (no-op, frontend only) ---- */
+    document.getElementById('exportPdfBtn').addEventListener('click', () => {
+      Auth.toast('Salary report PDF downloaded!', 'success');
+    });
+
+    /* ================================================================
+       API: Add skill
+       ================================================================ */
+    document.querySelector('#section-profile .btn-outline')?.addEventListener('click', async () => {
+      const input = document.querySelector('#section-profile input[placeholder*="skill"]');
+      if (!input || !input.value.trim()) return;
+      try {
+        const profileRes = await Auth.fetch('/candidate/profile');
+        if (!profileRes) return;
+        const profile = await profileRes.json();
+        const skills = profile.skills || [];
+        skills.push(input.value.trim());
+        await Auth.fetch('/candidate/profile', {
+          method: 'PUT',
+          body: JSON.stringify({ skills }),
+        });
+        input.value = '';
+        Auth.toast('Skill added!', 'success');
+        loadProfile();
+      } catch (err) {
+        Auth.toast('Error adding skill', 'error');
+      }
+    });
+
+    /* ================================================================
+       Initial load
+       ================================================================ */
+    document.addEventListener('DOMContentLoaded', () => {
+      loadDashboard();
+      loadMatches();
+      loadApplications();
+      loadMessages();
+    });
+
+    /* ---- Logout ---- */
+    document.getElementById('sidebarLogoutBtn').addEventListener('click', () => Auth.logout());
+
+    /* ---- Language sync ---- */
+    const savedLang = localStorage.getItem('gsp-lang');
+    if (savedLang === 'nl' || savedLang === 'en') {
+      document.documentElement.setAttribute('data-lang', savedLang);
+    }
+  </script>
+</body>
+</html>
