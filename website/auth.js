@@ -9,7 +9,7 @@ const Auth = {
   USER_KEY: 'gsp_user',
 
   /* ---- API Base (no trailing slash) ---- */
-  API: '/api',
+  API: 'https://api.gsprecruitment.nl/api',
 
   /* ---- Get stored token ---- */
   getToken() {

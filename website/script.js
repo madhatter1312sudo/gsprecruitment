@@ -6,7 +6,7 @@
 (() => {
   'use strict';
 
-  const API = '';
+  const API = 'https://api.gsprecruitment.nl';
   const TOKEN_KEY = 'gsp_token';
   const USER_KEY = 'gsp_user';
 
@@ -271,7 +271,7 @@
       if (errEl) errEl.style.display = 'none';
       if (successEl) successEl.style.display = 'none';
       try {
-        const res = await fetch('/api/auth/forgot-password', {
+        const res = await fetch(`${API}/api/auth/forgot-password`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ email: val }),
