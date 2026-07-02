@@ -188,6 +188,20 @@
       tabs.forEach(t => t.classList.toggle('active', t.dataset.tab === tab));
       if (loginForm) loginForm.style.display = tab === 'login' ? 'flex' : 'none';
       if (registerForm) registerForm.style.display = tab === 'register' ? 'flex' : 'none';
+      // Force input fields visible — language toggle may have hidden them
+      if (tab === 'login') {
+        const emailInput = $('loginEmail');
+        const pwInput = $('loginPassword');
+        if (emailInput) emailInput.style.display = '';
+        if (pwInput) pwInput.style.display = '';
+      } else {
+        const nameInput = $('regName');
+        const emailInput = $('regEmail');
+        const pwInput = $('regPassword');
+        if (nameInput) nameInput.style.display = '';
+        if (emailInput) emailInput.style.display = '';
+        if (pwInput) pwInput.style.display = '';
+      }
       if (errEl) errEl.style.display = 'none';
       if (successEl) successEl.style.display = 'none';
     }
