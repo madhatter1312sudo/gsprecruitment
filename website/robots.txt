@@ -1,0 +1,8 @@
+User-agent: *
+Allow: /
+Disallow: /admin/
+Disallow: /candidate/
+Disallow: /client/
+Disallow: /*?*
+
+Sitemap: https://gsp-recruitment.nl/sitemap.xml
