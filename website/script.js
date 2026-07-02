@@ -6,7 +6,7 @@
 (() => {
   'use strict';
 
-  const API = '';
+  const API = 'https://api.gsprecruitment.nl';
   const TOKEN_KEY = 'gsp_token';
   const USER_KEY = 'gsp_user';
 
@@ -525,7 +525,7 @@
       // Try API first
       try {
         const res = await fetch(
-          `${API}/api/v1/public/salary-data?role_title=${encodeURIComponent(role)}&seniority=${level}&location=${encodeURIComponent(location)}`
+          `${API}/api/public/salary-data?role_title=${encodeURIComponent(role)}&seniority=${level}&location=${encodeURIComponent(location)}`
         );
         if (res.ok) {
           const data = await res.json();
@@ -720,7 +720,7 @@
         }
 
         try {
-          const res = await fetch(`${API}/api/v1/public/lead`, {
+          const res = await fetch(`${API}/api/public/lead`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -777,7 +777,7 @@
       delete data.gdpr; // don't send checkbox value
 
       try {
-        const res = await fetch(`${API}/api/v1/public/lead`, {
+        const res = await fetch(`${API}/api/public/lead`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(data)
@@ -814,7 +814,7 @@
       const u = JSON.parse(userData);
 
       if (u.role === 'admin') {
-        fetch(`${API}/api/v1/admin/dashboard`, {
+        fetch(`${API}/api/admin/dashboard`, {
           headers: { 'Authorization': 'Bearer ' + token }
         })
           .then(r => r.json())
