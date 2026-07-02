@@ -1,0 +1,45 @@
+{
+  "blog_title_nl": "GSP Recruitment Blog — Tech & IT Recruitment in de Brainport",
+  "blog_title_en": "GSP Recruitment Blog — Tech & IT Recruitment in the Brainport Region",
+  "posts": [
+    {
+      "id": "001-embedded-cpp-boom-brainport",
+      "title_nl": "Waarom embedded C++ developers de goudmijn van de Brainport zijn",
+      "title_en": "Why Embedded C++ Developers Are the Gold Mine of the Brainport Region",
+      "date_nl": "26 juni 2026",
+      "date_en": "June 26, 2026",
+      "excerpt_nl": "De vraag naar embedded C++ developers in de Brainport Eindhoven regio is explosief. Lees waarom deze specialisten zo schaars zijn en wat je eraan kunt doen.",
+      "excerpt_en": "Demand for embedded C++ developers in the Brainport Eindhoven region is exploding. Read why these specialists are so scarce and what you can do about it.",
+      "tags": ["embedded", "C++", "Brainport", "recruitment", "tech-talent"],
+      "author": "Gijs",
+      "read_time_min": 5,
+      "featured": true
+    },
+    {
+      "id": "002-salaris-senior-software-engineer",
+      "title_nl": "Wat verdient een senior software engineer in Eindhoven? Salarisbenchmark 2026",
+      "title_en": "What Does a Senior Software Engineer Earn in Eindhoven? Salary Benchmark 2026",
+      "date_nl": "23 juni 2026",
+      "date_en": "June 23, 2026",
+      "excerpt_nl": "Een compleet overzicht van salarissen voor senior software engineers in de regio Eindhoven/Brainport. Inclusief data per specialisatie (embedded, C++, cloud, data).",
+      "excerpt_en": "A complete overview of salaries for senior software engineers in the Eindhoven/Brainport region. Including data per specialisation (embedded, C++, cloud, data).",
+      "tags": ["salaris", "salary", "software-engineer", "Eindhoven", "benchmark", "2026"],
+      "author": "Gijs",
+      "read_time_min": 4,
+      "featured": true
+    },
+    {
+      "id": "003-brainport-tech-ecosysteem",
+      "title_nl": "Navigeren in het Brainport tech ecosysteem: een gids voor hiring managers",
+      "title_en": "Navigating the Brainport Tech Ecosystem: A Guide for Hiring Managers",
+      "date_nl": "20 juni 2026",
+      "date_en": "June 20, 2026",
+      "excerpt_nl": "ASML, Prodrive, VDL, NTS, Sioux, TNO — het Brainport ecosysteem is uniek in Europa. Hoe vind en behoud je toptalent in deze competitieve markt?",
+      "excerpt_en": "ASML, Prodrive, VDL, NTS, Sioux, TNO — the Brainport ecosystem is unique in Europe. How do you find and retain top talent in this competitive market?",
+      "tags": ["Brainport", "Eindhoven", "hightech", "ecosysteem", "hiring", "recruitment"],
+      "author": "Gijs",
+      "read_time_min": 6,
+      "featured": true
+    }
+  ]
+}

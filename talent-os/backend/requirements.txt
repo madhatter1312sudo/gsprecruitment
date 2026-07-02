@@ -1,0 +1,27 @@
+# Talent OS - Backend Dependencies
+# ALL AI/LLM calls go through OpenRouter. NO models hosted on VPS.
+
+# Core
+fastapi>=0.110.0,<1.0.0
+uvicorn[standard]>=0.27.0,<1.0.0
+pydantic>=2.5.0,<3.0.0
+pydantic-settings>=2.0.0,<3.0.0
+
+# Database
+asyncpg>=0.29.0,<1.0.0
+
+# HTTP client (Apollo.io integration, OpenRouter calls)
+httpx>=0.26.0,<1.0.0
+
+# Auth
+passlib[bcrypt]>=1.7.4,<2.0.0
+python-jose[cryptography]>=3.3.0,<4.0.0
+slowapi>=0.1.9,<1.0.0
+email-validator>=2.0.0,<3.0.0
+
+# File uploads
+python-multipart>=0.0.9,<1.0.0
+
+# Google API (for Gmail OAuth email sending)
+google-auth>=2.29.0,<3.0.0
+google-auth-oauthlib>=1.2.0,<2.0.0

@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html lang="nl" data-lang="nl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="theme-color" content="#0E1B2E">
+<title>Waarom embedded C++ developers de goudmijn van de Brainport zijn — GSP Recruitment</title>
+<meta name="description" content="Waarom embedded C++ developers zo schaars en waardevol zijn in Brainport Eindhoven — met praktische tips voor hiring managers bij high-tech bedrijven.">
+<link rel="canonical" href="https://gsp-recruitment.nl/blog/001-embedded-cpp-boom-brainport.html">
+<link rel="alternate" hreflang="nl" href="https://gsp-recruitment.nl/blog/001-embedded-cpp-boom-brainport.html">
+<link rel="alternate" hreflang="en" href="https://gsp-recruitment.nl/blog/001-embedded-cpp-boom-brainport.html">
+<link rel="alternate" hreflang="x-default" href="https://gsp-recruitment.nl/blog/001-embedded-cpp-boom-brainport.html">
+<meta property="og:type" content="article">
+<meta property="og:title" content="Waarom embedded C++ developers de goudmijn van de Brainport zijn">
+<meta property="og:description" content="De schaarste aan embedded C++ talent raakt ASML, Prodrive, VDL, NTS en hun supply chain. Lees wat hiring managers vandaag beter kunnen doen.">
+<meta property="og:url" content="https://gsp-recruitment.nl/blog/001-embedded-cpp-boom-brainport.html">
+<meta property="og:image" content="https://gsp-recruitment.nl/og-image.png">
+<meta property="og:locale" content="nl_NL">
+<meta property="og:locale:alternate" content="en_GB">
+<meta property="article:published_time" content="2026-06-26T09:00:00+02:00">
+<meta property="article:modified_time" content="2026-06-27T09:00:00+02:00">
+<meta property="article:author" content="Gijs, GSP Recruitment">
+<meta property="article:section" content="Tech Recruitment">
+<meta property="article:tag" content="embedded C++">
+<meta property="article:tag" content="Brainport Eindhoven">
+<meta property="article:tag" content="high-tech recruitment">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Why Embedded C++ Developers Are the Gold Mine of the Brainport Region">
+<meta name="twitter:description" content="Practical insights for hiring scarce embedded C++ talent in Brainport Eindhoven.">
+<meta name="twitter:image" content="https://gsp-recruitment.nl/og-image.png">
+<link rel="icon" type="image/png" sizes="32x32" href="../favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="../favicon-16.png">
+<link rel="apple-touch-icon" href="../apple-touch-icon.png">
+<link rel="manifest" href="../site.webmanifest">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+<link rel="stylesheet" href="../styles.css">
+<style>
+.article-hero { padding-top: 150px; padding-bottom: 56px; background: radial-gradient(700px 420px at 85% 0%, rgba(232,180,0,.14), transparent 60%), linear-gradient(180deg, #fff 0%, var(--bg-alt) 100%); }
+.article-wrap { max-width: 860px; margin: 0 auto; padding: 0 24px; }
+.article-meta { display: flex; flex-wrap: wrap; gap: 10px 18px; margin: 22px 0 0; color: var(--text-muted); font-size: .9rem; }
+.article-meta span { display: inline-flex; align-items: center; gap: 7px; }
+.article-body { padding: 64px 0; }
+.article-body article { max-width: 820px; margin: 0 auto; }
+.article-body p { margin: 0 0 22px; font-size: 1.06rem; }
+.article-body h2 { margin-top: 42px; margin-bottom: 16px; color: var(--navy); }
+.article-body h3 { margin-top: 28px; margin-bottom: 10px; color: var(--navy); }
+.article-body ul { list-style: none; margin: 12px 0 28px; padding: 0; }
+.article-body li { position: relative; padding-left: 28px; margin-bottom: 12px; color: var(--text-secondary); font-size: 1.02rem; line-height: 1.65; }
+.article-body li::before { content: ''; position: absolute; left: 0; top: .72em; width: 9px; height: 9px; border-radius: 50%; background: var(--gold); box-shadow: 0 0 0 4px var(--gold-light); }
+.article-callout { background: var(--navy); color: #fff; border-radius: var(--radius); padding: 30px; margin: 34px 0; box-shadow: var(--shadow-lg); }
+.article-callout p, .article-callout li { color: rgba(255,255,255,.78); }
+.article-callout h3 { color: #fff; margin-top: 0; }
+.article-callout li::before { background: var(--gold); box-shadow: none; }
+.article-tags { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 26px; }
+.article-tags span { padding: 5px 12px; border-radius: var(--radius-full); background: var(--gold-light); color: var(--gold-dark); font-size: .78rem; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; }
+.article-cta { margin-top: 48px; padding: 36px; border-radius: var(--radius); background: linear-gradient(135deg, var(--navy) 0%, var(--navy-light) 100%); color: #fff; text-align: center; }
+.article-cta h2 { color: #fff; margin-bottom: 10px; }
+.article-cta p { color: rgba(255,255,255,.76); max-width: 650px; margin-left: auto; margin-right: auto; }
+.breadcrumb { display:inline-flex; gap:8px; align-items:center; color:var(--text-muted); font-size:.88rem; margin-bottom:20px; }
+.breadcrumb a:hover { color: var(--gold-dark); }
+@media (max-width: 768px) { .article-hero { padding-top: 120px; } .article-body { padding: 44px 0; } .article-cta { padding: 28px 20px; } }
+</style>
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "Article",
+  "mainEntityOfPage": {
+    "@type": "WebPage",
+    "@id": "https://gsp-recruitment.nl/blog/001-embedded-cpp-boom-brainport.html"
+  },
+  "headline": "Waarom embedded C++ developers de goudmijn van de Brainport zijn / Why Embedded C++ Developers Are the Gold Mine of the Brainport Region",
+  "alternativeHeadline": "Waarom Brainport Eindhoven embedded C++ talent harder nodig heeft dan ooit",
+  "description": "Een tweetalig artikel over de schaarste aan embedded C++ developers in Brainport Eindhoven en praktische hiring tips voor high-tech bedrijven.",
+  "image": "https://gsp-recruitment.nl/og-image.png",
+  "datePublished": "2026-06-26T09:00:00+02:00",
+  "dateModified": "2026-06-27T09:00:00+02:00",
+  "inLanguage": ["nl-NL", "en-GB"],
+  "author": {
+    "@type": "Person",
+    "name": "Gijs",
+    "url": "https://gsp-recruitment.nl/"
+  },
+  "publisher": {
+    "@type": "Organization",
+    "name": "GSP Recruitment",
+    "url": "https://gsp-recruitment.nl/",
+    "logo": {
+      "@type": "ImageObject",
+      "url": "https://gsp-recruitment.nl/logo.png"
+    }
+  },
+  "keywords": ["embedded C++", "Brainport Eindhoven", "ASML", "Prodrive", "VDL", "NTS", "tech recruitment", "embedded software engineers"],
+  "articleSection": "Tech Recruitment"
+}
+</script>
+</head>
+<body>
+<div id="preloader"><img src="../logo-dark.png" alt="GSP Recruitment"><div class="preloader-bar"><div class="preloader-fill" id="preloaderFill"></div></div></div>
+<header class="header" id="header">
+  <div class="header-inner">
+    <a href="../index.html" class="header-logo"><img src="../logo-dark.png" alt="GSP Recruitment" width="120" height="28"></a>
+    <div class="audience-switch" role="tablist" aria-label="Werkgevers of kandidaten">
+      <a href="../werkgevers.html" class="aud-opt"><i class="fas fa-building"></i><span class="lang-en">Employers</span><span class="lang-nl">Werkgevers</span></a>
+      <a href="../kandidaten.html" class="aud-opt"><i class="fas fa-user"></i><span class="lang-en">Candidates</span><span class="lang-nl">Kandidaten</span></a>
+    </div>
+    <nav class="nav" id="nav">
+      <ul class="nav-list">
+        <li class="nav-aud"><a href="../werkgevers.html" class="nav-link"><span class="lang-en">For employers</span><span class="lang-nl">Voor werkgevers</span></a></li>
+        <li class="nav-aud"><a href="../kandidaten.html" class="nav-link"><span class="lang-en">For candidates</span><span class="lang-nl">Voor kandidaten</span></a></li>
+        <li><a href="../vacatures.html" class="nav-link"><span class="lang-en">Vacancies</span><span class="lang-nl">Vacatures</span></a></li>
+        <li><a href="../blog/" class="nav-link active"><span class="lang-en">Blog</span><span class="lang-nl">Blog</span></a></li>
+        <li><a href="../contact.html" class="nav-link"><span class="lang-en">Contact</span><span class="lang-nl">Contact</span></a></li>
+      </ul>
+    </nav>
+    <div class="header-actions">
+      <button class="lang-btn" id="langEn">EN</button>
+      <button class="lang-btn" id="langNl">NL</button>
+      <button class="btn btn-ghost btn-sm" id="loginBtn"><i class="fas fa-sign-in-alt"></i> <span class="lang-en">Sign In</span><span class="lang-nl">Inloggen</span></button>
+      <button class="hamburger" id="hamburger" aria-label="Menu"><span></span><span></span><span></span></button>
+    </div>
+  </div>
+</header>
+
+<section class="article-hero">
+  <div class="article-wrap">
+    <div class="breadcrumb"><a href="../index.html">GSP Recruitment</a><i class="fas fa-chevron-right"></i><a href="./">Blog</a></div>
+    <div class="eyebrow"><span class="lang-en">Embedded C++ · Brainport Eindhoven · Hiring strategy</span><span class="lang-nl">Embedded C++ · Brainport Eindhoven · Wervingsstrategie</span></div>
+    <h1 class="lang-nl">Waarom embedded C++ developers de goudmijn van de Brainport zijn</h1>
+    <h1 class="lang-en">Why Embedded C++ Developers Are the Gold Mine of the Brainport Region</h1>
+    <p class="lang-nl">De motor van de Brainport draait niet alleen op machines, cleanrooms en supply chains. Hij draait vooral op software die dicht op hardware zit — en op de engineers die dat foutloos kunnen bouwen.</p>
+    <p class="lang-en">The Brainport engine does not run only on machines, cleanrooms, and supply chains. It runs on software close to the hardware — and on the engineers who can build it reliably.</p>
+    <div class="article-meta">
+      <span><i class="fas fa-calendar"></i><span class="lang-nl">26 juni 2026</span><span class="lang-en">June 26, 2026</span></span>
+      <span><i class="fas fa-user"></i>Gijs · GSP Recruitment</span>
+      <span><i class="fas fa-clock"></i><span class="lang-nl">5 min leestijd</span><span class="lang-en">5 min read</span></span>
+    </div>
+    <div class="article-tags"><span>embedded</span><span>C++</span><span>Brainport</span><span>ASML</span><span>Prodrive</span><span>VDL</span><span>NTS</span></div>
+  </div>
+</section>
+
+<main class="article-body">
+  <div class="article-wrap">
+    <article class="lang-nl" data-lang="nl">
+      <p>In Brainport Eindhoven is embedded C++ geen niche meer. Het is een strategische competentie. Waar veel softwaremarkten bewegen richting snelle webstacks, low-code of cloud-native tooling, blijft de high-tech maakindustrie afhankelijk van mensen die begrijpen wat er gebeurt op milliseconde-niveau: geheugen, timing, interfaces, real-time gedrag, foutafhandeling en de interactie tussen software, elektronica en mechanica. Precies daarom zijn embedded C++ developers de goudmijn van de regio.</p>
+
+      <p>De schaarste is niet nieuw, maar hij voelt scherper dan ooit. ASML groeit door in lithografie en metrologie. Prodrive bouwt compacte, hoogperformante elektronica en embedded systemen voor markten waar betrouwbaarheid niet optioneel is. VDL ontwikkelt modules, voertuigen, automatisering en complexe productiesystemen. NTS levert high-precision systems waarin motion, control en software samenkomen. Elk van deze organisaties — en de tientallen suppliers eromheen — concurreert om een relatief kleine groep engineers die moderne C++ kunnen combineren met hardwarebegrip.</p>
+
+      <h2>Waarom juist embedded C++ zo schaars is</h2>
+      <p>Een goede embedded C++ developer is zelden “alleen programmeur”. De beste kandidaten kunnen lezen wat een datasheet impliceert, begrijpen waarom een race condition pas na drie uur testtijd zichtbaar wordt, en schrijven code die over jaren onderhoudbaar blijft. Ze werken met C++17 of C++20, maar hebben ook gevoel voor bare-metal constraints, embedded Linux, RTOS, device drivers, communication protocols, diagnostics, safety en performance profiling.</p>
+
+      <p>Die combinatie leer je niet in zes weken. Veel starters kiezen voor Python, JavaScript, data of cloud omdat de instap zichtbaarder is en de feedback sneller komt. Embedded vraagt geduld: debuggen met oscilloscopen, hardware-in-the-loop testopstellingen, cross-compilers, build pipelines, CI voor firmware, en soms documentatie die minder vriendelijk is dan een moderne API. Daardoor is de toevoer beperkt, terwijl de vraag in Brainport juist stijgt.</p>
+
+      <div class="article-callout">
+        <h3>De kern van het probleem</h3>
+        <p>Brainport-bedrijven zoeken geen generieke C++ developers. Ze zoeken engineers die softwarekwaliteit kunnen leveren in fysieke systemen waar fouten duur, zichtbaar en soms veiligheidskritisch zijn.</p>
+      </div>
+
+      <h2>Waarom ASML, Prodrive, VDL en NTS ze nodig hebben</h2>
+      <p>Bij ASML zit embedded software diep in de keten van motion control, sensoren, actuatoren, metrologie en systeemdiagnostiek. Een kleine verbetering in timing of stabiliteit kan op systeemniveau enorme waarde hebben. Bij Prodrive draait het vaak om compacte elektronica, automotive-grade kwaliteit, high-performance computing en industrial control: software moet efficiënt, robuust en produceerbaar zijn.</p>
+
+      <p>VDL heeft embedded expertise nodig in voertuigen, modules, charging, manufacturing automation en mechatronische systemen. NTS werkt aan high-tech modules waar precisie, reproduceerbaarheid en lifecycle management belangrijk zijn. In al deze omgevingen is software geen laagje bovenop het product; software is onderdeel van het product. Een vacature blijft dus niet alleen “open” staan. Een open embedded vacature kan een roadmap vertragen, testcapaciteit blokkeren of een systeemarchitect dwingen zelf ontwikkelwerk te blijven doen.</p>
+
+      <h2>Wat hiring managers vandaag anders moeten doen</h2>
+      <p>De markt vraagt om meer dan een vacaturetekst online zetten. Embedded C++ specialisten zijn vaak niet actief zoekend. Ze worden benaderd door meerdere bedrijven, maar reageren alleen wanneer de inhoud klopt en het proces professioneel voelt.</p>
+
+      <ul>
+        <li><strong>Maak de technische uitdaging concreet.</strong> Noem het product, de constraints, de stack, de testomgeving en de impact van de rol. “Je werkt aan innovatieve systemen” is te vaag.</li>
+        <li><strong>Verkort het proces.</strong> Twee gesprekken en een gerichte technische verdieping werken beter dan vijf losse rondes. Goede kandidaten zijn snel van de markt.</li>
+        <li><strong>Laat engineers vroeg meepraten.</strong> Een senior kandidaat wil sparren over architectuur, kwaliteit en trade-offs. HR-only gesprekken missen vaak overtuigingskracht.</li>
+        <li><strong>Wees realistisch over must-haves.</strong> C++, embedded Linux, RTOS, Python tooling, safety, Dutch language, specifieke sectorervaring én vijf jaar in dezelfde niche is meestal te smal.</li>
+        <li><strong>Verkoop het team, niet alleen het merk.</strong> ASML, Prodrive, VDL en NTS hebben sterke namen, maar kandidaten kiezen uiteindelijk voor autonomie, technische diepgang en de mensen met wie ze bouwen.</li>
+      </ul>
+
+      <h2>Retentie begint vóór het aanbod</h2>
+      <p>In deze markt is hiring slechts de helft van de opdracht. Retentie begint bij een eerlijke intake: wat gaat iemand echt doen, hoeveel legacy is er, hoeveel architectuurvrijheid bestaat er, en hoe volwassen zijn build, test en release? Kandidaten prikken snel door te rooskleurige verhalen heen. Transparantie verlaagt misschien het aantal sollicitanten, maar verhoogt de kwaliteit van de match.</p>
+
+      <p>Voor hiring managers betekent dat: durf scherp te kiezen. Zoek je iemand die diep in device drivers duikt, of iemand die embedded applicaties bouwt bovenop Linux? Heb je een maintainer nodig voor bestaande code, of een architect voor een nieuw platform? Hoe duidelijker de opdracht, hoe beter de sourcing, screening en conversie.</p>
+
+      <p>Embedded C++ developers zijn de goudmijn van Brainport omdat zij de brug vormen tussen idee en fysiek werkend systeem. Wie ze wil aantrekken, moet ze benaderen als schaarse specialisten: inhoudelijk, snel, eerlijk en met respect voor hun vakmanschap.</p>
+
+      <div class="article-cta">
+        <h2>Op zoek naar embedded C++ talent?</h2>
+        <p>GSP Recruitment helpt Brainport-bedrijven met gerichte search naar embedded software engineers, C++ developers en firmware specialisten. Geen massamailing, maar inhoudelijke selectie en eerlijke begeleiding.</p>
+        <div class="hero-actions" style="justify-content:center;margin-top:22px">
+          <a href="../contact.html" class="btn btn-gold"><i class="fas fa-paper-plane"></i> Neem contact op</a>
+          <a href="../werkgevers.html" class="btn btn-outline" style="color:#fff;border-color:rgba(255,255,255,.28)"><i class="fas fa-building"></i> Voor werkgevers</a>
+        </div>
+      </div>
+    </article>
+
+    <article class="lang-en" data-lang="en">
+      <p>In Brainport Eindhoven, embedded C++ is no longer a niche. It is a strategic capability. While many software markets move toward web stacks, low-code, or cloud tooling, high-tech manufacturing still depends on people who understand millisecond-level memory, timing, interfaces, real-time behaviour, failure handling, and the interaction between software, electronics, and mechanics. That is why embedded C++ developers are the gold mine of the region.</p>
+
+      <p>The shortage is not new, but it feels sharper than ever. ASML grows in lithography and metrology. Prodrive builds compact, high-performance electronics for markets where reliability is not optional. VDL develops modules, vehicles, automation, and production systems. NTS delivers high-precision systems where motion, control, and software come together. Each organisation — and the suppliers around them — competes for a small group of engineers who combine modern C++ with hardware understanding.</p>
+
+      <h2>Why embedded C++ is so scarce</h2>
+      <p>A strong embedded C++ developer is rarely “just a programmer”. The best candidates can read what a datasheet implies, understand why a race condition appears only after hours of testing, and write code that remains maintainable for years. They work with C++17 or C++20, but also understand bare-metal constraints, embedded Linux, RTOS, device drivers, communication protocols, diagnostics, safety, and profiling.</p>
+
+      <p>You do not learn that combination in six weeks. Many graduates choose Python, JavaScript, data, or cloud because the entry point is more visible and feedback is faster. Embedded requires patience: debugging with oscilloscopes, hardware-in-the-loop setups, cross-compilers, firmware pipelines, CI for devices, and documentation that is often less friendly than a modern API. Supply is limited while demand in Brainport keeps increasing.</p>
+
+      <div class="article-callout">
+        <h3>The core problem</h3>
+        <p>Brainport companies are not looking for generic C++ developers. They need engineers who deliver software quality inside physical systems where mistakes are expensive, visible, and sometimes safety-critical.</p>
+      </div>
+
+      <h2>Why ASML, Prodrive, VDL, and NTS need them</h2>
+      <p>At ASML, embedded software sits deep inside motion control, sensors, actuators, metrology, and diagnostics. A small improvement in timing or stability can create enormous value at system level. At Prodrive, the challenge is often compact electronics, automotive-grade quality, high-performance computing, and industrial control: software must be efficient, robust, and producible.</p>
+
+      <p>VDL needs embedded expertise in vehicles, modules, charging, manufacturing automation, and mechatronic systems. NTS works on high-tech modules where precision, reproducibility, and lifecycle management matter. In all these environments, software is not a layer on top of the product; software is part of the product. An open vacancy therefore does not simply remain “open”. An unfilled embedded role can delay a roadmap, block test capacity, or force a system architect to keep doing development work that should be delegated.</p>
+
+      <h2>What hiring managers should do differently</h2>
+      <p>This market requires more than publishing a job description and waiting. Embedded C++ specialists are often not actively looking. They are approached by multiple companies, but they respond only when the technical substance is clear and the process feels professional.</p>
+
+      <ul>
+        <li><strong>Make the technical challenge concrete.</strong> Mention the product, constraints, stack, test environment, and impact of the role. “You will work on innovative systems” is too generic.</li>
+        <li><strong>Shorten the process.</strong> Two interviews and one focused technical deep dive usually work better than five separate rounds. Good candidates disappear quickly.</li>
+        <li><strong>Involve engineers early.</strong> Senior candidates want to discuss architecture, quality, and trade-offs. HR-only conversations often lack persuasive power.</li>
+        <li><strong>Be realistic about must-haves.</strong> C++, embedded Linux, RTOS, Python tooling, safety, Dutch language, specific sector experience, and five years in the same niche is often too narrow.</li>
+        <li><strong>Sell the team, not just the brand.</strong> ASML, Prodrive, VDL, and NTS have strong names, but candidates ultimately choose autonomy, technical depth, and the people they will build with.</li>
+      </ul>
+
+      <h2>Retention starts before the offer</h2>
+      <p>In this market, hiring is only half the challenge. Retention starts with an honest intake: what will the person really do, how much legacy exists, how much architectural freedom is available, and how mature are build, test, and release processes? Candidates quickly see through overly polished stories. Transparency may reduce the number of applicants, but it increases the quality of the match.</p>
+
+      <p>For hiring managers, that means making sharper choices. Do you need someone who goes deep into device drivers, or someone who builds embedded applications on top of Linux? Do you need a maintainer for existing code, or an architect for a new platform? The clearer the assignment, the better the sourcing, screening, and conversion.</p>
+
+      <p>Embedded C++ developers are the gold mine of Brainport because they form the bridge between an idea and a physically working system. If you want to attract them, treat them as scarce specialists: technically, quickly, honestly, and with respect for their craft.</p>
+
+      <div class="article-cta">
+        <h2>Looking for embedded C++ talent?</h2>
+        <p>GSP Recruitment helps Brainport companies with targeted search for embedded software engineers, C++ developers, and firmware specialists. No mass mailing — just technical selection and honest guidance.</p>
+        <div class="hero-actions" style="justify-content:center;margin-top:22px">
+          <a href="../contact.html" class="btn btn-gold"><i class="fas fa-paper-plane"></i> Get in touch</a>
+          <a href="../werkgevers.html" class="btn btn-outline" style="color:#fff;border-color:rgba(255,255,255,.28)"><i class="fas fa-building"></i> For employers</a>
+        </div>
+      </div>
+    </article>
+  </div>
+</main>
+
+<footer class="footer">
+  <div class="container">
+    <div class="footer-grid">
+      <div class="footer-brand">
+        <img src="../logo.png" alt="GSP Recruitment">
+        <p class="lang-en">Specialist tech &amp; IT recruitment across the Netherlands. Founder-led, personal, and honest.</p>
+        <p class="lang-nl">Gespecialiseerde tech &amp; IT-recruitment in heel Nederland. Founder-led, persoonlijk en eerlijk.</p>
+      </div>
+      <div><h4><span class="lang-en">For employers</span><span class="lang-nl">Voor werkgevers</span></h4>
+        <ul class="footer-links"><li><a href="../werkgevers.html"><span class="lang-en">How we work</span><span class="lang-nl">Werkwijze</span></a></li><li><a href="../werkgevers.html#specialisms"><span class="lang-en">Specialisms</span><span class="lang-nl">Vakgebieden</span></a></li><li><a href="../contact.html"><span class="lang-en">Share a vacancy</span><span class="lang-nl">Deel een vacature</span></a></li></ul></div>
+      <div><h4><span class="lang-en">For candidates</span><span class="lang-nl">Voor kandidaten</span></h4>
+        <ul class="footer-links"><li><a href="../vacatures.html"><span class="lang-en">Vacancies</span><span class="lang-nl">Vacatures</span></a></li><li><a href="../kandidaten.html#salary"><span class="lang-en">Salary data</span><span class="lang-nl">Salarisdata</span></a></li><li><a href="../kandidaten.html#quiz"><span class="lang-en">Match quiz</span><span class="lang-nl">Match quiz</span></a></li></ul></div>
+      <div><h4><span class="lang-en">Company</span><span class="lang-nl">Bedrijf</span></h4>
+        <ul class="footer-links"><li><a href="../blog/"><span class="lang-en">Blog</span><span class="lang-nl">Blog</span></a></li><li><a href="../contact.html"><span class="lang-en">Contact</span><span class="lang-nl">Contact</span></a></li><li><a href="../privacy.html"><span class="lang-en">Privacy Policy</span><span class="lang-nl">Privacybeleid</span></a></li><li><a href="https://www.linkedin.com/company/gsp-recruitment/" target="_blank" rel="noopener"><i class="fab fa-linkedin"></i> LinkedIn</a></li></ul></div>
+    </div>
+    <div class="footer-bottom">
+      <span>© 2026 GSP Recruitment. <span class="lang-en">All rights reserved.</span><span class="lang-nl">Alle rechten voorbehouden.</span></span>
+      <span class="lang-en">Tech &amp; IT recruitment · Brainport Eindhoven · the Netherlands</span>
+      <span class="lang-nl">Tech &amp; IT-recruitment · Brainport Eindhoven · Nederland</span>
+    </div>
+  </div>
+</footer>
+
+<a href="https://wa.me/31612345678?text=Hi%20GSP%20Recruitment" class="whatsapp-float" target="_blank" rel="noopener" aria-label="WhatsApp"><i class="fab fa-whatsapp"></i></a>
+<div class="modal-overlay" id="authModal">
+  <div class="modal">
+    <button class="modal-close" id="authClose">&times;</button>
+    <h2 class="lang-en">Welcome to GSP</h2>
+    <h2 class="lang-nl">Welkom bij GSP</h2>
+    <p class="lang-en">Sign in to your account or create one.</p>
+    <p class="lang-nl">Log in of maak een account aan.</p>
+    <div class="modal-tabs" id="authTabs">
+      <button class="modal-tab active" data-tab="login"><span class="lang-en">Sign In</span><span class="lang-nl">Inloggen</span></button>
+      <button class="modal-tab" data-tab="register"><span class="lang-en">Register</span><span class="lang-nl">Registreren</span></button>
+    </div>
+    <div id="authError" class="form-error"></div>
+    <div id="authSuccess" class="form-success"></div>
+    <form id="loginForm" class="modal-form">
+      <input type="email" id="loginEmail" placeholder="Email address" data-lang-en="Email address" data-lang-nl="E-mailadres" required>
+      <input type="password" id="loginPassword" placeholder="Password" data-lang-en="Password" data-lang-nl="Wachtwoord" required minlength="6">
+      <button type="submit" class="btn btn-primary"><i class="fas fa-sign-in-alt"></i> <span class="lang-en">Sign In</span><span class="lang-nl">Inloggen</span></button>
+      <div class="modal-divider"><span class="lang-en">or</span><span class="lang-nl">of</span></div>
+      <div class="social-btns"><button type="button" class="btn btn-ghost btn-sm"><i class="fab fa-linkedin"></i> LinkedIn</button><button type="button" class="btn btn-ghost btn-sm"><i class="fab fa-google"></i> Google</button></div>
+    </form>
+    <form id="registerForm" class="modal-form" style="display:none">
+      <input type="text" id="regName" placeholder="Full name" data-lang-en="Full name" data-lang-nl="Volledige naam" required>
+      <input type="email" id="regEmail" placeholder="Email address" data-lang-en="Email address" data-lang-nl="E-mailadres" required>
+      <input type="password" id="regPassword" placeholder="Password (min 6 chars)" data-lang-en="Password (min 6 chars)" data-lang-nl="Wachtwoord (min 6 tekens)" required minlength="6">
+      <select id="regRole"><option value="candidate" data-lang-en="I'm looking for a role" data-lang-nl="Ik zoek een rol">I'm looking for a role</option><option value="client" data-lang-en="I'm looking to hire" data-lang-nl="Ik wil aannemen">I'm looking to hire</option></select>
+      <button type="submit" class="btn btn-gold"><i class="fas fa-user-plus"></i> <span class="lang-en">Create Account</span><span class="lang-nl">Account aanmaken</span></button>
+    </form>
+  </div>
+</div>
+<script src="../auth.js"></script>
+<script src="../script.js"></script>
+</body>
+</html>

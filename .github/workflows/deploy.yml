@@ -1,0 +1,52 @@
+name: Deploy to Production
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.VPS_SSH_PRIVATE_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -H 188.245.254.248 >> ~/.ssh/known_hosts
+
+      - name: Sync backend code to VPS
+        run: |
+          rsync -avz --exclude='.env' --exclude='__pycache__' --exclude='*.pyc' \
+            talent-os/ \
+            gsp@188.245.254.248:/home/gsp/projects/gsp-recruitment/talent-os/
+
+      - name: Sync docker-compose.yml
+        run: |
+          rsync -avz docker-compose.yml \
+            gsp@188.245.254.248:/home/gsp/projects/gsp-recruitment/docker-compose.yml
+
+      - name: Sync website (frontend) to Cloudflare via git push
+        run: |
+          # The frontend is on Cloudflare Pages, which auto-deploys from this repo
+          echo "Frontend is auto-deployed by Cloudflare Pages from this repository"
+
+      - name: SSH and restart Docker containers
+        run: |
+          ssh gsp@188.245.254.248 "
+            cd /home/gsp/projects/gsp-recruitment && \
+            docker compose up -d --build backend && \
+            sleep 5 && \
+            echo '=== Health Check ===' && \
+            curl -s http://127.0.0.1:8000/health | python3 -m json.tool
+          "
+
+      - name: Health check success notification
+        if: success()
+        run: echo "✅ Deployment successful! Backend healthy, frontend auto-deployed by Cloudflare."
+
+      - name: Health check failure notification
+        if: failure()
+        run: echo "❌ Deployment failed! Check the VPS and rollback if needed."

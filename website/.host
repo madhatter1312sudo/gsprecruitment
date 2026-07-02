@@ -1,0 +1,15 @@
+# GSP Recruitment — Caddyfile context
+# Serve this directory with:
+#   caddy file-server --domain gsptalent.com --root /home/og/projects/gsp-recruitment/website
+#
+# Or in a Caddyfile:
+#   gsptalent.com, www.gsptalent.com {
+#       root * /home/og/projects/gsp-recruitment/website
+#       file_server
+#       encode gzip
+#       header /* {
+#           Strict-Transport-Security "max-age=31536000; includeSubDomains"
+#           X-Content-Type-Options "nosniff"
+#           X-Frame-Options "SAMEORIGIN"
+#       }
+#   }
