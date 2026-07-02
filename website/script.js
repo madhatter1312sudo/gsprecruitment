@@ -29,10 +29,9 @@
       localStorage.setItem('gsp_lang', lang);
       document.documentElement.setAttribute('data-lang', lang);
 
-      // Show/hide language-specific elements
-      document.querySelectorAll('.lang-en, .lang-nl').forEach(el => {
-        el.style.display = el.classList.contains('lang-' + lang) ? '' : 'none';
-      });
+      // Language visibility is handled by CSS (html[data-lang] attribute selector)
+      // No inline display manipulation needed — avoids conflicts with form inputs
+      // that have both .lang-en and .lang-nl classes
 
       // Update hero H1
       const heroTitle = $('heroTitle');

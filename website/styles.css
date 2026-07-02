@@ -1018,8 +1018,8 @@ input[type="checkbox"] { accent-color: var(--gold); }
 
 /* ── Language visibility (immediate, based on <html data-lang>) ──
    Prevents the EN+NL double-text flash before script.js runs. */
-html[data-lang="nl"] .lang-en { display: none; }
-html[data-lang="en"] .lang-nl { display: none; }
+html[data-lang="nl"] .lang-en:not(.lang-nl) { display: none; }
+html[data-lang="en"] .lang-nl:not(.lang-en) { display: none; }
 
 /* ── Audience switch (Werkgevers / Kandidaten) ──────────── */
 .audience-switch {
