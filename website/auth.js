@@ -77,7 +77,10 @@ const Auth = {
         headers
       });
 
-      if (response.status === 401) {
+      if (response.status === 401 && token) {
+        // Only treat 401 as "session expired" when we actually sent a token.
+        // Unauthenticated calls (login/register/forgot-password) return 401
+        // for bad credentials and must be handled by the caller, not redirected.
         this.clearAuth();
         window.location.href = '/';
         return null;
