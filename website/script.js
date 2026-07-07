@@ -27,6 +27,7 @@
       currentLang = lang;
       localStorage.setItem('gsp_lang', lang);
       document.documentElement.setAttribute('data-lang', lang);
+      document.documentElement.setAttribute('lang', lang);
 
       document.querySelectorAll('.lang-en, .lang-nl').forEach(el => {
         el.style.display = el.classList.contains('lang-' + lang) ? '' : 'none';
@@ -41,6 +42,9 @@
         const placeholder = el.getAttribute('data-lang-' + lang);
         if (placeholder && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT')) {
           el.setAttribute('placeholder', placeholder);
+          // Placeholder text is the only visible label on these compact forms;
+          // mirror it into aria-label so it survives once the field has a value.
+          el.setAttribute('aria-label', placeholder);
         }
       });
 
@@ -157,8 +161,14 @@
       btn.addEventListener('click', () => {
         const item = btn.closest('.faq-item');
         const isActive = item.classList.contains('active');
-        qsa('.faq-item.active').forEach(i => i.classList.remove('active'));
-        if (!isActive) item.classList.add('active');
+        qsa('.faq-item.active').forEach(i => {
+          i.classList.remove('active');
+          i.querySelector('.faq-question')?.setAttribute('aria-expanded', 'false');
+        });
+        if (!isActive) {
+          item.classList.add('active');
+          btn.setAttribute('aria-expanded', 'true');
+        }
       });
     });
   }
@@ -175,7 +185,7 @@
     const errEl = $('authError');
     const successEl = $('authSuccess');
 
-    function openModal(tab) {
+    function openModal(tab, triggerEl) {
       if (!modal) return;
       modal.classList.add('active');
       tabs.forEach(t => t.classList.toggle('active', t.dataset.tab === tab));
@@ -183,6 +193,12 @@
       if (registerForm) registerForm.style.display = tab === 'register' ? 'flex' : 'none';
       if (errEl) errEl.style.display = 'none';
       if (successEl) successEl.style.display = 'none';
+      Auth.trapFocus(modal, triggerEl || document.activeElement);
+    }
+
+    function closeAuthModal() {
+      modal?.classList.remove('active');
+      Auth.releaseFocusTrap(modal);
     }
 
     // Check logged-in state using Auth module
@@ -197,12 +213,12 @@
         });
       }
     } else {
-      loginBtn?.addEventListener('click', () => openModal('login'));
+      loginBtn?.addEventListener('click', (e) => openModal('login', e.currentTarget));
     }
 
-    registerBtn?.addEventListener('click', () => openModal('register'));
-    closeBtn?.addEventListener('click', () => modal?.classList.remove('active'));
-    modal?.addEventListener('click', (e) => { if (e.target === modal) modal.classList.remove('active'); });
+    registerBtn?.addEventListener('click', (e) => openModal('register', e.currentTarget));
+    closeBtn?.addEventListener('click', closeAuthModal);
+    modal?.addEventListener('click', (e) => { if (e.target === modal) closeAuthModal(); });
     tabs.forEach(tab => tab.addEventListener('click', () => openModal(tab.dataset.tab)));
 
     // Wire up social login buttons → "Coming soon" toast
@@ -246,7 +262,7 @@
           if (errEl) { errEl.textContent = result.error; errEl.style.display = 'block'; }
           Auth.toast(result.error, 'error');
         } else {
-          if (modal) modal.classList.remove('active');
+          closeAuthModal();
           window.location.href = Auth.getDashboardUrl(result.user);
         }
       } catch (err) {
@@ -285,7 +301,7 @@
           Auth.toast(result.error, 'error');
         } else {
           Auth.toast('Account created successfully!', 'success');
-          if (modal) modal.classList.remove('active');
+          closeAuthModal();
           window.location.href = Auth.getDashboardUrl(result.user);
         }
       } catch (err) {
@@ -987,8 +1003,11 @@
       goToSlide((currentIndex + 1) % cards.length);
     }
 
+    const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
     function startAutoRotate() {
       stopAutoRotate();
+      if (prefersReducedMotion) return;
       intervalId = setInterval(nextSlide, 5000);
     }
 
@@ -999,11 +1018,15 @@
       }
     }
 
-    // Pause on hover
+    // Pause on hover, and on keyboard focus so keyboard users get time to read
     wrapper.addEventListener('mouseenter', () => { autoRotate = false; });
     wrapper.addEventListener('mouseleave', () => { autoRotate = true; });
+    wrapper.addEventListener('focusin', () => { autoRotate = false; });
+    wrapper.addEventListener('focusout', () => { autoRotate = true; });
     dotsContainer.addEventListener('mouseenter', () => { autoRotate = false; });
     dotsContainer.addEventListener('mouseleave', () => { autoRotate = true; });
+    dotsContainer.addEventListener('focusin', () => { autoRotate = false; });
+    dotsContainer.addEventListener('focusout', () => { autoRotate = true; });
 
     startAutoRotate();
   }

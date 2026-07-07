@@ -21,7 +21,7 @@
     .sidebar-logo a { display: flex; align-items: center; gap: var(--space-sm); }
     .sidebar-nav { flex: 1; padding: var(--space-md) 0; }
     .sidebar-nav-item { display: flex; align-items: center; gap: var(--space-md); padding: 0.75rem var(--space-xl); font-size: var(--font-size-sm); font-weight: 500; color: var(--navy-200); text-decoration: none; transition: all var(--transition-fast); border-left: 3px solid transparent; cursor: pointer; background: none; width: 100%; font-family: var(--font-primary); text-align: left; }
-    .sidebar-nav-item i { width: 20px; text-align: center; font-size: 1rem; color: var(--navy-300); transition: color var(--transition-fast); }
+    .sidebar-nav-item i { width: 20px; text-align: center; font-size: 1rem; color: var(--navy-200); transition: color var(--transition-fast); }
     .sidebar-nav-item:hover { color: var(--white); background: rgba(74,111,159,0.08); }
     .sidebar-nav-item.active { color: var(--gold-500); border-left-color: var(--gold-500); background: rgba(250,200,0,0.06); }
     .sidebar-nav-item.active i { color: var(--gold-500); }
@@ -30,7 +30,7 @@
     .sidebar-user { display: flex; align-items: center; gap: var(--space-md); }
     .sidebar-user-info { flex: 1; min-width: 0; }
     .sidebar-user-name { font-size: var(--font-size-sm); font-weight: 600; color: var(--white); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .sidebar-user-email { font-size: var(--font-size-xs); color: var(--navy-300); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .sidebar-user-email { font-size: var(--font-size-xs); color: var(--navy-200); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .main-content { flex: 1; margin-left: var(--sidebar-width); min-height: 100vh; background: var(--navy-800); }
     .portal-header { display: flex; align-items: center; justify-content: space-between; padding: var(--space-lg) var(--space-2xl); background: rgba(10,22,40,0.9); backdrop-filter: blur(12px); border-bottom: 1px solid rgba(74,111,159,0.1); position: sticky; top: 0; z-index: 50; }
     .portal-header h1 { font-size: var(--font-size-xl); font-weight: 700; color: var(--white); }
@@ -46,11 +46,11 @@
     .kanban-board { display: grid; grid-template-columns: repeat(4,1fr); gap: var(--space-md); margin-top: var(--space-lg); }
     .kanban-column { background: rgba(6,13,26,0.3); border-radius: var(--radius-lg); padding: var(--space-md); }
     .kanban-column h4 { font-size: var(--font-size-sm); font-weight: 600; color: var(--white); margin-bottom: var(--space-md); padding: 0 var(--space-sm); display: flex; align-items: center; justify-content: space-between; }
-    .kanban-column h4 span { font-size: var(--font-size-xs); color: var(--navy-300); background: rgba(74,111,159,0.15); padding: 2px 8px; border-radius: var(--radius-full); }
+    .kanban-column h4 span { font-size: var(--font-size-xs); color: var(--navy-200); background: rgba(74,111,159,0.15); padding: 2px 8px; border-radius: var(--radius-full); }
     .kanban-card { background: linear-gradient(145deg,rgba(21,43,74,0.5),rgba(15,29,53,0.7)); border: 1px solid rgba(74,111,159,0.12); border-radius: var(--radius-md); padding: var(--space-md); margin-bottom: var(--space-sm); cursor: pointer; transition: all var(--transition-fast); }
     .kanban-card:hover { border-color: rgba(250,200,0,0.2); }
     .kanban-card h5 { font-size: var(--font-size-sm); font-weight: 600; color: var(--white); margin-bottom: 2px; }
-    .kanban-card p { font-size: var(--font-size-xs); color: var(--navy-300); }
+    .kanban-card p { font-size: var(--font-size-xs); color: var(--navy-200); }
 
     /* ---- Candidate search ---- */
     .candidate-result { display: flex; align-items: center; gap: var(--space-lg); padding: var(--space-lg); background: linear-gradient(145deg,rgba(21,43,74,0.4),rgba(15,29,53,0.6)); border: 1px solid rgba(74,111,159,0.12); border-radius: var(--radius-lg); margin-bottom: var(--space-md); transition: all var(--transition-fast); }
@@ -63,7 +63,7 @@
     .search-bar { display: flex; align-items: center; gap: var(--space-sm); background: rgba(6,13,26,0.5); border: 1px solid rgba(74,111,159,0.25); border-radius: var(--radius-md); padding: 0.5rem 1rem; transition: border-color var(--transition-fast); }
     .search-bar:focus-within { border-color: var(--gold-500); box-shadow: 0 0 0 3px rgba(250,200,0,0.1); }
     .search-bar input { flex: 1; background: transparent; border: none; outline: none; color: var(--white); font-family: var(--font-primary); font-size: var(--font-size-sm); }
-    .search-bar input::placeholder { color: var(--navy-300); }
+    .search-bar input::placeholder { color: var(--navy-200); }
 
     .stat-card { background: linear-gradient(145deg,rgba(21,43,74,0.5),rgba(15,29,53,0.7)); border: 1px solid rgba(74,111,159,0.12); border-radius: var(--radius-xl); padding: var(--space-lg); text-align: center; }
     .stat-card .stat-value { font-size: var(--font-size-3xl); font-weight: 800; color: var(--gold-500); line-height: 1.1; margin-bottom: 2px; }
@@ -74,7 +74,7 @@
     .activity-item:last-child { border-bottom: none; }
     .activity-icon { width: 36px; height: 36px; border-radius: 50%; display: flex; align-items: center; justify-content: center; flex-shrink: 0; font-size: 0.8rem; }
     .activity-text { font-size: var(--font-size-sm); color: var(--navy-100); }
-    .activity-time { font-size: var(--font-size-xs); color: var(--navy-300); margin-top: 2px; }
+    .activity-time { font-size: var(--font-size-xs); color: var(--navy-200); margin-top: 2px; }
 
     @media (max-width:1024px){ .stats-grid { grid-template-columns: repeat(2,1fr); } .dashboard-grid, .dashboard-grid-wide { grid-template-columns: 1fr; } .kanban-board { grid-template-columns: repeat(2,1fr); } }
     @media (max-width:768px){ .sidebar { width: 100%; position: fixed; left: -100%; transition: left var(--transition-base); } .sidebar.open { left: 0; } .main-content { margin-left: 0; } .stats-grid { grid-template-columns: 1fr 1fr; } .portal-content { padding: var(--space-lg); } .kanban-board { grid-template-columns: 1fr; } }
@@ -375,7 +375,7 @@
             <div class="card">
               <h3 style="font-size:var(--font-size-lg);font-weight:600;color:var(--white);margin-bottom:var(--space-lg);"><span class="lang-en">Time-to-Hire Trend</span><span class="lang-nl">Time-to-Hire Trend</span></h3>
               <div class="chart-placeholder" style="height:200px;">
-                <div style="text-align:center;color:var(--navy-300);font-size:var(--font-size-sm);">
+                <div style="text-align:center;color:var(--navy-200);font-size:var(--font-size-sm);">
                   <i class="fa-regular fa-chart-line" style="font-size:2rem;margin-bottom:var(--space-md);display:block;"></i>
                   <span class="lang-en">Chart: Avg days to hire per quarter</span>
                   <span class="lang-nl">Grafiek: Gemiddelde dagen per kwartaal</span>
@@ -385,7 +385,7 @@
             <div class="card">
               <h3 style="font-size:var(--font-size-lg);font-weight:600;color:var(--white);margin-bottom:var(--space-lg);"><span class="lang-en">Pipeline Funnel</span><span class="lang-nl">Pipeline Trechter</span></h3>
               <div class="chart-placeholder" style="height:200px;">
-                <div style="text-align:center;color:var(--navy-300);font-size:var(--font-size-sm);">
+                <div style="text-align:center;color:var(--navy-200);font-size:var(--font-size-sm);">
                   <i class="fa-regular fa-chart-bar" style="font-size:2rem;margin-bottom:var(--space-md);display:block;"></i>
                   <span class="lang-en">Chart: Application → Screening → Interview → Offer</span>
                   <span class="lang-nl">Grafiek: Sollicitatie → Screening → Gesprek → Aanbod</span>
@@ -489,7 +489,7 @@
                   <span class="lang-en">Danger Zone</span>
                   <span class="lang-nl">Gevarenzone</span>
                 </h3>
-                <p style="font-size:var(--font-size-sm);color:var(--navy-300);margin-bottom:var(--space-lg);">
+                <p style="font-size:var(--font-size-sm);color:var(--navy-200);margin-bottom:var(--space-lg);">
                   <span class="lang-en">This will permanently deactivate your account.</span>
                   <span class="lang-nl">Dit zal uw account permanent deactiveren.</span>
                 </p>
@@ -650,7 +650,7 @@
         const data = await res.json();
         const list = document.getElementById('jobsList');
         if (!data.items || data.items.length === 0) {
-          list.innerHTML = '<p style="color:var(--navy-300);text-align:center;padding:var(--space-2xl);">No jobs yet. Create your first job!</p>';
+          list.innerHTML = '<p style="color:var(--navy-200);text-align:center;padding:var(--space-2xl);">No jobs yet. Create your first job!</p>';
           return;
         }
         list.innerHTML = data.items.map(j => {
@@ -771,7 +771,7 @@
         if (!data.items || data.items.length === 0) {
           results.forEach(r => r.style.display = 'none');
           container.querySelector('.pagination')?.insertAdjacentHTML('beforebegin',
-            '<p style="color:var(--navy-300);text-align:center;padding:var(--space-lg);">No candidates found.</p>');
+            '<p style="color:var(--navy-200);text-align:center;padding:var(--space-lg);">No candidates found.</p>');
           return;
         }
         results.forEach((r, i) => {

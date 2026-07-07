@@ -21,7 +21,7 @@
     .sidebar-logo a { display: flex; align-items: center; gap: var(--space-sm); }
     .sidebar-nav { flex: 1; padding: var(--space-md) 0; }
     .sidebar-nav-item { display: flex; align-items: center; gap: var(--space-md); padding: 0.75rem var(--space-xl); font-size: var(--font-size-sm); font-weight: 500; color: var(--navy-200); text-decoration: none; transition: all var(--transition-fast); border-left: 3px solid transparent; cursor: pointer; background: none; width: 100%; font-family: var(--font-primary); text-align: left; }
-    .sidebar-nav-item i { width: 20px; text-align: center; font-size: 1rem; color: var(--navy-300); transition: color var(--transition-fast); }
+    .sidebar-nav-item i { width: 20px; text-align: center; font-size: 1rem; color: var(--navy-200); transition: color var(--transition-fast); }
     .sidebar-nav-item:hover { color: var(--white); background: rgba(74,111,159,0.08); }
     .sidebar-nav-item.active { color: var(--gold-500); border-left-color: var(--gold-500); background: rgba(250,200,0,0.06); }
     .sidebar-nav-item.active i { color: var(--gold-500); }
@@ -30,7 +30,7 @@
     .sidebar-user { display: flex; align-items: center; gap: var(--space-md); }
     .sidebar-user-info { flex: 1; min-width: 0; }
     .sidebar-user-name { font-size: var(--font-size-sm); font-weight: 600; color: var(--white); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .sidebar-user-email { font-size: var(--font-size-xs); color: var(--navy-300); }
+    .sidebar-user-email { font-size: var(--font-size-xs); color: var(--navy-200); }
     .main-content { flex: 1; margin-left: var(--sidebar-width); min-height: 100vh; background: var(--navy-800); }
     .portal-header { display: flex; align-items: center; justify-content: space-between; padding: var(--space-lg) var(--space-2xl); background: rgba(10,22,40,0.9); backdrop-filter: blur(12px); border-bottom: 1px solid rgba(74,111,159,0.1); position: sticky; top: 0; z-index: 50; }
     .portal-header h1 { font-size: var(--font-size-xl); font-weight: 700; color: var(--white); }
@@ -49,7 +49,7 @@
     .search-bar { display: flex; align-items: center; gap: var(--space-sm); background: rgba(6,13,26,0.5); border: 1px solid rgba(74,111,159,0.25); border-radius: var(--radius-md); padding: 0.5rem 1rem; transition: border-color var(--transition-fast); }
     .search-bar:focus-within { border-color: var(--gold-500); box-shadow: 0 0 0 3px rgba(250,200,0,0.1); }
     .search-bar input { flex: 1; background: transparent; border: none; outline: none; color: var(--white); font-family: var(--font-primary); font-size: var(--font-size-sm); }
-    .search-bar input::placeholder { color: var(--navy-300); }
+    .search-bar input::placeholder { color: var(--navy-200); }
     .table-wrap { overflow-x: auto; background: linear-gradient(145deg,rgba(21,43,74,0.5),rgba(15,29,53,0.7)); border: 1px solid rgba(74,111,159,0.15); border-radius: var(--radius-xl); }
     table { width: 100%; border-collapse: collapse; }
     table th { text-align: left; padding: var(--space-md) var(--space-lg); font-size: var(--font-size-xs); font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: var(--navy-200); background: rgba(6,13,26,0.3); border-bottom: 1px solid rgba(74,111,159,0.15); }
@@ -60,8 +60,8 @@
     .activity-item:last-child { border-bottom: none; }
     .activity-icon { width: 36px; height: 36px; border-radius: 50%; display: flex; align-items: center; justify-content: center; flex-shrink: 0; font-size: 0.8rem; }
     .activity-text { font-size: var(--font-size-sm); color: var(--navy-100); }
-    .activity-time { font-size: var(--font-size-xs); color: var(--navy-300); margin-top: 2px; }
-    .chart-placeholder { width: 100%; height: 180px; background: linear-gradient(145deg,rgba(21,43,74,0.3),rgba(15,29,53,0.5)); border-radius: var(--radius-lg); display: flex; align-items: center; justify-content: center; color: var(--navy-300); font-size: var(--font-size-sm); }
+    .activity-time { font-size: var(--font-size-xs); color: var(--navy-200); margin-top: 2px; }
+    .chart-placeholder { width: 100%; height: 180px; background: linear-gradient(145deg,rgba(21,43,74,0.3),rgba(15,29,53,0.5)); border-radius: var(--radius-lg); display: flex; align-items: center; justify-content: center; color: var(--navy-200); font-size: var(--font-size-sm); }
     .toggle-switch { display: flex; align-items: center; gap: var(--space-md); }
     .toggle-switch input[type="checkbox"] { appearance: none; width: 44px; height: 24px; background: rgba(74,111,159,0.3); border-radius: 12px; position: relative; cursor: pointer; transition: background var(--transition-fast); }
     .toggle-switch input[type="checkbox"]::before { content: ''; position: absolute; top: 3px; left: 3px; width: 18px; height: 18px; border-radius: 50%; background: var(--white); transition: transform var(--transition-fast); }
@@ -268,7 +268,7 @@
                   <td style="color:var(--navy-200);">m.jansen@email.com</td>
                   <td><span class="badge badge-gold lang-en">Candidate</span><span class="badge badge-gold lang-nl">Kandidaat</span></td>
                   <td><span class="badge badge-green">Active</span></td>
-                  <td style="font-size:var(--font-size-xs);color:var(--navy-300);">Mar 2025</td>
+                  <td style="font-size:var(--font-size-xs);color:var(--navy-200);">Mar 2025</td>
                   <td><button class="btn btn-sm btn-ghost" style="color:var(--navy-200);" onclick="showUserActions(this)"><i class="fa-regular fa-ellipsis-vertical"></i></button></td>
                 </tr>
                 <tr>
@@ -276,7 +276,7 @@
                   <td style="color:var(--navy-200);">j.bakker@email.com</td>
                   <td><span class="badge badge-gold lang-en">Candidate</span><span class="badge badge-gold lang-nl">Kandidaat</span></td>
                   <td><span class="badge badge-blue">Pending</span></td>
-                  <td style="font-size:var(--font-size-xs);color:var(--navy-300);">2h ago</td>
+                  <td style="font-size:var(--font-size-xs);color:var(--navy-200);">2h ago</td>
                   <td><button class="btn btn-sm btn-ghost" style="color:var(--navy-200);"><i class="fa-regular fa-ellipsis-vertical"></i></button></td>
                 </tr>
                 <tr>
@@ -284,7 +284,7 @@
                   <td style="color:var(--navy-200);">hr@techcorp.nl</td>
                   <td><span class="badge badge-blue lang-en">Client</span><span class="badge badge-blue lang-nl">Opdrachtgever</span></td>
                   <td><span class="badge badge-green">Active</span></td>
-                  <td style="font-size:var(--font-size-xs);color:var(--navy-300);">Jan 2025</td>
+                  <td style="font-size:var(--font-size-xs);color:var(--navy-200);">Jan 2025</td>
                   <td><button class="btn btn-sm btn-ghost" style="color:var(--navy-200);"><i class="fa-regular fa-ellipsis-vertical"></i></button></td>
                 </tr>
                 <tr>
@@ -292,7 +292,7 @@
                   <td style="color:var(--navy-200);">spganesh@gsprecruitment.nl</td>
                   <td><span class="badge badge-red lang-en">Admin</span><span class="badge badge-red lang-nl">Admin</span></td>
                   <td><span class="badge badge-green">Active</span></td>
-                  <td style="font-size:var(--font-size-xs);color:var(--navy-300);">2023</td>
+                  <td style="font-size:var(--font-size-xs);color:var(--navy-200);">2023</td>
                   <td><button class="btn btn-sm btn-ghost" style="color:var(--navy-200);"><i class="fa-regular fa-ellipsis-vertical"></i></button></td>
                 </tr>
               </tbody>
@@ -619,11 +619,11 @@
                 </tr>
               </thead>
               <tbody>
-                <tr><td style="font-size:var(--font-size-xs);color:var(--navy-300);">2025-03-20 14:32</td><td>User Login</td><td>m.jansen@email.com</td><td>IP: 192.168.x.x</td></tr>
-                <tr><td style="font-size:var(--font-size-xs);color:var(--navy-300);">2025-03-20 13:15</td><td>Job Created</td><td>hr@techcorp.nl</td><td>Senior Embedded Engineer</td></tr>
-                <tr><td style="font-size:var(--font-size-xs);color:var(--navy-300);">2025-03-20 11:47</td><td>Registration</td><td>j.bakker@email.com</td><td>Candidate account created</td></tr>
-                <tr><td style="font-size:var(--font-size-xs);color:var(--navy-300);">2025-03-20 10:02</td><td>Placement</td><td>admin@gsptalent.com</td><td>M. Jansen → ASML (€85K)</td></tr>
-                <tr><td style="font-size:var(--font-size-xs);color:var(--navy-300);">2025-03-19 16:20</td><td>Application</td><td>s.visser@email.com</td><td>Applied to C++ Engineer @ Philips</td></tr>
+                <tr><td style="font-size:var(--font-size-xs);color:var(--navy-200);">2025-03-20 14:32</td><td>User Login</td><td>m.jansen@email.com</td><td>IP: 192.168.x.x</td></tr>
+                <tr><td style="font-size:var(--font-size-xs);color:var(--navy-200);">2025-03-20 13:15</td><td>Job Created</td><td>hr@techcorp.nl</td><td>Senior Embedded Engineer</td></tr>
+                <tr><td style="font-size:var(--font-size-xs);color:var(--navy-200);">2025-03-20 11:47</td><td>Registration</td><td>j.bakker@email.com</td><td>Candidate account created</td></tr>
+                <tr><td style="font-size:var(--font-size-xs);color:var(--navy-200);">2025-03-20 10:02</td><td>Placement</td><td>admin@gsptalent.com</td><td>M. Jansen → ASML (€85K)</td></tr>
+                <tr><td style="font-size:var(--font-size-xs);color:var(--navy-200);">2025-03-19 16:20</td><td>Application</td><td>s.visser@email.com</td><td>Applied to C++ Engineer @ Philips</td></tr>
               </tbody>
             </table>
           </div>

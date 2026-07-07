@@ -16,6 +16,47 @@ const Auth = {
     return localStorage.getItem('gsp_cookie_consent') === 'true';
   },
 
+  /* ---- Modal focus trap: keyboard-only users can't tab out, Escape closes ---- */
+  trapFocus(modalEl, triggerEl) {
+    if (!modalEl) return;
+    const focusables = modalEl.querySelectorAll(
+      'input:not([disabled]), button:not([disabled]), select:not([disabled]), textarea:not([disabled]), a[href]'
+    );
+    if (focusables.length === 0) return;
+    const first = focusables[0];
+    const last = focusables[focusables.length - 1];
+    first.focus();
+
+    const handleKey = (e) => {
+      if (e.key === 'Escape') {
+        modalEl.classList.remove('active');
+        this.releaseFocusTrap(modalEl, triggerEl);
+        return;
+      }
+      if (e.key !== 'Tab') return;
+      if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    };
+    modalEl.addEventListener('keydown', handleKey);
+    modalEl._focusTrapHandler = handleKey;
+    modalEl._focusTrapTrigger = triggerEl;
+  },
+
+  releaseFocusTrap(modalEl, triggerEl) {
+    if (!modalEl) return;
+    if (modalEl._focusTrapHandler) {
+      modalEl.removeEventListener('keydown', modalEl._focusTrapHandler);
+      modalEl._focusTrapHandler = null;
+    }
+    const returnTo = triggerEl || modalEl._focusTrapTrigger;
+    if (returnTo && typeof returnTo.focus === 'function') returnTo.focus();
+  },
+
   /* ---- Get stored token ---- */
   getToken() {
     if (!this.hasCookieConsent()) return null;
@@ -299,14 +340,19 @@ const Auth = {
     const email = document.getElementById('forgotPwEmail');
     const errEl = document.getElementById('forgotPwError');
     const successEl = document.getElementById('forgotPwSuccess');
+    const triggerEl = document.getElementById('forgotPwLink');
 
     if (errEl) errEl.textContent = '';
     if (errEl) errEl.style.display = 'none';
     if (successEl) successEl.textContent = '';
     if (successEl) successEl.style.display = 'none';
 
-    const closeHandler = () => modal.classList.remove('active');
-    const overlayHandler = (e) => { if (e.target === modal) modal.classList.remove('active'); };
+    const closeHandler = () => {
+      modal.classList.remove('active');
+      this.releaseFocusTrap(modal, triggerEl);
+    };
+    const overlayHandler = (e) => { if (e.target === modal) closeHandler(); };
+    this.trapFocus(modal, triggerEl);
 
     // Clean up old listeners by cloning
     const newCloseBtn = closeBtn.cloneNode(true);
@@ -349,7 +395,7 @@ const Auth = {
             successEl.style.display = 'block';
           }
           this.toast('Reset link sent if the email exists.', 'success');
-          setTimeout(() => { modal.classList.remove('active'); }, 2500);
+          setTimeout(closeHandler, 2500);
         } else {
           const d = await res.json();
           if (errEl) {
