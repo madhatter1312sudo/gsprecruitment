@@ -1269,9 +1269,9 @@
     async function loadDashboard() {
       try {
         const [profileRes, dashboardRes, matchesRes] = await Promise.all([
-          Auth.fetch('/candidate/profile'),
-          Auth.fetch('/candidate/dashboard'),
-          Auth.fetch('/candidate/matches?limit=5'),
+          Auth.fetch('/v1/candidate/profile'),
+          Auth.fetch('/v1/candidate/dashboard'),
+          Auth.fetch('/v1/candidate/matches?limit=5'),
         ]);
         const profile = profileRes ? await profileRes.json() : {};
         const dashboard = dashboardRes ? await dashboardRes.json() : {};
@@ -1367,7 +1367,7 @@
        ================================================================ */
     async function loadProfile() {
       try {
-        const res = await Auth.fetch('/candidate/profile');
+        const res = await Auth.fetch('/v1/candidate/profile');
         if (!res) return;
         const profile = await res.json();
         if (!profile) return;
@@ -1410,7 +1410,7 @@
           phone: document.getElementById('profPhone').value,
           current_title: document.getElementById('profRole').value,
         };
-        const res = await Auth.fetch('/candidate/profile', {
+        const res = await Auth.fetch('/v1/candidate/profile', {
           method: 'PUT',
           body: JSON.stringify(data),
         });
@@ -1499,7 +1499,7 @@
        ================================================================ */
     async function loadMatches() {
       try {
-        const res = await Auth.fetch('/candidate/matches?limit=50');
+        const res = await Auth.fetch('/v1/candidate/matches?limit=50');
         if (!res) return;
         const data = await res.json();
         const list = document.getElementById('matchesList');
@@ -1533,7 +1533,7 @@
     /* ---- Apply to job ---- */
     window.applyToJob = async function(jobId) {
       try {
-        const res = await Auth.fetch('/candidate/applications', {
+        const res = await Auth.fetch('/v1/candidate/applications', {
           method: 'POST',
           body: JSON.stringify({ job_id: jobId }),
         });
@@ -1557,7 +1557,7 @@
        ================================================================ */
     async function loadApplications() {
       try {
-        const res = await Auth.fetch('/candidate/applications?limit=50');
+        const res = await Auth.fetch('/v1/candidate/applications?limit=50');
         if (!res) return;
         const data = await res.json();
         const tbody = document.querySelector('#section-applications table tbody');
@@ -1589,7 +1589,7 @@
        ================================================================ */
     async function loadMessages() {
       try {
-        const res = await Auth.fetch('/candidate/messages?limit=50');
+        const res = await Auth.fetch('/v1/candidate/messages?limit=50');
         if (!res) return;
         const data = await res.json();
         const msgContainer = document.querySelector('#section-messages .dashboard-grid > div:first-child');
@@ -1624,7 +1624,7 @@
       const role = document.getElementById('salaryRole').value;
       const level = document.getElementById('salaryLevel').value;
       try {
-        const res = await Auth.fetch(`/candidate/salary-benchmark?role_title=${encodeURIComponent(role)}&seniority=${encodeURIComponent(level)}`);
+        const res = await Auth.fetch(`/v1/candidate/salary-benchmark?role_title=${encodeURIComponent(role)}&seniority=${encodeURIComponent(level)}`);
         if (!res) return;
         const data = await res.json();
         const chartEl = document.querySelector('#section-salary .chart-placeholder');
@@ -1664,12 +1664,12 @@
       const input = document.querySelector('#section-profile input[placeholder*="skill"]');
       if (!input || !input.value.trim()) return;
       try {
-        const profileRes = await Auth.fetch('/candidate/profile');
+        const profileRes = await Auth.fetch('/v1/candidate/profile');
         if (!profileRes) return;
         const profile = await profileRes.json();
         const skills = profile.skills || [];
         skills.push(input.value.trim());
-        await Auth.fetch('/candidate/profile', {
+        await Auth.fetch('/v1/candidate/profile', {
           method: 'PUT',
           body: JSON.stringify({ skills }),
         });

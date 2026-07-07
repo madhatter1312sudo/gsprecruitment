@@ -903,7 +903,7 @@
     const token = Auth.getToken();
     if (!token) return;
 
-    fetch(`${API}/api/admin/dashboard`, {
+    fetch(`${API}/api/v1/admin/dashboard`, {
       headers: { 'Authorization': 'Bearer ' + token }
     })
       .then(r => {

@@ -1,15 +1,13 @@
 # GSP Recruitment — Caddyfile context
-# Serve this directory with:
-#   caddy file-server --domain gsptalent.com --root /home/og/projects/gsp-recruitment/website
+# Served by the system Caddy instance (/etc/caddy/Caddyfile) at:
 #
-# Or in a Caddyfile:
-#   gsptalent.com, www.gsptalent.com {
-#       root * /home/og/projects/gsp-recruitment/website
-#       file_server
-#       encode gzip
-#       header /* {
-#           Strict-Transport-Security "max-age=31536000; includeSubDomains"
-#           X-Content-Type-Options "nosniff"
-#           X-Frame-Options "SAMEORIGIN"
+#   gsprecruitment.nl {
+#       handle /api/* { reverse_proxy localhost:8000 }
+#       handle /health { reverse_proxy localhost:8000 }
+#       handle /openapi.json { reverse_proxy localhost:8000 }
+#       handle {
+#           root * /home/og/projects/gsp-recruitment/website
+#           file_server
+#           try_files {path} /index.html
 #       }
 #   }
