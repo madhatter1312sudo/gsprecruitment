@@ -28,4 +28,14 @@ USER talentos
 
 EXPOSE 8000
 
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "4"]
+# --forwarded-allow-ips=* trusts X-Forwarded-For from whatever connects to
+# uvicorn directly. Safe here specifically because docker-compose.yml binds
+# this container's port to 127.0.0.1 only -- the sole thing that can ever
+# connect is the trusted local Caddy reverse proxy, never the public
+# internet. Without this, slowapi's rate limiter keys on the Docker bridge
+# gateway IP for every request (since that's the apparent peer, not the
+# real client), making every rate limit a single shared global bucket
+# instead of per-client -- trivially enabling one bad actor to lock out
+# all users from login/register/password-reset.
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "4", \
+     "--proxy-headers", "--forwarded-allow-ips=*"]
