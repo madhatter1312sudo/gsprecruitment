@@ -582,7 +582,7 @@
       // Try API first
       try {
         const res = await fetch(
-          `${API}/api/public/salary-data?role_title=${encodeURIComponent(role)}&seniority=${level}&location=${encodeURIComponent(location)}`
+          `${API}/api/v1/public/salary-data?role_title=${encodeURIComponent(role)}&seniority=${level}&location=${encodeURIComponent(location)}`
         );
         if (res.ok) {
           const data = await res.json();
@@ -788,7 +788,7 @@
         }
 
         try {
-          const res = await fetch(`${API}/api/public/lead`, {
+          const res = await fetch(`${API}/api/v1/public/lead`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -857,7 +857,7 @@
       delete data.gdpr;
 
       try {
-        const res = await fetch(`${API}/api/public/lead`, {
+        const res = await fetch(`${API}/api/v1/public/lead`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(data)
