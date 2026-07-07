@@ -1,5 +1,13 @@
 # GSP Recruitment — Docker Compose
 # Caddy-compatible versie (alleen 127.0.0.1 binding, geen nginx)
+#
+# THIS IS THE FILE ACTUALLY DEPLOYED TO PRODUCTION (rsynced by
+# .github/workflows/deploy.yml to the Hetzner VPS). It only runs
+# postgres + backend -- no Celery/Redis, so the "AI matching" /
+# "Apollo auto-sourcing" background tasks in talent-os/backend/tasks/
+# are not currently running anywhere. See talent-os/docker-compose.yml
+# for the full-stack reference config (postgres+redis+backend+celery+
+# nginx) if that feature ever gets built out -- it is NOT deployed.
 
 services:
   # ── PostgreSQL ──────────────────────────────────────────────────────────
@@ -15,6 +23,7 @@ services:
       - ./talent-os/.env
     volumes:
       - pgdata:/var/lib/postgresql/data
+      - ./talent-os/scripts/init_db.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
     ports:
       - "127.0.0.1:5432:5432"
     healthcheck:

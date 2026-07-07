@@ -5,7 +5,33 @@ on:
     branches: [main]
 
 jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: API contract check (frontend calls vs backend routes)
+        run: python3 scripts/check_api_contract.py
+
+      - name: Install backend test dependencies
+        run: pip install -r talent-os/backend/requirements.txt
+
+      - name: Run backend tests
+        env:
+          JWT_SECRET: "ci-test-secret-not-used-in-production-32chars"
+          API_KEY: "ci-test-api-key-not-used-in-production"
+          WEBHOOK_SECRET: "ci-test-webhook-secret-not-used-in-production"
+          POSTGRES_PASSWORD: "ci-test-postgres-password"
+        run: |
+          cd talent-os/backend
+          python3 -m pytest -v
+
   deploy:
+    needs: test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -33,6 +59,14 @@ jobs:
           # The frontend is on Cloudflare Pages, which auto-deploys from this repo
           echo "Frontend is auto-deployed by Cloudflare Pages from this repository"
 
+      - name: Tag current image for rollback before replacing it
+        run: |
+          ssh gsp@188.245.254.248 "
+            if docker image inspect gsp-recruitment-backend:latest >/dev/null 2>&1; then
+              docker tag gsp-recruitment-backend:latest gsp-recruitment-backend:previous
+            fi
+          "
+
       - name: SSH and restart Docker containers
         run: |
           ssh gsp@188.245.254.248 "
@@ -40,7 +74,33 @@ jobs:
             docker compose up -d --build backend && \
             sleep 5 && \
             echo '=== Health Check ===' && \
-            curl -s http://127.0.0.1:8000/health | python3 -m json.tool
+            curl -sf http://127.0.0.1:8000/health | python3 -m json.tool
+          "
+
+      - name: Tag this build with its git SHA and prune old history
+        if: success()
+        continue-on-error: true  # nice-to-have; must never fail an otherwise-successful deploy
+        run: |
+          ssh gsp@188.245.254.248 "
+            docker tag gsp-recruitment-backend:latest gsp-recruitment-backend:${{ github.sha }} && \
+            docker images gsp-recruitment-backend --format '{{.Tag}}' \
+              | grep -vE '^(latest|previous)\$' \
+              | tail -n +6 \
+              | xargs -r -I{} docker rmi gsp-recruitment-backend:{}
+          "
+
+      - name: Roll back to previous image on health check failure
+        if: failure()
+        run: |
+          ssh gsp@188.245.254.248 "
+            if docker image inspect gsp-recruitment-backend:previous >/dev/null 2>&1; then
+              docker tag gsp-recruitment-backend:previous gsp-recruitment-backend:latest && \
+              cd /home/gsp/projects/gsp-recruitment && \
+              docker compose up -d backend && \
+              echo 'Rolled back to previous image.'
+            else
+              echo 'No previous image tag found -- cannot auto-rollback. Manual intervention needed.'
+            fi
           "
 
       - name: Health check success notification
@@ -49,4 +109,4 @@ jobs:
 
       - name: Health check failure notification
         if: failure()
-        run: echo "❌ Deployment failed! Check the VPS and rollback if needed."
+        run: echo "❌ Deployment failed! Rolled back to the previous image if one was available -- check the VPS."

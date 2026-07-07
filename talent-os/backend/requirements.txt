@@ -25,3 +25,6 @@ python-multipart>=0.0.9,<1.0.0
 # Google API (for Gmail OAuth email sending)
 google-auth>=2.29.0,<3.0.0
 google-auth-oauthlib>=1.2.0,<2.0.0
+
+# Testing (CI only, not needed at runtime)
+pytest>=8.0.0,<9.0.0

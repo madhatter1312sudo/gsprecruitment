@@ -1,4 +1,15 @@
-# Talent OS — Docker Compose
+# Talent OS — Docker Compose (REFERENCE / NOT DEPLOYED)
+#
+# This is NOT the file running in production -- that's /docker-compose.yml
+# at the repo root (rsynced to the VPS by .github/workflows/deploy.yml),
+# which only runs postgres+backend. This full-stack version (postgres+
+# redis+backend+celery-worker+celery-beat+nginx) is kept as a reference
+# for standing up the AI matching / Apollo auto-sourcing background
+# tasks (talent-os/backend/tasks/), which are currently unbuilt/inactive
+# in production. If that feature gets greenlit, this is the starting
+# point -- but it will need a review pass first (memory limits assume a
+# 32GB VPS; production is smaller, and nginx here duplicates Caddy's job
+# on the actual host).
 # Memory limits ensure stability on 32GB VPS.
 # ALL AI/LLM calls go through OpenRouter. NO models hosted in any container.
 version: "3.8"
