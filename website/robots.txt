@@ -5,4 +5,4 @@ Disallow: /candidate/
 Disallow: /client/
 Disallow: /*?*
 
-Sitemap: https://gsp-recruitment.nl/sitemap.xml
+Sitemap: https://gsprecruitment.nl/sitemap.xml
