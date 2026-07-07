@@ -40,3 +40,9 @@ SETUP_SUMMARY.md
 COMPETITOR-ANALYSIS.md
 ENTERPRISE-ARCHITECTURE-SPEC.md
 SITE-DESIGN-SPEC.md
+
+# wrangler files
+.wrangler
+.dev.vars*
+!.dev.vars.example
+!.env.example
