@@ -10,7 +10,7 @@ class UserRegister(BaseModel):
     email: EmailStr
     password: str = Field(..., min_length=8, max_length=128)
     full_name: str = Field(..., min_length=1, max_length=255)
-    role: str = Field("candidate", pattern=r"^(candidate|client|admin)$")
+    role: str = Field("candidate", pattern=r"^(candidate|client)$")
 
 
 class UserLogin(BaseModel):
