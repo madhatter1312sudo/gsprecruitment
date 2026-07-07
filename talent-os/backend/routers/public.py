@@ -2,7 +2,7 @@
 Talent OS — Public API Router.
 Unauthenticated endpoints for site content, salary benchmarks, and lead submission.
 """
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from core.database import fetch_all, fetch_one, execute
 from core.config import settings
 from models.schemas import SiteContentResponse, LeadSubmit, SalaryBenchmarkResponse
@@ -19,8 +19,9 @@ limiter = Limiter(key_func=get_remote_address)
 
 @router.get("/site-content", response_model=SiteContentResponse)
 @limiter.limit("30/minute")
-async def get_site_content(request: Request, section: str = Query(..., description="Content section (e.g. hero, features, about)")):
+async def get_site_content(request: Request, response: Response, section: str = Query(..., description="Content section (e.g. hero, features, about)")):
     """Get site content by section."""
+    response.headers["Cache-Control"] = "public, max-age=300"
     rows = await fetch_all(
         "SELECT * FROM site_content WHERE section = $1 ORDER BY sort_order, key",
         section,
@@ -46,13 +47,14 @@ async def get_site_content(request: Request, section: str = Query(..., descripti
 
 @router.get("/salary-data", response_model=List[SalaryBenchmarkResponse])
 @limiter.limit("30/minute")
-async def get_public_salary_data(request: Request,
+async def get_public_salary_data(request: Request, response: Response,
     role_title: Optional[str] = Query(None),
     location: Optional[str] = Query(None),
     seniority: Optional[str] = Query(None),
     limit: int = Query(50, ge=1, le=200),
 ):
     """Get salary benchmark data (public)."""
+    response.headers["Cache-Control"] = "public, max-age=300"
     conditions = []
     params = []
     idx = 1

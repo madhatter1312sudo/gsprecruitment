@@ -13,6 +13,7 @@ from models.schemas import (
 )
 from typing import Optional, List
 from datetime import timedelta
+import asyncio
 
 router = APIRouter(prefix="/api/v1/admin", tags=["admin-portal"])
 
@@ -23,15 +24,22 @@ router = APIRouter(prefix="/api/v1/admin", tags=["admin-portal"])
 async def get_admin_dashboard(current_user: dict = Depends(require_role("admin"))):
     """Get platform-wide dashboard stats."""
     stats = AdminDashboard()
-    stats.total_users = await fetch_val("SELECT COUNT(*) FROM users WHERE deleted_at IS NULL") or 0
-    stats.active_jobs = await fetch_val("SELECT COUNT(*) FROM job_orders WHERE status = 'open' AND deleted_at IS NULL") or 0
-    stats.registered_candidates = await fetch_val("SELECT COUNT(*) FROM users WHERE role = 'candidate' AND deleted_at IS NULL") or 0
-    stats.active_clients = await fetch_val("SELECT COUNT(*) FROM clients WHERE deleted_at IS NULL") or 0
-    stats.placements_this_week = await fetch_val(
-        """SELECT COUNT(*) FROM matches
-           WHERE status = 'placed'
-           AND created_at >= DATE_TRUNC('week', NOW())""",
-    ) or 0
+    total_users, active_jobs, registered_candidates, active_clients, placements_this_week = await asyncio.gather(
+        fetch_val("SELECT COUNT(*) FROM users WHERE deleted_at IS NULL"),
+        fetch_val("SELECT COUNT(*) FROM job_orders WHERE status = 'open' AND deleted_at IS NULL"),
+        fetch_val("SELECT COUNT(*) FROM users WHERE role = 'candidate' AND deleted_at IS NULL"),
+        fetch_val("SELECT COUNT(*) FROM clients WHERE deleted_at IS NULL"),
+        fetch_val(
+            """SELECT COUNT(*) FROM matches
+               WHERE status = 'placed'
+               AND created_at >= DATE_TRUNC('week', NOW())""",
+        ),
+    )
+    stats.total_users = total_users or 0
+    stats.active_jobs = active_jobs or 0
+    stats.registered_candidates = registered_candidates or 0
+    stats.active_clients = active_clients or 0
+    stats.placements_this_week = placements_this_week or 0
     return stats
 
 
@@ -343,9 +351,16 @@ async def list_all_candidates(
     total = await fetch_val(f"SELECT COUNT(*) FROM candidates c WHERE {where}", *params) or 0
     params_ext = params + [limit, offset]
     rows = await fetch_all(
-        f"""SELECT c.*, (SELECT COUNT(*) FROM matches WHERE candidate_id = c.id) AS match_count,
-                   (SELECT COUNT(*) FROM matches WHERE candidate_id = c.id AND status = 'placed') AS placement_count
+        f"""SELECT c.*, COALESCE(m.match_count, 0) AS match_count,
+                   COALESCE(m.placement_count, 0) AS placement_count
             FROM candidates c
+            LEFT JOIN (
+                SELECT candidate_id,
+                       COUNT(*) AS match_count,
+                       COUNT(*) FILTER (WHERE status = 'placed') AS placement_count
+                FROM matches
+                GROUP BY candidate_id
+            ) m ON m.candidate_id = c.id
             WHERE {where}
             ORDER BY c.created_at DESC
             LIMIT ${idx} OFFSET ${idx + 1}""",
@@ -362,29 +377,43 @@ async def get_platform_analytics(current_user: dict = Depends(require_role("admi
     """Get platform-wide analytics data."""
     analytics = AdminAnalytics()
 
-    # User growth by month (last 12 months)
-    user_growth_rows = await fetch_all(
-        """SELECT DATE_TRUNC('month', created_at) AS month, COUNT(*) AS count
-           FROM users WHERE deleted_at IS NULL AND created_at >= NOW() - INTERVAL '12 months'
-           GROUP BY month ORDER BY month""",
+    (
+        user_growth_rows, total_jobs, filled_jobs, total_clients, repeat_clients,
+    ) = await asyncio.gather(
+        fetch_all(
+            """SELECT DATE_TRUNC('month', created_at) AS month, COUNT(*) AS count
+               FROM users WHERE deleted_at IS NULL AND created_at >= NOW() - INTERVAL '12 months'
+               GROUP BY month ORDER BY month""",
+        ),
+        fetch_val("SELECT COUNT(*) FROM job_orders WHERE deleted_at IS NULL"),
+        fetch_val("SELECT COUNT(*) FROM job_orders WHERE filled_at IS NOT NULL AND deleted_at IS NULL"),
+        fetch_val("SELECT COUNT(*) FROM clients WHERE deleted_at IS NULL"),
+        fetch_val(
+            """SELECT COUNT(*) FROM (
+                   SELECT client_id FROM job_orders
+                   WHERE filled_at IS NOT NULL AND deleted_at IS NULL
+                   GROUP BY client_id HAVING COUNT(*) > 1
+               ) repeat_client_groups""",
+        ),
     )
+
     analytics.user_growth = {str(r["month"]): r["count"] for r in user_growth_rows}
 
-    # Job fill rate
-    total_jobs = await fetch_val("SELECT COUNT(*) FROM job_orders WHERE deleted_at IS NULL") or 0
-    filled_jobs = await fetch_val("SELECT COUNT(*) FROM job_orders WHERE filled_at IS NOT NULL AND deleted_at IS NULL") or 0
+    total_jobs = total_jobs or 0
+    filled_jobs = filled_jobs or 0
     analytics.job_fill_rate = round(filled_jobs / total_jobs * 100, 1) if total_jobs > 0 else 0
 
-    # Client retention (clients with multiple jobs)
-    total_clients = await fetch_val("SELECT COUNT(*) FROM clients WHERE deleted_at IS NULL") or 0
-    repeat_clients = await fetch_val(
-        "SELECT COUNT(DISTINCT client_id) FROM job_orders WHERE filled_at IS NOT NULL AND deleted_at IS NULL GROUP BY client_id HAVING COUNT(*) > 1",
-    ) or 0
+    total_clients = total_clients or 0
+    repeat_clients = repeat_clients or 0
     analytics.client_retention_rate = round(repeat_clients / total_clients * 100, 1) if total_clients > 0 else 0
 
     # Candidate satisfaction (simplified: placement rate)
-    total_candidates = await fetch_val("SELECT COUNT(*) FROM candidates WHERE deleted_at IS NULL") or 0
-    placed = await fetch_val("SELECT COUNT(*) FROM matches WHERE status = 'placed'") or 0
+    total_candidates, placed = await asyncio.gather(
+        fetch_val("SELECT COUNT(*) FROM candidates WHERE deleted_at IS NULL"),
+        fetch_val("SELECT COUNT(*) FROM matches WHERE status = 'placed'"),
+    )
+    total_candidates = total_candidates or 0
+    placed = placed or 0
     analytics.candidate_satisfaction = round(placed / total_candidates * 100, 1) if total_candidates > 0 else 0
 
     return analytics

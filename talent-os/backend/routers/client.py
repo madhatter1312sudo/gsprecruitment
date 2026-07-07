@@ -13,6 +13,7 @@ from models.schemas import (
     MessageListResponse, MessageResponse,
 )
 from typing import Optional, List
+import asyncio
 import secrets
 
 router = APIRouter(prefix="/api/v1/client", tags=["client-portal"])
@@ -63,24 +64,30 @@ async def get_client_dashboard(current_user: dict = Depends(require_role("client
 
     cid = client["id"]
     stats = ClientDashboard()
-    stats.active_jobs = await fetch_val(
-        "SELECT COUNT(*) FROM job_orders WHERE client_id = $1 AND status = 'open' AND deleted_at IS NULL", cid,
-    ) or 0
-    stats.total_candidates_matched = await fetch_val(
-        """SELECT COUNT(*) FROM matches m
-           JOIN job_orders j ON j.id = m.job_id
-           WHERE j.client_id = $1""", cid,
-    ) or 0
-    stats.candidates_in_pipeline = await fetch_val(
-        """SELECT COUNT(*) FROM pipeline_entries pe
-           JOIN job_orders j ON j.id = pe.job_id
-           WHERE j.client_id = $1""", cid,
-    ) or 0
-    stats.placements = await fetch_val(
-        """SELECT COUNT(*) FROM matches m
-           JOIN job_orders j ON j.id = m.job_id
-           WHERE j.client_id = $1 AND m.status = 'placed'""", cid,
-    ) or 0
+    active_jobs, total_matched, in_pipeline, placements = await asyncio.gather(
+        fetch_val(
+            "SELECT COUNT(*) FROM job_orders WHERE client_id = $1 AND status = 'open' AND deleted_at IS NULL", cid,
+        ),
+        fetch_val(
+            """SELECT COUNT(*) FROM matches m
+               JOIN job_orders j ON j.id = m.job_id
+               WHERE j.client_id = $1""", cid,
+        ),
+        fetch_val(
+            """SELECT COUNT(*) FROM pipeline_entries pe
+               JOIN job_orders j ON j.id = pe.job_id
+               WHERE j.client_id = $1""", cid,
+        ),
+        fetch_val(
+            """SELECT COUNT(*) FROM matches m
+               JOIN job_orders j ON j.id = m.job_id
+               WHERE j.client_id = $1 AND m.status = 'placed'""", cid,
+        ),
+    )
+    stats.active_jobs = active_jobs or 0
+    stats.total_candidates_matched = total_matched or 0
+    stats.candidates_in_pipeline = in_pipeline or 0
+    stats.placements = placements or 0
     stats.unread_messages = 0  # Placeholder
     return stats
 

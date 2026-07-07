@@ -12,6 +12,7 @@ from models.schemas import (
     SalaryBenchmarkResponse, MessageListResponse, MessageResponse,
 )
 from typing import Optional, List
+import asyncio
 import os
 import uuid
 import logging
@@ -24,6 +25,15 @@ UPLOAD_DIR = "/app/uploads/cv"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 MAX_CV_SIZE_BYTES = 5 * 1024 * 1024  # 5 MB
+
+
+async def _get_candidate_id(user_id: int) -> Optional[int]:
+    """Resolve the candidate record id linked to this user, once per request."""
+    row = await fetch_one(
+        "SELECT id FROM candidates WHERE email = (SELECT email FROM users WHERE id = $1)",
+        user_id,
+    )
+    return row["id"] if row else None
 
 
 # ── Profile ─────────────────────────────────────────────────────────────
@@ -165,16 +175,13 @@ async def get_candidate_matches(
         raise HTTPException(status_code=403, detail="Only candidates can view their matches")
 
     # First get the candidate record linked to this user
-    candidate = await fetch_one(
-        "SELECT id FROM candidates WHERE email = (SELECT email FROM users WHERE id = $1)",
-        current_user["id"],
-    )
-    if not candidate:
+    candidate_id = await _get_candidate_id(current_user["id"])
+    if not candidate_id:
         return {"items": [], "total": 0, "limit": limit, "offset": offset}
 
     total = await fetch_val(
         "SELECT COUNT(*) FROM matches WHERE candidate_id = $1",
-        candidate["id"],
+        candidate_id,
     )
     rows = await fetch_all(
         """SELECT m.*, j.title AS job_title, c.company_name
@@ -184,7 +191,7 @@ async def get_candidate_matches(
            WHERE m.candidate_id = $1
            ORDER BY m.match_score DESC NULLS LAST
            LIMIT $2 OFFSET $3""",
-        candidate["id"], limit, offset,
+        candidate_id, limit, offset,
     )
 
     return {"items": rows, "total": total, "limit": limit, "offset": offset}
@@ -202,16 +209,13 @@ async def get_applications(
     if current_user["role"] != "candidate":
         raise HTTPException(status_code=403, detail="Only candidates can view their applications")
 
-    candidate = await fetch_one(
-        "SELECT id FROM candidates WHERE email = (SELECT email FROM users WHERE id = $1)",
-        current_user["id"],
-    )
-    if not candidate:
+    candidate_id = await _get_candidate_id(current_user["id"])
+    if not candidate_id:
         return {"items": [], "total": 0, "limit": limit, "offset": offset}
 
     total = await fetch_val(
         "SELECT COUNT(*) FROM matches WHERE candidate_id = $1 AND status IN ('applied', 'interviewing', 'offered', 'placed', 'rejected')",
-        candidate["id"],
+        candidate_id,
     )
     rows = await fetch_all(
         """SELECT m.*, j.title AS job_title, c.company_name
@@ -221,7 +225,7 @@ async def get_applications(
            WHERE m.candidate_id = $1 AND m.status IN ('applied', 'interviewing', 'offered', 'placed', 'rejected')
            ORDER BY m.created_at DESC
            LIMIT $2 OFFSET $3""",
-        candidate["id"], limit, offset,
+        candidate_id, limit, offset,
     )
 
     return {"items": rows, "total": total, "limit": limit, "offset": offset}
@@ -236,11 +240,8 @@ async def apply_to_job(
     if current_user["role"] != "candidate":
         raise HTTPException(status_code=403, detail="Only candidates can apply to jobs")
 
-    candidate = await fetch_one(
-        "SELECT id FROM candidates WHERE email = (SELECT email FROM users WHERE id = $1)",
-        current_user["id"],
-    )
-    if not candidate:
+    candidate_id = await _get_candidate_id(current_user["id"])
+    if not candidate_id:
         raise HTTPException(status_code=400, detail="No candidate profile found. Contact support.")
 
     # Check the job exists and is open
@@ -256,7 +257,7 @@ async def apply_to_job(
     # Check if already applied
     existing = await fetch_one(
         "SELECT id FROM matches WHERE candidate_id = $1 AND job_id = $2",
-        candidate["id"], data.job_id,
+        candidate_id, data.job_id,
     )
     if existing:
         raise HTTPException(status_code=409, detail="You have already applied to this job")
@@ -265,7 +266,7 @@ async def apply_to_job(
         """INSERT INTO matches (candidate_id, job_id, status)
            VALUES ($1, $2, 'applied')
            RETURNING *""",
-        candidate["id"], data.job_id,
+        candidate_id, data.job_id,
     )
     return match
 
@@ -282,16 +283,13 @@ async def get_saved_jobs(
     if current_user["role"] != "candidate":
         raise HTTPException(status_code=403, detail="Only candidates can view saved jobs")
 
-    candidate = await fetch_one(
-        "SELECT id FROM candidates WHERE email = (SELECT email FROM users WHERE id = $1)",
-        current_user["id"],
-    )
-    if not candidate:
+    candidate_id = await _get_candidate_id(current_user["id"])
+    if not candidate_id:
         return {"items": [], "total": 0, "limit": limit, "offset": offset}
 
     total = await fetch_val(
         "SELECT COUNT(*) FROM saved_jobs WHERE candidate_id = $1",
-        candidate["id"],
+        candidate_id,
     )
     rows = await fetch_all(
         """SELECT sj.*, j.title AS job_title, j.description, j.salary_min, j.salary_max,
@@ -302,7 +300,7 @@ async def get_saved_jobs(
            WHERE sj.candidate_id = $1
            ORDER BY sj.created_at DESC
            LIMIT $2 OFFSET $3""",
-        candidate["id"], limit, offset,
+        candidate_id, limit, offset,
     )
 
     return {"items": rows, "total": total, "limit": limit, "offset": offset}
@@ -317,11 +315,8 @@ async def save_job(
     if current_user["role"] != "candidate":
         raise HTTPException(status_code=403, detail="Only candidates can save jobs")
 
-    candidate = await fetch_one(
-        "SELECT id FROM candidates WHERE email = (SELECT email FROM users WHERE id = $1)",
-        current_user["id"],
-    )
-    if not candidate:
+    candidate_id = await _get_candidate_id(current_user["id"])
+    if not candidate_id:
         raise HTTPException(status_code=400, detail="No candidate profile found")
 
     # Verify job exists
@@ -335,14 +330,14 @@ async def save_job(
     # Check if already saved
     existing = await fetch_one(
         "SELECT id FROM saved_jobs WHERE candidate_id = $1 AND job_id = $2",
-        candidate["id"], data.job_id,
+        candidate_id, data.job_id,
     )
     if existing:
         return {"message": "Job already saved", "id": existing["id"]}
 
     saved = await fetch_one(
         "INSERT INTO saved_jobs (candidate_id, job_id) VALUES ($1, $2) RETURNING *",
-        candidate["id"], data.job_id,
+        candidate_id, data.job_id,
     )
     return saved
 
@@ -356,16 +351,13 @@ async def unsave_job(
     if current_user["role"] != "candidate":
         raise HTTPException(status_code=403, detail="Only candidates can unsave jobs")
 
-    candidate = await fetch_one(
-        "SELECT id FROM candidates WHERE email = (SELECT email FROM users WHERE id = $1)",
-        current_user["id"],
-    )
-    if not candidate:
+    candidate_id = await _get_candidate_id(current_user["id"])
+    if not candidate_id:
         raise HTTPException(status_code=400, detail="No candidate profile found")
 
     deleted = await execute(
         "DELETE FROM saved_jobs WHERE candidate_id = $1 AND job_id = $2",
-        candidate["id"], job_id,
+        candidate_id, job_id,
     )
     if deleted == "DELETE 0":
         raise HTTPException(status_code=404, detail="Saved job not found")
@@ -385,23 +377,24 @@ async def get_candidate_messages(
     if current_user["role"] != "candidate":
         raise HTTPException(status_code=403, detail="Only candidates can view their messages")
 
-    total = await fetch_val(
-        "SELECT COUNT(*) FROM outreach_messages WHERE candidate_id = (SELECT id FROM candidates WHERE email = (SELECT email FROM users WHERE id = $1))",
-        current_user["id"],
-    )
-    unread = await fetch_val(
-        "SELECT COUNT(*) FROM outreach_messages WHERE candidate_id = (SELECT id FROM candidates WHERE email = (SELECT email FROM users WHERE id = $1)) AND (opened_at IS NULL AND status != 'draft')",
-        current_user["id"],
-    )
+    candidate_id = await _get_candidate_id(current_user["id"])
+    if not candidate_id:
+        return MessageListResponse(messages=[], unread_count=0)
 
-    rows = await fetch_all(
-        """SELECT om.*, c.full_name AS sender_name
-           FROM outreach_messages om
-           LEFT JOIN candidates c ON c.id = om.candidate_id
-           WHERE om.candidate_id = (SELECT id FROM candidates WHERE email = (SELECT email FROM users WHERE id = $1))
-           ORDER BY om.created_at DESC
-           LIMIT $2 OFFSET $3""",
-        current_user["id"], limit, offset,
+    unread, rows = await asyncio.gather(
+        fetch_val(
+            "SELECT COUNT(*) FROM outreach_messages WHERE candidate_id = $1 AND (opened_at IS NULL AND status != 'draft')",
+            candidate_id,
+        ),
+        fetch_all(
+            """SELECT om.*, c.full_name AS sender_name
+               FROM outreach_messages om
+               LEFT JOIN candidates c ON c.id = om.candidate_id
+               WHERE om.candidate_id = $1
+               ORDER BY om.created_at DESC
+               LIMIT $2 OFFSET $3""",
+            candidate_id, limit, offset,
+        ),
     )
 
     return MessageListResponse(messages=rows, unread_count=unread or 0)
@@ -450,28 +443,30 @@ async def get_candidate_dashboard(current_user: dict = Depends(get_current_user)
     if current_user["role"] != "candidate":
         raise HTTPException(status_code=403, detail="Only candidates can view their dashboard")
 
-    candidate = await fetch_one(
-        "SELECT id FROM candidates WHERE email = (SELECT email FROM users WHERE id = $1)",
-        current_user["id"],
-    )
+    candidate_id = await _get_candidate_id(current_user["id"])
 
     stats = CandidateDashboard()
 
-    if candidate:
-        cid = candidate["id"]
-        stats.match_count = await fetch_val(
-            "SELECT COUNT(*) FROM matches WHERE candidate_id = $1 AND match_score >= 50", cid,
-        ) or 0
-        stats.saved_jobs_count = await fetch_val(
-            "SELECT COUNT(*) FROM saved_jobs WHERE candidate_id = $1", cid,
-        ) or 0
-        stats.applications_count = await fetch_val(
-            "SELECT COUNT(*) FROM matches WHERE candidate_id = $1 AND status IN ('applied', 'interviewing', 'offered', 'placed')", cid,
-        ) or 0
-        stats.unread_messages = await fetch_val(
-            """SELECT COUNT(*) FROM outreach_messages
-               WHERE candidate_id = $1 AND (opened_at IS NULL AND status != 'draft')""", cid,
-        ) or 0
+    if candidate_id:
+        match_count, saved_jobs_count, applications_count, unread_messages = await asyncio.gather(
+            fetch_val(
+                "SELECT COUNT(*) FROM matches WHERE candidate_id = $1 AND match_score >= 50", candidate_id,
+            ),
+            fetch_val(
+                "SELECT COUNT(*) FROM saved_jobs WHERE candidate_id = $1", candidate_id,
+            ),
+            fetch_val(
+                "SELECT COUNT(*) FROM matches WHERE candidate_id = $1 AND status IN ('applied', 'interviewing', 'offered', 'placed')", candidate_id,
+            ),
+            fetch_val(
+                """SELECT COUNT(*) FROM outreach_messages
+                   WHERE candidate_id = $1 AND (opened_at IS NULL AND status != 'draft')""", candidate_id,
+            ),
+        )
+        stats.match_count = match_count or 0
+        stats.saved_jobs_count = saved_jobs_count or 0
+        stats.applications_count = applications_count or 0
+        stats.unread_messages = unread_messages or 0
 
     # Profile views - from an audit-like log or placeholder
     stats.profile_views = 0
