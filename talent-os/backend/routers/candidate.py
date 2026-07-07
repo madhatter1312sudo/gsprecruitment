@@ -23,6 +23,8 @@ router = APIRouter(prefix="/api/v1/candidate", tags=["candidate-portal"])
 UPLOAD_DIR = "/app/uploads/cv"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
+MAX_CV_SIZE_BYTES = 5 * 1024 * 1024  # 5 MB
+
 
 # ── Profile ─────────────────────────────────────────────────────────────
 
@@ -126,8 +128,18 @@ async def upload_cv(
     filename = f"{uuid.uuid4().hex}{ext}"
     file_path = os.path.join(UPLOAD_DIR, filename)
 
+    # Read with a hard size cap (bounded memory use, rejects oversized uploads)
+    content = bytearray()
+    while True:
+        chunk = await file.read(1024 * 1024)
+        if not chunk:
+            break
+        content.extend(chunk)
+        if len(content) > MAX_CV_SIZE_BYTES:
+            raise HTTPException(status_code=413, detail="CV file too large (max 5 MB)")
+    content = bytes(content)
+
     # Save file
-    content = await file.read()
     with open(file_path, "wb") as f:
         f.write(content)
 

@@ -2,7 +2,7 @@
 Talent OS — Auth Router: register, login, JWT refresh, email verification,
 password reset, profile read/update. Rate-limited.
 """
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from core.database import fetch_one, fetch_all, execute
 from core.security import hash_password, verify_password, create_access_token, decode_token
 from core.deps import get_current_user, get_optional_user, require_role
@@ -17,9 +17,13 @@ import secrets
 from datetime import timedelta
 import logging
 
+from slowapi import Limiter
+from slowapi.util import get_remote_address
+
 logger = logging.getLogger("talent_os.auth")
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
+limiter = Limiter(key_func=get_remote_address)
 
 
 # ── Helper ──────────────────────────────────────────────────────────────
@@ -54,7 +58,8 @@ def _build_token_response(user: dict) -> dict:
 # ── Register ────────────────────────────────────────────────────────────
 
 @router.post("/register", response_model=TokenResponse, status_code=201)
-async def register(data: UserRegister):
+@limiter.limit("5/minute")
+async def register(request: Request, data: UserRegister):
     """Register a new user account."""
     email = data.email.lower().strip()
 
@@ -92,7 +97,8 @@ async def register(data: UserRegister):
 # ── Login ───────────────────────────────────────────────────────────────
 
 @router.post("/login", response_model=TokenResponse)
-async def login(data: UserLogin):
+@limiter.limit("5/minute")
+async def login(request: Request, data: UserLogin):
     """Authenticate a user and return a JWT token."""
     email = data.email.lower().strip()
     user = await _get_user_by_email(email)
@@ -152,7 +158,8 @@ async def verify_email(data: VerifyEmailRequest):
 # ── Forgot Password ─────────────────────────────────────────────────────
 
 @router.post("/forgot-password")
-async def forgot_password(data: ForgotPasswordRequest):
+@limiter.limit("3/minute")
+async def forgot_password(request: Request, data: ForgotPasswordRequest):
     """Generate a password reset token and return it (placeholder for email sending)."""
     email = data.email.lower().strip()
     user = await _get_user_by_email(email)
@@ -162,7 +169,7 @@ async def forgot_password(data: ForgotPasswordRequest):
 
     reset_token = secrets.token_urlsafe(32)
     await execute(
-        "UPDATE users SET reset_token = $1 WHERE id = $2",
+        "UPDATE users SET reset_token = $1, reset_token_expires_at = NOW() + INTERVAL '1 hour' WHERE id = $2",
         reset_token, user["id"],
     )
 
@@ -195,10 +202,11 @@ info@gsprecruitment.nl
 # ── Reset Password ──────────────────────────────────────────────────────
 
 @router.post("/reset-password")
-async def reset_password(data: ResetPasswordRequest):
-    """Reset a user's password using a valid reset token."""
+@limiter.limit("3/minute")
+async def reset_password(request: Request, data: ResetPasswordRequest):
+    """Reset a user's password using a valid, unexpired reset token."""
     user = await fetch_one(
-        "SELECT id FROM users WHERE reset_token = $1 AND deleted_at IS NULL",
+        "SELECT id FROM users WHERE reset_token = $1 AND reset_token_expires_at > NOW() AND deleted_at IS NULL",
         data.token,
     )
     if not user:
@@ -206,7 +214,7 @@ async def reset_password(data: ResetPasswordRequest):
 
     new_hash = hash_password(data.new_password)
     await execute(
-        "UPDATE users SET password_hash = $1, reset_token = NULL WHERE id = $2",
+        "UPDATE users SET password_hash = $1, reset_token = NULL, reset_token_expires_at = NULL, updated_at = NOW() WHERE id = $2",
         new_hash, user["id"],
     )
     return {"message": "Password reset successfully"}

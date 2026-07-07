@@ -1,4 +1,5 @@
 """Talent OS - Pydantic Settings (all secrets from .env, never hardcoded)."""
+from pydantic import model_validator
 from pydantic_settings import BaseSettings
 from typing import List
 
@@ -49,7 +50,7 @@ class Settings(BaseSettings):
     backend_host: str = "127.0.0.1"
     backend_port: int = 8000
     backend_workers: int = 4
-    cors_origins: str = "https://gsp-recruitment.nl,http://localhost:3000,http://127.0.0.1:3000"
+    cors_origins: str = "https://gsprecruitment.nl,https://www.gsprecruitment.nl,http://localhost:3000,http://127.0.0.1:3000"
 
     @property
     def cors_origin_list(self) -> List[str]:
@@ -57,7 +58,7 @@ class Settings(BaseSettings):
 
     log_level: str = "INFO"
 
-    WEBHOOK_SECRET: str = "CHANGE_ME_TO_A_UNIQUE_WEBHOOK_SECRET"
+    webhook_secret: str = "CHANGE_ME_TO_A_UNIQUE_WEBHOOK_SECRET"
     api_key: str = "CHANGE_ME"  # For internal API authentication
 
     # ── Google OAuth (for Gmail API) ──────────────────────────────────────
@@ -71,6 +72,24 @@ class Settings(BaseSettings):
     access_token_expire_minutes: int = 60
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "case_sensitive": False}
+
+    @model_validator(mode="after")
+    def _reject_placeholder_secrets(self) -> "Settings":
+        placeholders = {
+            "postgres_password": "CHANGE_ME",
+            "webhook_secret": "CHANGE_ME_TO_A_UNIQUE_WEBHOOK_SECRET",
+            "api_key": "CHANGE_ME",
+            "jwt_secret": "CHANGE_ME_TO_A_STRONG_RANDOM_SECRET_AT_LEAST_32_CHARS",
+        }
+        leftover = [name for name, default in placeholders.items() if getattr(self, name) == default]
+        if leftover:
+            raise ValueError(
+                f"Refusing to start: these settings are still at their placeholder default "
+                f"(set real values via environment/.env): {', '.join(leftover)}"
+            )
+        if len(self.jwt_secret) < 32:
+            raise ValueError("jwt_secret must be at least 32 characters")
+        return self
 
 
 settings = Settings()
