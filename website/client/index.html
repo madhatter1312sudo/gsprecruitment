@@ -760,7 +760,10 @@
        Candidate Search (basic)
        ================================================================ */
     document.querySelector('#section-candidates .btn-primary')?.addEventListener('click', async (e) => {
-      const searchInput = document.querySelector('#section-candidates .search-bar input');
+      // Two EN/NL twin inputs share this search bar; only one is visible at
+      // a time (CSS toggles by active language) -- read from whichever is.
+      const searchInputs = document.querySelectorAll('#section-candidates .search-bar input');
+      const searchInput = Array.from(searchInputs).find((el) => el.offsetParent !== null);
       const query = searchInput ? searchInput.value.trim() : '';
       try {
         const res = await Auth.fetch(`/v1/client/candidates?limit=20${query ? '&specialisation=' + encodeURIComponent(query) : ''}`);
@@ -804,7 +807,7 @@
 
     document.getElementById('sidebarLogoutBtn').addEventListener('click', () => Auth.logout());
 
-    const savedLang = localStorage.getItem('gsp-lang');
+    const savedLang = localStorage.getItem('gsp_lang');
     if (savedLang === 'nl' || savedLang === 'en') document.documentElement.setAttribute('data-lang', savedLang);
   </script>
 </body>

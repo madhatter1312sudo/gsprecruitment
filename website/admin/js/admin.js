@@ -296,30 +296,30 @@ const Admin = {
      SEARCH / FILTER BINDING
      ============================================================ */
   bindFilters() {
+    // Each search bar has an EN and NL twin input (CSS shows/hides by active
+    // language); bind both so typing works regardless of which is visible.
+
     // Users search
-    const usersSearch = document.querySelector('#section-users .search-bar input');
-    if (usersSearch) {
-      usersSearch.addEventListener('input', debounce((e) => {
+    document.querySelectorAll('#section-users .search-bar input').forEach((el) => {
+      el.addEventListener('input', debounce((e) => {
         this.loadUsers({ search: e.target.value });
       }, 400));
-    }
+    });
 
     // Jobs search
-    const jobsSearch = document.querySelector('#section-jobs .search-bar input');
-    if (jobsSearch) {
-      jobsSearch.addEventListener('input', debounce((e) => {
+    document.querySelectorAll('#section-jobs .search-bar input').forEach((el) => {
+      el.addEventListener('input', debounce((e) => {
         // jobs endpoint uses status filter, no search in the admin/jobs endpoint
         // We'll use a simple client-side filter
       }, 400));
-    }
+    });
 
     // Candidates search
-    const candidatesSearch = document.querySelector('#section-candidates .search-bar input');
-    if (candidatesSearch) {
-      candidatesSearch.addEventListener('input', debounce((e) => {
+    document.querySelectorAll('#section-candidates .search-bar input').forEach((el) => {
+      el.addEventListener('input', debounce((e) => {
         this.loadCandidates({ search: e.target.value });
       }, 400));
-    }
+    });
 
     // Role filter on users
     const roleSelect = document.querySelector('#section-users select:first-of-type');

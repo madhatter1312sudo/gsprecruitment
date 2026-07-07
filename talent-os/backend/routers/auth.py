@@ -90,6 +90,20 @@ async def register(request: Request, data: UserRegister):
             "INSERT INTO candidate_profiles (user_id) VALUES ($1) ON CONFLICT DO NOTHING",
             user["id"],
         )
+    elif data.role == "client":
+        # Without this, the client portal's _get_client_by_user() lookup
+        # never finds a row and every endpoint silently no-ops (blank
+        # dashboard, empty everything) -- there was no other code path that
+        # ever created this linkage for a client signup.
+        client = await fetch_one(
+            "INSERT INTO clients (company_name, domain) VALUES ($1, $2) RETURNING id",
+            user["full_name"], email.split("@")[1] if "@" in email else "",
+        )
+        if client:
+            await execute(
+                "INSERT INTO user_clients (user_id, client_id) VALUES ($1, $2) ON CONFLICT DO NOTHING",
+                user["id"], client["id"],
+            )
 
     return _build_token_response(user)
 

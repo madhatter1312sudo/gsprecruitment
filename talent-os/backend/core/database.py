@@ -19,8 +19,16 @@ async def get_pool() -> asyncpg.Pool:
             database=settings.postgres_db,
             user=settings.postgres_user,
             password=settings.postgres_password,
-            min_size=2,
-            max_size=10,
+            # Several dashboard/analytics endpoints now fan out up to 5
+            # concurrent queries per request via asyncio.gather, so a single
+            # request can hold multiple connections at once. With 4 uvicorn
+            # worker processes (each with its own pool), max_size=15 caps the
+            # worst case at 4*15=60 -- comfortably under Postgres's default
+            # max_connections=100, leaving headroom for migrations/manual
+            # sessions instead of the previous 4*10=40 ceiling that a couple
+            # of concurrent analytics requests could exhaust on its own.
+            min_size=3,
+            max_size=15,
             command_timeout=30,
             # Always use SSL when connecting
             # ssl="require",  # uncomment once TLS cert is configured

@@ -688,7 +688,7 @@
     document.getElementById('sidebarLogoutBtn').addEventListener('click', () => Auth.logout());
 
     // Restore saved language preference
-    const savedLang = localStorage.getItem('gsp-lang');
+    const savedLang = localStorage.getItem('gsp_lang');
     if (savedLang === 'nl' || savedLang === 'en') document.documentElement.setAttribute('data-lang', savedLang);
   </script>
 </body>
