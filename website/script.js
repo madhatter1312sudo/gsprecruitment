@@ -221,10 +221,14 @@
     modal?.addEventListener('click', (e) => { if (e.target === modal) closeAuthModal(); });
     tabs.forEach(tab => tab.addEventListener('click', () => openModal(tab.dataset.tab)));
 
-    // Wire up social login buttons → "Coming soon" toast
+    // Wire up social login buttons
     const socialBtns = qsa('.social-btns button');
     socialBtns.forEach(btn => {
       btn.addEventListener('click', () => {
+        if (btn.querySelector('.fa-google')) {
+          window.location.href = `${Auth.API}/auth/google/login`;
+          return;
+        }
         const provider = btn.textContent.trim() || 'Social';
         Auth.toast(`${provider} login coming soon!`, 'info');
       });
@@ -1111,8 +1115,48 @@
     });
   }
 
+  // ── Google Sign-In Callback ─────────────────────────────
+  // The backend redirects here as https://gsprecruitment.nl/?google_auth=<jwt>
+  // (or ?google_auth_error=<code>) after the user completes Google's consent
+  // screen. Pick up the token, strip it from the URL immediately (before any
+  // other network request can leak it via a Referer header), then fetch the
+  // user's profile to finish signing them in the same way a normal
+  // email/password login does.
+  function handleGoogleAuthCallback() {
+    const params = new URLSearchParams(window.location.search);
+    const token = params.get('google_auth');
+    const error = params.get('google_auth_error');
+
+    if (!token && !error) return;
+    window.history.replaceState({}, document.title, window.location.pathname);
+
+    if (error) {
+      const messages = {
+        access_denied: 'Google sign-in was cancelled.',
+        email_not_verified: 'Your Google email is not verified yet. Please verify it with Google first.',
+      };
+      Auth.toast(messages[error] || 'Google sign-in failed. Please try again.', 'error');
+      return;
+    }
+
+    fetch(`${Auth.API}/auth/me`, { headers: { 'Authorization': `Bearer ${token}` } })
+      .then((res) => {
+        if (!res.ok) throw new Error('Failed to fetch profile');
+        return res.json();
+      })
+      .then((user) => {
+        Auth.setAuth(token, user);
+        Auth.toast('Signed in with Google!', 'success');
+        window.location.href = Auth.getDashboardUrl(user);
+      })
+      .catch(() => {
+        Auth.toast('Google sign-in failed. Please try again.', 'error');
+      });
+  }
+
   // ── Init Everything ────────────────────────────────────
   document.addEventListener('DOMContentLoaded', () => {
+    handleGoogleAuthCallback();
     initLang();
     initPreloader();
     initHamburger();

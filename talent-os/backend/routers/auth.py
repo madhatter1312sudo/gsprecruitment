@@ -3,6 +3,7 @@ Talent OS — Auth Router: register, login, JWT refresh, email verification,
 password reset, profile read/update. Rate-limited.
 """
 from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi.responses import RedirectResponse
 from core.database import fetch_one, fetch_all, execute
 from core.security import hash_password, verify_password, create_access_token, decode_token
 from core.deps import get_current_user, get_optional_user, require_role
@@ -13,9 +14,13 @@ from models.schemas import (
 )
 from services.email_service import email_service
 from typing import Optional
+from urllib.parse import urlencode, quote
 import secrets
 from datetime import timedelta
 import logging
+import httpx
+from google.oauth2 import id_token as google_id_token
+from google.auth.transport import requests as google_auth_requests
 
 from slowapi import Limiter
 from slowapi.util import get_remote_address
@@ -281,3 +286,116 @@ async def update_me(
         *values,
     )
     return updated
+
+
+# ── Google Sign-In ────────────────────────────────────────────────────────
+# Reuses the same Google Cloud OAuth client already configured for sending
+# transactional email (GOOGLE_CLIENT_ID/SECRET) -- it just needs this
+# callback URL added as an additional authorized redirect URI in Google
+# Cloud Console. Uses the standard Authorization Code flow with a
+# short-lived signed cookie for CSRF (`state`) protection, since there's no
+# server-side session store to keep state in otherwise.
+
+GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
+GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
+GOOGLE_REDIRECT_URI = "https://api.gsprecruitment.nl/api/auth/google/callback"
+FRONTEND_URL = "https://gsprecruitment.nl"
+
+
+@router.get("/google/login")
+@limiter.limit("10/minute")
+async def google_login(request: Request):
+    """Redirect the browser to Google's OAuth consent screen."""
+    if not settings.google_client_id:
+        raise HTTPException(status_code=503, detail="Google sign-in is not configured")
+
+    state = secrets.token_urlsafe(24)
+    params = {
+        "client_id": settings.google_client_id,
+        "redirect_uri": GOOGLE_REDIRECT_URI,
+        "response_type": "code",
+        "scope": "openid email profile",
+        "access_type": "online",
+        "prompt": "select_account",
+        "state": state,
+    }
+    response = RedirectResponse(f"{GOOGLE_AUTH_URL}?{urlencode(params)}")
+    response.set_cookie(
+        "google_oauth_state", state,
+        max_age=600, httponly=True, secure=True, samesite="lax",
+    )
+    return response
+
+
+@router.get("/google/callback")
+async def google_callback(
+    request: Request,
+    code: Optional[str] = None,
+    state: Optional[str] = None,
+    error: Optional[str] = None,
+):
+    """Handle Google's redirect back: exchange code, find-or-create user, issue our JWT."""
+    if error:
+        return RedirectResponse(f"{FRONTEND_URL}/?google_auth_error={quote(error)}")
+
+    cookie_state = request.cookies.get("google_oauth_state")
+    if not state or not cookie_state or state != cookie_state:
+        return RedirectResponse(f"{FRONTEND_URL}/?google_auth_error=invalid_state")
+
+    if not code:
+        return RedirectResponse(f"{FRONTEND_URL}/?google_auth_error=missing_code")
+
+    try:
+        async with httpx.AsyncClient() as client:
+            token_res = await client.post(GOOGLE_TOKEN_URL, data={
+                "client_id": settings.google_client_id,
+                "client_secret": settings.google_client_secret,
+                "code": code,
+                "redirect_uri": GOOGLE_REDIRECT_URI,
+                "grant_type": "authorization_code",
+            })
+        if token_res.status_code != 200:
+            logger.warning(f"Google token exchange failed: {token_res.text}")
+            return RedirectResponse(f"{FRONTEND_URL}/?google_auth_error=token_exchange_failed")
+
+        id_token_str = token_res.json().get("id_token")
+        if not id_token_str:
+            return RedirectResponse(f"{FRONTEND_URL}/?google_auth_error=no_id_token")
+
+        idinfo = google_id_token.verify_oauth2_token(
+            id_token_str, google_auth_requests.Request(), settings.google_client_id,
+        )
+    except Exception as e:
+        logger.warning(f"Google sign-in failed: {e}")
+        return RedirectResponse(f"{FRONTEND_URL}/?google_auth_error=verification_failed")
+
+    if not idinfo.get("email_verified"):
+        return RedirectResponse(f"{FRONTEND_URL}/?google_auth_error=email_not_verified")
+
+    email = idinfo["email"].lower().strip()
+    full_name = idinfo.get("name") or email.split("@")[0]
+
+    user = await fetch_one(
+        "SELECT id, email, full_name, role, is_verified FROM users WHERE email = $1 AND deleted_at IS NULL",
+        email,
+    )
+    if not user:
+        # New account via Google -- default role candidate (matches public
+        # self-registration's default), pre-verified since Google already
+        # confirmed the email, unusable random password (Google-only login).
+        random_password_hash = hash_password(secrets.token_urlsafe(32))
+        user = await fetch_one(
+            """INSERT INTO users (email, password_hash, full_name, role, is_verified)
+               VALUES ($1, $2, $3, 'candidate', TRUE)
+               RETURNING id, email, full_name, role, is_verified""",
+            email, random_password_hash, full_name,
+        )
+        await execute(
+            "INSERT INTO candidate_profiles (user_id) VALUES ($1) ON CONFLICT DO NOTHING",
+            user["id"],
+        )
+
+    token_response = _build_token_response(user)
+    response = RedirectResponse(f"{FRONTEND_URL}/?google_auth={token_response['access_token']}")
+    response.delete_cookie("google_oauth_state")
+    return response
