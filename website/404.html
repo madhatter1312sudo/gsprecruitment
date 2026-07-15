@@ -100,7 +100,7 @@
   </div>
 </footer>
 
-<a href="https://wa.me/31612345678?text=Hi%20GSP%20Recruitment" class="whatsapp-float" target="_blank" rel="noopener" aria-label="WhatsApp"><i class="fab fa-whatsapp"></i></a>
+<a href="mailto:info@gsprecruitment.nl" class="whatsapp-float" aria-label="E-mail GSP Recruitment"><i class="fas fa-envelope"></i></a>
 <div class="modal-overlay" id="authModal" role="dialog" aria-modal="true" aria-label="Sign in or register">
   <div class="modal">
     <button class="modal-close" id="authClose">&times;</button>
@@ -120,18 +120,21 @@
       <button type="submit" class="btn btn-primary"><i class="fas fa-sign-in-alt"></i> <span class="lang-en">Sign In</span><span class="lang-nl">Inloggen</span></button>
       <div class="modal-divider"><span class="lang-en">or</span><span class="lang-nl">of</span></div>
       <div class="social-btns">
-        <button type="button" class="btn btn-ghost btn-sm"><i class="fab fa-linkedin"></i> LinkedIn</button>
-        <button type="button" class="btn btn-ghost btn-sm"><i class="fab fa-google"></i> Google</button>
+        <button type="button" class="btn btn-ghost btn-sm"><i class="fab fa-google"></i> <span class="lang-en">Sign in with Google</span><span class="lang-nl">Inloggen met Google</span></button>
       </div>
     </form>
     <form id="registerForm" class="modal-form" style="display:none">
       <input type="text" id="regName" placeholder="Full name" data-lang-en="Full name" data-lang-nl="Volledige naam" required>
       <input type="email" id="regEmail" placeholder="Email address" data-lang-en="Email address" data-lang-nl="E-mailadres" required>
-      <input type="password" id="regPassword" placeholder="Password (min 6 chars)" data-lang-en="Password (min 6 chars)" data-lang-nl="Wachtwoord (min 6 tekens)" required minlength="6">
+      <input type="password" id="regPassword" placeholder="Password (min 8 chars, upper/lower/digit)" data-lang-en="Password (min 8 chars, upper/lower/digit)" data-lang-nl="Wachtwoord (min 8 tekens, hoofdletter/kleine letter/cijfer)" required minlength="8">
       <select id="regRole">
         <option value="candidate"><span class="lang-en">I'm looking for a role</span><span class="lang-nl">Ik zoek een rol</span></option>
         <option value="client"><span class="lang-en">I'm looking to hire</span><span class="lang-nl">Ik wil aannemen</span></option>
       </select>
+      <label class="checkbox-label" style="display:flex;gap:8px;align-items:flex-start;font-size:0.85rem;line-height:1.4">
+        <input type="checkbox" id="regAvgConsent" required style="margin-top:3px">
+        <span><span class="lang-en">I agree to the processing of my data as described in the <a href="privacy.html" target="_blank" style="color:var(--gold)">privacy policy</a> (AVG/GDPR)</span><span class="lang-nl">Ik ga akkoord met de verwerking van mijn gegevens zoals beschreven in het <a href="privacy.html" target="_blank" style="color:var(--gold)">privacybeleid</a> (AVG)</span></span>
+      </label>
       <button type="submit" class="btn btn-gold"><i class="fas fa-user-plus"></i> <span class="lang-en">Create Account</span><span class="lang-nl">Account aanmaken</span></button>
     </form>
   </div>

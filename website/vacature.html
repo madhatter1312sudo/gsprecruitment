@@ -93,7 +93,7 @@
     <p class="lang-en">Send your CV or ask us a question — we'll reply within 24 hours.</p>
     <p class="lang-nl">Stuur je CV of stel een vraag — we reageren binnen 24 uur.</p>
     <div class="hero-actions" style="justify-content:center;margin-top:16px">
-      <a href="contact.html" class="btn btn-gold"><i class="fas fa-paper-plane"></i> <span class="lang-en">Apply now</span><span class="lang-nl">Solliciteer direct</span></a>
+      <a href="contact.html" class="btn btn-gold" id="applyBtn"><i class="fas fa-paper-plane"></i> <span class="lang-en">Apply now</span><span class="lang-nl">Solliciteer direct</span></a>
       <a href="vacatures.html" class="btn btn-outline"><i class="fas fa-briefcase"></i> <span class="lang-en">All vacancies</span><span class="lang-nl">Alle vacatures</span></a>
     </div>
   </div>
@@ -159,13 +159,44 @@
       "employmentType": job.employment_type || "FULL_TIME",
       "directApply": true
     });
+
+    // Smart apply: logged-in candidates apply in one click via the API;
+    // everyone else goes to the contact form with the job reference attached.
+    const applyBtn = document.getElementById('applyBtn');
+    if (applyBtn) {
+      applyBtn.href = `contact.html?job=${encodeURIComponent(job.id)}&title=${encodeURIComponent(job.title)}`;
+      const user = (typeof Auth !== 'undefined') && Auth.getUser && Auth.getUser();
+      if (user && user.role === 'candidate') {
+        applyBtn.addEventListener('click', async (e) => {
+          e.preventDefault();
+          applyBtn.style.pointerEvents = 'none';
+          try {
+            const res = await Auth.fetch('/v1/candidate/applications', {
+              method: 'POST',
+              body: JSON.stringify({ job_id: job.id }),
+            });
+            if (res && res.ok) {
+              Auth.toast(lang === 'nl' ? 'Sollicitatie verstuurd!' : 'Application sent!', 'success');
+              applyBtn.innerHTML = '<i class="fas fa-check"></i> ' + (lang === 'nl' ? 'Gesolliciteerd' : 'Applied');
+            } else if (res) {
+              const err = await res.json().catch(() => ({}));
+              Auth.toast(err.detail || (lang === 'nl' ? 'Solliciteren mislukt' : 'Application failed'), 'error');
+              applyBtn.style.pointerEvents = '';
+            }
+          } catch (_) {
+            Auth.toast(lang === 'nl' ? 'Er ging iets mis' : 'Something went wrong', 'error');
+            applyBtn.style.pointerEvents = '';
+          }
+        });
+      }
+    }
   } catch(e) {
     document.getElementById('loadingSpinner').style.display = 'none';
     document.getElementById('jobNotFound').style.display = 'block';
   }
 })();
 </script>
-<a href="https://wa.me/31612345678?text=Hi%20GSP%20Recruitment" class="whatsapp-float" target="_blank" rel="noopener" aria-label="WhatsApp"><i class="fab fa-whatsapp"></i></a>
+<a href="mailto:info@gsprecruitment.nl" class="whatsapp-float" aria-label="E-mail GSP Recruitment"><i class="fas fa-envelope"></i></a>
 </main>
 <footer class="footer">
   <div class="container">

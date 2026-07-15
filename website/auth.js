@@ -282,7 +282,11 @@ const Auth = {
 
   /* ---- OAuth Handlers ---- */
   handleOAuthLogin(provider) {
-    this.toast(`${provider} login coming soon!`, 'info');
+    if (String(provider).toLowerCase().includes('google')) {
+      window.location.href = `${this.API}/auth/google/login`;
+      return;
+    }
+    this.toast(`${provider} login is not available`, 'info');
   },
 
   /* ---- Show toast notification ---- */

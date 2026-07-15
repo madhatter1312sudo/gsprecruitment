@@ -28,10 +28,46 @@ MAX_CV_SIZE_BYTES = 5 * 1024 * 1024  # 5 MB
 
 
 async def _get_candidate_id(user_id: int) -> Optional[int]:
-    """Resolve the candidate record id linked to this user, once per request."""
+    """Resolve the candidate record id linked to this user, creating the
+    candidates row if it doesn't exist yet (self-registered users only get a
+    candidate_profiles row at signup; the sourcing pipeline needs a candidates
+    row for matches/applications/saved-jobs to work)."""
     row = await fetch_one(
         "SELECT id FROM candidates WHERE email = (SELECT email FROM users WHERE id = $1)",
         user_id,
+    )
+    if row:
+        return row["id"]
+
+    user = await fetch_one("SELECT email, full_name FROM users WHERE id = $1", user_id)
+    if not user:
+        return None
+
+    profile = await fetch_one(
+        "SELECT phone, current_title, current_company, location, skills, years_experience "
+        "FROM candidate_profiles WHERE user_id = $1",
+        user_id,
+    )
+    created = await fetch_one(
+        """INSERT INTO candidates (full_name, email, phone, current_title, current_company,
+                                   location, skills, years_experience, source)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'portal_registration')
+           ON CONFLICT DO NOTHING
+           RETURNING id""",
+        user["full_name"] or user["email"],
+        user["email"],
+        profile["phone"] if profile else None,
+        profile["current_title"] if profile else None,
+        profile["current_company"] if profile else None,
+        profile["location"] if profile else None,
+        profile["skills"] if profile else None,
+        profile["years_experience"] if profile else None,
+    )
+    if created:
+        return created["id"]
+    # Race: another request created it between our SELECT and INSERT
+    row = await fetch_one(
+        "SELECT id FROM candidates WHERE email = $1", user["email"]
     )
     return row["id"] if row else None
 
@@ -107,12 +143,24 @@ async def update_candidate_profile(
         *values,
     )
 
-    # Also update users table full_name if provided
-    if updates.current_title:
-        await execute(
-            "UPDATE users SET full_name = $1 WHERE id = $2",
-            updates.current_title, current_user["id"],
-        )
+    # Keep the sourcing-side candidates row in sync (same allowed columns exist there)
+    candidate_id = await _get_candidate_id(current_user["id"])
+    if candidate_id:
+        set_parts_c = []
+        values_c = []
+        idx_c = 1
+        for key, val in update_dict.items():
+            if key not in allowed:
+                continue
+            set_parts_c.append(f"{key} = ${idx_c}")
+            values_c.append(val)
+            idx_c += 1
+        if set_parts_c:
+            values_c.append(candidate_id)
+            await execute(
+                f"UPDATE candidates SET {', '.join(set_parts_c)}, updated_at = NOW() WHERE id = ${idx_c}",
+                *values_c,
+            )
 
     return await get_candidate_profile(current_user)
 
@@ -160,6 +208,28 @@ async def upload_cv(
     )
 
     return {"message": "CV uploaded successfully", "file_path": f"/uploads/cv/{filename}", "size": len(content)}
+
+
+@router.get("/cv")
+async def download_own_cv(current_user: dict = Depends(get_current_user)):
+    """Download the candidate's own uploaded CV (auth-gated; CVs are never served publicly)."""
+    if current_user["role"] != "candidate":
+        raise HTTPException(status_code=403, detail="Only candidates can download their CV")
+
+    profile = await fetch_one(
+        "SELECT cv_file_path FROM candidate_profiles WHERE user_id = $1",
+        current_user["id"],
+    )
+    if not profile or not profile["cv_file_path"]:
+        raise HTTPException(status_code=404, detail="No CV uploaded")
+
+    filename = os.path.basename(profile["cv_file_path"])
+    file_path = os.path.join(UPLOAD_DIR, filename)
+    if not os.path.isfile(file_path):
+        raise HTTPException(status_code=404, detail="CV file missing on server")
+
+    from fastapi.responses import FileResponse
+    return FileResponse(file_path, filename=f"cv{os.path.splitext(filename)[1]}")
 
 
 # ── Matches ─────────────────────────────────────────────────────────────

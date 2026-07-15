@@ -624,34 +624,10 @@
                   </button>
                 </div>
                 <div id="topMatchesList">
-                  <div class="match-card">
-                    <div class="match-score">95%</div>
-                    <div class="match-info">
-                      <h4>Senior Embedded Engineer</h4>
-                      <p class="match-company">ASML — Veldhoven</p>
-                      <p>€75K – €100K · Permanent</p>
-                    </div>
-                    <button class="btn btn-sm btn-primary lang-en" onclick="Auth.toast('Applied successfully!')">Apply</button>
-                    <button class="btn btn-sm btn-primary lang-nl" onclick="Auth.toast('Sollicitatie verstuurd!')">Solliciteer</button>
-                  </div>
-                  <div class="match-card">
-                    <div class="match-score">91%</div>
-                    <div class="match-info">
-                      <h4>C++ Software Engineer</h4>
-                      <p class="match-company">Philips — Best</p>
-                      <p>€65K – €85K · Contract</p>
-                    </div>
-                    <button class="btn btn-sm btn-primary lang-en" onclick="Auth.toast('Applied successfully!')">Apply</button>
-                    <button class="btn btn-sm btn-primary lang-nl" onclick="Auth.toast('Sollicitatie verstuurd!')">Solliciteer</button>
-                  </div>
-                  <div class="match-card">
-                    <div class="match-score">88%</div>
-                    <div class="match-info">
-                      <h4>Mechatronics Architect</h4>
-                      <p class="match-company">VDL ETG — Eindhoven</p>
-                      <p>€85K – €115K · Permanent</p>
-                    </div>
-                    <button class="btn btn-sm btn-primary">Apply</button>
+                  <div class="empty-state" style="text-align:center;padding:2rem 1rem;color:var(--navy-200);">
+                    <i class="fas fa-magnifying-glass" style="font-size:1.5rem;opacity:0.5;"></i>
+                    <p style="margin-top:0.75rem;"><span class="lang-en">Loading your matches…</span><span class="lang-nl">Je matches worden geladen…</span></p>
+                    <p style="font-size:0.8rem;"><span class="lang-en">No matches yet? Complete your profile and upload your CV.</span><span class="lang-nl">Nog geen matches? Vul je profiel aan en upload je CV.</span></p>
                   </div>
                 </div>
               </div>
@@ -917,62 +893,12 @@
           </div>
 
           <div id="matchesList">
-            <div class="match-card">
-              <div class="match-score">95%</div>
-              <div class="match-info">
-                <h4>Senior Embedded Engineer</h4>
-                <p class="match-company">ASML — Veldhoven</p>
-                <p>€75K – €100K · Permanent · Embedded C/C++, RTOS</p>
-                <div style="margin-top:6px;display:flex;gap:4px;">
-                  <span class="tag tag-blue">Embedded</span>
-                  <span class="tag tag-gold">Senior</span>
-                  <span class="tag tag-green">New</span>
+                  <div class="empty-state" style="text-align:center;padding:2rem 1rem;color:var(--navy-200);">
+                    <i class="fas fa-magnifying-glass" style="font-size:1.5rem;opacity:0.5;"></i>
+                    <p style="margin-top:0.75rem;"><span class="lang-en">Loading your matches…</span><span class="lang-nl">Je matches worden geladen…</span></p>
+                    <p style="font-size:0.8rem;"><span class="lang-en">No matches yet? Complete your profile and upload your CV.</span><span class="lang-nl">Nog geen matches? Vul je profiel aan en upload je CV.</span></p>
+                  </div>
                 </div>
-              </div>
-              <button class="btn btn-sm btn-primary lang-en" onclick="Auth.toast('Applied successfully!')">Apply Now</button>
-              <button class="btn btn-sm btn-primary lang-nl" onclick="Auth.toast('Sollicitatie verstuurd!')">Solliciteer</button>
-            </div>
-            <div class="match-card">
-              <div class="match-score">91%</div>
-              <div class="match-info">
-                <h4>C++ Software Engineer</h4>
-                <p class="match-company">Philips — Best</p>
-                <p>€65K – €85K · Contract · Modern C++, Qt, ROS</p>
-                <div style="margin-top:6px;display:flex;gap:4px;">
-                  <span class="tag tag-blue">C++</span>
-                  <span class="tag tag-gold">Mid</span>
-                </div>
-              </div>
-              <button class="btn btn-sm btn-primary">Apply Now</button>
-            </div>
-            <div class="match-card">
-              <div class="match-score">88%</div>
-              <div class="match-info">
-                <h4>Mechatronics Architect</h4>
-                <p class="match-company">VDL ETG — Eindhoven</p>
-                <p>€85K – €115K · Permanent · Motion control, precision</p>
-                <div style="margin-top:6px;display:flex;gap:4px;">
-                  <span class="tag tag-blue">Mechatronics</span>
-                  <span class="tag tag-gold">Senior</span>
-                </div>
-              </div>
-              <button class="btn btn-sm btn-primary">Apply Now</button>
-            </div>
-            <div class="match-card">
-              <div class="match-score">82%</div>
-              <div class="match-info">
-                <h4>Cybersecurity Engineer (OT/IoT)</h4>
-                <p class="match-company">Simac — Eindhoven</p>
-                <p>€70K – €95K · Permanent · OT security, IoT</p>
-                <div style="margin-top:6px;display:flex;gap:4px;">
-                  <span class="tag tag-blue">Security</span>
-                  <span class="tag tag-gold">Mid</span>
-                </div>
-              </div>
-              <button class="btn btn-sm btn-outline lang-en">Save</button>
-              <button class="btn btn-sm btn-outline lang-nl">Opslaan</button>
-            </div>
-          </div>
 
           <div class="pagination">
             <button disabled><i class="fa-regular fa-chevron-left"></i></button>

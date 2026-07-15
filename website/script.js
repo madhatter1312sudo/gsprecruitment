@@ -298,7 +298,7 @@
           password: $('regPassword')?.value,
           full_name: $('regName')?.value,
           role: $('regRole')?.value || 'candidate',
-          avg_consent: true
+          avg_consent: $('regAvgConsent')?.checked === true
         });
         if (result.error) {
           if (errEl) { errEl.textContent = result.error; errEl.style.display = 'block'; }

@@ -68,8 +68,11 @@ class EmbeddingMatcher:
         # Build candidate texts
         cand_texts = []
         for c in candidates:
-            text = f"{c.get('current_title', '')} {c.get('cv_text', '')[:500]} {' '.join(c.get('skills', []))}"
-            cand_texts.append(text)
+            # DB NULLs come through as None — never assume the defaults kick in
+            title = c.get("current_title") or ""
+            cv = (c.get("cv_text") or "")[:500]
+            skills = " ".join(c.get("skills") or [])
+            cand_texts.append(f"{title} {cv} {skills}")
 
         # Embed job + all candidates in one call
         all_texts = [job_text] + cand_texts

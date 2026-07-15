@@ -11,7 +11,6 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
@@ -61,7 +60,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origin_list,
     allow_credentials=True,
-    allow_methods=["GET", "POST", "PATCH", "DELETE"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
     allow_headers=["X-API-Key", "Authorization", "X-Hermes-Signature", "Content-Type"],
 )
 
@@ -81,6 +80,7 @@ from routers.candidate import router as candidate_portal_router
 from routers.client import router as client_portal_router
 from routers.admin import router as admin_portal_router
 from routers.public import router as public_router
+from routers.gdpr import router as gdpr_router
 
 app.include_router(health_router)
 app.include_router(auth_router)
@@ -94,6 +94,7 @@ app.include_router(candidate_portal_router)
 app.include_router(client_portal_router)
 app.include_router(admin_portal_router)
 app.include_router(public_router)
+app.include_router(gdpr_router)
 
 
 # ── Entry Point ─────────────────────────────────────────────────────────
