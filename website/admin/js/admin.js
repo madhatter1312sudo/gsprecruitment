@@ -1,81 +1,62 @@
 /* ============================================================
-   GSP Recruitment — admin.js
-   Admin portal API integration with FastAPI backend
-   Uses Auth.fetch() from ../auth.js for authenticated requests
+   GSP Recruitment — admin.js  v2.0
+   Full admin portal: all sections wired to real API, no stubs.
    ============================================================ */
 
 const Admin = {
-  /* ---- Cache ---- */
   _data: {},
+  _currentPage: { users: 1, candidates: 1, audit: 1 },
+  _pageSize: 20,
 
-  /* ---- Init: load all sections ---- */
+  /* ---- Init ---- */
   async init() {
     const user = Auth.requireAuth(['admin']);
     if (!user) return;
 
-    // Set user info in sidebar
     const name = user.full_name || 'Admin';
-    const email = user.email || 'admin@gsptalent.com';
     const initials = name.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase();
     document.getElementById('sidebarName').textContent = name;
-    document.getElementById('sidebarEmail').textContent = email;
+    document.getElementById('sidebarEmail').textContent = user.email || '';
     document.getElementById('sidebarAvatar').textContent = initials;
 
-    // Kick off data loads in parallel
-    await Promise.all([
-      this.loadDashboard(),
-      this.loadUsers(),
-      this.loadJobs(),
-      this.loadCandidates(),
-      this.loadAuditLog(),
-    ]);
+    await this.loadDashboard();
   },
 
-  /* ---- Helpers ---- */
-
-  formatDate(dateStr) {
-    if (!dateStr) return '—';
-    const d = new Date(dateStr);
-    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-                    'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-    return `${months[d.getMonth()]} ${d.getDate()}, ${d.getFullYear()}`;
+  /* ---- Utilities ---- */
+  formatDate(d) {
+    if (!d) return '—';
+    const dt = new Date(d);
+    return dt.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
   },
-
-  timeAgo(dateStr) {
-    if (!dateStr) return '';
-    const now = new Date();
-    const d = new Date(dateStr);
-    const diffMs = now - d;
-    const diffMins = Math.floor(diffMs / 60000);
-    if (diffMins < 1) return 'just now';
-    if (diffMins < 60) return `${diffMins}m ago`;
-    const diffHours = Math.floor(diffMins / 60);
-    if (diffHours < 24) return `${diffHours}h ago`;
-    const diffDays = Math.floor(diffHours / 24);
-    if (diffDays < 7) return `${diffDays}d ago`;
-    return this.formatDate(dateStr);
+  timeAgo(d) {
+    if (!d) return '';
+    const s = (Date.now() - new Date(d)) / 1000;
+    if (s < 60) return 'just now';
+    if (s < 3600) return `${Math.floor(s / 60)}m ago`;
+    if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
+    if (s < 604800) return `${Math.floor(s / 86400)}d ago`;
+    return this.formatDate(d);
   },
-
   badge(status) {
-    const map = {
-      'active': 'badge-green',
-      'open': 'badge-green',
-      'placed': 'badge-blue',
-      'pending': 'badge-blue',
-      'suspended': 'badge-red',
-      'closed': 'badge-red',
-      'draft': 'badge',
-      'verified': 'badge-green',
-      'unverified': 'badge-blue',
-    };
+    const map = { active: 'badge-green', open: 'badge-green', placed: 'badge-blue',
+      pending: 'badge-blue', suspended: 'badge-red', closed: 'badge-red',
+      draft: 'badge', admin: 'badge-red', candidate: 'badge-gold', client: 'badge-blue' };
     return map[status?.toLowerCase()] || 'badge';
   },
-
-  escapeHtml(str) {
-    if (!str) return '';
-    const div = document.createElement('div');
-    div.textContent = String(str);
-    return div.innerHTML;
+  esc(s) {
+    if (s == null) return '';
+    const d = document.createElement('div');
+    d.textContent = String(s);
+    return d.innerHTML;
+  },
+  setLoading(tbodyId, cols) {
+    const el = document.querySelector(tbodyId);
+    if (el) el.innerHTML = `<tr><td colspan="${cols}" style="text-align:center;padding:2rem;color:var(--navy-300);">
+      <i class="fa-regular fa-spinner fa-spin"></i> Loading…</td></tr>`;
+  },
+  setEmpty(tbodyId, cols, msg = 'No results') {
+    const el = document.querySelector(tbodyId);
+    if (el) el.innerHTML = `<tr><td colspan="${cols}" style="text-align:center;padding:2rem;color:var(--navy-300);">${msg}</td></tr>`;
   },
 
   /* ============================================================
@@ -83,21 +64,91 @@ const Admin = {
      ============================================================ */
   async loadDashboard() {
     try {
-      const res = await Auth.fetch('/v1/admin/dashboard');
-      if (!res) return;
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.detail || 'Failed to load dashboard');
+      const [dashRes, recentRes] = await Promise.all([
+        Auth.fetch('/v1/admin/dashboard'),
+        Auth.fetch('/v1/admin/audit-log?limit=8'),
+      ]);
 
-      document.getElementById('kpiTotalUsers').textContent = data.total_users ?? '0';
-      document.getElementById('kpiActiveJobs').textContent = data.active_jobs ?? '0';
-      document.getElementById('kpiCandidates').textContent = data.registered_candidates ?? '0';
-      document.getElementById('kpiClients').textContent = data.active_clients ?? '0';
-      document.getElementById('kpiPlacements').textContent = data.placements_this_week ?? '0';
+      if (dashRes?.ok) {
+        const d = await dashRes.json();
+        document.getElementById('kpiTotalUsers').textContent = d.total_users ?? 0;
+        document.getElementById('kpiActiveJobs').textContent = d.active_jobs ?? 0;
+        document.getElementById('kpiCandidates').textContent = d.registered_candidates ?? 0;
+        document.getElementById('kpiClients').textContent = d.active_clients ?? 0;
+        document.getElementById('kpiPlacements').textContent = d.placements_this_week ?? 0;
+        this._data.dashboard = d;
+      }
 
-      this._data.dashboard = data;
+      if (recentRes?.ok) {
+        const auditData = await recentRes.json();
+        this.renderRecentActivity(auditData.items || []);
+      }
+
+      // Load pending (unverified) users for the pending widget
+      const pendingRes = await Auth.fetch('/v1/admin/users?status=unverified&limit=5');
+      if (pendingRes?.ok) {
+        const pd = await pendingRes.json();
+        this.renderPendingRegistrations(pd.items || []);
+      }
     } catch (err) {
       console.error('Dashboard load error:', err);
     }
+  },
+
+  renderRecentActivity(items) {
+    const el = document.getElementById('recentActivityList');
+    if (!el) return;
+    if (!items.length) { el.innerHTML = '<div style="color:var(--navy-300);font-size:var(--font-size-sm);padding:1rem 0;">No recent activity</div>'; return; }
+    const icons = { user_update: 'fa-user-pen', user_delete: 'fa-user-xmark', impersonate: 'fa-mask',
+      job_update: 'fa-briefcase', content_update: 'fa-newspaper', settings_update: 'fa-gear',
+      placement: 'fa-calendar-check' };
+    el.innerHTML = items.map(e => `
+      <div class="activity-item">
+        <div class="activity-icon" style="background:rgba(250,200,0,0.1);color:var(--gold-400);">
+          <i class="fa-regular ${icons[e.action] || 'fa-circle-dot'}"></i>
+        </div>
+        <div class="activity-content" style="flex:1;">
+          <div class="activity-text">${this.esc(e.action?.replace(/_/g, ' '))} <span style="color:var(--navy-300);">by ${this.esc(e.actor_email || 'system')}</span></div>
+          <div class="activity-time">${this.timeAgo(e.created_at)}</div>
+        </div>
+      </div>`).join('');
+  },
+
+  renderPendingRegistrations(items) {
+    const el = document.getElementById('pendingRegistrationsList');
+    const badge = document.getElementById('pendingBadge');
+    if (badge) badge.textContent = items.length || '0';
+    if (!el) return;
+    if (!items.length) { el.innerHTML = '<div style="color:var(--navy-300);font-size:var(--font-size-sm);padding:0.5rem 0;">No pending registrations</div>'; return; }
+    el.innerHTML = items.map(u => `
+      <div class="activity-item">
+        <div class="activity-icon" style="background:rgba(250,200,0,0.1);color:var(--gold-500);"><i class="fa-regular fa-user-plus"></i></div>
+        <div class="activity-content" style="flex:1;">
+          <div class="activity-text">${this.esc(u.full_name || u.email)} — <span style="color:var(--gold-400);">${this.esc(u.role)}</span></div>
+          <div class="activity-time">${this.timeAgo(u.created_at)}</div>
+        </div>
+        <button class="btn btn-sm btn-primary" onclick="Admin.verifyUser(${u.id}, this)" style="flex-shrink:0;">Verify</button>
+      </div>`).join('');
+  },
+
+  async verifyUser(userId, btn) {
+    if (btn) { btn.disabled = true; btn.textContent = '…'; }
+    try {
+      const res = await Auth.fetch(`/v1/admin/users/${userId}`, {
+        method: 'PUT', body: JSON.stringify({ is_verified: true }),
+      });
+      if (res?.ok) {
+        Auth.toast('User verified', 'success');
+        await this.loadDashboard();
+        if (document.getElementById('section-users').classList.contains('active')) {
+          await this.loadUsers();
+        }
+      } else {
+        const d = await res?.json();
+        Auth.toast(d?.detail || 'Failed to verify', 'error');
+        if (btn) { btn.disabled = false; btn.textContent = 'Verify'; }
+      }
+    } catch { Auth.toast('Network error', 'error'); if (btn) { btn.disabled = false; btn.textContent = 'Verify'; } }
   },
 
   /* ============================================================
@@ -105,21 +156,29 @@ const Admin = {
      ============================================================ */
   async loadUsers(params = {}) {
     const qs = new URLSearchParams();
+    const limit = this._pageSize;
+    const offset = ((this._currentPage.users || 1) - 1) * limit;
     if (params.role) qs.set('role', params.role);
     if (params.status) qs.set('status', params.status);
     if (params.search) qs.set('search', params.search);
-    const query = qs.toString();
+    qs.set('limit', limit);
+    qs.set('offset', offset);
 
+    this.setLoading('#section-users table tbody', 6);
     try {
-      const res = await Auth.fetch(`/v1/admin/users${query ? '?' + query : ''}`);
+      const res = await Auth.fetch(`/v1/admin/users?${qs}`);
       if (!res) return;
       const data = await res.json();
-      if (!res.ok) throw new Error(data.detail || 'Failed to load users');
-
+      if (!res.ok) throw new Error(data.detail);
       this._data.users = data;
       this.renderUsers(data);
+      this.renderPagination('usersPagination', data.total, limit, this._currentPage.users, (p) => {
+        this._currentPage.users = p;
+        this.loadUsers(params);
+      });
     } catch (err) {
-      console.error('Users load error:', err);
+      this.setEmpty('#section-users table tbody', 6, 'Failed to load users');
+      console.error(err);
     }
   },
 
@@ -127,29 +186,125 @@ const Admin = {
     const tbody = document.querySelector('#section-users table tbody');
     if (!tbody) return;
     const items = data.items || [];
-    if (items.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--navy-300);padding:2rem;">No users found</td></tr>';
-      return;
-    }
+    if (!items.length) { this.setEmpty('#section-users table tbody', 6, 'No users found'); return; }
     tbody.innerHTML = items.map(u => `
       <tr>
-        <td style="font-weight:600;color:var(--white);">${this.escapeHtml(u.full_name || '—')}</td>
-        <td style="color:var(--navy-200);">${this.escapeHtml(u.email)}</td>
-        <td><span class="badge ${this.badge(u.role)}">${this.escapeHtml(u.role)}</span></td>
-        <td><span class="badge ${this.badge(u.is_verified ? 'verified' : 'unverified')}">${u.is_verified ? 'Verified' : 'Unverified'}</span></td>
+        <td style="font-weight:600;color:var(--white);">${this.esc(u.full_name || '—')}</td>
+        <td style="color:var(--navy-200);font-size:var(--font-size-xs);">${this.esc(u.email)}</td>
+        <td><span class="badge ${this.badge(u.role)}">${this.esc(u.role)}</span></td>
+        <td><span class="badge ${u.is_verified ? 'badge-green' : 'badge-blue'}">${u.is_verified ? 'Verified' : 'Pending'}</span></td>
         <td style="font-size:var(--font-size-xs);color:var(--navy-300);">${this.timeAgo(u.created_at)}</td>
         <td>
-          <button class="btn btn-sm btn-ghost" style="color:var(--navy-200);"
-                  onclick="Admin.showUserActions(${u.id}, '${this.escapeHtml(u.full_name || '')}', '${u.email}', '${u.role}')">
-            <i class="fa-regular fa-ellipsis-vertical"></i>
-          </button>
+          <div class="action-menu-wrap" style="position:relative;">
+            <button class="btn btn-sm btn-ghost" onclick="Admin.toggleUserMenu(${u.id}, event)">
+              <i class="fa-regular fa-ellipsis-vertical"></i>
+            </button>
+            <div class="action-menu" id="user-menu-${u.id}" style="display:none;">
+              ${!u.is_verified ? `<button onclick="Admin.verifyUser(${u.id});Admin.closeMenus()"><i class="fa-regular fa-circle-check"></i> Verify</button>` : ''}
+              <button onclick="Admin.openEditUserModal(${u.id});Admin.closeMenus()"><i class="fa-regular fa-pen"></i> Edit Role</button>
+              <button onclick="Admin.impersonateUser(${u.id}, '${this.esc(u.email)}');Admin.closeMenus()"><i class="fa-regular fa-mask"></i> Impersonate</button>
+              <button onclick="Admin.confirmDeleteUser(${u.id}, '${this.esc(u.email)}');Admin.closeMenus()" style="color:#f87171;"><i class="fa-regular fa-trash"></i> Delete</button>
+            </div>
+          </div>
         </td>
-      </tr>
-    `).join('');
+      </tr>`).join('');
   },
 
-  showUserActions(id, name, email, role) {
-    Auth.toast(`User: ${name} (${email}) — Role: ${role}`, 'warning');
+  toggleUserMenu(id, e) {
+    e.stopPropagation();
+    this.closeMenus();
+    const menu = document.getElementById(`user-menu-${id}`);
+    if (menu) menu.style.display = 'block';
+  },
+  closeMenus() {
+    document.querySelectorAll('.action-menu').forEach(m => m.style.display = 'none');
+  },
+
+  openEditUserModal(userId) {
+    const user = (this._data.users?.items || []).find(u => u.id === userId);
+    if (!user) return;
+    this.openModal('editUserModal', `
+      <h3 style="color:var(--white);margin-bottom:var(--space-lg);">Edit User: ${this.esc(user.full_name || user.email)}</h3>
+      <div class="form-group">
+        <label>Full Name</label>
+        <input type="text" id="editUserName" value="${this.esc(user.full_name || '')}">
+      </div>
+      <div class="form-group">
+        <label>Role</label>
+        <select id="editUserRole">
+          <option value="candidate" ${user.role === 'candidate' ? 'selected' : ''}>Candidate</option>
+          <option value="client" ${user.role === 'client' ? 'selected' : ''}>Client</option>
+          <option value="admin" ${user.role === 'admin' ? 'selected' : ''}>Admin</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Verified</label>
+        <select id="editUserVerified">
+          <option value="true" ${user.is_verified ? 'selected' : ''}>Yes</option>
+          <option value="false" ${!user.is_verified ? 'selected' : ''}>No</option>
+        </select>
+      </div>
+      <div style="display:flex;gap:var(--space-md);margin-top:var(--space-lg);">
+        <button class="btn btn-primary" onclick="Admin.saveUserEdit(${userId})">Save Changes</button>
+        <button class="btn btn-ghost" onclick="Admin.closeModal()">Cancel</button>
+      </div>
+    `);
+  },
+
+  async saveUserEdit(userId) {
+    const name = document.getElementById('editUserName')?.value?.trim();
+    const role = document.getElementById('editUserRole')?.value;
+    const verified = document.getElementById('editUserVerified')?.value === 'true';
+    const payload = {};
+    if (name) payload.full_name = name;
+    if (role) payload.role = role;
+    payload.is_verified = verified;
+
+    try {
+      const res = await Auth.fetch(`/v1/admin/users/${userId}`, {
+        method: 'PUT', body: JSON.stringify(payload),
+      });
+      if (res?.ok) {
+        Auth.toast('User updated', 'success');
+        this.closeModal();
+        await this.loadUsers();
+      } else {
+        const d = await res?.json();
+        Auth.toast(d?.detail || 'Update failed', 'error');
+      }
+    } catch { Auth.toast('Network error', 'error'); }
+  },
+
+  async impersonateUser(userId, email) {
+    if (!confirm(`Impersonate ${email}? You will get a 15-minute session token as this user.`)) return;
+    try {
+      const res = await Auth.fetch(`/v1/admin/users/${userId}/impersonate`, { method: 'POST' });
+      if (!res?.ok) { Auth.toast('Impersonation failed', 'error'); return; }
+      const data = await res.json();
+      const user = data.user;
+      Auth.setAuth(data.access_token, user);
+      const dest = user.role === 'candidate' ? '/candidate/' : user.role === 'client' ? '/client/' : '/admin/';
+      window.location.href = dest;
+    } catch { Auth.toast('Network error', 'error'); }
+  },
+
+  confirmDeleteUser(userId, email) {
+    if (!confirm(`Permanently delete ${email}? This cannot be undone.`)) return;
+    this.deleteUser(userId, email);
+  },
+
+  async deleteUser(userId, email) {
+    try {
+      const res = await Auth.fetch(`/v1/admin/users/${userId}`, { method: 'DELETE' });
+      if (res?.ok) {
+        Auth.toast(`${email} deleted`, 'success');
+        await this.loadUsers();
+        await this.loadDashboard();
+      } else {
+        const d = await res?.json();
+        Auth.toast(d?.detail || 'Delete failed', 'error');
+      }
+    } catch { Auth.toast('Network error', 'error'); }
   },
 
   /* ============================================================
@@ -158,18 +313,18 @@ const Admin = {
   async loadJobs(params = {}) {
     const qs = new URLSearchParams();
     if (params.status) qs.set('status', params.status);
-    const query = qs.toString();
+    qs.set('limit', 50);
 
+    this.setLoading('#section-jobs table tbody', 5);
     try {
-      const res = await Auth.fetch(`/v1/admin/jobs${query ? '?' + query : ''}`);
+      const res = await Auth.fetch(`/v1/admin/jobs?${qs}`);
       if (!res) return;
       const data = await res.json();
-      if (!res.ok) throw new Error(data.detail || 'Failed to load jobs');
-
+      if (!res.ok) throw new Error(data.detail);
       this._data.jobs = data;
       this.renderJobs(data);
     } catch (err) {
-      console.error('Jobs load error:', err);
+      this.setEmpty('#section-jobs table tbody', 5, 'Failed to load jobs');
     }
   },
 
@@ -177,34 +332,71 @@ const Admin = {
     const tbody = document.querySelector('#section-jobs table tbody');
     if (!tbody) return;
     const items = data.items || [];
-    if (items.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--navy-300);padding:2rem;">No jobs found</td></tr>';
-      return;
-    }
+    if (!items.length) { this.setEmpty('#section-jobs table tbody', 5, 'No jobs found'); return; }
     tbody.innerHTML = items.map(j => `
       <tr>
-        <td style="font-weight:600;color:var(--white);">${this.escapeHtml(j.title || 'Untitled')}</td>
-        <td>${this.escapeHtml(j.company_name || '—')}</td>
-        <td>${j.application_count ?? '—'}</td>
-        <td><span class="badge ${this.badge(j.status)}">${this.escapeHtml(j.status || 'draft')}</span></td>
+        <td style="font-weight:600;color:var(--white);">${this.esc(j.title || 'Untitled')}</td>
+        <td style="color:var(--navy-200);">${this.esc(j.company_name || '—')}</td>
+        <td style="text-align:center;">${j.application_count ?? '—'}</td>
+        <td><span class="badge ${this.badge(j.status)}">${this.esc(j.status || 'draft')}</span></td>
         <td>
-          <button class="btn btn-sm btn-outline" onclick="Admin.toggleFeatured(${j.id})" title="Toggle featured">
-            <i class="fa-regular fa-star"></i>
+          ${j.status === 'draft' || j.status === 'pending' ? `
+            <button class="btn btn-sm btn-primary" onclick="Admin.setJobStatus(${j.id}, 'open')" title="Approve">
+              <i class="fa-regular fa-circle-check"></i> Approve
+            </button>` : ''}
+          ${j.status === 'open' ? `
+            <button class="btn btn-sm btn-ghost" onclick="Admin.setJobStatus(${j.id}, 'closed')" title="Close" style="color:#f87171;">
+              <i class="fa-regular fa-xmark"></i> Close
+            </button>` : ''}
+          <button class="btn btn-sm btn-ghost" onclick="Admin.triggerMatching(${j.id})" title="Run AI matching">
+            <i class="fa-regular fa-wand-magic-sparkles"></i>
           </button>
-          <button class="btn btn-sm btn-ghost" onclick="Admin.showJobActions(${j.id})">
-            <i class="fa-regular fa-ellipsis-vertical"></i>
+          <button class="btn btn-sm btn-ghost" onclick="Admin.confirmDeleteJob(${j.id})" title="Delete" style="color:#f87171;">
+            <i class="fa-regular fa-trash"></i>
           </button>
         </td>
-      </tr>
-    `).join('');
+      </tr>`).join('');
   },
 
-  showJobActions(id) {
-    Auth.toast(`Job #${id} — Actions: Edit, Approve, Close`, 'warning');
+  async setJobStatus(jobId, status) {
+    try {
+      const res = await Auth.fetch(`/v1/admin/jobs/${jobId}`, {
+        method: 'PUT', body: JSON.stringify({ status }),
+      });
+      if (res?.ok) {
+        Auth.toast(`Job ${status === 'open' ? 'approved' : 'closed'}`, 'success');
+        await this.loadJobs();
+      } else {
+        const d = await res?.json();
+        Auth.toast(d?.detail || 'Update failed', 'error');
+      }
+    } catch { Auth.toast('Network error', 'error'); }
   },
 
-  toggleFeatured(id) {
-    Auth.toast(`Job #${id} featured toggled`, 'success');
+  async triggerMatching(jobId) {
+    Auth.toast('Running AI matching…', 'info');
+    try {
+      const res = await Auth.fetch(`/v1/matches/run?job_id=${jobId}`, { method: 'POST' });
+      if (res?.ok) Auth.toast('Matching queued — results will appear shortly', 'success');
+      else Auth.toast('Failed to start matching', 'error');
+    } catch { Auth.toast('Network error', 'error'); }
+  },
+
+  confirmDeleteJob(jobId) {
+    if (!confirm('Delete this job? This action cannot be undone.')) return;
+    this.deleteJob(jobId);
+  },
+
+  async deleteJob(jobId) {
+    try {
+      const res = await Auth.fetch(`/v1/admin/jobs/${jobId}`, { method: 'DELETE' });
+      if (res?.ok || res?.status === 404) {
+        Auth.toast('Job deleted', 'success');
+        await this.loadJobs();
+      } else {
+        Auth.toast('Delete failed', 'error');
+      }
+    } catch { Auth.toast('Network error', 'error'); }
   },
 
   /* ============================================================
@@ -212,20 +404,27 @@ const Admin = {
      ============================================================ */
   async loadCandidates(params = {}) {
     const qs = new URLSearchParams();
-    if (params.status) qs.set('status', params.status);
+    const limit = this._pageSize;
+    const offset = ((this._currentPage.candidates || 1) - 1) * limit;
     if (params.search) qs.set('search', params.search);
-    const query = qs.toString();
+    if (params.status) qs.set('status', params.status);
+    qs.set('limit', limit);
+    qs.set('offset', offset);
 
+    this.setLoading('#section-candidates table tbody', 6);
     try {
-      const res = await Auth.fetch(`/v1/admin/candidates${query ? '?' + query : ''}`);
+      const res = await Auth.fetch(`/v1/admin/candidates?${qs}`);
       if (!res) return;
       const data = await res.json();
-      if (!res.ok) throw new Error(data.detail || 'Failed to load candidates');
-
+      if (!res.ok) throw new Error(data.detail);
       this._data.candidates = data;
       this.renderCandidates(data);
+      this.renderPagination('candidatesPagination', data.total, limit, this._currentPage.candidates, (p) => {
+        this._currentPage.candidates = p;
+        this.loadCandidates(params);
+      });
     } catch (err) {
-      console.error('Candidates load error:', err);
+      this.setEmpty('#section-candidates table tbody', 6, 'Failed to load candidates');
     }
   },
 
@@ -233,44 +432,145 @@ const Admin = {
     const tbody = document.querySelector('#section-candidates table tbody');
     if (!tbody) return;
     const items = data.items || [];
-    if (items.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--navy-300);padding:2rem;">No candidates found</td></tr>';
-      return;
-    }
+    if (!items.length) { this.setEmpty('#section-candidates table tbody', 6, 'No candidates found'); return; }
     tbody.innerHTML = items.map(c => `
       <tr>
-        <td style="font-weight:600;color:var(--white);">${this.escapeHtml(c.full_name || '—')}</td>
-        <td>${this.escapeHtml(c.email)}</td>
-        <td>${this.escapeHtml(c.current_title || '—')}</td>
-        <td>${c.years_experience ? c.years_experience + ' yrs' : '—'}</td>
-        <td><span class="badge ${this.badge(c.status)}">${this.escapeHtml(c.status || 'active')}</span></td>
+        <td style="font-weight:600;color:var(--white);">${this.esc(c.full_name || '—')}</td>
+        <td style="color:var(--navy-200);font-size:var(--font-size-xs);">${this.esc(c.email)}</td>
+        <td>${this.esc(c.current_title || '—')}</td>
+        <td style="text-align:center;">${c.years_experience ? c.years_experience + ' yrs' : '—'}</td>
+        <td style="text-align:center;">
+          <span title="Matches">${c.match_count ?? 0}</span>
+          ${c.placement_count ? ` / <span style="color:#4ade80;" title="Placed">${c.placement_count} placed</span>` : ''}
+        </td>
         <td>
-          <button class="btn btn-sm btn-ghost" onclick="Admin.showCandidateActions(${c.id})">
-            <i class="fa-regular fa-ellipsis-vertical"></i>
+          <span class="badge ${this.badge(c.status || 'active')}">${this.esc(c.status || 'active')}</span>
+        </td>
+        <td>
+          <button class="btn btn-sm btn-ghost" onclick="Admin.viewCandidate(${c.id})" title="View profile">
+            <i class="fa-regular fa-eye"></i>
+          </button>
+          <button class="btn btn-sm btn-ghost" onclick="Admin.triggerCandidateMatch(${c.id})" title="Run matching">
+            <i class="fa-regular fa-wand-magic-sparkles"></i>
           </button>
         </td>
-      </tr>
-    `).join('');
+      </tr>`).join('');
   },
 
-  showCandidateActions(id) {
-    Auth.toast(`Candidate #${id} — Actions: View, Edit, Match`, 'warning');
+  viewCandidate(candidateId) {
+    const c = (this._data.candidates?.items || []).find(x => x.id === candidateId);
+    if (!c) return;
+    const skills = Array.isArray(c.skills) ? c.skills.join(', ') : (c.skills || '—');
+    this.openModal('viewCandidateModal', `
+      <h3 style="color:var(--white);margin-bottom:var(--space-lg);">${this.esc(c.full_name)}</h3>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:var(--space-md);margin-bottom:var(--space-lg);">
+        <div><div style="font-size:var(--font-size-xs);color:var(--navy-300);margin-bottom:4px;">Email</div><div>${this.esc(c.email)}</div></div>
+        <div><div style="font-size:var(--font-size-xs);color:var(--navy-300);margin-bottom:4px;">Phone</div><div>${this.esc(c.phone || '—')}</div></div>
+        <div><div style="font-size:var(--font-size-xs);color:var(--navy-300);margin-bottom:4px;">Current Title</div><div>${this.esc(c.current_title || '—')}</div></div>
+        <div><div style="font-size:var(--font-size-xs);color:var(--navy-300);margin-bottom:4px;">Company</div><div>${this.esc(c.current_company || '—')}</div></div>
+        <div><div style="font-size:var(--font-size-xs);color:var(--navy-300);margin-bottom:4px;">Experience</div><div>${c.years_experience ? c.years_experience + ' years' : '—'}</div></div>
+        <div><div style="font-size:var(--font-size-xs);color:var(--navy-300);margin-bottom:4px;">Location</div><div>${this.esc(c.location || '—')}</div></div>
+        <div><div style="font-size:var(--font-size-xs);color:var(--navy-300);margin-bottom:4px;">Source</div><div>${this.esc(c.source || '—')}</div></div>
+        <div><div style="font-size:var(--font-size-xs);color:var(--navy-300);margin-bottom:4px;">Status</div><div><span class="badge ${this.badge(c.status)}">${this.esc(c.status || 'active')}</span></div></div>
+      </div>
+      <div style="margin-bottom:var(--space-md);">
+        <div style="font-size:var(--font-size-xs);color:var(--navy-300);margin-bottom:4px;">Skills</div>
+        <div>${this.esc(skills)}</div>
+      </div>
+      <div style="display:flex;gap:var(--space-md);flex-wrap:wrap;margin-top:var(--space-lg);">
+        <div style="background:rgba(74,111,159,0.1);border:1px solid rgba(74,111,159,0.2);border-radius:var(--radius-md);padding:var(--space-md) var(--space-lg);text-align:center;flex:1;">
+          <div style="font-size:var(--font-size-xl);font-weight:700;color:var(--gold-500);">${c.match_count ?? 0}</div>
+          <div style="font-size:var(--font-size-xs);color:var(--navy-300);">Matches</div>
+        </div>
+        <div style="background:rgba(74,111,159,0.1);border:1px solid rgba(74,111,159,0.2);border-radius:var(--radius-md);padding:var(--space-md) var(--space-lg);text-align:center;flex:1;">
+          <div style="font-size:var(--font-size-xl);font-weight:700;color:#4ade80;">${c.placement_count ?? 0}</div>
+          <div style="font-size:var(--font-size-xs);color:var(--navy-300);">Placed</div>
+        </div>
+      </div>
+      <div style="margin-top:var(--space-lg);display:flex;gap:var(--space-md);">
+        <button class="btn btn-primary btn-sm" onclick="Admin.triggerCandidateMatch(${c.id});Admin.closeModal()">
+          <i class="fa-regular fa-wand-magic-sparkles"></i> Run Matching
+        </button>
+        <button class="btn btn-ghost btn-sm" onclick="Admin.closeModal()">Close</button>
+      </div>
+    `);
+  },
+
+  async triggerCandidateMatch(candidateId) {
+    Auth.toast('Running AI matching for candidate…', 'info');
+    try {
+      const res = await Auth.fetch(`/v1/matches/run`, { method: 'POST' });
+      if (res?.ok) Auth.toast('Matching queued', 'success');
+      else Auth.toast('Failed to start matching', 'error');
+    } catch { Auth.toast('Network error', 'error'); }
+  },
+
+  /* ============================================================
+     ANALYTICS
+     ============================================================ */
+  async loadAnalytics() {
+    const container = document.getElementById('analyticsContent');
+    if (container) container.innerHTML = '<div style="text-align:center;padding:3rem;color:var(--navy-300);"><i class="fa-regular fa-spinner fa-spin"></i> Loading analytics…</div>';
+    try {
+      const res = await Auth.fetch('/v1/admin/analytics');
+      if (!res?.ok) throw new Error('Failed');
+      const data = await res.json();
+      this._data.analytics = data;
+      this.renderAnalytics(data);
+    } catch {
+      if (container) container.innerHTML = '<div style="text-align:center;padding:3rem;color:#f87171;">Failed to load analytics</div>';
+    }
+  },
+
+  renderAnalytics(data) {
+    document.getElementById('kpiJobFillRate').textContent = (data.job_fill_rate ?? 0) + '%';
+    document.getElementById('kpiClientRetention').textContent = (data.client_retention_rate ?? 0) + '%';
+    document.getElementById('kpiCandidatePlacement').textContent = (data.candidate_satisfaction ?? 0) + '%';
+
+    const growthEl = document.getElementById('userGrowthChart');
+    if (growthEl && data.user_growth) {
+      const entries = Object.entries(data.user_growth).sort(([a], [b]) => a.localeCompare(b));
+      if (!entries.length) { growthEl.innerHTML = '<div style="color:var(--navy-300);font-size:var(--font-size-sm);">No data yet</div>'; return; }
+      const max = Math.max(...entries.map(([, v]) => v), 1);
+      growthEl.innerHTML = `<div style="display:flex;align-items:flex-end;gap:6px;height:120px;width:100%;">
+        ${entries.map(([month, count]) => {
+          const h = Math.round((count / max) * 110);
+          const label = new Date(month).toLocaleDateString('en-GB', { month: 'short' });
+          return `<div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:4px;">
+            <div style="font-size:9px;color:var(--navy-300);">${count}</div>
+            <div style="width:100%;border-radius:4px 4px 0 0;background:var(--gold-gradient);height:${h}px;"></div>
+            <div style="font-size:9px;color:var(--navy-300);">${label}</div>
+          </div>`;
+        }).join('')}
+      </div>`;
+    }
   },
 
   /* ============================================================
      AUDIT LOG
      ============================================================ */
-  async loadAuditLog() {
+  async loadAuditLog(params = {}) {
+    const qs = new URLSearchParams();
+    const limit = this._pageSize;
+    const offset = ((this._currentPage.audit || 1) - 1) * limit;
+    if (params.action) qs.set('action', params.action);
+    qs.set('limit', limit);
+    qs.set('offset', offset);
+
+    this.setLoading('#section-audit table tbody', 4);
     try {
-      const res = await Auth.fetch('/v1/admin/audit-log?limit=20');
+      const res = await Auth.fetch(`/v1/admin/audit-log?${qs}`);
       if (!res) return;
       const data = await res.json();
-      if (!res.ok) throw new Error(data.detail || 'Failed to load audit log');
-
+      if (!res.ok) throw new Error(data.detail);
       this._data.audit = data;
       this.renderAuditLog(data);
-    } catch (err) {
-      console.error('Audit log load error:', err);
+      this.renderPagination('auditPagination', data.total, limit, this._currentPage.audit, (p) => {
+        this._currentPage.audit = p;
+        this.loadAuditLog(params);
+      });
+    } catch {
+      this.setEmpty('#section-audit table tbody', 4, 'Failed to load audit log');
     }
   },
 
@@ -278,81 +578,198 @@ const Admin = {
     const tbody = document.querySelector('#section-audit table tbody');
     if (!tbody) return;
     const items = data.items || [];
-    if (items.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;color:var(--navy-300);padding:2rem;">No audit entries found</td></tr>';
-      return;
-    }
-    tbody.innerHTML = items.map(entry => `
+    if (!items.length) { this.setEmpty('#section-audit table tbody', 4, 'No audit entries'); return; }
+    const colors = { user_delete: '#f87171', impersonate: '#fb923c', settings_update: '#a78bfa' };
+    tbody.innerHTML = items.map(e => `
       <tr>
-        <td style="font-size:var(--font-size-xs);color:var(--navy-300);">${this.formatDate(entry.created_at)}</td>
-        <td>${this.escapeHtml(entry.action || '—')}</td>
-        <td>${this.escapeHtml(entry.actor_email || '—')}</td>
-        <td>${this.escapeHtml(entry.target_type ? entry.target_type + ' #' + entry.target_id : '—')}</td>
-      </tr>
-    `).join('');
+        <td style="font-size:var(--font-size-xs);color:var(--navy-300);white-space:nowrap;">${this.formatDate(e.created_at)}</td>
+        <td><span style="color:${colors[e.action] || 'var(--gold-400)'};">${this.esc(e.action?.replace(/_/g, ' '))}</span></td>
+        <td style="font-size:var(--font-size-xs);color:var(--navy-200);">${this.esc(e.actor_email || 'system')}</td>
+        <td style="font-size:var(--font-size-xs);color:var(--navy-300);">${this.esc(e.target_type ? e.target_type + ' #' + e.target_id : '—')}</td>
+      </tr>`).join('');
   },
 
   /* ============================================================
-     SEARCH / FILTER BINDING
+     SETTINGS
+     ============================================================ */
+  async loadSettings() {
+    try {
+      const res = await Auth.fetch('/v1/admin/settings');
+      if (!res?.ok) return;
+      const rows = await res.json();
+      this._data.settings = rows;
+      rows.forEach(s => {
+        const el = document.getElementById(`setting_${s.key}`);
+        if (el) {
+          if (el.type === 'checkbox') el.checked = s.value === 'true';
+          else el.value = s.value || '';
+        }
+      });
+    } catch { console.error('Settings load error'); }
+  },
+
+  async saveSettings() {
+    const btn = document.getElementById('saveSettingsBtn');
+    if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fa-regular fa-spinner fa-spin"></i> Saving…'; }
+    const settings = {};
+    document.querySelectorAll('[data-setting-key]').forEach(el => {
+      settings[el.dataset.settingKey] = el.type === 'checkbox' ? String(el.checked) : el.value;
+    });
+    try {
+      const res = await Auth.fetch('/v1/admin/settings', {
+        method: 'PUT', body: JSON.stringify({ settings }),
+      });
+      if (res?.ok) Auth.toast('Settings saved', 'success');
+      else Auth.toast('Failed to save settings', 'error');
+    } catch { Auth.toast('Network error', 'error'); }
+    finally { if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fa-regular fa-floppy-disk"></i> Save Settings'; } }
+  },
+
+  /* ============================================================
+     CONTENT CMS
+     ============================================================ */
+  async loadContent() {
+    try {
+      const res = await Auth.fetch('/v1/admin/content');
+      if (!res?.ok) return;
+      const rows = await res.json();
+      this._data.content = rows;
+      this.renderContent(rows);
+    } catch { console.error('Content load error'); }
+  },
+
+  renderContent(rows) {
+    const el = document.getElementById('contentList');
+    if (!el) return;
+    if (!rows.length) { el.innerHTML = '<div style="color:var(--navy-300);padding:1rem;">No content items found</div>'; return; }
+    el.innerHTML = rows.map(item => `
+      <div style="display:flex;align-items:center;gap:var(--space-md);padding:var(--space-md) 0;border-bottom:1px solid rgba(74,111,159,0.08);">
+        <div style="flex:1;">
+          <div style="font-size:var(--font-size-xs);color:var(--navy-300);">${this.esc(item.section)} / ${this.esc(item.key)}</div>
+          <div style="color:var(--navy-100);margin-top:2px;font-size:var(--font-size-sm);">${this.esc((item.value || '').slice(0, 80))}${(item.value || '').length > 80 ? '…' : ''}</div>
+        </div>
+        <button class="btn btn-sm btn-ghost" onclick="Admin.editContent(${item.id}, '${this.esc(item.key)}', \`${this.esc(item.value || '')}\`)">
+          <i class="fa-regular fa-pen"></i>
+        </button>
+      </div>`).join('');
+  },
+
+  editContent(id, key, value) {
+    this.openModal('editContentModal', `
+      <h3 style="color:var(--white);margin-bottom:var(--space-lg);">Edit: ${this.esc(key)}</h3>
+      <div class="form-group">
+        <label>Value</label>
+        <textarea id="editContentValue" rows="5" style="width:100%;background:rgba(6,13,26,0.6);border:1px solid rgba(74,111,159,0.3);border-radius:var(--radius-md);color:var(--white);padding:0.75rem;font-family:var(--font-primary);font-size:var(--font-size-sm);resize:vertical;">${this.esc(value)}</textarea>
+      </div>
+      <div style="display:flex;gap:var(--space-md);margin-top:var(--space-lg);">
+        <button class="btn btn-primary" onclick="Admin.saveContent(${id})">Save</button>
+        <button class="btn btn-ghost" onclick="Admin.closeModal()">Cancel</button>
+      </div>
+    `);
+  },
+
+  async saveContent(id) {
+    const value = document.getElementById('editContentValue')?.value;
+    if (value == null) return;
+    try {
+      const res = await Auth.fetch(`/v1/admin/content/${id}`, {
+        method: 'PUT', body: JSON.stringify({ value }),
+      });
+      if (res?.ok) {
+        Auth.toast('Content updated', 'success');
+        this.closeModal();
+        await this.loadContent();
+      } else { Auth.toast('Update failed', 'error'); }
+    } catch { Auth.toast('Network error', 'error'); }
+  },
+
+  /* ============================================================
+     PAGINATION
+     ============================================================ */
+  renderPagination(containerId, total, limit, current, onPage) {
+    const el = document.getElementById(containerId);
+    if (!el) return;
+    const pages = Math.ceil(total / limit);
+    if (pages <= 1) { el.innerHTML = ''; return; }
+
+    const buttons = [];
+    buttons.push(`<button ${current === 1 ? 'disabled' : ''} onclick="(${onPage.toString()})(${current - 1})"><i class="fa-regular fa-chevron-left"></i></button>`);
+    for (let i = 1; i <= Math.min(pages, 7); i++) {
+      buttons.push(`<button class="${i === current ? 'active' : ''}" onclick="(${onPage.toString()})(${i})">${i}</button>`);
+    }
+    if (pages > 7) buttons.push(`<span style="color:var(--navy-300);padding:0 4px;">…${pages}</span>`);
+    buttons.push(`<button ${current === pages ? 'disabled' : ''} onclick="(${onPage.toString()})(${current + 1})"><i class="fa-regular fa-chevron-right"></i></button>`);
+    el.innerHTML = buttons.join('');
+  },
+
+  /* ============================================================
+     MODAL
+     ============================================================ */
+  openModal(id, html) {
+    let overlay = document.getElementById('adminModalOverlay');
+    if (!overlay) {
+      overlay = document.createElement('div');
+      overlay.id = 'adminModalOverlay';
+      overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:999;display:flex;align-items:center;justify-content:center;padding:1rem;backdrop-filter:blur(4px);';
+      overlay.addEventListener('click', e => { if (e.target === overlay) this.closeModal(); });
+      document.body.appendChild(overlay);
+    }
+    overlay.innerHTML = `
+      <div style="background:var(--navy-900);border:1px solid rgba(74,111,159,0.2);border-radius:var(--radius-xl);padding:var(--space-2xl);max-width:520px;width:100%;max-height:80vh;overflow-y:auto;position:relative;">
+        <button onclick="Admin.closeModal()" style="position:absolute;top:1rem;right:1rem;background:none;border:none;color:var(--navy-200);cursor:pointer;font-size:1.2rem;">
+          <i class="fa-regular fa-xmark"></i>
+        </button>
+        ${html}
+      </div>`;
+    overlay.style.display = 'flex';
+  },
+
+  closeModal() {
+    const overlay = document.getElementById('adminModalOverlay');
+    if (overlay) overlay.style.display = 'none';
+  },
+
+  /* ============================================================
+     SECTION FILTER BINDING
      ============================================================ */
   bindFilters() {
-    // Each search bar has an EN and NL twin input (CSS shows/hides by active
-    // language); bind both so typing works regardless of which is visible.
-
-    // Users search
-    document.querySelectorAll('#section-users .search-bar input').forEach((el) => {
-      el.addEventListener('input', debounce((e) => {
-        this.loadUsers({ search: e.target.value });
-      }, 400));
+    const debouncedUsers = debounce(val => this.loadUsers({ search: val }), 400);
+    document.querySelectorAll('#section-users .search-bar input').forEach(el => {
+      el.addEventListener('input', e => debouncedUsers(e.target.value));
     });
 
-    // Jobs search
-    document.querySelectorAll('#section-jobs .search-bar input').forEach((el) => {
-      el.addEventListener('input', debounce((e) => {
-        // jobs endpoint uses status filter, no search in the admin/jobs endpoint
-        // We'll use a simple client-side filter
-      }, 400));
+    const roleSelect = document.getElementById('userRoleFilter');
+    if (roleSelect) roleSelect.addEventListener('change', e => {
+      const v = e.target.value;
+      this.loadUsers({ role: ['candidate','client','admin'].includes(v) ? v : '' });
     });
 
-    // Candidates search
-    document.querySelectorAll('#section-candidates .search-bar input').forEach((el) => {
-      el.addEventListener('input', debounce((e) => {
-        this.loadCandidates({ search: e.target.value });
-      }, 400));
+    const statusSelect = document.getElementById('userStatusFilter');
+    if (statusSelect) statusSelect.addEventListener('change', e => {
+      const v = e.target.value;
+      this.loadUsers({ status: ['verified','unverified'].includes(v) ? v : '' });
     });
 
-    // Role filter on users
-    const roleSelect = document.querySelector('#section-users select:first-of-type');
-    if (roleSelect) {
-      roleSelect.addEventListener('change', (e) => {
-        const val = e.target.value;
-        this.loadUsers({ role: val === 'All Roles' || val === 'Alle Rollen' ? '' : val.toLowerCase() });
-      });
-    }
+    const debouncedCandidates = debounce(val => this.loadCandidates({ search: val }), 400);
+    document.querySelectorAll('#section-candidates .search-bar input').forEach(el => {
+      el.addEventListener('input', e => debouncedCandidates(e.target.value));
+    });
 
-    // Status filter on users
-    const statusSelect = document.querySelector('#section-users select:last-of-type');
-    if (statusSelect) {
-      statusSelect.addEventListener('change', (e) => {
-        const val = e.target.value;
-        this.loadUsers({ status: val === 'All Status' || val === 'Alle Statussen' ? '' : val.toLowerCase() });
-      });
-    }
+    const jobStatusFilter = document.getElementById('jobStatusFilter');
+    if (jobStatusFilter) jobStatusFilter.addEventListener('change', e => {
+      const v = e.target.value;
+      this.loadJobs({ status: ['open','closed','draft'].includes(v) ? v : '' });
+    });
+
+    document.addEventListener('click', () => this.closeMenus());
   },
 };
 
-/* ---- Debounce utility ---- */
 function debounce(fn, delay) {
-  let timer;
-  return (...args) => {
-    clearTimeout(timer);
-    timer = setTimeout(() => fn(...args), delay);
-  };
+  let t;
+  return (...args) => { clearTimeout(t); t = setTimeout(() => fn(...args), delay); };
 }
 
-/* ============================================================
-   DOM READY
-   ============================================================ */
 document.addEventListener('DOMContentLoaded', () => {
   Admin.init();
   Admin.bindFilters();
