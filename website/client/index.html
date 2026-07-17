@@ -919,6 +919,149 @@
     });
 
     /* ================================================================
+       API: Load Team
+       ================================================================ */
+    async function loadTeam() {
+      try {
+        const res = await Auth.fetch('/v1/client/team');
+        const members = res && res.ok ? await res.json() : [];
+        const tbody = document.getElementById('teamTableBody');
+        if (!tbody) return;
+        if (!members || members.length === 0) {
+          tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--navy-200);padding:var(--space-lg);">No team members yet.</td></tr>';
+          return;
+        }
+        tbody.innerHTML = members.map(m => {
+          const roleBadge = m.role === 'admin' ? 'badge-gold' : m.role === 'client' ? 'badge-blue' : 'badge-gray';
+          const roleLabel = m.role === 'admin' ? 'Admin' : m.role === 'client' ? 'Client' : m.role;
+          const statusBadge = m.is_verified ? 'badge-green' : 'badge-gray';
+          const statusLabel = m.is_verified ? 'Active' : 'Pending';
+          return `<tr>
+            <td style="font-weight:600;color:var(--white);">${m.full_name || ''}</td>
+            <td style="color:var(--navy-200);">${m.email || ''}</td>
+            <td><span class="badge ${roleBadge}">${roleLabel}</span></td>
+            <td><span class="badge ${statusBadge}">${statusLabel}</span></td>
+            <td><button class="btn btn-sm btn-ghost"><i class="fa-regular fa-ellipsis-vertical"></i></button></td>
+          </tr>`;
+        }).join('');
+      } catch (err) {
+        console.error('Team load error:', err);
+      }
+    }
+
+    /* ================================================================
+       Invite Team Member Modal
+       ================================================================ */
+    window.showInviteModal = function() {
+      const existing = document.getElementById('inviteModalOverlay');
+      if (existing) existing.remove();
+
+      const overlay = document.createElement('div');
+      overlay.id = 'inviteModalOverlay';
+      overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:1000;display:flex;align-items:center;justify-content:center;padding:var(--space-lg);';
+      overlay.innerHTML = `
+        <div style="background:var(--navy-800);border:1px solid var(--navy-600);border-radius:12px;padding:var(--space-2xl);width:100%;max-width:420px;">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:var(--space-xl);">
+            <h3 style="font-size:var(--font-size-lg);font-weight:600;color:var(--white);">
+              <span class="lang-en">Invite Team Member</span>
+              <span class="lang-nl">Lid Uitnodigen</span>
+            </h3>
+            <button id="inviteModalClose" class="btn btn-sm btn-ghost"><i class="fa-regular fa-xmark"></i></button>
+          </div>
+          <form id="inviteModalForm">
+            <div class="form-group">
+              <label class="lang-en">Full Name *</label><label class="lang-nl">Volledige naam *</label>
+              <input type="text" name="full_name" required placeholder="Jan de Vries">
+            </div>
+            <div class="form-group">
+              <label>Email *</label>
+              <input type="email" name="email" required placeholder="jan@company.com">
+            </div>
+            <div style="display:flex;gap:var(--space-md);justify-content:flex-end;margin-top:var(--space-xl);">
+              <button type="button" id="inviteModalCancelBtn" class="btn btn-outline">
+                <span class="lang-en">Cancel</span><span class="lang-nl">Annuleren</span>
+              </button>
+              <button type="submit" class="btn btn-primary">
+                <i class="fa-regular fa-paper-plane"></i>
+                <span class="lang-en">Send Invite</span><span class="lang-nl">Uitnodigen</span>
+              </button>
+            </div>
+          </form>
+        </div>
+      `;
+      document.body.appendChild(overlay);
+
+      overlay.querySelector('#inviteModalClose').addEventListener('click', () => overlay.remove());
+      overlay.querySelector('#inviteModalCancelBtn').addEventListener('click', () => overlay.remove());
+      overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+
+      overlay.querySelector('#inviteModalForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const fd = new FormData(e.target);
+        const payload = { full_name: fd.get('full_name'), email: fd.get('email'), role: 'client' };
+        try {
+          const res = await Auth.fetch('/v1/client/team', { method: 'POST', body: JSON.stringify(payload) });
+          if (res && (res.ok || res.status === 201)) {
+            const data = await res.json();
+            Auth.toast('Team member invited!', 'success');
+            if (data.temporary_password) {
+              alert(`Temporary password for ${payload.email}: ${data.temporary_password}\n\nPlease share this securely with the new team member.`);
+            }
+            overlay.remove();
+            loadTeam();
+          } else {
+            const err = res ? await res.json().catch(() => ({})) : {};
+            Auth.toast(err.detail || 'Failed to invite member', 'error');
+          }
+        } catch (err) {
+          Auth.toast('Error inviting member', 'error');
+        }
+      });
+    };
+
+    /* ================================================================
+       API: Load / Save Client Profile (Settings)
+       ================================================================ */
+    async function loadClientProfile() {
+      try {
+        const res = await Auth.fetch('/v1/client/profile');
+        if (!res || !res.ok) return;
+        const profile = await res.json();
+        const nameEl = document.getElementById('settingsCompanyName');
+        const webEl = document.getElementById('settingsWebsite');
+        const indEl = document.getElementById('settingsIndustry');
+        if (nameEl) nameEl.value = profile.company_name || '';
+        if (webEl) webEl.value = profile.domain || '';
+        if (indEl && profile.industry) {
+          const opt = Array.from(indEl.options).find(o => o.value === profile.industry);
+          if (opt) indEl.value = profile.industry;
+        }
+      } catch (err) {
+        console.error('Profile load error:', err);
+      }
+    }
+
+    const settingsForm = document.getElementById('clientSettingsForm');
+    if (settingsForm) {
+      settingsForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const fd = new FormData(e.target);
+        const payload = {};
+        for (const [k, v] of fd.entries()) { if (v) payload[k] = v; }
+        try {
+          const res = await Auth.fetch('/v1/client/profile', { method: 'PATCH', body: JSON.stringify(payload) });
+          if (res && res.ok) {
+            Auth.toast('Settings saved!', 'success');
+          } else {
+            Auth.toast('Failed to save settings', 'error');
+          }
+        } catch (err) {
+          Auth.toast('Error saving settings', 'error');
+        }
+      });
+    }
+
+    /* ================================================================
        Initial load
        ================================================================ */
     document.addEventListener('DOMContentLoaded', () => {
