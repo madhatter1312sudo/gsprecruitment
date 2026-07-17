@@ -11,6 +11,7 @@ from core.config import settings
 from models.schemas import (
     UserRegister, UserLogin, TokenResponse, UserResponse, UserUpdate,
     ForgotPasswordRequest, ResetPasswordRequest, VerifyEmailRequest,
+    ChangePasswordRequest,
 )
 from services.email_service import email_service
 from typing import Optional
@@ -286,6 +287,32 @@ async def update_me(
         *values,
     )
     return updated
+
+
+# ── Change Password ─────────────────────────────────────────────────────
+
+@router.post("/change-password")
+async def change_password(
+    data: ChangePasswordRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    """Change the authenticated user's password (requires current password)."""
+    user = await fetch_one(
+        "SELECT id, password_hash FROM users WHERE id = $1 AND deleted_at IS NULL",
+        current_user["id"],
+    )
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    if not verify_password(data.current_password, user["password_hash"]):
+        raise HTTPException(status_code=400, detail="Current password is incorrect")
+
+    new_hash = hash_password(data.new_password)
+    await execute(
+        "UPDATE users SET password_hash = $1, updated_at = NOW() WHERE id = $2",
+        new_hash, current_user["id"],
+    )
+    return {"message": "Password changed successfully"}
 
 
 # ── Google Sign-In ────────────────────────────────────────────────────────

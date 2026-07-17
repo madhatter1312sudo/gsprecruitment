@@ -402,7 +402,7 @@
               <span class="lang-en">Team Members</span>
               <span class="lang-nl">Teamleden</span>
             </h3>
-            <button class="btn btn-primary" onclick="Auth.toast('Invite link copied!')">
+            <button class="btn btn-primary" onclick="showInviteModal()">
               <i class="fa-regular fa-user-plus"></i> <span class="lang-en">Invite Member</span><span class="lang-nl">Lid Uitnodigen</span>
             </button>
           </div>
@@ -420,21 +420,8 @@
                   <th></th>
                 </tr>
               </thead>
-              <tbody>
-                <tr>
-                  <td style="font-weight:600;color:var(--white);">Jan de Vries</td>
-                  <td style="color:var(--navy-200);">jan@company.com</td>
-                  <td><span class="badge badge-gold lang-en">Admin</span><span class="badge badge-gold lang-nl">Beheerder</span></td>
-                  <td><span class="badge badge-green lang-en">Active</span><span class="badge badge-green lang-nl">Actief</span></td>
-                  <td><button class="btn btn-sm btn-ghost"><i class="fa-regular fa-ellipsis-vertical"></i></button></td>
-                </tr>
-                <tr>
-                  <td style="font-weight:600;color:var(--white);">Lisa Bakker</td>
-                  <td style="color:var(--navy-200);">lisa@company.com</td>
-                  <td><span class="badge badge-blue lang-en">Recruiter</span><span class="badge badge-blue lang-nl">Recruiter</span></td>
-                  <td><span class="badge badge-green lang-en">Active</span><span class="badge badge-green lang-nl">Actief</span></td>
-                  <td><button class="btn btn-sm btn-ghost"><i class="fa-regular fa-ellipsis-vertical"></i></button></td>
-                </tr>
+              <tbody id="teamTableBody">
+                <tr><td colspan="5" style="text-align:center;color:var(--navy-200);padding:var(--space-lg);">Loading…</td></tr>
               </tbody>
             </table>
           </div>
@@ -448,25 +435,28 @@
                 <span class="lang-en">Company Profile</span>
                 <span class="lang-nl">Bedrijfsprofiel</span>
               </h3>
-              <form>
+              <form id="clientSettingsForm">
                 <div class="form-group">
                   <label class="lang-en">Company name</label>
                   <label class="lang-nl">Bedrijfsnaam</label>
-                  <input type="text" value="Tech Corp BV" placeholder="Company name">
+                  <input type="text" name="company_name" id="settingsCompanyName" placeholder="Company name">
                 </div>
                 <div class="form-group">
                   <label>Website</label>
-                  <input type="url" value="https://techcorp.nl" placeholder="https://">
+                  <input type="url" name="website" id="settingsWebsite" placeholder="https://">
                 </div>
                 <div class="form-group">
                   <label class="lang-en">Industry</label>
                   <label class="lang-nl">Industrie</label>
-                  <select>
-                    <option>High-Tech Equipment</option>
-                    <option>Semiconductor</option>
-                    <option>Automotive</option>
-                    <option>Healthcare</option>
-                    <option>Security</option>
+                  <select name="industry" id="settingsIndustry">
+                    <option value="">Select…</option>
+                    <option value="High-Tech Equipment">High-Tech Equipment</option>
+                    <option value="Semiconductor">Semiconductor</option>
+                    <option value="Automotive">Automotive</option>
+                    <option value="Healthcare">Healthcare</option>
+                    <option value="Security">Security</option>
+                    <option value="Software">Software</option>
+                    <option value="Other">Other</option>
                   </select>
                 </div>
                 <button type="submit" class="btn btn-primary"><i class="fa-regular fa-floppy-disk"></i> <span class="lang-en">Save</span><span class="lang-nl">Opslaan</span></button>
@@ -542,6 +532,8 @@
       if (section === 'dashboard') loadDashboard();
       else if (section === 'jobs') loadJobs();
       else if (section === 'analytics') loadAnalytics();
+      else if (section === 'team') loadTeam();
+      else if (section === 'settings') loadClientProfile();
     }
 
     document.querySelectorAll('.sidebar-nav-item').forEach(item => {
@@ -673,7 +665,7 @@
                 </div>
               </div>
               <div style="display:flex;gap:var(--space-sm);">
-                <button class="btn btn-sm btn-outline" onclick="Auth.toast('Edit job: ${j.id}')"><i class="fa-regular fa-pen-to-square"></i></button>
+                <button class="btn btn-sm btn-outline" onclick="editJob(${j.id})"><i class="fa-regular fa-pen-to-square"></i></button>
                 <button class="btn btn-sm btn-ghost" style="color:#f87171;" onclick="deleteJob(${j.id})"><i class="fa-regular fa-trash-can"></i></button>
               </div>
             </div>
@@ -683,6 +675,18 @@
         console.error('Jobs load error:', err);
       }
     }
+
+    /* ---- Edit job ---- */
+    window.editJob = async function(jobId) {
+      try {
+        const res = await Auth.fetch(`/v1/client/jobs/${jobId}`);
+        if (!res || !res.ok) { Auth.toast('Failed to load job', 'error'); return; }
+        const job = await res.json();
+        window.showJobModal(job);
+      } catch (err) {
+        Auth.toast('Error loading job', 'error');
+      }
+    };
 
     /* ---- Delete job ---- */
     window.deleteJob = async function(jobId) {
@@ -700,10 +704,127 @@
       }
     };
 
-    /* ---- Create job (placeholder) ---- */
+    /* ---- Create job modal ---- */
     document.getElementById('createJobBtn').addEventListener('click', () => {
-      Auth.toast('Job creation form opened', 'success');
+      window.showJobModal();
     });
+
+    window.showJobModal = function(job = null) {
+      const isEdit = !!job;
+      const existing = document.getElementById('jobModalOverlay');
+      if (existing) existing.remove();
+
+      const overlay = document.createElement('div');
+      overlay.id = 'jobModalOverlay';
+      overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:1000;display:flex;align-items:center;justify-content:center;padding:var(--space-lg);';
+      overlay.innerHTML = `
+        <div style="background:var(--navy-800);border:1px solid var(--navy-600);border-radius:12px;padding:var(--space-2xl);width:100%;max-width:560px;max-height:90vh;overflow-y:auto;">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:var(--space-xl);">
+            <h3 style="font-size:var(--font-size-lg);font-weight:600;color:var(--white);">
+              <span class="lang-en">${isEdit ? 'Edit Job' : 'Create Job'}</span>
+              <span class="lang-nl">${isEdit ? 'Vacature Bewerken' : 'Vacature Aanmaken'}</span>
+            </h3>
+            <button id="jobModalClose" class="btn btn-sm btn-ghost"><i class="fa-regular fa-xmark"></i></button>
+          </div>
+          <form id="jobModalForm">
+            <div class="form-group">
+              <label class="lang-en">Job Title *</label><label class="lang-nl">Functietitel *</label>
+              <input type="text" name="title" required placeholder="e.g. Senior Embedded Software Engineer" value="${job?.title || ''}">
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:var(--space-md);">
+              <div class="form-group">
+                <label class="lang-en">Department</label><label class="lang-nl">Afdeling</label>
+                <input type="text" name="department" placeholder="e.g. R&D" value="${job?.department || ''}">
+              </div>
+              <div class="form-group">
+                <label class="lang-en">Seniority</label><label class="lang-nl">Niveau</label>
+                <select name="seniority">
+                  <option value="">Select…</option>
+                  ${['junior','mid','senior','lead','executive'].map(s => `<option value="${s}" ${job?.seniority === s ? 'selected' : ''}>${s.charAt(0).toUpperCase()+s.slice(1)}</option>`).join('')}
+                </select>
+              </div>
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:var(--space-md);">
+              <div class="form-group">
+                <label class="lang-en">Min Salary (€)</label><label class="lang-nl">Min Salaris (€)</label>
+                <input type="number" name="salary_min" placeholder="50000" value="${job?.salary_min || ''}">
+              </div>
+              <div class="form-group">
+                <label class="lang-en">Max Salary (€)</label><label class="lang-nl">Max Salaris (€)</label>
+                <input type="number" name="salary_max" placeholder="80000" value="${job?.salary_max || ''}">
+              </div>
+              <div class="form-group">
+                <label class="lang-en">Location Type</label><label class="lang-nl">Werkplek</label>
+                <select name="location_type">
+                  <option value="">Select…</option>
+                  ${['remote','hybrid','onsite'].map(t => `<option value="${t}" ${job?.location_type === t ? 'selected' : ''}>${t.charAt(0).toUpperCase()+t.slice(1)}</option>`).join('')}
+                </select>
+              </div>
+            </div>
+            <div class="form-group">
+              <label class="lang-en">Description</label><label class="lang-nl">Beschrijving</label>
+              <textarea name="description" rows="4" placeholder="Describe the role and responsibilities…" style="width:100%;resize:vertical;">${job?.description || ''}</textarea>
+            </div>
+            <div class="form-group">
+              <label class="lang-en">Requirements</label><label class="lang-nl">Vereisten</label>
+              <textarea name="requirements" rows="3" placeholder="Required skills and experience…" style="width:100%;resize:vertical;">${job?.requirements || ''}</textarea>
+            </div>
+            <div class="form-group">
+              <label class="lang-en">Nice to Have</label><label class="lang-nl">Pré</label>
+              <textarea name="nice_to_have" rows="2" placeholder="Bonus skills…" style="width:100%;resize:vertical;">${job?.nice_to_have || ''}</textarea>
+            </div>
+            <div class="form-group">
+              <label class="lang-en">Urgency</label><label class="lang-nl">Urgentie</label>
+              <select name="urgency">
+                ${['normal','high','critical'].map(u => `<option value="${u}" ${job?.urgency === u || (!job?.urgency && u === 'normal') ? 'selected' : ''}>${u.charAt(0).toUpperCase()+u.slice(1)}</option>`).join('')}
+              </select>
+            </div>
+            <div style="display:flex;gap:var(--space-md);justify-content:flex-end;margin-top:var(--space-xl);">
+              <button type="button" id="jobModalCancelBtn" class="btn btn-outline">
+                <span class="lang-en">Cancel</span><span class="lang-nl">Annuleren</span>
+              </button>
+              <button type="submit" class="btn btn-primary">
+                <i class="fa-regular fa-floppy-disk"></i>
+                <span class="lang-en">${isEdit ? 'Save Changes' : 'Create Job'}</span>
+                <span class="lang-nl">${isEdit ? 'Opslaan' : 'Aanmaken'}</span>
+              </button>
+            </div>
+          </form>
+        </div>
+      `;
+      document.body.appendChild(overlay);
+
+      overlay.querySelector('#jobModalClose').addEventListener('click', () => overlay.remove());
+      overlay.querySelector('#jobModalCancelBtn').addEventListener('click', () => overlay.remove());
+      overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+
+      overlay.querySelector('#jobModalForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const fd = new FormData(e.target);
+        const payload = {};
+        for (const [k, v] of fd.entries()) {
+          if (v !== '') payload[k] = k.includes('salary') ? parseInt(v) || null : v;
+        }
+        try {
+          const url = isEdit ? `/v1/client/jobs/${job.id}` : '/v1/client/jobs';
+          const method = isEdit ? 'PUT' : 'POST';
+          const res = await Auth.fetch(url, {
+            method,
+            body: JSON.stringify(payload),
+          });
+          if (res && (res.ok || res.status === 201)) {
+            Auth.toast(isEdit ? 'Job updated!' : 'Job created!', 'success');
+            overlay.remove();
+            loadJobs();
+          } else {
+            const err = res ? await res.json().catch(() => ({})) : {};
+            Auth.toast(err.detail || 'Failed to save job', 'error');
+          }
+        } catch (err) {
+          Auth.toast('Error saving job', 'error');
+        }
+      });
+    };
 
     /* ================================================================
        API: Load Analytics

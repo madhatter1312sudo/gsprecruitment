@@ -13,8 +13,17 @@ from models.schemas import (
     MessageListResponse, MessageResponse,
 )
 from typing import Optional, List
+from pydantic import BaseModel
 import asyncio
 import secrets
+
+
+class ClientProfileUpdate(BaseModel):
+    company_name: Optional[str] = None
+    website: Optional[str] = None
+    industry: Optional[str] = None
+    location: Optional[str] = None
+    size_range: Optional[str] = None
 
 router = APIRouter(prefix="/api/v1/client", tags=["client-portal"])
 
@@ -609,3 +618,54 @@ async def invite_team_member(
         "email": user["email"],
         "temporary_password": temp_password,
     }
+
+
+# ── Client Profile ──────────────────────────────────────────────────────
+
+@router.get("/profile")
+async def get_client_profile(current_user: dict = Depends(require_role("client", "admin"))):
+    """Get this client's company profile."""
+    client = await _get_client_by_user(current_user["id"])
+    if not client:
+        return {}
+    return dict(client)
+
+
+@router.patch("/profile")
+async def update_client_profile(
+    updates: ClientProfileUpdate,
+    current_user: dict = Depends(require_role("client", "admin")),
+):
+    """Update this client's company profile."""
+    client = await _get_client_by_user(current_user["id"])
+    if not client:
+        raise HTTPException(status_code=404, detail="Client profile not found")
+
+    set_parts = []
+    values = []
+    idx = 1
+    allowed = {"company_name", "industry", "location", "size_range"}
+    update_dict = updates.model_dump(exclude_none=True)
+
+    # Map 'website' to 'domain' column
+    if "website" in update_dict:
+        set_parts.append(f"domain = ${idx}")
+        values.append(update_dict.pop("website"))
+        idx += 1
+
+    for key, val in update_dict.items():
+        if key not in allowed:
+            continue
+        set_parts.append(f"{key} = ${idx}")
+        values.append(val)
+        idx += 1
+
+    if not set_parts:
+        return dict(client)
+
+    values.append(client["id"])
+    updated = await fetch_one(
+        f"UPDATE clients SET {', '.join(set_parts)}, updated_at = NOW() WHERE id = ${idx} RETURNING *",
+        *values,
+    )
+    return dict(updated)

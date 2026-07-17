@@ -1404,16 +1404,21 @@
         Auth.toast('Passwords do not match', 'error');
         return;
       }
+      if (newPw.length < 8) {
+        Auth.toast('New password must be at least 8 characters', 'error');
+        return;
+      }
       try {
-        const res = await Auth.fetch('/auth/me', {
-          method: 'PATCH',
-          body: JSON.stringify({ password: newPw }),
+        const res = await Auth.fetch('/auth/change-password', {
+          method: 'POST',
+          body: JSON.stringify({ current_password: currentPw, new_password: newPw }),
         });
         if (res && res.ok) {
-          Auth.toast(document.documentElement.getAttribute('data-lang') === 'nl' ? 'Wachtwoord bijgewerkt!' : 'Password updated!');
+          Auth.toast(document.documentElement.getAttribute('data-lang') === 'nl' ? 'Wachtwoord bijgewerkt!' : 'Password updated!', 'success');
           inputs.forEach(i => i.value = '');
         } else {
-          Auth.toast('Failed to update password', 'error');
+          const err = res ? await res.json().catch(() => ({})) : {};
+          Auth.toast(err.detail || 'Failed to update password', 'error');
         }
       } catch (err) {
         Auth.toast('Error updating password', 'error');
