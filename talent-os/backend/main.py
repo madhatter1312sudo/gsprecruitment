@@ -91,6 +91,7 @@ from routers.public import router as public_router
 from routers.gdpr import router as gdpr_router
 from routers.outreach import router as outreach_router
 from routers.blog_admin import router as blog_admin_router
+from routers.mobile import router as mobile_router
 
 app.include_router(health_router)
 app.include_router(auth_router)
@@ -107,6 +108,7 @@ app.include_router(public_router)
 app.include_router(gdpr_router)
 app.include_router(outreach_router)
 app.include_router(blog_admin_router)
+app.include_router(mobile_router)
 
 
 # ── Entry Point ─────────────────────────────────────────────────────────

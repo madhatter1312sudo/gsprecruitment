@@ -51,7 +51,7 @@ class Settings(BaseSettings):
     backend_host: str = "127.0.0.1"
     backend_port: int = 8000
     backend_workers: int = 4
-    cors_origins: str = "https://gsprecruitment.nl,https://www.gsprecruitment.nl,http://localhost:3000,http://127.0.0.1:3000"
+    cors_origins: str = "https://gsprecruitment.nl,https://www.gsprecruitment.nl,http://localhost:3000,http://127.0.0.1:3000,http://localhost:8081,http://localhost:19006,exp://localhost:8081"
 
     @property
     def cors_origin_list(self) -> List[str]:

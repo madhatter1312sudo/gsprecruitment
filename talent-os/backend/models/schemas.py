@@ -447,3 +447,26 @@ class MessageResponse(BaseModel):
 class MessageListResponse(BaseModel):
     messages: List[MessageResponse]
     unread_count: int = 0
+
+
+# ── Mobile: Push Tokens ─────────────────────────────────────────────────
+
+class PushTokenCreate(BaseModel):
+    token: str = Field(..., min_length=1, max_length=400)
+    platform: Optional[str] = Field(None, max_length=20)
+
+
+class PushTokenDelete(BaseModel):
+    token: str = Field(..., min_length=1, max_length=400)
+
+
+# ── Public: Skill Quiz ───────────────────────────────────────────────────
+
+class QuizAnswerItem(BaseModel):
+    question_id: int
+    answer_index: int = Field(..., ge=0, le=3)
+
+
+class QuizSubmitRequest(BaseModel):
+    email: Optional[EmailStr] = None
+    answers: List[QuizAnswerItem] = Field(..., min_length=1)
