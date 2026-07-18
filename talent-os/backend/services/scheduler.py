@@ -251,6 +251,68 @@ async def draft_outreach() -> dict:
     return {"status": "success", "considered": len(candidates), "drafted": drafted}
 
 
+# ── Job 5: Weekly (Mon 05:00) — Draft a blog post ───────────────────────
+
+BLOG_TOPICS = [
+    "Salaristrends embedded software Brainport",
+    "Zo verloopt een technische screening bij GSP",
+    "Hiring-tijdlijnen voor C++ engineers in Nederland",
+    "Carrièreswitch naar mechatronica",
+    "Cybersecurity-talent vinden in Brainport",
+    "Interviewvoorbereiding voor embedded engineers",
+]
+
+
+async def draft_blog_post() -> dict:
+    """Draft a new blog post from the next topic in BLOG_TOPICS (rotating,
+    tracked via the system_settings 'blog_topic_index' key) and store it as
+    status='draft'. NEVER publishes — a human must publish via
+    routers/blog_admin.py before it appears on the public site."""
+    if not await _flag_enabled("blog_drafting_enabled"):
+        logger.info("draft_blog_post: disabled via system_settings, skipping")
+        return {"status": "skipped", "reason": "blog_drafting_enabled=false"}
+
+    raw_index = await fetch_val("SELECT value FROM system_settings WHERE key = $1", "blog_topic_index")
+    try:
+        index = int(raw_index) if raw_index is not None else 0
+    except (TypeError, ValueError):
+        index = 0
+    index = index % len(BLOG_TOPICS)
+
+    topic = BLOG_TOPICS[index]
+    next_index = (index + 1) % len(BLOG_TOPICS)
+
+    try:
+        draft = await outreach_ai.draft_blog(topic)
+    except Exception:
+        logger.exception("draft_blog_post: draft_blog failed for topic=%s", topic)
+        return {"status": "failed", "topic": topic}
+
+    slug = draft["slug"]
+    existing = await fetch_val("SELECT id FROM blog_posts WHERE slug = $1", slug)
+    if existing:
+        slug = f"{slug}-{datetime.now(timezone.utc).strftime('%Y-%m-%d')}"
+
+    await execute(
+        """INSERT INTO blog_posts
+           (slug, title_nl, title_en, excerpt_nl, excerpt_en, body_nl, body_en,
+            tags, read_time_min, status, ai_model)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'draft',$10)""",
+        slug, draft["title_nl"], draft["title_en"], draft["excerpt_nl"], draft["excerpt_en"],
+        draft["body_nl"], draft["body_en"], draft["tags"], draft["read_time_min"],
+        settings.openrouter_chat_model,
+    )
+
+    await execute(
+        """INSERT INTO system_settings (key, value) VALUES ($1, $2)
+           ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value""",
+        "blog_topic_index", str(next_index),
+    )
+
+    logger.info("draft_blog_post: drafted slug=%s topic=%s", slug, topic)
+    return {"status": "success", "slug": slug, "topic": topic}
+
+
 # ── Scheduler lifecycle ──────────────────────────────────────────────────
 
 def start_scheduler() -> None:
@@ -275,9 +337,13 @@ def start_scheduler() -> None:
         draft_outreach, CronTrigger(hour=7, minute=30),
         id="draft_outreach", replace_existing=True,
     )
+    scheduler.add_job(
+        draft_blog_post, CronTrigger(day_of_week="mon", hour=5, minute=0),
+        id="draft_blog_post", replace_existing=True,
+    )
 
     scheduler.start()
-    logger.info("scheduler: started with 4 daily jobs (Europe/Amsterdam)")
+    logger.info("scheduler: started with 4 daily jobs + 1 weekly job (Europe/Amsterdam)")
 
 
 def shutdown_scheduler() -> None:
@@ -292,4 +358,5 @@ JOBS_BY_NAME = {
     "enrich": apollo_enrich_batch,
     "matching": matching,
     "drafting": draft_outreach,
+    "blog": draft_blog_post,
 }

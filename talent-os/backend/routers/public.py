@@ -84,6 +84,35 @@ async def get_public_salary_data(request: Request, response: Response,
 
 # ── Lead Submission ─────────────────────────────────────────────────────
 
+@router.get("/blog")
+@limiter.limit("30/minute")
+async def list_blog_posts(request: Request, response: Response):
+    """List published blog posts, newest first."""
+    response.headers["Cache-Control"] = "public, max-age=300"
+    rows = await fetch_all(
+        """SELECT slug, title_nl, title_en, excerpt_nl, excerpt_en, tags,
+                  read_time_min, published_at
+           FROM blog_posts
+           WHERE status = 'published'
+           ORDER BY published_at DESC""",
+    )
+    return rows
+
+
+@router.get("/blog/{slug}")
+@limiter.limit("30/minute")
+async def get_blog_post(request: Request, response: Response, slug: str):
+    """Get a single published blog post by slug, including full bodies."""
+    response.headers["Cache-Control"] = "public, max-age=300"
+    row = await fetch_one(
+        "SELECT * FROM blog_posts WHERE slug = $1 AND status = 'published'",
+        slug,
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail="Blog post not found")
+    return row
+
+
 @router.post("/lead", status_code=201)
 @limiter.limit("10/minute")
 async def submit_lead(request: Request, data: LeadSubmit):

@@ -5,7 +5,7 @@
 
 const Admin = {
   _data: {},
-  _currentPage: { users: 1, candidates: 1, audit: 1, outreach: 1 },
+  _currentPage: { users: 1, candidates: 1, audit: 1, outreach: 1, blog: 1 },
   _pageSize: 20,
 
   /* ---- Init ---- */
@@ -41,7 +41,8 @@ const Admin = {
     const map = { active: 'badge-green', open: 'badge-green', placed: 'badge-blue',
       pending: 'badge-blue', suspended: 'badge-red', closed: 'badge-red',
       draft: 'badge-blue', admin: 'badge-red', candidate: 'badge-gold', client: 'badge-blue',
-      sent: 'badge-green', rejected: 'badge', failed: 'badge-red' };
+      sent: 'badge-green', rejected: 'badge', failed: 'badge-red',
+      published: 'badge-green', archived: 'badge' };
     return map[status?.toLowerCase()] || 'badge';
   },
   esc(s) {
@@ -662,6 +663,170 @@ const Admin = {
       }
     } catch { Auth.toast('Network error', 'error'); }
     finally { if (btn) { btn.disabled = false; btn.innerHTML = btn.dataset.origText || btn.innerHTML; } }
+  },
+
+  /* ============================================================
+     BLOG
+     ============================================================ */
+  async loadBlog(params = {}) {
+    const qs = new URLSearchParams();
+    const limit = this._pageSize;
+    const offset = ((this._currentPage.blog || 1) - 1) * limit;
+    const statusFilter = document.getElementById('blogStatusFilter');
+    const status = params.status !== undefined ? params.status : statusFilter?.value;
+    if (status) qs.set('status', status);
+    qs.set('limit', limit);
+    qs.set('offset', offset);
+
+    this.setLoading('#section-blog table tbody', 6);
+    try {
+      const res = await Auth.fetch(`/v1/admin/blog/?${qs}`);
+      if (!res) return;
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail);
+      this._data.blog = data;
+      this.renderBlog(data);
+      this.renderPagination('blogPagination', data.total, limit, this._currentPage.blog, (p) => {
+        this._currentPage.blog = p;
+        this.loadBlog(params);
+      });
+    } catch (err) {
+      this.setEmpty('#section-blog table tbody', 6, 'Failed to load blog posts');
+      console.error(err);
+    }
+  },
+
+  renderBlog(data) {
+    const tbody = document.querySelector('#section-blog table tbody');
+    if (!tbody) return;
+    const items = data.items || [];
+    if (!items.length) { this.setEmpty('#section-blog table tbody', 6, 'No blog posts found'); return; }
+    tbody.innerHTML = items.map(p => {
+      const tags = Array.isArray(p.tags) ? p.tags.join(', ') : (p.tags || '—');
+      return `
+      <tr>
+        <td style="font-weight:600;color:var(--white);">${this.esc(p.title_nl || '—')}</td>
+        <td style="color:var(--navy-200);font-size:var(--font-size-xs);">${this.esc(p.slug)}</td>
+        <td style="color:var(--navy-200);font-size:var(--font-size-xs);">${this.esc(tags)}</td>
+        <td><span class="badge ${this.badge(p.status)}">${this.esc(p.status)}</span></td>
+        <td style="font-size:var(--font-size-xs);color:var(--navy-300);">${p.published_at ? this.formatDate(p.published_at) : '—'}</td>
+        <td>
+          <button class="btn btn-sm btn-ghost" onclick="Admin.openBlogModal(${p.id})" title="Edit">
+            <i class="fa-regular fa-pen"></i>
+          </button>
+          ${p.status === 'draft' ? `
+            <button class="btn btn-sm btn-ghost" onclick="Admin.publishBlogPost(${p.id})" title="Publish" style="color:#4ade80;">
+              <i class="fa-regular fa-circle-check"></i>
+            </button>` : ''}
+          ${p.status === 'published' ? `
+            <button class="btn btn-sm btn-ghost" onclick="Admin.archiveBlogPost(${p.id})" title="Archive" style="color:#f87171;">
+              <i class="fa-regular fa-box-archive"></i>
+            </button>` : ''}
+        </td>
+      </tr>`;
+    }).join('');
+  },
+
+  openBlogModal(id) {
+    const p = id ? (this._data.blog?.items || []).find(x => x.id === id) : null;
+    this.openModal('blogModal', `
+      <h3 style="color:var(--white);margin-bottom:var(--space-lg);">${p ? 'Edit Post' : 'New Post'}</h3>
+      <div class="form-group">
+        <label>Slug</label>
+        <input type="text" id="blogSlug" value="${this.esc(p?.slug || '')}">
+      </div>
+      <div class="form-group">
+        <label>Title (NL)</label>
+        <input type="text" id="blogTitleNl" value="${this.esc(p?.title_nl || '')}">
+      </div>
+      <div class="form-group">
+        <label>Title (EN)</label>
+        <input type="text" id="blogTitleEn" value="${this.esc(p?.title_en || '')}">
+      </div>
+      <div class="form-group">
+        <label>Excerpt (NL)</label>
+        <textarea id="blogExcerptNl" rows="3" style="width:100%;background:rgba(6,13,26,0.6);border:1px solid rgba(74,111,159,0.3);border-radius:var(--radius-md);color:var(--white);padding:0.75rem;font-family:var(--font-primary);font-size:var(--font-size-sm);resize:vertical;box-sizing:border-box;">${this.esc(p?.excerpt_nl || '')}</textarea>
+      </div>
+      <div class="form-group">
+        <label>Excerpt (EN)</label>
+        <textarea id="blogExcerptEn" rows="3" style="width:100%;background:rgba(6,13,26,0.6);border:1px solid rgba(74,111,159,0.3);border-radius:var(--radius-md);color:var(--white);padding:0.75rem;font-family:var(--font-primary);font-size:var(--font-size-sm);resize:vertical;box-sizing:border-box;">${this.esc(p?.excerpt_en || '')}</textarea>
+      </div>
+      <div class="form-group">
+        <label>Body HTML (NL)</label>
+        <textarea id="blogBodyNl" rows="10" style="width:100%;background:rgba(6,13,26,0.6);border:1px solid rgba(74,111,159,0.3);border-radius:var(--radius-md);color:var(--white);padding:0.75rem;font-family:var(--font-primary);font-size:var(--font-size-sm);resize:vertical;box-sizing:border-box;">${this.esc(p?.body_nl || '')}</textarea>
+      </div>
+      <div class="form-group">
+        <label>Body HTML (EN)</label>
+        <textarea id="blogBodyEn" rows="10" style="width:100%;background:rgba(6,13,26,0.6);border:1px solid rgba(74,111,159,0.3);border-radius:var(--radius-md);color:var(--white);padding:0.75rem;font-family:var(--font-primary);font-size:var(--font-size-sm);resize:vertical;box-sizing:border-box;">${this.esc(p?.body_en || '')}</textarea>
+      </div>
+      <div class="form-group">
+        <label>Tags (comma-separated)</label>
+        <input type="text" id="blogTags" value="${this.esc(Array.isArray(p?.tags) ? p.tags.join(', ') : (p?.tags || ''))}">
+      </div>
+      <div class="form-group">
+        <label>Read time (min)</label>
+        <input type="number" id="blogReadTime" value="${p?.read_time_min ?? ''}">
+      </div>
+      <div style="display:flex;gap:var(--space-md);margin-top:var(--space-lg);">
+        <button class="btn btn-primary" onclick="Admin.saveBlogPost(${p ? p.id : 'null'})">Save</button>
+        <button class="btn btn-ghost" onclick="Admin.closeModal()">Cancel</button>
+      </div>
+    `);
+  },
+
+  async saveBlogPost(id) {
+    const payload = {
+      slug: document.getElementById('blogSlug')?.value?.trim(),
+      title_nl: document.getElementById('blogTitleNl')?.value?.trim(),
+      title_en: document.getElementById('blogTitleEn')?.value?.trim(),
+      excerpt_nl: document.getElementById('blogExcerptNl')?.value,
+      excerpt_en: document.getElementById('blogExcerptEn')?.value,
+      body_nl: document.getElementById('blogBodyNl')?.value,
+      body_en: document.getElementById('blogBodyEn')?.value,
+      tags: (document.getElementById('blogTags')?.value || '').split(',').map(t => t.trim()).filter(Boolean),
+      read_time_min: parseInt(document.getElementById('blogReadTime')?.value, 10) || null,
+    };
+    try {
+      const res = id
+        ? await Auth.fetch(`/v1/admin/blog/${id}`, { method: 'PUT', body: JSON.stringify(payload) })
+        : await Auth.fetch(`/v1/admin/blog/`, { method: 'POST', body: JSON.stringify(payload) });
+      if (res?.ok) {
+        Auth.toast(id ? 'Post updated' : 'Post created', 'success');
+        this.closeModal();
+        await this.loadBlog();
+      } else {
+        const d = await res?.json();
+        Auth.toast(d?.detail || 'Save failed', 'error');
+      }
+    } catch { Auth.toast('Network error', 'error'); }
+  },
+
+  async publishBlogPost(id) {
+    if (!confirm('Publish this post? It will become visible on the public blog.')) return;
+    try {
+      const res = await Auth.fetch(`/v1/admin/blog/${id}/publish`, { method: 'POST' });
+      if (res?.ok) {
+        Auth.toast('Post published', 'success');
+        await this.loadBlog();
+      } else {
+        const d = await res?.json();
+        Auth.toast(d?.detail || 'Publish failed', 'error');
+      }
+    } catch { Auth.toast('Network error', 'error'); }
+  },
+
+  async archiveBlogPost(id) {
+    if (!confirm('Archive this post? It will be removed from the public blog.')) return;
+    try {
+      const res = await Auth.fetch(`/v1/admin/blog/${id}/archive`, { method: 'POST' });
+      if (res?.ok) {
+        Auth.toast('Post archived', 'success');
+        await this.loadBlog();
+      } else {
+        const d = await res?.json();
+        Auth.toast(d?.detail || 'Archive failed', 'error');
+      }
+    } catch { Auth.toast('Network error', 'error'); }
   },
 
   /* ============================================================

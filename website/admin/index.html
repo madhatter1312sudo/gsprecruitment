@@ -131,6 +131,7 @@
 
       <div class="sidebar-section-label">Growth</div>
       <button class="nav-item" data-section="outreach"><i class="fa-regular fa-paper-plane"></i> Outreach</button>
+      <button class="nav-item" data-section="blog"><i class="fa-regular fa-newspaper"></i> Blog</button>
 
       <div class="sidebar-section-label">Insights</div>
       <button class="nav-item" data-section="analytics"><i class="fa-regular fa-chart-line"></i> Analytics</button>
@@ -342,6 +343,36 @@
         <div class="pagination" id="outreachPagination"></div>
       </section>
 
+      <!-- ==================== BLOG ==================== -->
+      <section class="portal-section" id="section-blog">
+        <div class="toolbar">
+          <select class="filter-select" id="blogStatusFilter">
+            <option value="">All</option>
+            <option value="draft">Draft</option>
+            <option value="published">Published</option>
+            <option value="archived">Archived</option>
+          </select>
+          <button class="btn btn-sm btn-outline" onclick="Admin.runOutreachJob('blog', this)">Draft new post (AI)</button>
+          <button class="btn btn-sm btn-primary" onclick="Admin.openBlogModal(null)">New post</button>
+        </div>
+        <div class="table-wrap" style="margin-bottom:var(--space-md);">
+          <table>
+            <thead>
+              <tr>
+                <th>Title NL</th>
+                <th>Slug</th>
+                <th>Tags</th>
+                <th>Status</th>
+                <th>Published</th>
+                <th style="width:180px;">Actions</th>
+              </tr>
+            </thead>
+            <tbody><tr><td colspan="6" style="text-align:center;padding:2rem;color:var(--navy-300);"><i class="fa-regular fa-spinner fa-spin"></i></td></tr></tbody>
+          </table>
+        </div>
+        <div class="pagination" id="blogPagination"></div>
+      </section>
+
       <!-- ==================== CANDIDATES ==================== -->
       <section class="portal-section" id="section-candidates">
         <div class="toolbar">
@@ -541,7 +572,7 @@
   /* ---- Navigation ---- */
   const sectionTitles = {
     dashboard: 'Dashboard', users: 'User Management', jobs: 'All Jobs',
-    candidates: 'All Candidates', outreach: 'Outreach', analytics: 'Analytics',
+    candidates: 'All Candidates', outreach: 'Outreach', blog: 'Blog', analytics: 'Analytics',
     audit: 'Audit Log', cms: 'Content CMS', settings: 'Settings',
   };
 
@@ -550,6 +581,7 @@
     jobs:       () => Admin.loadJobs(),
     candidates: () => Admin.loadCandidates(),
     outreach:   () => Admin.loadOutreach(),
+    blog:       () => Admin.loadBlog(),
     analytics:  () => Admin.loadAnalytics(),
     audit:      () => Admin.loadAuditLog(),
     cms:        () => Admin.loadContent(),
@@ -625,6 +657,15 @@
     outreachStatusFilter.addEventListener('change', e => {
       Admin._currentPage.outreach = 1;
       Admin.loadOutreach({ status: e.target.value || undefined });
+    });
+  }
+
+  /* ---- Blog status filter ---- */
+  const blogStatusFilter = document.getElementById('blogStatusFilter');
+  if (blogStatusFilter) {
+    blogStatusFilter.addEventListener('change', e => {
+      Admin._currentPage.blog = 1;
+      Admin.loadBlog({ status: e.target.value || undefined });
     });
   }
 

@@ -1,6 +1,6 @@
 // WhatsApp number in E.164 format, digits only (no +), e.g. '31612345678'.
 // Leave empty to keep the floating WhatsApp button hidden site-wide.
-const GSP_WHATSAPP = '';
+const GSP_WHATSAPP = '31617913965';
 
 /* ==========================================================================
    GSP Recruitment — Main Application Script
@@ -483,6 +483,39 @@ const GSP_WHATSAPP = '';
     });
 
     fetchJobs();
+  }
+
+  // ── Homepage Vacancy Module ─────────────────────────────
+  function initHomeVacancies() {
+    const section = $('homeVacancies');
+    const grid = $('homeVacanciesGrid');
+    if (!section || !grid) return; // safe no-op on other pages
+
+    fetch(`${API}/api/public/jobs`)
+      .then(res => {
+        if (!res.ok) throw new Error('bad response');
+        return res.json();
+      })
+      .then(data => {
+        if (!Array.isArray(data) || data.length === 0) {
+          section.style.display = 'none';
+          return;
+        }
+        const jobs = data.slice(0, 3);
+        grid.innerHTML = jobs.map(job => `
+          <div class="vac-card">
+            <div class="vac-ref">GSP-${job.id}</div>
+            <h3>${job.title}</h3>
+            <span class="vac-chip">${job.department || ''}</span>
+            <div class="vac-meta"><i class="fas fa-map-marker-alt"></i> ${job.location_type || job.location || 'Netherlands'}</div>
+            <a href="vacature.html?id=${job.slug || job.id}" class="vac-link"><span class="lang-en">View vacancy →</span><span class="lang-nl">Bekijk vacature →</span></a>
+          </div>
+        `).join('');
+        section.style.display = '';
+      })
+      .catch(() => {
+        section.style.display = 'none';
+      });
   }
 
   // ── Salary Calculator ──────────────────────────────────
@@ -1170,6 +1203,7 @@ const GSP_WHATSAPP = '';
     initAuth();
     initCookieConsent();
     initJobBoard();
+    initHomeVacancies();
     initSalaryCalc();
     initQuiz();
     initContactForm();
