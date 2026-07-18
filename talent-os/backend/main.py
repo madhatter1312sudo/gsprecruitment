@@ -18,6 +18,7 @@ from slowapi.util import get_remote_address
 
 from core.config import settings
 from core.database import close_pool
+from services.scheduler import start_scheduler, shutdown_scheduler
 
 
 # ── Logging ────────────────────────────────────────────────────────────
@@ -37,8 +38,15 @@ async def lifespan(app: FastAPI):
     logger.info(f"OpenRouter: {'configured' if settings.openrouter_api_key else 'NOT configured'}")
     logger.info(f"Apollo.io: {'configured' if settings.apollo_api_key else 'NOT configured'}")
     logger.info("ALL AI/LLM calls go through OpenRouter. NO models on VPS.")
+
+    try:
+        start_scheduler()
+    except Exception:
+        logger.exception("Failed to start sourcing/outreach scheduler — continuing without it")
+
     yield
     logger.info("Shutting down...")
+    shutdown_scheduler()
     await close_pool()
 
 
@@ -81,6 +89,7 @@ from routers.client import router as client_portal_router
 from routers.admin import router as admin_portal_router
 from routers.public import router as public_router
 from routers.gdpr import router as gdpr_router
+from routers.outreach import router as outreach_router
 
 app.include_router(health_router)
 app.include_router(auth_router)
@@ -95,6 +104,7 @@ app.include_router(client_portal_router)
 app.include_router(admin_portal_router)
 app.include_router(public_router)
 app.include_router(gdpr_router)
+app.include_router(outreach_router)
 
 
 # ── Entry Point ─────────────────────────────────────────────────────────

@@ -5,7 +5,7 @@
 
 const Admin = {
   _data: {},
-  _currentPage: { users: 1, candidates: 1, audit: 1 },
+  _currentPage: { users: 1, candidates: 1, audit: 1, outreach: 1 },
   _pageSize: 20,
 
   /* ---- Init ---- */
@@ -40,7 +40,8 @@ const Admin = {
   badge(status) {
     const map = { active: 'badge-green', open: 'badge-green', placed: 'badge-blue',
       pending: 'badge-blue', suspended: 'badge-red', closed: 'badge-red',
-      draft: 'badge', admin: 'badge-red', candidate: 'badge-gold', client: 'badge-blue' };
+      draft: 'badge-blue', admin: 'badge-red', candidate: 'badge-gold', client: 'badge-blue',
+      sent: 'badge-green', rejected: 'badge', failed: 'badge-red' };
     return map[status?.toLowerCase()] || 'badge';
   },
   esc(s) {
@@ -503,6 +504,164 @@ const Admin = {
       if (res?.ok) Auth.toast('Matching queued', 'success');
       else Auth.toast('Failed to start matching', 'error');
     } catch { Auth.toast('Network error', 'error'); }
+  },
+
+  /* ============================================================
+     OUTREACH
+     ============================================================ */
+  async loadOutreach(params = {}) {
+    const qs = new URLSearchParams();
+    const limit = this._pageSize;
+    const offset = ((this._currentPage.outreach || 1) - 1) * limit;
+    const statusFilter = document.getElementById('outreachStatusFilter');
+    const status = params.status !== undefined ? params.status : statusFilter?.value;
+    if (status) qs.set('status', status);
+    qs.set('limit', limit);
+    qs.set('offset', offset);
+
+    this.setLoading('#section-outreach table tbody', 8);
+    try {
+      const res = await Auth.fetch(`/v1/admin/outreach/drafts?${qs}`);
+      if (!res) return;
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail);
+      this._data.outreach = data;
+      this.renderOutreach(data);
+      this.renderPagination('outreachPagination', data.total, limit, this._currentPage.outreach, (p) => {
+        this._currentPage.outreach = p;
+        this.loadOutreach(params);
+      });
+    } catch (err) {
+      this.setEmpty('#section-outreach table tbody', 8, 'Failed to load outreach drafts');
+      console.error(err);
+    }
+  },
+
+  renderOutreach(data) {
+    const tbody = document.querySelector('#section-outreach table tbody');
+    if (!tbody) return;
+    const items = data.items || [];
+    if (!items.length) { this.setEmpty('#section-outreach table tbody', 8, 'No outreach drafts found'); return; }
+    tbody.innerHTML = items.map(d => `
+      <tr>
+        <td style="color:var(--navy-200);font-size:var(--font-size-xs);">${this.esc(d.target_name || d.target_email || '—')}</td>
+        <td style="color:var(--navy-200);">${this.esc(d.company || '—')}</td>
+        <td style="color:var(--white);">${this.esc(d.subject || '—')}</td>
+        <td><span class="badge ${this.badge(d.target_type)}">${this.esc(d.target_type)}</span></td>
+        <td style="font-size:var(--font-size-xs);color:var(--navy-300);">${this.esc(d.ai_model || '—')}</td>
+        <td style="font-size:var(--font-size-xs);color:var(--navy-300);">${this.timeAgo(d.created_at)}</td>
+        <td><span class="badge ${this.badge(d.status)}">${this.esc(d.status)}</span></td>
+        <td>
+          <button class="btn btn-sm btn-ghost" onclick="Admin.openDraftModal(${d.id})" title="Review">
+            <i class="fa-regular fa-eye"></i>
+          </button>
+          ${d.status === 'draft' ? `
+            <button class="btn btn-sm btn-ghost" onclick="Admin.approveDraft(${d.id})" title="Approve &amp; send" style="color:#4ade80;">
+              <i class="fa-regular fa-paper-plane"></i>
+            </button>
+            <button class="btn btn-sm btn-ghost" onclick="Admin.rejectDraft(${d.id})" title="Reject" style="color:#f87171;">
+              <i class="fa-regular fa-xmark"></i>
+            </button>` : ''}
+        </td>
+      </tr>`).join('');
+  },
+
+  openDraftModal(id) {
+    const d = (this._data.outreach?.items || []).find(x => x.id === id);
+    if (!d) return;
+    const editable = d.status === 'draft';
+    this.openModal('outreachDraftModal', `
+      <h3 style="color:var(--white);margin-bottom:var(--space-lg);">Outreach Draft</h3>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:var(--space-md);margin-bottom:var(--space-lg);">
+        <div><div style="font-size:var(--font-size-xs);color:var(--navy-300);margin-bottom:4px;">To</div><div>${this.esc(d.target_name || '—')} &lt;${this.esc(d.target_email || '')}&gt;</div></div>
+        <div><div style="font-size:var(--font-size-xs);color:var(--navy-300);margin-bottom:4px;">Company</div><div>${this.esc(d.company || '—')}</div></div>
+        <div><div style="font-size:var(--font-size-xs);color:var(--navy-300);margin-bottom:4px;">Type</div><div><span class="badge ${this.badge(d.target_type)}">${this.esc(d.target_type)}</span></div></div>
+        <div><div style="font-size:var(--font-size-xs);color:var(--navy-300);margin-bottom:4px;">Status</div><div><span class="badge ${this.badge(d.status)}">${this.esc(d.status)}</span></div></div>
+        <div><div style="font-size:var(--font-size-xs);color:var(--navy-300);margin-bottom:4px;">Channel</div><div>${this.esc(d.channel || '—')}</div></div>
+        <div><div style="font-size:var(--font-size-xs);color:var(--navy-300);margin-bottom:4px;">Language</div><div>${this.esc(d.language || '—')}</div></div>
+        <div><div style="font-size:var(--font-size-xs);color:var(--navy-300);margin-bottom:4px;">AI Model</div><div>${this.esc(d.ai_model || '—')}</div></div>
+        <div><div style="font-size:var(--font-size-xs);color:var(--navy-300);margin-bottom:4px;">Created</div><div>${this.formatDate(d.created_at)}</div></div>
+      </div>
+      <div class="form-group">
+        <label>Subject</label>
+        <input type="text" id="draftSubject" value="${this.esc(d.subject || '')}" ${editable ? '' : 'disabled'}>
+      </div>
+      <div class="form-group">
+        <label>Body</label>
+        <textarea id="draftBody" rows="10" style="width:100%;background:rgba(6,13,26,0.6);border:1px solid rgba(74,111,159,0.3);border-radius:var(--radius-md);color:var(--white);padding:0.75rem;font-family:var(--font-primary);font-size:var(--font-size-sm);resize:vertical;box-sizing:border-box;" ${editable ? '' : 'disabled'}>${this.esc(d.body || '')}</textarea>
+      </div>
+      <div style="display:flex;gap:var(--space-md);margin-top:var(--space-lg);flex-wrap:wrap;">
+        ${editable ? `
+          <button class="btn btn-ghost" onclick="Admin.saveDraft(${d.id})"><i class="fa-regular fa-floppy-disk"></i> Save</button>
+          <button class="btn btn-primary" onclick="Admin.approveDraft(${d.id})"><i class="fa-regular fa-paper-plane"></i> Approve &amp; Send</button>
+          <button class="btn btn-ghost" onclick="Admin.rejectDraft(${d.id})" style="color:#f87171;"><i class="fa-regular fa-xmark"></i> Reject</button>` : ''}
+        <button class="btn btn-ghost" onclick="Admin.closeModal()">Close</button>
+      </div>
+    `);
+  },
+
+  async saveDraft(id) {
+    const subject = document.getElementById('draftSubject')?.value;
+    const body = document.getElementById('draftBody')?.value;
+    try {
+      const res = await Auth.fetch(`/v1/admin/outreach/drafts/${id}`, {
+        method: 'PUT', body: JSON.stringify({ subject, body }),
+      });
+      if (res?.ok) {
+        Auth.toast('Draft saved', 'success');
+        this.closeModal();
+        await this.loadOutreach();
+      } else {
+        const d = await res?.json();
+        Auth.toast(d?.detail || 'Save failed', 'error');
+      }
+    } catch { Auth.toast('Network error', 'error'); }
+  },
+
+  async approveDraft(id) {
+    const d = (this._data.outreach?.items || []).find(x => x.id === id);
+    const who = d?.target_email || 'this recipient';
+    if (!confirm(`Send this email to ${who}?`)) return;
+    try {
+      const res = await Auth.fetch(`/v1/admin/outreach/drafts/${id}/approve`, { method: 'POST' });
+      if (res?.ok) {
+        Auth.toast('Email sent', 'success');
+        this.closeModal();
+        await this.loadOutreach();
+      } else {
+        const data = await res?.json();
+        Auth.toast(data?.detail || 'Failed to send', 'error');
+      }
+    } catch { Auth.toast('Network error', 'error'); }
+  },
+
+  async rejectDraft(id) {
+    if (!confirm('Reject this draft?')) return;
+    try {
+      const res = await Auth.fetch(`/v1/admin/outreach/drafts/${id}/reject`, { method: 'POST' });
+      if (res?.ok) {
+        Auth.toast('Draft rejected', 'success');
+        this.closeModal();
+        await this.loadOutreach();
+      } else {
+        const data = await res?.json();
+        Auth.toast(data?.detail || 'Reject failed', 'error');
+      }
+    } catch { Auth.toast('Network error', 'error'); }
+  },
+
+  async runOutreachJob(name, btn) {
+    if (btn) { btn.disabled = true; btn.dataset.origText = btn.innerHTML; btn.innerHTML = '<i class="fa-regular fa-spinner fa-spin"></i>'; }
+    try {
+      const res = await Auth.fetch(`/v1/admin/outreach/run/${name}`, { method: 'POST' });
+      if (res?.ok || res?.status === 202) {
+        Auth.toast('Job started — refresh in a minute', 'success');
+      } else {
+        const data = await res?.json();
+        Auth.toast(data?.detail || 'Failed to start job', 'error');
+      }
+    } catch { Auth.toast('Network error', 'error'); }
+    finally { if (btn) { btn.disabled = false; btn.innerHTML = btn.dataset.origText || btn.innerHTML; } }
   },
 
   /* ============================================================

@@ -1,3 +1,7 @@
+// WhatsApp number in E.164 format, digits only (no +), e.g. '31612345678'.
+// Leave empty to keep the floating WhatsApp button hidden site-wide.
+const GSP_WHATSAPP = '';
+
 /* ==========================================================================
    GSP Recruitment — Main Application Script
    All features: preloader, lang toggle, hamburger, scroll animations, FAQ,
@@ -1172,5 +1176,21 @@
     initLiveStats();
     initTestimonials();
     initBackToTop();
+    initWhatsappFloat();
   });
+
+  // ── Floating WhatsApp Button ───────────────────────────
+  function initWhatsappFloat() {
+    if (!GSP_WHATSAPP) return; // no number configured — never show a dead link
+    const existing = document.querySelector('.mail-float');
+    if (existing) existing.classList.add('has-whatsapp-sibling');
+    const a = document.createElement('a');
+    a.href = `https://wa.me/${GSP_WHATSAPP}?text=Hoi%20GSP%20Recruitment`;
+    a.className = 'whatsapp-float';
+    a.target = '_blank';
+    a.rel = 'noopener noreferrer';
+    a.setAttribute('aria-label', 'Chat via WhatsApp');
+    a.innerHTML = '<i class="fa-brands fa-whatsapp"></i>';
+    document.body.appendChild(a);
+  }
 })();

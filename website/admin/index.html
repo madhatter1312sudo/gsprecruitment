@@ -129,6 +129,9 @@
       <div class="sidebar-section-label">Jobs</div>
       <button class="nav-item" data-section="jobs"><i class="fa-regular fa-briefcase"></i> All Jobs</button>
 
+      <div class="sidebar-section-label">Growth</div>
+      <button class="nav-item" data-section="outreach"><i class="fa-regular fa-paper-plane"></i> Outreach</button>
+
       <div class="sidebar-section-label">Insights</div>
       <button class="nav-item" data-section="analytics"><i class="fa-regular fa-chart-line"></i> Analytics</button>
       <button class="nav-item" data-section="audit"><i class="fa-regular fa-clock-rotate-left"></i> Audit Log</button>
@@ -222,6 +225,9 @@
                 <button class="btn btn-sm btn-outline" style="justify-content:flex-start;" onclick="navigateTo('jobs')">
                   <i class="fa-regular fa-briefcase"></i> Review Jobs
                 </button>
+                <button class="btn btn-sm btn-outline" style="justify-content:flex-start;" onclick="navigateTo('outreach')">
+                  <i class="fa-regular fa-paper-plane"></i> Outreach Drafts
+                </button>
                 <button class="btn btn-sm btn-outline" style="justify-content:flex-start;" onclick="navigateTo('analytics')">
                   <i class="fa-regular fa-chart-line"></i> View Analytics
                 </button>
@@ -299,6 +305,41 @@
             <tbody><tr><td colspan="5" style="text-align:center;padding:2rem;color:var(--navy-300);"><i class="fa-regular fa-spinner fa-spin"></i></td></tr></tbody>
           </table>
         </div>
+      </section>
+
+      <!-- ==================== OUTREACH ==================== -->
+      <section class="portal-section" id="section-outreach">
+        <div class="toolbar">
+          <select class="filter-select" id="outreachStatusFilter">
+            <option value="draft">Draft</option>
+            <option value="">All</option>
+            <option value="sent">Sent</option>
+            <option value="rejected">Rejected</option>
+            <option value="failed">Failed</option>
+          </select>
+          <button class="btn btn-sm btn-outline" onclick="Admin.runOutreachJob('sourcing', this)">Run sourcing now</button>
+          <button class="btn btn-sm btn-outline" onclick="Admin.runOutreachJob('enrich', this)">Run enrich now</button>
+          <button class="btn btn-sm btn-outline" onclick="Admin.runOutreachJob('matching', this)">Run matching now</button>
+          <button class="btn btn-sm btn-outline" onclick="Admin.runOutreachJob('drafting', this)">Run drafting now</button>
+        </div>
+        <div class="table-wrap" style="margin-bottom:var(--space-md);">
+          <table>
+            <thead>
+              <tr>
+                <th>To</th>
+                <th>Company</th>
+                <th>Subject</th>
+                <th>Type</th>
+                <th>AI Model</th>
+                <th>Created</th>
+                <th>Status</th>
+                <th style="width:140px;">Actions</th>
+              </tr>
+            </thead>
+            <tbody><tr><td colspan="8" style="text-align:center;padding:2rem;color:var(--navy-300);"><i class="fa-regular fa-spinner fa-spin"></i></td></tr></tbody>
+          </table>
+        </div>
+        <div class="pagination" id="outreachPagination"></div>
       </section>
 
       <!-- ==================== CANDIDATES ==================== -->
@@ -484,10 +525,6 @@
                   <div style="font-size:var(--font-size-xs);color:var(--navy-300);margin-bottom:4px;">Matching</div>
                   <div style="font-size:var(--font-size-sm);color:var(--navy-100);">OpenRouter text-embedding-3-small</div>
                 </div>
-                <div>
-                  <div style="font-size:var(--font-size-xs);color:var(--navy-300);margin-bottom:4px;">Storage</div>
-                  <div style="font-size:var(--font-size-sm);color:var(--navy-100);">Hetzner VPS — 188.245.254.248</div>
-                </div>
               </div>
             </div>
           </div>
@@ -504,7 +541,7 @@
   /* ---- Navigation ---- */
   const sectionTitles = {
     dashboard: 'Dashboard', users: 'User Management', jobs: 'All Jobs',
-    candidates: 'All Candidates', analytics: 'Analytics',
+    candidates: 'All Candidates', outreach: 'Outreach', analytics: 'Analytics',
     audit: 'Audit Log', cms: 'Content CMS', settings: 'Settings',
   };
 
@@ -512,6 +549,7 @@
     users:      () => Admin.loadUsers(),
     jobs:       () => Admin.loadJobs(),
     candidates: () => Admin.loadCandidates(),
+    outreach:   () => Admin.loadOutreach(),
     analytics:  () => Admin.loadAnalytics(),
     audit:      () => Admin.loadAuditLog(),
     cms:        () => Admin.loadContent(),
@@ -578,6 +616,15 @@
         Admin._currentPage.users = 1;
         Admin.loadUsers({ search: e.target.value.trim() });
       }, 400);
+    });
+  }
+
+  /* ---- Outreach status filter ---- */
+  const outreachStatusFilter = document.getElementById('outreachStatusFilter');
+  if (outreachStatusFilter) {
+    outreachStatusFilter.addEventListener('change', e => {
+      Admin._currentPage.outreach = 1;
+      Admin.loadOutreach({ status: e.target.value || undefined });
     });
   }
 
