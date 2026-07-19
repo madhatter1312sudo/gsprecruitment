@@ -1078,10 +1078,8 @@ const Admin = {
      SECTION FILTER BINDING
      ============================================================ */
   bindFilters() {
-    const debouncedUsers = debounce(val => this.loadUsers({ search: val }), 400);
-    document.querySelectorAll('#section-users .search-bar input').forEach(el => {
-      el.addEventListener('input', e => debouncedUsers(e.target.value));
-    });
+    // Users search is bound once in index.html's inline script (#userSearch) —
+    // binding it here too fired two loadUsers calls per keystroke.
 
     const roleSelect = document.getElementById('userRoleFilter');
     if (roleSelect) roleSelect.addEventListener('change', e => {
