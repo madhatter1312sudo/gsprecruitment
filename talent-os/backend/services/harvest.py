@@ -50,10 +50,20 @@ CANDIDATE_TITLES = [
     "Mechatronics Engineer",
     "Cybersecurity Engineer",
     "Embedded Linux Engineer",
+    "Firmware Engineer",
+    "Software Architect",
+    "Robotics Engineer",
+    "Systems Engineer",
+    "Test Automation Engineer",
+    "DevOps Engineer",
+    "Python Developer",
+    "FPGA Engineer",
+    "Electronics Engineer",
+    "PLC Programmer",
 ]
 SOURCE_LOCATIONS = ["Eindhoven, Netherlands", "Netherlands"]
 
-CAP_CANDIDATES = 2500
+CAP_CANDIDATES = 10000
 MAX_PAGES_PER_TITLE = 25
 PER_PAGE = 100
 
@@ -66,10 +76,15 @@ PROSPECT_TITLES = [
     "R&D Manager",
     "Hiring Manager",
     "VP Engineering",
+    "Technical Director",
+    "R&D Director",
+    "Director of Engineering",
+    "Head of Software Development",
+    "Managing Director",
 ]
 PROSPECT_KEYWORDS = "high-tech OR semiconductor OR embedded OR mechatronics"
 
-CAP_PROSPECTS = 500
+CAP_PROSPECTS = 2000
 MAX_PAGES_PROSPECTS = 25
 
 # ── Apollo rate limiting ─────────────────────────────────────────────────
