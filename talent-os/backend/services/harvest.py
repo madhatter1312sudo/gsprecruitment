@@ -259,8 +259,9 @@ async def harvest_prospects() -> dict:
                 break
 
             try:
+                # q_keywords with "OR" strings returns 0 results on api_search
+                # (treated as a literal phrase) — titles+locations only.
                 result = await client.search_people(
-                    q=PROSPECT_KEYWORDS,
                     titles=PROSPECT_TITLES,
                     locations=SOURCE_LOCATIONS,
                     limit=PER_PAGE,
