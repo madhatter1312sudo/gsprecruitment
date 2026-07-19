@@ -1,16 +1,20 @@
 /**
- * Tech Match Quiz — static question bank + local scoring.
+ * Tech Match Quiz — OFFLINE FALLBACK question bank + local scoring, plus
+ * growth-tips copy for both the offline and the (now live) server-graded
+ * quiz.
  *
- * There is no backend quiz endpoint (`/v1/public/quiz` does not exist in
- * talent-os/backend/routers/public.py — only site-content, salary-data,
- * blog and lead). The public website's own match quiz
- * (website/script.js `initQuiz()`) is client-side-only for the same
- * reason, so this mirrors that approach but with the fuller 12-question,
- * multi-domain shape requested for the app. On submit, if the user leaves
- * an email we forward the result to the real `POST /v1/public/lead`
- * endpoint (same one the website's quiz email-capture uses), tagged
- * `interest_type: 'candidate'` — there's no dedicated quiz-lead type on
- * the backend.
+ * `GET /v1/public/quiz` + `POST /v1/public/quiz/submit` are LIVE in
+ * production (see lib/api.ts `getQuiz`/`submitQuiz`) — the quiz screen
+ * (app/(tabs)/quiz.tsx) fetches real questions and submits answers for
+ * server-side grading by default. Everything in THIS file
+ * (`QUIZ_QUESTIONS`, `scoreQuiz`, `GROWTH_TIPS`) is only used as an
+ * "offline versie" fallback for when the fetch fails (no network, API
+ * down), so the quiz still works end-to-end and is clearly labelled as
+ * a locally-scored approximation. Its question bank predates the real
+ * backend and uses its own 6-domain taxonomy (frontend/backend/
+ * devops_cloud/data_ai/security/softskills) — a different set from the
+ * server's domains (general_swe/security/cloud_devops/embedded_cpp), so
+ * `SERVER_GROWTH_TIPS` below covers the server's domains separately.
  */
 import type { Lang } from './i18n';
 
@@ -312,3 +316,39 @@ export const GROWTH_TIPS: Record<QuizDomain, { nl: string; en: string }> = {
 };
 
 export const BLOG_URL = 'https://gsprecruitment.nl/blog';
+
+/**
+ * Growth-tips copy keyed by the REAL server domain values
+ * (`GET /v1/public/quiz` items' `domain` field). Used to show a coaching
+ * tip for the weakest domain reported by `POST /v1/public/quiz/submit`'s
+ * `domain_scores`. Falls back to `SERVER_GROWTH_TIPS_DEFAULT` for any
+ * domain value the backend adds later that isn't listed here yet, so a
+ * new domain never breaks the results screen.
+ */
+export const SERVER_GROWTH_TIPS: Record<string, { nl: string; en: string }> = {
+  general_swe: {
+    nl: 'Verdiep je in software-engineeringfundamenten: testpiramides (unit vs. integration), SOLID-principes en git-workflows. Dit is de basis waarop alle andere vakgebieden bouwen.',
+    en: 'Deepen your software-engineering fundamentals: test pyramids (unit vs. integration), SOLID principles and git workflows. This is the foundation every other domain builds on.',
+  },
+  security: {
+    nl: 'Leer de OWASP Top 10 uit je hoofd en oefen met een kwetsbare oefen-app (bv. OWASP Juice Shop). Secrets-beheer en least-privilege zijn de meest onderschatte categorieën.',
+    en: 'Learn the OWASP Top 10 by heart and practice with a deliberately vulnerable app (e.g. OWASP Juice Shop). Secrets management and least-privilege are the most underestimated categories.',
+  },
+  cloud_devops: {
+    nl: 'Bouw een volledige CI/CD-pipeline met tests, security scanning en gated deploys voor een eigen project. Leer infrastructure-as-code (Terraform) in plaats van handmatige cloud-configuratie.',
+    en: 'Build a full CI/CD pipeline with tests, security scanning and gated deploys for a side project. Learn infrastructure-as-code (Terraform) instead of manual cloud configuration.',
+  },
+  embedded_cpp: {
+    nl: 'Verdiep je in RAII, geheugenbeheer zonder garbage collector en real-time constraints (interrupts, priority inversion). Bouw iets op een microcontroller om de theorie hard te maken.',
+    en: 'Deepen your knowledge of RAII, memory management without a garbage collector and real-time constraints (interrupts, priority inversion). Build something on a microcontroller to make the theory concrete.',
+  },
+};
+
+export const SERVER_GROWTH_TIPS_DEFAULT = {
+  nl: 'Blijf actief leren op je zwakste vakgebied — kleine, regelmatige oefeningen verslaan lange leestheorie.',
+  en: 'Keep actively learning in your weakest domain — small, regular exercises beat long reading sessions.',
+};
+
+export function growthTipFor(domain: string, lang: Lang): string {
+  return (SERVER_GROWTH_TIPS[domain] ?? SERVER_GROWTH_TIPS_DEFAULT)[lang];
+}

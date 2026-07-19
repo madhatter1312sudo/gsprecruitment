@@ -7,23 +7,28 @@
  * (talent-os/backend/routers/*.py), see README-APP.md "API adjustments"
  * for the full list. In short:
  *   - Candidate matches/applications live under `/v1/candidate/...`,
- *     not `/v1/mobile/me/...`.
+ *     not `/v1/mobile/me/...` (the `/v1/mobile/me/...` aliases also exist
+ *     and work, but the app keeps using `/v1/candidate/...`).
  *   - There is no job-detail endpoint (`GET /public/jobs/{id}`) — the
  *     public router only exposes the list. Job detail is resolved
  *     client-side from the cached jobs list (see lib/queries.ts `useJob`).
- *   - There is no `/v1/public/quiz` backend at all yet — the quiz is
- *     entirely client-side (lib/quiz-data.ts), same approach the public
- *     website itself uses for its own match quiz. Quiz email capture
- *     reuses the real `POST /v1/public/lead` endpoint instead of a
- *     nonexistent `/v1/public/quiz/submit`.
- *   - There is no `/v1/mobile/push-token` endpoint on the backend today,
- *     and expo-notifications isn't part of this app's dependency list,
- *     so push registration is not wired up. `registerPushToken()` below
- *     is left in place, pointed at the path from the spec, for when both
- *     exist — it is never called.
+ *   - `GET /v1/public/quiz` and `POST /v1/public/quiz/submit` are now LIVE
+ *     in production (verified against api.gsprecruitment.nl) — the quiz
+ *     is server-graded via `getQuiz()`/`submitQuiz()` below. The server's
+ *     question domains (`general_swe` | `security` | `cloud_devops` |
+ *     `embedded_cpp`) do NOT match the app's original local domain set
+ *     (frontend/backend/devops_cloud/data_ai/security/softskills) — see
+ *     lib/quiz-data.ts, which keeps the old question bank + domains only
+ *     as an offline fallback for when the fetch fails.
+ *   - `/v1/mobile/push-token` is now LIVE in production, but
+ *     expo-notifications still isn't part of this app's dependency list,
+ *     so push registration is still not wired up anywhere in the UI.
+ *     `registerPushToken()` below is left in place, ready to call once
+ *     expo-notifications is added — it is still never called today.
  */
 import Constants from 'expo-constants';
 import { getAuthState, useAuthStore, type AuthUser } from './auth';
+import type { Lang } from './i18n';
 
 export const API_BASE_URL: string =
   (Constants.expoConfig?.extra?.apiBaseUrl as string | undefined) ??
@@ -301,6 +306,65 @@ export function submitLead(input: { name: string; email: string; message: string
   return apiRequest<{ message: string; id: number }>('/v1/public/lead', { method: 'POST', body: input });
 }
 
+// ── Quiz (server-graded) ─────────────────────────────────────────────────
+
+/** One question as served by `GET /v1/public/quiz` — no answer/points included. */
+export interface QuizItem {
+  id: number;
+  domain: string; // server-defined, currently: general_swe | security | cloud_devops | embedded_cpp
+  difficulty: number; // 1 (junior) – 3 (senior)
+  question: string;
+  options: string[];
+}
+
+export interface QuizListResponse {
+  lang: string;
+  items: QuizItem[];
+}
+
+export function getQuiz(lang: Lang) {
+  return apiRequest<QuizListResponse>('/v1/public/quiz', { query: { lang } });
+}
+
+export interface QuizSubmitAnswer {
+  question_id: number;
+  answer_index: number;
+}
+
+export interface QuizDomainScore {
+  correct: number;
+  total: number;
+}
+
+export interface QuizFeedbackItem {
+  question_id: number;
+  correct: boolean;
+  correct_index: number;
+  explanation: string;
+}
+
+export interface QuizSubmitResponse {
+  score: number;
+  max_score: number;
+  /** Opaque server string, e.g. "Junior-indicatie" / "Medior-indicatie" / "Senior-indicatie" — same text regardless of `lang`. */
+  tier: string;
+  domain_scores: Record<string, QuizDomainScore>;
+  feedback: QuizFeedbackItem[];
+}
+
+export function submitQuiz(
+  payload: { answers: QuizSubmitAnswer[]; email?: string },
+  lang: Lang,
+) {
+  const body: { answers: QuizSubmitAnswer[]; email?: string } = { answers: payload.answers };
+  if (payload.email) body.email = payload.email;
+  return apiRequest<QuizSubmitResponse>('/v1/public/quiz/submit', {
+    method: 'POST',
+    query: { lang },
+    body,
+  });
+}
+
 // ── Candidate (authed) ──────────────────────────────────────────────────
 
 export function getCandidateProfile() {
@@ -343,8 +407,9 @@ export function gdprDeleteAccount() {
   return apiRequest<{ message: string }>('/v1/gdpr/account', { method: 'DELETE', auth: true });
 }
 
-// ── Push (not wired — see file header) ─────────────────────────────────
+// ── Push (endpoint live, UI not wired — see file header) ────────────────
 
+/** `POST /v1/mobile/push-token` is live in production; this is unused until expo-notifications is added. */
 export function registerPushToken(token: string, platform: 'ios' | 'android') {
   return apiRequest<{ message?: string }>('/v1/mobile/push-token', { method: 'POST', auth: true, body: { token, platform } });
 }

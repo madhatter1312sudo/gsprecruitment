@@ -9,7 +9,7 @@ import { formatSalaryRange, locationTypeIcon, seniorityLabel } from '../lib/form
 export function JobCard({ job, onPress }: { job: JobOrder; onPress: () => void }) {
   const { t, lang } = useTranslation();
   return (
-    <Pressable onPress={onPress} style={({ pressed }) => [styles.card, pressed && styles.pressed]}>
+    <Pressable onPress={onPress} testID="job-card" style={({ pressed }) => [styles.card, pressed && styles.pressed]}>
       <Text style={styles.title} numberOfLines={2}>{job.title}</Text>
       <View style={styles.chipRow}>
         {job.department ? <Chip label={job.department} tone="gold" /> : null}

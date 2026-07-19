@@ -53,6 +53,7 @@ export default function LoginScreen() {
           <Text style={[typography.bodyMuted, { marginBottom: spacing.xl }]}>{t('login.subtitle')}</Text>
 
           <TextField
+            testID="login-email-input"
             label={t('auth.email')}
             value={email}
             onChangeText={setEmail}
@@ -61,6 +62,7 @@ export default function LoginScreen() {
             autoComplete="email"
           />
           <TextField
+            testID="login-password-input"
             label={t('auth.password')}
             value={password}
             onChangeText={setPassword}

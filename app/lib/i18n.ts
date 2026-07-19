@@ -140,6 +140,28 @@ export const dict: Dict = {
   'quiz.domain.data_ai': { nl: 'Data & AI', en: 'Data & AI' },
   'quiz.domain.security': { nl: 'Security', en: 'Security' },
   'quiz.domain.softskills': { nl: 'Samenwerking & leiderschap', en: 'Collaboration & leadership' },
+  // Server-reported domains (GET /v1/public/quiz) — a different set from the
+  // offline fallback bank above.
+  'quiz.domain.general_swe': { nl: 'Algemeen software engineering', en: 'General software engineering' },
+  'quiz.domain.cloud_devops': { nl: 'Cloud & DevOps', en: 'Cloud & DevOps' },
+  'quiz.domain.embedded_cpp': { nl: 'Embedded & C++', en: 'Embedded & C++' },
+
+  'quiz.loading': { nl: 'Vragen laden...', en: 'Loading questions...' },
+  'quiz.loadError': { nl: 'De quizvragen konden niet worden geladen.', en: 'Could not load the quiz questions.' },
+  'quiz.useOffline': { nl: 'Ga verder met de offline versie', en: 'Continue with the offline version' },
+  'quiz.offlineBadge': { nl: 'Offline versie', en: 'Offline version' },
+  'quiz.offlineNotice': {
+    nl: 'We konden geen verbinding maken met de server, dus je maakt nu de offline versie van de quiz. Je resultaat wordt lokaal berekend en niet naar ons verstuurd.',
+    en: "We couldn't reach the server, so you're taking the offline version of the quiz. Your result is calculated locally and not sent to us.",
+  },
+  'quiz.emailStageTitle': { nl: 'Resultaat aan je e-mail koppelen?', en: 'Link this result to your email?' },
+  'quiz.emailStageBody': {
+    nl: 'Optioneel: vul je e-mailadres in zodat we dit resultaat aan je kunnen koppelen.',
+    en: 'Optional: enter your email so we can link this result to you.',
+  },
+  'quiz.emailStageSkip': { nl: 'Overslaan', en: 'Skip' },
+  'quiz.submitting': { nl: 'Bezig met versturen...', en: 'Submitting...' },
+  'quiz.submitError': { nl: 'Versturen van je antwoorden is niet gelukt.', en: 'Could not submit your answers.' },
 
   // ── Career ──────────────────────────────────────────────────────────
   'career.title': { nl: 'Carrière', en: 'Career' },
