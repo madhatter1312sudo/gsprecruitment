@@ -74,15 +74,22 @@ class EmbeddingMatcher:
             skills = " ".join(c.get("skills") or [])
             cand_texts.append(f"{title} {cv} {skills}")
 
-        # Embed job + all candidates in one call
-        all_texts = [job_text] + cand_texts
-        embeddings = await self.embed(all_texts)
-
-        if not embeddings:
+        # Embed in batches — the embeddings endpoint caps input arrays
+        # (~2048 items) and 5k+ candidates in one request 4xx's.
+        BATCH = 500
+        job_batch = await self.embed([job_text])
+        if not job_batch or job_batch[0] is None:
             return []
+        job_emb = job_batch[0]
 
-        job_emb = embeddings[0]
-        cand_embs = embeddings[1:]
+        cand_embs: List[Any] = []
+        for start in range(0, len(cand_texts), BATCH):
+            chunk = await self.embed(cand_texts[start:start + BATCH])
+            if not chunk:
+                # keep index alignment with candidates on partial failure
+                cand_embs.extend([None] * len(cand_texts[start:start + BATCH]))
+            else:
+                cand_embs.extend(chunk)
 
         import math
 
@@ -96,7 +103,7 @@ class EmbeddingMatcher:
 
         results = []
         for i, c in enumerate(candidates):
-            if i >= len(cand_embs):
+            if i >= len(cand_embs) or cand_embs[i] is None:
                 continue
             score = cosine_sim(job_emb, cand_embs[i])
             if score >= min_score:
