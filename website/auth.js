@@ -368,7 +368,9 @@ const Auth = {
 
     const submitHandler = async (e) => {
       e.preventDefault();
-      const val = email?.value?.trim();
+      // Query at submit time: the form is replaced via cloneNode below, so a
+      // reference captured earlier points at the detached (always-empty) input.
+      const val = document.getElementById('forgotPwEmail')?.value?.trim();
       if (!val || !val.includes('@')) {
         if (errEl) {
           errEl.textContent = 'Please enter a valid email address.';
