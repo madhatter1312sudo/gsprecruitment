@@ -23,6 +23,8 @@ class ApolloClient:
                 headers={
                     "Content-Type": "application/json",
                     "Cache-Control": "no-cache",
+                    # Apollo requires the key in this header; body api_key is rejected (422)
+                    "X-Api-Key": self.api_key,
                 },
                 timeout=30.0,
             )
@@ -41,7 +43,7 @@ class ApolloClient:
     ) -> Dict[str, Any]:
         """
         Search Apollo.io's people database.
-        POST /api/v1/mixed_people/search
+        POST /api/v1/mixed_people/api_search
 
         `titles`/`locations` accept multiple values (Apollo OR-matches within
         each field) for bulk sourcing jobs; the singular `title`/`location`
@@ -51,7 +53,6 @@ class ApolloClient:
         person_titles = titles if titles else ([title] if title else [])
         person_locations = locations if locations else ([location] if location else [])
         payload = {
-            "api_key": self.api_key,
             "q_organization": company,
             "q_keywords": q,
             "person_titles": person_titles,
@@ -62,7 +63,7 @@ class ApolloClient:
         # Remove empty fields
         payload = {k: v for k, v in payload.items() if v}
 
-        resp = await client.post("/mixed_people/search", json=payload)
+        resp = await client.post("/mixed_people/api_search", json=payload)
         resp.raise_for_status()
         return resp.json()
 
@@ -73,7 +74,6 @@ class ApolloClient:
         """
         client = await self._get_client()
         payload = {
-            "api_key": self.api_key,
             "reveal_personal_emails": True,
             "reveal_phone": False,
         }
@@ -98,7 +98,6 @@ class ApolloClient:
         """
         client = await self._get_client()
         payload = {
-            "api_key": self.api_key,
             "per_page": limit,
         }
         if industry:

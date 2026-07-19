@@ -106,7 +106,11 @@ def _clean_email(raw: Optional[str]) -> Optional[str]:
 
 
 def _person_name(person: Dict[str, Any]) -> str:
-    return f"{person.get('first_name', '')} {person.get('last_name', '')}".strip()
+    # api_search returns preview records: full last names are obfuscated
+    # (last_name_obfuscated, e.g. "V."). Full name + email require a paid
+    # people/match reveal, done later for a targeted subset only.
+    last = person.get("last_name") or person.get("last_name_obfuscated") or ""
+    return f"{person.get('first_name', '')} {last}".strip()
 
 
 def _person_company(person: Dict[str, Any]) -> str:
@@ -185,12 +189,16 @@ async def harvest_candidates() -> dict:
                     linkedin_url = person.get("linkedin_url") or ""
                     skills = [s.get("name", "") for s in (person.get("skills") or []) if s.get("name")]
 
+                    # Preview records carry the Apollo person id — keep it so a
+                    # later people/match reveal can enrich without re-searching.
+                    apollo_ref = f"apollo:{person.get('id')}" if person.get("id") else None
+
                     try:
                         row = await fetch_one(
                             """INSERT INTO candidates
                                (full_name, email, current_company, current_title, location,
-                                linkedin_url, skills, source, sourced_by_agent, is_passive)
-                               SELECT $1,$2,$3,$4,$5,$6,$7,$8,$9,$10
+                                linkedin_url, skills, source, source_url, sourced_by_agent, is_passive)
+                               SELECT $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11
                                WHERE NOT EXISTS (
                                    SELECT 1 FROM candidates
                                    WHERE full_name = $1
@@ -198,7 +206,7 @@ async def harvest_candidates() -> dict:
                                )
                                RETURNING id""",
                             full_name, email, company, row_title, location,
-                            linkedin_url, skills, "apollo_bulk", "harvest-apollo-bulk", True,
+                            linkedin_url, skills, "apollo_bulk", apollo_ref, "harvest-apollo-bulk", True,
                         )
                     except Exception:
                         logger.exception("harvest_candidates: insert failed for %s", full_name)
