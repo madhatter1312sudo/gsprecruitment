@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en" data-lang="en">
+<html lang="en" data-lang="en" data-bs-theme="dark">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -12,562 +12,610 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" crossorigin="anonymous" referrerpolicy="no-referrer">
-  <link rel="stylesheet" href="../theme.css">
-  <link rel="stylesheet" href="../styles.css">
+  <link href="https://cdn.jsdelivr.net/npm/@tabler/core@1.4.0/dist/css/tabler.min.css" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/apexcharts@4.7.0"></script>
   <style>
-    /* ---- Layout ---- */
-    :root { --sidebar-w: 240px; }
-    .portal-layout { display:flex; min-height:100vh; }
-    .sidebar { width:var(--sidebar-w); background:var(--navy-900); border-right:1px solid rgba(74,111,159,0.1); display:flex; flex-direction:column; position:fixed; top:0; left:0; bottom:0; z-index:100; overflow-y:auto; transition:left .2s; }
-    .sidebar-logo { padding:var(--space-lg) var(--space-xl); border-bottom:1px solid rgba(74,111,159,0.1); }
-    .sidebar-logo a { display:flex; align-items:center; gap:var(--space-sm); }
-    .sidebar-nav { flex:1; padding:var(--space-md) 0; }
-    .sidebar-section-label { padding:.5rem var(--space-xl); font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:.1em; color:var(--navy-400); margin-top:var(--space-sm); }
-    .nav-item { display:flex; align-items:center; gap:var(--space-md); padding:.7rem var(--space-xl); font-size:var(--font-size-sm); font-weight:500; color:var(--navy-200); cursor:pointer; background:none; border:none; border-left:3px solid transparent; width:100%; font-family:var(--font-primary); text-align:left; transition:all .15s; }
-    .nav-item i { width:18px; text-align:center; font-size:.9rem; color:var(--navy-300); transition:color .15s; }
-    .nav-item:hover { color:var(--white); background:rgba(74,111,159,0.08); }
-    .nav-item.active { color:var(--gold-500); border-left-color:var(--gold-500); background:rgba(250,200,0,0.06); }
-    .nav-item.active i { color:var(--gold-500); }
-    .sidebar-footer { padding:var(--space-lg) var(--space-xl); border-top:1px solid rgba(74,111,159,0.1); }
-    .sidebar-user { display:flex; align-items:center; gap:var(--space-md); margin-bottom:var(--space-sm); }
-    .sidebar-user-name { font-size:var(--font-size-sm); font-weight:600; color:var(--white); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-    .sidebar-user-email { font-size:11px; color:var(--navy-300); }
-    .main-content { flex:1; margin-left:var(--sidebar-w); min-height:100vh; background:var(--navy-800); }
-    .portal-header { display:flex; align-items:center; justify-content:space-between; padding:var(--space-md) var(--space-2xl); background:rgba(10,22,40,0.95); backdrop-filter:blur(12px); border-bottom:1px solid rgba(74,111,159,0.1); position:sticky; top:0; z-index:50; gap:var(--space-md); }
-    .portal-header h1 { font-size:var(--font-size-lg); font-weight:700; color:var(--white); white-space:nowrap; }
-    .portal-content { padding:var(--space-2xl); max-width:1280px; }
+    /* ==== Legacy design-token compatibility ====
+       admin.js still writes inline style="...var(--navy-300)..." etc (~150
+       occurrences) and the fallback bar-chart branch uses --gold-gradient.
+       Re-declared here (recalibrated to the new brand) so admin.js needs
+       no changes beyond the badge()/button class mappings below. */
+    :root, [data-bs-theme=dark] {
+      --navy-900:#142235; --navy-800:#142235; --navy-700:#18293d; --navy-600:#1a2a42;
+      --navy-500:#24354f; --navy-400:#3a4f6e; --navy-300:#8695ac; --navy-200:#b8c4d6; --navy-100:#e2e8f0;
+      --white:#ffffff;
+      --gold-gradient: linear-gradient(135deg,#f5cf4d 0%,#E8B400 45%,#b38900 100%);
+      --gold-400: #f5cf4d;
+      --gold-500: #E8B400;
+      --space-xs:4px; --space-sm:8px; --space-md:16px; --space-lg:24px; --space-xl:32px; --space-2xl:48px;
+      --radius-sm:8px; --radius-md:10px; --radius:12px; --radius-lg:16px; --radius-xl:20px;
+      --font-primary:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;
+      --font-size-xs:.75rem; --font-size-sm:.875rem; --font-size-md:1rem; --font-size-xl:1.25rem;
 
-    /* ---- Cards & tables ---- */
-    .stats-grid { display:grid; grid-template-columns:repeat(5,1fr); gap:var(--space-md); margin-bottom:var(--space-xl); }
-    .stat-card { background:linear-gradient(145deg,rgba(21,43,74,0.5),rgba(15,29,53,0.7)); border:1px solid rgba(74,111,159,0.12); border-radius:var(--radius-xl); padding:var(--space-lg); text-align:center; }
-    .stat-card .stat-icon { font-size:1.25rem; color:var(--gold-400); margin-bottom:var(--space-sm); }
-    .stat-card .stat-value { font-size:2rem; font-weight:800; color:var(--gold-500); line-height:1.1; }
-    .stat-card .stat-label { font-size:var(--font-size-xs); color:var(--navy-200); margin-top:2px; }
-    .card { background:linear-gradient(145deg,rgba(21,43,74,0.55),rgba(15,29,53,0.75)); border:1px solid rgba(74,111,159,0.12); border-radius:var(--radius-xl); padding:var(--space-xl); }
-    .card-title { font-size:var(--font-size-md); font-weight:600; color:var(--white); margin-bottom:var(--space-lg); display:flex; align-items:center; gap:var(--space-sm); }
-    .grid-2 { display:grid; grid-template-columns:1fr 1fr; gap:var(--space-xl); }
-    .grid-3-1 { display:grid; grid-template-columns:2fr 1fr; gap:var(--space-xl); }
-    .table-wrap { overflow-x:auto; border-radius:var(--radius-lg); border:1px solid rgba(74,111,159,0.12); }
-    table { width:100%; border-collapse:collapse; }
-    th { text-align:left; padding:var(--space-md) var(--space-lg); font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:.08em; color:var(--navy-300); background:rgba(6,13,26,0.3); border-bottom:1px solid rgba(74,111,159,0.12); white-space:nowrap; }
-    td { padding:var(--space-md) var(--space-lg); font-size:var(--font-size-sm); color:var(--navy-100); border-bottom:1px solid rgba(74,111,159,0.06); }
-    tr:last-child td { border-bottom:none; }
-    tr:hover td { background:rgba(74,111,159,0.05); }
+      /* ==== Tabler brand overrides — GSP navy/gold ==== */
+      --tblr-primary:#E8B400;
+      --tblr-primary-rgb:232,180,0;
+      --tblr-body-bg:#0E1B2E;
+      --tblr-bg-surface:#142235;
+      --tblr-bg-surface-tertiary:#1a2a42;
+      --tblr-border-color:#24354f;
+    }
+    .navbar-brand img { height: 28px; width: auto; }
 
-    /* ---- Search / filter bar ---- */
-    .toolbar { display:flex; gap:var(--space-md); margin-bottom:var(--space-xl); flex-wrap:wrap; align-items:center; }
-    .search-bar { display:flex; align-items:center; gap:var(--space-sm); background:rgba(6,13,26,0.5); border:1px solid rgba(74,111,159,0.25); border-radius:var(--radius-md); padding:.5rem 1rem; flex:1; min-width:200px; transition:border-color .15s; }
-    .search-bar:focus-within { border-color:var(--gold-500); box-shadow:0 0 0 3px rgba(250,200,0,0.08); }
-    .search-bar i { color:var(--navy-300); font-size:.85rem; }
-    .search-bar input { flex:1; background:transparent; border:none; outline:none; color:var(--white); font-family:var(--font-primary); font-size:var(--font-size-sm); }
-    .search-bar input::placeholder { color:var(--navy-300); }
-    select.filter-select { padding:.5rem 1rem; background:rgba(6,13,26,0.5); border:1px solid rgba(74,111,159,0.25); border-radius:var(--radius-md); color:var(--white); font-family:var(--font-primary); font-size:var(--font-size-sm); outline:none; cursor:pointer; }
-    select.filter-select:focus { border-color:var(--gold-500); }
+    /* ==== Toast (auth.js Auth.toast) — admin no longer loads the site stylesheet ==== */
+    .toast-container { position:fixed; bottom:24px; right:24px; z-index:9998; display:flex; flex-direction:column; gap:8px; }
+    .toast { display:flex; align-items:center; gap:10px; padding:14px 20px; border-radius:var(--radius-sm); font-size:.88rem; font-weight:500; box-shadow:0 20px 50px rgba(3,8,18,.5); max-width:360px; opacity:0; transform:translateY(16px); transition:opacity .3s ease, transform .3s ease; }
+    .toast-visible { opacity:1; transform:translateY(0); }
+    .toast-removing { opacity:0; transform:translateX(40px); }
+    .toast-success { background:#065f46; color:#fff; }
+    .toast-error { background:#991b1b; color:#fff; }
+    .toast-warning { background:#78350f; color:#fff; }
+    .toast-info { background:var(--navy-600); color:#fff; }
+    .toast-icon { font-size:1.1rem; line-height:1; }
 
-    /* ---- Section visibility ---- */
+    /* ==== Compatibility classes for admin.js-generated markup ==== */
     .portal-section { display:none; }
     .portal-section.active { display:block; }
-
-    /* ---- Action menus ---- */
     .action-menu-wrap { position:relative; display:inline-block; }
-    .action-menu { position:absolute; right:0; top:100%; background:var(--navy-900); border:1px solid rgba(74,111,159,0.2); border-radius:var(--radius-md); box-shadow:0 8px 32px rgba(0,0,0,0.4); z-index:200; min-width:160px; overflow:hidden; }
-    .action-menu button { display:flex; align-items:center; gap:var(--space-sm); padding:.65rem 1rem; font-size:var(--font-size-sm); color:var(--navy-100); background:none; border:none; width:100%; text-align:left; cursor:pointer; font-family:var(--font-primary); }
-    .action-menu button:hover { background:rgba(74,111,159,0.1); color:var(--white); }
-    .action-menu button i { width:16px; text-align:center; }
-
-    /* ---- Pagination ---- */
-    .pagination { display:flex; gap:6px; margin-top:var(--space-lg); justify-content:center; flex-wrap:wrap; }
-    .pagination button { min-width:32px; height:32px; padding:0 8px; background:rgba(21,43,74,0.4); border:1px solid rgba(74,111,159,0.2); border-radius:var(--radius-sm); color:var(--navy-200); font-family:var(--font-primary); font-size:var(--font-size-xs); cursor:pointer; transition:all .15s; }
-    .pagination button.active { background:var(--gold-500); color:#000; border-color:var(--gold-500); font-weight:700; }
-    .pagination button:hover:not(.active):not(:disabled) { border-color:var(--gold-500); color:var(--gold-500); }
-    .pagination button:disabled { opacity:.35; cursor:not-allowed; }
-
-    /* ---- Activity feed ---- */
-    .activity-item { display:flex; align-items:flex-start; gap:var(--space-md); padding:var(--space-md) 0; border-bottom:1px solid rgba(74,111,159,0.06); }
+    .action-menu { position:absolute; right:0; top:100%; background:var(--tblr-bg-surface); border:1px solid var(--tblr-border-color); border-radius:var(--radius-md); box-shadow:0 8px 32px rgba(0,0,0,.4); z-index:200; min-width:160px; overflow:hidden; }
+    .action-menu button { display:flex; align-items:center; gap:8px; padding:.65rem 1rem; font-size:var(--font-size-sm); background:none; border:none; width:100%; text-align:left; cursor:pointer; font-family:var(--font-primary); }
+    .action-menu button:hover { background:var(--tblr-bg-surface-tertiary); }
+    .activity-item { display:flex; align-items:flex-start; gap:12px; padding:12px 0; border-bottom:1px solid var(--tblr-border-color); }
     .activity-item:last-child { border-bottom:none; }
     .activity-icon { width:34px; height:34px; border-radius:50%; display:flex; align-items:center; justify-content:center; flex-shrink:0; font-size:.8rem; }
-    .activity-text { font-size:var(--font-size-sm); color:var(--navy-100); }
+    .activity-text { font-size:var(--font-size-sm); }
     .activity-time { font-size:11px; color:var(--navy-300); margin-top:2px; }
-
-    /* ---- Toggle switch ---- */
-    .toggle-row { display:flex; align-items:center; justify-content:space-between; padding:var(--space-md) 0; border-bottom:1px solid rgba(74,111,159,0.06); }
-    .toggle-row:last-child { border-bottom:none; }
-    .toggle-switch { position:relative; display:inline-block; width:44px; height:24px; flex-shrink:0; }
-    .toggle-switch input { opacity:0; width:0; height:0; }
-    .toggle-slider { position:absolute; inset:0; background:rgba(74,111,159,0.3); border-radius:12px; cursor:pointer; transition:background .2s; }
-    .toggle-slider:before { content:''; position:absolute; left:3px; top:3px; width:18px; height:18px; background:var(--white); border-radius:50%; transition:transform .2s; }
-    .toggle-switch input:checked + .toggle-slider { background:var(--gold-500); }
-    .toggle-switch input:checked + .toggle-slider:before { transform:translateX(20px); }
-
-    /* ---- Form styles inside cards ---- */
     .form-group { margin-bottom:var(--space-lg); }
     .form-group label { display:block; font-size:var(--font-size-xs); font-weight:600; color:var(--navy-200); text-transform:uppercase; letter-spacing:.06em; margin-bottom:.4rem; }
-    .form-group input, .form-group select, .form-group textarea { width:100%; background:rgba(6,13,26,0.6); border:1px solid rgba(74,111,159,0.3); border-radius:var(--radius-md); color:var(--white); padding:.65rem 1rem; font-family:var(--font-primary); font-size:var(--font-size-sm); outline:none; box-sizing:border-box; }
-    .form-group input:focus, .form-group select:focus, .form-group textarea:focus { border-color:var(--gold-500); box-shadow:0 0 0 3px rgba(250,200,0,0.08); }
-
-    /* ---- Responsive ---- */
-    @media (max-width:1100px){ .stats-grid { grid-template-columns:repeat(3,1fr); } .grid-3-1,.grid-2 { grid-template-columns:1fr; } }
-    @media (max-width:768px){ .sidebar { left:-100%; } .sidebar.open { left:0; } .main-content { margin-left:0; } .stats-grid { grid-template-columns:1fr 1fr; } #mobileMenuBtn { display:inline-flex !important; } .portal-content { padding:var(--space-lg); } }
+    .form-group input, .form-group select, .form-group textarea { width:100%; background:var(--tblr-body-bg); border:1px solid var(--tblr-border-color); border-radius:var(--radius-md); color:var(--white); padding:.65rem 1rem; font-family:var(--font-primary); font-size:var(--font-size-sm); outline:none; box-sizing:border-box; }
+    .form-group input:focus, .form-group select:focus, .form-group textarea:focus { border-color:var(--tblr-primary); box-shadow:0 0 0 3px rgba(var(--tblr-primary-rgb),.15); }
+    .pagination-wrap { display:flex; gap:6px; flex-wrap:wrap; }
+    .pagination-wrap button { min-width:32px; height:32px; padding:0 8px; background:var(--tblr-bg-surface-tertiary); border:1px solid var(--tblr-border-color); border-radius:var(--radius-sm); color:var(--navy-200); font-family:var(--font-primary); font-size:var(--font-size-xs); cursor:pointer; }
+    .pagination-wrap button.active { background:var(--tblr-primary); color:#1a1a1a; border-color:var(--tblr-primary); font-weight:700; }
+    .pagination-wrap button:hover:not(.active):not(:disabled) { border-color:var(--tblr-primary); color:var(--tblr-primary); }
+    .pagination-wrap button:disabled { opacity:.35; cursor:not-allowed; }
   </style>
 </head>
 <body>
-<div class="portal-layout">
+<div class="page">
 
   <!-- ==================== SIDEBAR ==================== -->
-  <aside class="sidebar" id="sidebar">
-    <div class="sidebar-logo">
-      <a href="../"><img src="../logo.png" alt="GSP Recruitment" height="28"></a>
-    </div>
-    <nav class="sidebar-nav">
-      <div class="sidebar-section-label">Overview</div>
-      <button class="nav-item active" data-section="dashboard"><i class="fa-regular fa-chart-pie"></i> Dashboard</button>
+  <aside class="navbar navbar-vertical navbar-expand-lg" data-bs-theme="dark" id="sidebar">
+    <div class="container-fluid">
+      <button class="navbar-toggler" type="button" id="mobileMenuBtn" data-bs-toggle="collapse" data-bs-target="#sidebar-menu" aria-controls="sidebar-menu" aria-expanded="false" aria-label="Toggle navigation">
+        <span class="navbar-toggler-icon"></span>
+      </button>
+      <h1 class="navbar-brand navbar-brand-image">
+        <a href="../"><img src="../logo.png" alt="GSP Recruitment"></a>
+      </h1>
+      <div class="collapse navbar-collapse" id="sidebar-menu">
+        <div class="text-secondary text-uppercase px-3 pt-3 pb-1 fw-bold" style="font-size:10px;letter-spacing:.1em;">Overview</div>
+        <ul class="navbar-nav">
+          <li class="nav-item"><a class="nav-link active" href="#" data-section="dashboard"><span class="nav-link-icon"><i class="fa-regular fa-chart-pie"></i></span><span class="nav-link-title">Dashboard</span></a></li>
+        </ul>
 
-      <div class="sidebar-section-label">People</div>
-      <button class="nav-item" data-section="users"><i class="fa-regular fa-users"></i> Users</button>
-      <button class="nav-item" data-section="candidates"><i class="fa-regular fa-user-tie"></i> Candidates</button>
+        <div class="text-secondary text-uppercase px-3 pt-3 pb-1 fw-bold" style="font-size:10px;letter-spacing:.1em;">People</div>
+        <ul class="navbar-nav">
+          <li class="nav-item"><a class="nav-link" href="#" data-section="users"><span class="nav-link-icon"><i class="fa-regular fa-users"></i></span><span class="nav-link-title">Users</span></a></li>
+          <li class="nav-item"><a class="nav-link" href="#" data-section="candidates"><span class="nav-link-icon"><i class="fa-regular fa-user-tie"></i></span><span class="nav-link-title">Candidates</span></a></li>
+        </ul>
 
-      <div class="sidebar-section-label">Jobs</div>
-      <button class="nav-item" data-section="jobs"><i class="fa-regular fa-briefcase"></i> All Jobs</button>
+        <div class="text-secondary text-uppercase px-3 pt-3 pb-1 fw-bold" style="font-size:10px;letter-spacing:.1em;">Jobs</div>
+        <ul class="navbar-nav">
+          <li class="nav-item"><a class="nav-link" href="#" data-section="jobs"><span class="nav-link-icon"><i class="fa-regular fa-briefcase"></i></span><span class="nav-link-title">All Jobs</span></a></li>
+        </ul>
 
-      <div class="sidebar-section-label">Growth</div>
-      <button class="nav-item" data-section="outreach"><i class="fa-regular fa-paper-plane"></i> Outreach</button>
-      <button class="nav-item" data-section="blog"><i class="fa-regular fa-newspaper"></i> Blog</button>
+        <div class="text-secondary text-uppercase px-3 pt-3 pb-1 fw-bold" style="font-size:10px;letter-spacing:.1em;">Growth</div>
+        <ul class="navbar-nav">
+          <li class="nav-item"><a class="nav-link" href="#" data-section="outreach"><span class="nav-link-icon"><i class="fa-regular fa-paper-plane"></i></span><span class="nav-link-title">Outreach</span></a></li>
+          <li class="nav-item"><a class="nav-link" href="#" data-section="blog"><span class="nav-link-icon"><i class="fa-regular fa-newspaper"></i></span><span class="nav-link-title">Blog</span></a></li>
+        </ul>
 
-      <div class="sidebar-section-label">Insights</div>
-      <button class="nav-item" data-section="analytics"><i class="fa-regular fa-chart-line"></i> Analytics</button>
-      <button class="nav-item" data-section="audit"><i class="fa-regular fa-clock-rotate-left"></i> Audit Log</button>
+        <div class="text-secondary text-uppercase px-3 pt-3 pb-1 fw-bold" style="font-size:10px;letter-spacing:.1em;">Insights</div>
+        <ul class="navbar-nav">
+          <li class="nav-item"><a class="nav-link" href="#" data-section="analytics"><span class="nav-link-icon"><i class="fa-regular fa-chart-line"></i></span><span class="nav-link-title">Analytics</span></a></li>
+          <li class="nav-item"><a class="nav-link" href="#" data-section="audit"><span class="nav-link-icon"><i class="fa-regular fa-clock-rotate-left"></i></span><span class="nav-link-title">Audit Log</span></a></li>
+        </ul>
 
-      <div class="sidebar-section-label">System</div>
-      <button class="nav-item" data-section="cms"><i class="fa-regular fa-newspaper"></i> Content CMS</button>
-      <button class="nav-item" data-section="settings"><i class="fa-regular fa-gear"></i> Settings</button>
-    </nav>
-    <div class="sidebar-footer">
-      <div class="sidebar-user">
-        <div class="avatar avatar-gold avatar-sm" id="sidebarAvatar" style="flex-shrink:0;">AD</div>
-        <div style="flex:1;min-width:0;">
-          <div class="sidebar-user-name" id="sidebarName">Admin</div>
-          <div class="sidebar-user-email" id="sidebarEmail"></div>
+        <div class="text-secondary text-uppercase px-3 pt-3 pb-1 fw-bold" style="font-size:10px;letter-spacing:.1em;">System</div>
+        <ul class="navbar-nav">
+          <li class="nav-item"><a class="nav-link" href="#" data-section="cms"><span class="nav-link-icon"><i class="fa-regular fa-newspaper"></i></span><span class="nav-link-title">Content CMS</span></a></li>
+          <li class="nav-item"><a class="nav-link" href="#" data-section="settings"><span class="nav-link-icon"><i class="fa-regular fa-gear"></i></span><span class="nav-link-title">Settings</span></a></li>
+        </ul>
+
+        <div class="mt-auto">
+          <hr class="text-secondary opacity-25 my-2 mx-3">
+          <div class="d-flex align-items-center px-3 py-2">
+            <span class="avatar avatar-sm me-2" id="sidebarAvatar" style="background:var(--tblr-primary);color:#1a1a1a;font-weight:700;flex-shrink:0;">AD</span>
+            <div class="flex-fill" style="min-width:0;">
+              <div class="text-white fw-medium text-truncate" id="sidebarName" style="font-size:.8125rem;">Admin</div>
+              <div class="text-secondary text-truncate" id="sidebarEmail" style="font-size:.6875rem;"></div>
+            </div>
+          </div>
+          <div class="px-3 pb-3">
+            <button class="btn btn-ghost-secondary btn-sm w-100" id="sidebarLogoutBtn">
+              <i class="fa-regular fa-arrow-right-from-bracket me-1"></i> Logout
+            </button>
+          </div>
         </div>
       </div>
-      <button class="btn btn-sm btn-ghost" style="width:100%;justify-content:center;margin-top:var(--space-sm);" id="sidebarLogoutBtn">
-        <i class="fa-regular fa-arrow-right-from-bracket"></i> Logout
-      </button>
     </div>
   </aside>
 
   <!-- ==================== MAIN ==================== -->
-  <main class="main-content">
-    <header class="portal-header">
-      <div style="display:flex;align-items:center;gap:var(--space-md);">
-        <button class="btn btn-sm btn-ghost" id="mobileMenuBtn" style="display:none;"><i class="fa-solid fa-bars"></i></button>
-        <h1 id="pageTitle">Dashboard</h1>
-      </div>
-      <div style="display:flex;align-items:center;gap:var(--space-md);">
-        <a href="../" class="btn btn-sm btn-ghost"><i class="fa-regular fa-arrow-up-right-from-square"></i> View Site</a>
+  <div class="page-wrapper">
+    <header class="navbar navbar-expand-md d-print-none border-bottom">
+      <div class="container-fluid">
+        <div class="d-flex align-items-center w-100 py-2">
+          <h1 class="h2 mb-0 fw-bold" id="pageTitle">Dashboard</h1>
+          <div class="ms-auto">
+            <a href="../" class="btn btn-ghost-secondary btn-sm"><i class="fa-regular fa-arrow-up-right-from-square me-1"></i> View Site</a>
+          </div>
+        </div>
       </div>
     </header>
 
-    <div class="portal-content">
+    <div class="page-body">
+      <div class="container-xl">
 
-      <!-- ==================== DASHBOARD ==================== -->
-      <section class="portal-section active" id="section-dashboard">
-        <div class="stats-grid">
-          <div class="stat-card">
-            <div class="stat-icon"><i class="fa-regular fa-users"></i></div>
-            <div class="stat-value" id="kpiTotalUsers">—</div>
-            <div class="stat-label">Total Users</div>
-          </div>
-          <div class="stat-card">
-            <div class="stat-icon"><i class="fa-regular fa-briefcase"></i></div>
-            <div class="stat-value" id="kpiActiveJobs">—</div>
-            <div class="stat-label">Active Jobs</div>
-          </div>
-          <div class="stat-card">
-            <div class="stat-icon"><i class="fa-regular fa-user-tie"></i></div>
-            <div class="stat-value" id="kpiCandidates">—</div>
-            <div class="stat-label">Candidates</div>
-          </div>
-          <div class="stat-card">
-            <div class="stat-icon"><i class="fa-regular fa-building"></i></div>
-            <div class="stat-value" id="kpiClients">—</div>
-            <div class="stat-label">Clients</div>
-          </div>
-          <div class="stat-card">
-            <div class="stat-icon"><i class="fa-regular fa-calendar-check"></i></div>
-            <div class="stat-value" id="kpiPlacements">—</div>
-            <div class="stat-label">Placed This Week</div>
-          </div>
-        </div>
-
-        <div class="grid-3-1">
-          <div style="display:flex;flex-direction:column;gap:var(--space-xl);">
-            <div class="card">
-              <div class="card-title"><i class="fa-regular fa-clock-rotate-left" style="color:var(--gold-400);"></i> Recent Activity</div>
-              <div id="recentActivityList" style="color:var(--navy-300);font-size:var(--font-size-sm);">Loading…</div>
+        <!-- ==================== DASHBOARD ==================== -->
+        <section class="portal-section active" id="section-dashboard">
+          <div class="row row-deck row-cards mb-4">
+            <div class="col-sm-6 col-lg">
+              <div class="card card-sm"><div class="card-body">
+                <div class="subheader"><i class="fa-regular fa-users me-1"></i>Total Users</div>
+                <div class="h1 mb-0" id="kpiTotalUsers">—</div>
+              </div></div>
+            </div>
+            <div class="col-sm-6 col-lg">
+              <div class="card card-sm"><div class="card-body">
+                <div class="subheader"><i class="fa-regular fa-briefcase me-1"></i>Active Jobs</div>
+                <div class="h1 mb-0" id="kpiActiveJobs">—</div>
+              </div></div>
+            </div>
+            <div class="col-sm-6 col-lg">
+              <div class="card card-sm"><div class="card-body">
+                <div class="subheader"><i class="fa-regular fa-user-tie me-1"></i>Candidates</div>
+                <div class="h1 mb-0" id="kpiCandidates">—</div>
+              </div></div>
+            </div>
+            <div class="col-sm-6 col-lg">
+              <div class="card card-sm"><div class="card-body">
+                <div class="subheader"><i class="fa-regular fa-building me-1"></i>Clients</div>
+                <div class="h1 mb-0" id="kpiClients">—</div>
+              </div></div>
+            </div>
+            <div class="col-sm-6 col-lg">
+              <div class="card card-sm"><div class="card-body">
+                <div class="subheader"><i class="fa-regular fa-calendar-check me-1"></i>Placed This Week</div>
+                <div class="h1 mb-0" id="kpiPlacements">—</div>
+              </div></div>
             </div>
           </div>
 
-          <div style="display:flex;flex-direction:column;gap:var(--space-xl);">
-            <div class="card">
-              <div class="card-title">
-                <i class="fa-regular fa-user-plus" style="color:var(--gold-400);"></i>
-                Pending Verifications
-                <span class="badge badge-gold" id="pendingBadge" style="margin-left:auto;">0</span>
-              </div>
-              <div id="pendingRegistrationsList" style="color:var(--navy-300);font-size:var(--font-size-sm);">Loading…</div>
-            </div>
-
-            <div class="card">
-              <div class="card-title"><i class="fa-regular fa-bolt" style="color:var(--gold-400);"></i> Quick Actions</div>
-              <div style="display:flex;flex-direction:column;gap:var(--space-sm);">
-                <button class="btn btn-sm btn-outline" style="justify-content:flex-start;" onclick="navigateTo('users')">
-                  <i class="fa-regular fa-users"></i> Manage Users
-                </button>
-                <button class="btn btn-sm btn-outline" style="justify-content:flex-start;" onclick="navigateTo('jobs')">
-                  <i class="fa-regular fa-briefcase"></i> Review Jobs
-                </button>
-                <button class="btn btn-sm btn-outline" style="justify-content:flex-start;" onclick="navigateTo('outreach')">
-                  <i class="fa-regular fa-paper-plane"></i> Outreach Drafts
-                </button>
-                <button class="btn btn-sm btn-outline" style="justify-content:flex-start;" onclick="navigateTo('analytics')">
-                  <i class="fa-regular fa-chart-line"></i> View Analytics
-                </button>
-                <button class="btn btn-sm btn-outline" style="justify-content:flex-start;" onclick="navigateTo('audit')">
-                  <i class="fa-regular fa-shield"></i> Audit Log
-                </button>
+          <div class="row row-cards">
+            <div class="col-lg-8">
+              <div class="card">
+                <div class="card-header"><h3 class="card-title"><i class="fa-regular fa-clock-rotate-left text-primary me-2"></i>Recent Activity</h3></div>
+                <div class="card-body">
+                  <div id="recentActivityList" class="text-secondary">Loading…</div>
+                </div>
               </div>
             </div>
-          </div>
-        </div>
-      </section>
 
-      <!-- ==================== USERS ==================== -->
-      <section class="portal-section" id="section-users">
-        <div class="toolbar">
-          <div class="search-bar">
-            <i class="fa-regular fa-magnifying-glass"></i>
-            <input type="text" placeholder="Search by name or email…" id="userSearch">
-          </div>
-          <select class="filter-select" id="userRoleFilter">
-            <option value="">All Roles</option>
-            <option value="candidate">Candidate</option>
-            <option value="client">Client</option>
-            <option value="admin">Admin</option>
-          </select>
-          <select class="filter-select" id="userStatusFilter">
-            <option value="">All Status</option>
-            <option value="verified">Verified</option>
-            <option value="unverified">Pending</option>
-          </select>
-        </div>
-        <div class="table-wrap" style="margin-bottom:var(--space-md);">
-          <table>
-            <thead>
-              <tr>
-                <th>Name</th>
-                <th>Email</th>
-                <th>Role</th>
-                <th>Status</th>
-                <th>Joined</th>
-                <th style="width:60px;"></th>
-              </tr>
-            </thead>
-            <tbody><tr><td colspan="6" style="text-align:center;padding:2rem;color:var(--navy-300);"><i class="fa-regular fa-spinner fa-spin"></i></td></tr></tbody>
-          </table>
-        </div>
-        <div class="pagination" id="usersPagination"></div>
-      </section>
+            <div class="col-lg-4">
+              <div class="card mb-3">
+                <div class="card-header">
+                  <h3 class="card-title"><i class="fa-regular fa-user-plus text-primary me-2"></i>Pending Verifications</h3>
+                  <span class="badge bg-yellow-lt ms-auto" id="pendingBadge">0</span>
+                </div>
+                <div class="card-body">
+                  <div id="pendingRegistrationsList" class="text-secondary">Loading…</div>
+                </div>
+              </div>
 
-      <!-- ==================== JOBS ==================== -->
-      <section class="portal-section" id="section-jobs">
-        <div class="toolbar">
-          <div class="search-bar">
-            <i class="fa-regular fa-magnifying-glass"></i>
-            <input type="text" placeholder="Search jobs…" id="jobSearch" disabled style="cursor:default;">
-          </div>
-          <select class="filter-select" id="jobStatusFilter">
-            <option value="">All Status</option>
-            <option value="open">Open</option>
-            <option value="draft">Draft / Pending</option>
-            <option value="closed">Closed</option>
-          </select>
-        </div>
-        <div class="table-wrap" style="margin-bottom:var(--space-md);">
-          <table>
-            <thead>
-              <tr>
-                <th>Job Title</th>
-                <th>Client</th>
-                <th style="text-align:center;">Apps</th>
-                <th>Status</th>
-                <th style="width:220px;">Actions</th>
-              </tr>
-            </thead>
-            <tbody><tr><td colspan="5" style="text-align:center;padding:2rem;color:var(--navy-300);"><i class="fa-regular fa-spinner fa-spin"></i></td></tr></tbody>
-          </table>
-        </div>
-      </section>
-
-      <!-- ==================== OUTREACH ==================== -->
-      <section class="portal-section" id="section-outreach">
-        <div class="toolbar">
-          <select class="filter-select" id="outreachStatusFilter">
-            <option value="draft">Draft</option>
-            <option value="">All</option>
-            <option value="sent">Sent</option>
-            <option value="rejected">Rejected</option>
-            <option value="failed">Failed</option>
-          </select>
-          <button class="btn btn-sm btn-outline" onclick="Admin.runOutreachJob('sourcing', this)">Run sourcing now</button>
-          <button class="btn btn-sm btn-outline" onclick="Admin.runOutreachJob('enrich', this)">Run enrich now</button>
-          <button class="btn btn-sm btn-outline" onclick="Admin.runOutreachJob('matching', this)">Run matching now</button>
-          <button class="btn btn-sm btn-outline" onclick="Admin.runOutreachJob('drafting', this)">Run drafting now</button>
-        </div>
-        <div class="table-wrap" style="margin-bottom:var(--space-md);">
-          <table>
-            <thead>
-              <tr>
-                <th>To</th>
-                <th>Company</th>
-                <th>Subject</th>
-                <th>Type</th>
-                <th>AI Model</th>
-                <th>Created</th>
-                <th>Status</th>
-                <th style="width:140px;">Actions</th>
-              </tr>
-            </thead>
-            <tbody><tr><td colspan="8" style="text-align:center;padding:2rem;color:var(--navy-300);"><i class="fa-regular fa-spinner fa-spin"></i></td></tr></tbody>
-          </table>
-        </div>
-        <div class="pagination" id="outreachPagination"></div>
-      </section>
-
-      <!-- ==================== BLOG ==================== -->
-      <section class="portal-section" id="section-blog">
-        <div class="toolbar">
-          <select class="filter-select" id="blogStatusFilter">
-            <option value="">All</option>
-            <option value="draft">Draft</option>
-            <option value="published">Published</option>
-            <option value="archived">Archived</option>
-          </select>
-          <button class="btn btn-sm btn-outline" onclick="Admin.runOutreachJob('blog', this)">Draft new post (AI)</button>
-          <button class="btn btn-sm btn-primary" onclick="Admin.openBlogModal(null)">New post</button>
-        </div>
-        <div class="table-wrap" style="margin-bottom:var(--space-md);">
-          <table>
-            <thead>
-              <tr>
-                <th>Title NL</th>
-                <th>Slug</th>
-                <th>Tags</th>
-                <th>Status</th>
-                <th>Published</th>
-                <th style="width:180px;">Actions</th>
-              </tr>
-            </thead>
-            <tbody><tr><td colspan="6" style="text-align:center;padding:2rem;color:var(--navy-300);"><i class="fa-regular fa-spinner fa-spin"></i></td></tr></tbody>
-          </table>
-        </div>
-        <div class="pagination" id="blogPagination"></div>
-      </section>
-
-      <!-- ==================== CANDIDATES ==================== -->
-      <section class="portal-section" id="section-candidates">
-        <div class="toolbar">
-          <div class="search-bar">
-            <i class="fa-regular fa-magnifying-glass"></i>
-            <input type="text" placeholder="Search by name, email or title…">
-          </div>
-          <select class="filter-select" id="candidateStatusFilter">
-            <option value="">All Status</option>
-            <option value="active">Active</option>
-            <option value="placed">Placed</option>
-            <option value="inactive">Inactive</option>
-          </select>
-        </div>
-        <div class="table-wrap" style="margin-bottom:var(--space-md);">
-          <table>
-            <thead>
-              <tr>
-                <th>Name</th>
-                <th>Email</th>
-                <th>Current Role</th>
-                <th style="text-align:center;">Exp</th>
-                <th style="text-align:center;">Matches</th>
-                <th>Status</th>
-                <th style="width:90px;">Actions</th>
-              </tr>
-            </thead>
-            <tbody><tr><td colspan="7" style="text-align:center;padding:2rem;color:var(--navy-300);"><i class="fa-regular fa-spinner fa-spin"></i></td></tr></tbody>
-          </table>
-        </div>
-        <div class="pagination" id="candidatesPagination"></div>
-      </section>
-
-      <!-- ==================== ANALYTICS ==================== -->
-      <section class="portal-section" id="section-analytics">
-        <div class="stats-grid" style="margin-bottom:var(--space-xl);">
-          <div class="stat-card">
-            <div class="stat-icon"><i class="fa-regular fa-fill-drip"></i></div>
-            <div class="stat-value" id="kpiJobFillRate">—</div>
-            <div class="stat-label">Job Fill Rate</div>
-          </div>
-          <div class="stat-card">
-            <div class="stat-icon"><i class="fa-regular fa-arrow-rotate-left"></i></div>
-            <div class="stat-value" id="kpiClientRetention">—</div>
-            <div class="stat-label">Client Retention</div>
-          </div>
-          <div class="stat-card">
-            <div class="stat-icon"><i class="fa-regular fa-handshake"></i></div>
-            <div class="stat-value" id="kpiCandidatePlacement">—</div>
-            <div class="stat-label">Placement Rate</div>
-          </div>
-        </div>
-        <div id="analyticsContent">
-          <div class="grid-2">
-            <div class="card">
-              <div class="card-title"><i class="fa-regular fa-chart-bar" style="color:var(--gold-400);"></i> User Growth (12 months)</div>
-              <div id="userGrowthChart" style="min-height:140px;display:flex;align-items:center;justify-content:center;color:var(--navy-300);">Loading…</div>
-            </div>
-            <div class="card">
-              <div class="card-title"><i class="fa-regular fa-chart-pie" style="color:var(--gold-400);"></i> Platform Summary</div>
-              <div id="analyticsSummary" style="color:var(--navy-300);font-size:var(--font-size-sm);">Loading…</div>
+              <div class="card">
+                <div class="card-header"><h3 class="card-title"><i class="fa-regular fa-bolt text-primary me-2"></i>Quick Actions</h3></div>
+                <div class="card-body d-flex flex-column gap-2">
+                  <button class="btn btn-outline-secondary btn-sm text-start" onclick="navigateTo('users')">
+                    <i class="fa-regular fa-users me-1"></i> Manage Users
+                  </button>
+                  <button class="btn btn-outline-secondary btn-sm text-start" onclick="navigateTo('jobs')">
+                    <i class="fa-regular fa-briefcase me-1"></i> Review Jobs
+                  </button>
+                  <button class="btn btn-outline-secondary btn-sm text-start" onclick="navigateTo('outreach')">
+                    <i class="fa-regular fa-paper-plane me-1"></i> Outreach Drafts
+                  </button>
+                  <button class="btn btn-outline-secondary btn-sm text-start" onclick="navigateTo('analytics')">
+                    <i class="fa-regular fa-chart-line me-1"></i> View Analytics
+                  </button>
+                  <button class="btn btn-outline-secondary btn-sm text-start" onclick="navigateTo('audit')">
+                    <i class="fa-regular fa-shield me-1"></i> Audit Log
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
-        </div>
-      </section>
+        </section>
 
-      <!-- ==================== AUDIT LOG ==================== -->
-      <section class="portal-section" id="section-audit">
-        <div class="toolbar">
-          <div class="search-bar" style="flex:1;">
-            <i class="fa-regular fa-magnifying-glass"></i>
-            <input type="text" placeholder="Filter by action…" id="auditActionFilter">
-          </div>
-        </div>
-        <div class="table-wrap" style="margin-bottom:var(--space-md);">
-          <table>
-            <thead>
-              <tr>
-                <th>Timestamp</th>
-                <th>Action</th>
-                <th>Actor</th>
-                <th>Target</th>
-              </tr>
-            </thead>
-            <tbody><tr><td colspan="4" style="text-align:center;padding:2rem;color:var(--navy-300);"><i class="fa-regular fa-spinner fa-spin"></i></td></tr></tbody>
-          </table>
-        </div>
-        <div class="pagination" id="auditPagination"></div>
-      </section>
-
-      <!-- ==================== CONTENT CMS ==================== -->
-      <section class="portal-section" id="section-cms">
-        <div class="grid-2">
+        <!-- ==================== USERS ==================== -->
+        <section class="portal-section" id="section-users">
           <div class="card">
-            <div class="card-title"><i class="fa-regular fa-list" style="color:var(--gold-400);"></i> Content Items</div>
-            <p style="font-size:var(--font-size-sm);color:var(--navy-300);margin-bottom:var(--space-lg);">These values are stored in the database and used to populate dynamic site content.</p>
-            <div id="contentList" style="color:var(--navy-300);font-size:var(--font-size-sm);">Loading…</div>
+            <div class="card-body border-bottom py-3">
+              <div class="d-flex gap-2 flex-wrap align-items-center">
+                <div class="input-icon search-bar flex-fill" style="min-width:220px;">
+                  <span class="input-icon-addon"><i class="fa-regular fa-magnifying-glass"></i></span>
+                  <input type="text" class="form-control" placeholder="Search by name or email…" id="userSearch">
+                </div>
+                <select class="form-select" style="max-width:160px;" id="userRoleFilter">
+                  <option value="">All Roles</option>
+                  <option value="candidate">Candidate</option>
+                  <option value="client">Client</option>
+                  <option value="admin">Admin</option>
+                </select>
+                <select class="form-select" style="max-width:160px;" id="userStatusFilter">
+                  <option value="">All Status</option>
+                  <option value="verified">Verified</option>
+                  <option value="unverified">Pending</option>
+                </select>
+              </div>
+            </div>
+            <div class="table-responsive">
+              <table class="table table-vcenter card-table">
+                <thead>
+                  <tr>
+                    <th>Name</th>
+                    <th>Email</th>
+                    <th>Role</th>
+                    <th>Status</th>
+                    <th>Joined</th>
+                    <th style="width:60px;"></th>
+                  </tr>
+                </thead>
+                <tbody><tr><td colspan="6" class="text-center text-secondary py-4"><i class="fa-regular fa-spinner fa-spin"></i></td></tr></tbody>
+              </table>
+            </div>
+            <div class="card-footer d-flex justify-content-center">
+              <div class="pagination-wrap" id="usersPagination"></div>
+            </div>
           </div>
+        </section>
+
+        <!-- ==================== JOBS ==================== -->
+        <section class="portal-section" id="section-jobs">
           <div class="card">
-            <div class="card-title"><i class="fa-regular fa-circle-info" style="color:var(--gold-400);"></i> CMS Guide</div>
-            <div style="font-size:var(--font-size-sm);color:var(--navy-200);line-height:1.7;">
-              <p style="margin-bottom:var(--space-md);">Content items are key/value pairs stored per <strong>section</strong>.</p>
-              <ul style="list-style:disc;padding-left:1.5rem;display:flex;flex-direction:column;gap:var(--space-sm);">
-                <li>Click the <i class="fa-regular fa-pen"></i> button to edit a value</li>
-                <li>Changes are saved to the database immediately</li>
-                <li>New content keys must be added directly via the API or database</li>
-              </ul>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <!-- ==================== SETTINGS ==================== -->
-      <section class="portal-section" id="section-settings">
-        <div class="grid-2">
-          <div>
-            <div class="card" style="margin-bottom:var(--space-xl);">
-              <div class="card-title"><i class="fa-regular fa-toggle-on" style="color:var(--gold-400);"></i> Feature Flags</div>
-              <p style="font-size:var(--font-size-sm);color:var(--navy-300);margin-bottom:var(--space-lg);">Changes are saved to the platform settings database.</p>
-              <div class="toggle-row">
-                <div>
-                  <div style="font-size:var(--font-size-sm);color:var(--white);font-weight:500;">AI Matching</div>
-                  <div style="font-size:var(--font-size-xs);color:var(--navy-300);">OpenRouter embedding-based candidate matching</div>
+            <div class="card-body border-bottom py-3">
+              <div class="d-flex gap-2 flex-wrap align-items-center">
+                <div class="input-icon flex-fill" style="min-width:220px;">
+                  <span class="input-icon-addon"><i class="fa-regular fa-magnifying-glass"></i></span>
+                  <input type="text" class="form-control" placeholder="Search jobs…" id="jobSearch" disabled style="cursor:default;">
                 </div>
-                <label class="toggle-switch">
-                  <input type="checkbox" id="setting_ai_matching_enabled" data-setting-key="ai_matching_enabled" checked>
-                  <span class="toggle-slider"></span>
-                </label>
-              </div>
-              <div class="toggle-row">
-                <div>
-                  <div style="font-size:var(--font-size-sm);color:var(--white);font-weight:500;">Self-Service Registration</div>
-                  <div style="font-size:var(--font-size-xs);color:var(--navy-300);">Allow candidates to register without admin approval</div>
-                </div>
-                <label class="toggle-switch">
-                  <input type="checkbox" id="setting_self_registration" data-setting-key="self_registration" checked>
-                  <span class="toggle-slider"></span>
-                </label>
-              </div>
-              <div class="toggle-row">
-                <div>
-                  <div style="font-size:var(--font-size-sm);color:var(--white);font-weight:500;">Maintenance Mode</div>
-                  <div style="font-size:var(--font-size-xs);color:var(--navy-300);">Show maintenance banner on public site</div>
-                </div>
-                <label class="toggle-switch">
-                  <input type="checkbox" id="setting_maintenance_mode" data-setting-key="maintenance_mode">
-                  <span class="toggle-slider"></span>
-                </label>
-              </div>
-              <div class="toggle-row">
-                <div>
-                  <div style="font-size:var(--font-size-sm);color:var(--white);font-weight:500;">Email Notifications</div>
-                  <div style="font-size:var(--font-size-xs);color:var(--navy-300);">Send automated emails for matches and applications</div>
-                </div>
-                <label class="toggle-switch">
-                  <input type="checkbox" id="setting_email_notifications" data-setting-key="email_notifications" checked>
-                  <span class="toggle-slider"></span>
-                </label>
-              </div>
-              <div style="margin-top:var(--space-xl);">
-                <button class="btn btn-primary" id="saveSettingsBtn" onclick="Admin.saveSettings()">
-                  <i class="fa-regular fa-floppy-disk"></i> Save Settings
-                </button>
+                <select class="form-select" style="max-width:180px;" id="jobStatusFilter">
+                  <option value="">All Status</option>
+                  <option value="open">Open</option>
+                  <option value="draft">Draft / Pending</option>
+                  <option value="closed">Closed</option>
+                </select>
               </div>
             </div>
+            <div class="table-responsive">
+              <table class="table table-vcenter card-table">
+                <thead>
+                  <tr>
+                    <th>Job Title</th>
+                    <th>Client</th>
+                    <th class="text-center">Apps</th>
+                    <th>Status</th>
+                    <th style="width:220px;">Actions</th>
+                  </tr>
+                </thead>
+                <tbody><tr><td colspan="5" class="text-center text-secondary py-4"><i class="fa-regular fa-spinner fa-spin"></i></td></tr></tbody>
+              </table>
+            </div>
           </div>
+        </section>
 
-          <div>
-            <div class="card">
-              <div class="card-title"><i class="fa-regular fa-circle-info" style="color:var(--gold-400);"></i> System Info</div>
-              <div style="display:flex;flex-direction:column;gap:var(--space-md);">
-                <div>
-                  <div style="font-size:var(--font-size-xs);color:var(--navy-300);margin-bottom:4px;">Backend</div>
-                  <div style="font-size:var(--font-size-sm);color:var(--navy-100);">FastAPI + asyncpg (PostgreSQL)</div>
+        <!-- ==================== OUTREACH ==================== -->
+        <section class="portal-section" id="section-outreach">
+          <div class="card">
+            <div class="card-body border-bottom py-3">
+              <div class="d-flex gap-2 flex-wrap align-items-center">
+                <select class="form-select" style="max-width:160px;" id="outreachStatusFilter">
+                  <option value="draft">Draft</option>
+                  <option value="">All</option>
+                  <option value="sent">Sent</option>
+                  <option value="rejected">Rejected</option>
+                  <option value="failed">Failed</option>
+                </select>
+                <button class="btn btn-outline-secondary btn-sm" onclick="Admin.runOutreachJob('sourcing', this)">Run sourcing now</button>
+                <button class="btn btn-outline-secondary btn-sm" onclick="Admin.runOutreachJob('enrich', this)">Run enrich now</button>
+                <button class="btn btn-outline-secondary btn-sm" onclick="Admin.runOutreachJob('matching', this)">Run matching now</button>
+                <button class="btn btn-outline-secondary btn-sm" onclick="Admin.runOutreachJob('drafting', this)">Run drafting now</button>
+              </div>
+            </div>
+            <div class="table-responsive">
+              <table class="table table-vcenter card-table">
+                <thead>
+                  <tr>
+                    <th>To</th>
+                    <th>Company</th>
+                    <th>Subject</th>
+                    <th>Type</th>
+                    <th>AI Model</th>
+                    <th>Created</th>
+                    <th>Status</th>
+                    <th style="width:140px;">Actions</th>
+                  </tr>
+                </thead>
+                <tbody><tr><td colspan="8" class="text-center text-secondary py-4"><i class="fa-regular fa-spinner fa-spin"></i></td></tr></tbody>
+              </table>
+            </div>
+            <div class="card-footer d-flex justify-content-center">
+              <div class="pagination-wrap" id="outreachPagination"></div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ==================== BLOG ==================== -->
+        <section class="portal-section" id="section-blog">
+          <div class="card">
+            <div class="card-body border-bottom py-3">
+              <div class="d-flex gap-2 flex-wrap align-items-center">
+                <select class="form-select" style="max-width:160px;" id="blogStatusFilter">
+                  <option value="">All</option>
+                  <option value="draft">Draft</option>
+                  <option value="published">Published</option>
+                  <option value="archived">Archived</option>
+                </select>
+                <button class="btn btn-outline-secondary btn-sm" onclick="Admin.runOutreachJob('blog', this)">Draft new post (AI)</button>
+                <button class="btn btn-primary btn-sm" onclick="Admin.openBlogModal(null)">New post</button>
+              </div>
+            </div>
+            <div class="table-responsive">
+              <table class="table table-vcenter card-table">
+                <thead>
+                  <tr>
+                    <th>Title NL</th>
+                    <th>Slug</th>
+                    <th>Tags</th>
+                    <th>Status</th>
+                    <th>Published</th>
+                    <th style="width:180px;">Actions</th>
+                  </tr>
+                </thead>
+                <tbody><tr><td colspan="6" class="text-center text-secondary py-4"><i class="fa-regular fa-spinner fa-spin"></i></td></tr></tbody>
+              </table>
+            </div>
+            <div class="card-footer d-flex justify-content-center">
+              <div class="pagination-wrap" id="blogPagination"></div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ==================== CANDIDATES ==================== -->
+        <section class="portal-section" id="section-candidates">
+          <div class="card">
+            <div class="card-body border-bottom py-3">
+              <div class="d-flex gap-2 flex-wrap align-items-center">
+                <div class="input-icon search-bar flex-fill" style="min-width:220px;">
+                  <span class="input-icon-addon"><i class="fa-regular fa-magnifying-glass"></i></span>
+                  <input type="text" class="form-control" placeholder="Search by name, email or title…">
                 </div>
-                <div>
-                  <div style="font-size:var(--font-size-xs);color:var(--navy-300);margin-bottom:4px;">API Base</div>
-                  <div style="font-size:var(--font-size-sm);color:var(--navy-100);font-family:monospace;">https://api.gsprecruitment.nl/api</div>
+                <select class="form-select" style="max-width:160px;" id="candidateStatusFilter">
+                  <option value="">All Status</option>
+                  <option value="active">Active</option>
+                  <option value="placed">Placed</option>
+                  <option value="inactive">Inactive</option>
+                </select>
+              </div>
+            </div>
+            <div class="table-responsive">
+              <table class="table table-vcenter card-table">
+                <thead>
+                  <tr>
+                    <th>Name</th>
+                    <th>Email</th>
+                    <th>Current Role</th>
+                    <th class="text-center">Exp</th>
+                    <th class="text-center">Matches</th>
+                    <th>Status</th>
+                    <th style="width:90px;">Actions</th>
+                  </tr>
+                </thead>
+                <tbody><tr><td colspan="7" class="text-center text-secondary py-4"><i class="fa-regular fa-spinner fa-spin"></i></td></tr></tbody>
+              </table>
+            </div>
+            <div class="card-footer d-flex justify-content-center">
+              <div class="pagination-wrap" id="candidatesPagination"></div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ==================== ANALYTICS ==================== -->
+        <section class="portal-section" id="section-analytics">
+          <div class="row row-deck row-cards mb-4">
+            <div class="col-sm-4">
+              <div class="card card-sm"><div class="card-body">
+                <div class="subheader"><i class="fa-regular fa-fill-drip me-1"></i>Job Fill Rate</div>
+                <div class="h1 mb-0" id="kpiJobFillRate">—</div>
+              </div></div>
+            </div>
+            <div class="col-sm-4">
+              <div class="card card-sm"><div class="card-body">
+                <div class="subheader"><i class="fa-regular fa-arrow-rotate-left me-1"></i>Client Retention</div>
+                <div class="h1 mb-0" id="kpiClientRetention">—</div>
+              </div></div>
+            </div>
+            <div class="col-sm-4">
+              <div class="card card-sm"><div class="card-body">
+                <div class="subheader"><i class="fa-regular fa-handshake me-1"></i>Placement Rate</div>
+                <div class="h1 mb-0" id="kpiCandidatePlacement">—</div>
+              </div></div>
+            </div>
+          </div>
+          <div id="analyticsContent">
+            <div class="row row-cards">
+              <div class="col-lg-6">
+                <div class="card">
+                  <div class="card-header"><h3 class="card-title"><i class="fa-regular fa-chart-bar text-primary me-2"></i>User Growth (12 months)</h3></div>
+                  <div class="card-body">
+                    <div id="userGrowthChart" style="min-height:140px;display:flex;align-items:center;justify-content:center;" class="text-secondary">Loading…</div>
+                  </div>
                 </div>
-                <div>
-                  <div style="font-size:var(--font-size-xs);color:var(--navy-300);margin-bottom:4px;">Matching</div>
-                  <div style="font-size:var(--font-size-sm);color:var(--navy-100);">OpenRouter text-embedding-3-small</div>
+              </div>
+              <div class="col-lg-6">
+                <div class="card">
+                  <div class="card-header"><h3 class="card-title"><i class="fa-regular fa-chart-pie text-primary me-2"></i>Platform Summary</h3></div>
+                  <div class="card-body">
+                    <div id="analyticsSummary" class="text-secondary">Loading…</div>
+                  </div>
                 </div>
               </div>
             </div>
           </div>
-        </div>
-      </section>
+        </section>
 
-    </div><!-- /portal-content -->
-  </main>
-</div><!-- /portal-layout -->
+        <!-- ==================== AUDIT LOG ==================== -->
+        <section class="portal-section" id="section-audit">
+          <div class="card">
+            <div class="card-body border-bottom py-3">
+              <div class="input-icon" style="max-width:360px;">
+                <span class="input-icon-addon"><i class="fa-regular fa-magnifying-glass"></i></span>
+                <input type="text" class="form-control" placeholder="Filter by action…" id="auditActionFilter">
+              </div>
+            </div>
+            <div class="table-responsive">
+              <table class="table table-vcenter card-table">
+                <thead>
+                  <tr>
+                    <th>Timestamp</th>
+                    <th>Action</th>
+                    <th>Actor</th>
+                    <th>Target</th>
+                  </tr>
+                </thead>
+                <tbody><tr><td colspan="4" class="text-center text-secondary py-4"><i class="fa-regular fa-spinner fa-spin"></i></td></tr></tbody>
+              </table>
+            </div>
+            <div class="card-footer d-flex justify-content-center">
+              <div class="pagination-wrap" id="auditPagination"></div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ==================== CONTENT CMS ==================== -->
+        <section class="portal-section" id="section-cms">
+          <div class="row row-cards">
+            <div class="col-lg-6">
+              <div class="card">
+                <div class="card-header"><h3 class="card-title"><i class="fa-regular fa-list text-primary me-2"></i>Content Items</h3></div>
+                <div class="card-body">
+                  <p class="text-secondary mb-3">These values are stored in the database and used to populate dynamic site content.</p>
+                  <div id="contentList" class="text-secondary">Loading…</div>
+                </div>
+              </div>
+            </div>
+            <div class="col-lg-6">
+              <div class="card">
+                <div class="card-header"><h3 class="card-title"><i class="fa-regular fa-circle-info text-primary me-2"></i>CMS Guide</h3></div>
+                <div class="card-body" style="line-height:1.7;">
+                  <p class="mb-2">Content items are key/value pairs stored per <strong>section</strong>.</p>
+                  <ul class="d-flex flex-column gap-2 ps-3 mb-0">
+                    <li>Click the <i class="fa-regular fa-pen"></i> button to edit a value</li>
+                    <li>Changes are saved to the database immediately</li>
+                    <li>New content keys must be added directly via the API or database</li>
+                  </ul>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ==================== SETTINGS ==================== -->
+        <section class="portal-section" id="section-settings">
+          <div class="row row-cards">
+            <div class="col-lg-6">
+              <div class="card mb-3">
+                <div class="card-header"><h3 class="card-title"><i class="fa-regular fa-toggle-on text-primary me-2"></i>Feature Flags</h3></div>
+                <div class="card-body">
+                  <p class="text-secondary mb-3">Changes are saved to the platform settings database.</p>
+
+                  <div class="d-flex align-items-center py-2 border-bottom">
+                    <div>
+                      <div class="fw-medium">AI Matching</div>
+                      <div class="text-secondary small">OpenRouter embedding-based candidate matching</div>
+                    </div>
+                    <label class="form-check form-switch ms-auto mb-0">
+                      <input class="form-check-input" type="checkbox" id="setting_ai_matching_enabled" data-setting-key="ai_matching_enabled" checked>
+                    </label>
+                  </div>
+                  <div class="d-flex align-items-center py-2 border-bottom">
+                    <div>
+                      <div class="fw-medium">Self-Service Registration</div>
+                      <div class="text-secondary small">Allow candidates to register without admin approval</div>
+                    </div>
+                    <label class="form-check form-switch ms-auto mb-0">
+                      <input class="form-check-input" type="checkbox" id="setting_self_registration" data-setting-key="self_registration" checked>
+                    </label>
+                  </div>
+                  <div class="d-flex align-items-center py-2 border-bottom">
+                    <div>
+                      <div class="fw-medium">Maintenance Mode</div>
+                      <div class="text-secondary small">Show maintenance banner on public site</div>
+                    </div>
+                    <label class="form-check form-switch ms-auto mb-0">
+                      <input class="form-check-input" type="checkbox" id="setting_maintenance_mode" data-setting-key="maintenance_mode">
+                    </label>
+                  </div>
+                  <div class="d-flex align-items-center py-2">
+                    <div>
+                      <div class="fw-medium">Email Notifications</div>
+                      <div class="text-secondary small">Send automated emails for matches and applications</div>
+                    </div>
+                    <label class="form-check form-switch ms-auto mb-0">
+                      <input class="form-check-input" type="checkbox" id="setting_email_notifications" data-setting-key="email_notifications" checked>
+                    </label>
+                  </div>
+
+                  <div class="mt-4">
+                    <button class="btn btn-primary" id="saveSettingsBtn" onclick="Admin.saveSettings()">
+                      <i class="fa-regular fa-floppy-disk"></i> Save Settings
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="col-lg-6">
+              <div class="card">
+                <div class="card-header"><h3 class="card-title"><i class="fa-regular fa-circle-info text-primary me-2"></i>System Info</h3></div>
+                <div class="card-body d-flex flex-column gap-3">
+                  <div>
+                    <div class="text-secondary small mb-1">Backend</div>
+                    <div>FastAPI + asyncpg (PostgreSQL)</div>
+                  </div>
+                  <div>
+                    <div class="text-secondary small mb-1">API Base</div>
+                    <div class="font-monospace">https://api.gsprecruitment.nl/api</div>
+                  </div>
+                  <div>
+                    <div class="text-secondary small mb-1">Matching</div>
+                    <div>OpenRouter text-embedding-3-small</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+      </div><!-- /container-xl -->
+    </div><!-- /page-body -->
+  </div><!-- /page-wrapper -->
+</div><!-- /page -->
 
 <script src="../auth.js"></script>
 <script src="js/admin.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@tabler/core@1.4.0/dist/js/tabler.min.js"></script>
 <script>
   /* ---- Navigation ---- */
   const sectionTitles = {
@@ -591,7 +639,7 @@
   const loaded = new Set(['dashboard']);
 
   function navigateTo(section) {
-    document.querySelectorAll('.nav-item').forEach(item => {
+    document.querySelectorAll('.nav-link[data-section]').forEach(item => {
       item.classList.toggle('active', item.dataset.section === section);
     });
     document.querySelectorAll('.portal-section').forEach(s => {
@@ -599,7 +647,10 @@
     });
     document.getElementById('pageTitle').textContent = sectionTitles[section] || section;
     window.location.hash = section;
-    document.getElementById('sidebar').classList.remove('open');
+    const menu = document.getElementById('sidebar-menu');
+    if (menu && menu.classList.contains('show') && window.bootstrap) {
+      window.bootstrap.Collapse.getOrCreateInstance(menu).hide();
+    }
 
     if (!loaded.has(section) && sectionLoaders[section]) {
       loaded.add(section);
@@ -607,20 +658,12 @@
     }
   }
 
-  document.querySelectorAll('.nav-item[data-section]').forEach(item => {
-    item.addEventListener('click', () => navigateTo(item.dataset.section));
+  document.querySelectorAll('.nav-link[data-section]').forEach(item => {
+    item.addEventListener('click', (e) => { e.preventDefault(); navigateTo(item.dataset.section); });
   });
 
   const hash = window.location.hash.replace('#', '');
   if (hash && sectionTitles[hash]) navigateTo(hash);
-
-  /* ---- Mobile menu ---- */
-  const mobileBtn = document.getElementById('mobileMenuBtn');
-  const sidebar = document.getElementById('sidebar');
-  function checkMobile() { mobileBtn.style.display = window.innerWidth <= 768 ? 'inline-flex' : 'none'; }
-  checkMobile();
-  window.addEventListener('resize', checkMobile);
-  mobileBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
 
   /* ---- Logout ---- */
   document.getElementById('sidebarLogoutBtn').addEventListener('click', () => Auth.logout());

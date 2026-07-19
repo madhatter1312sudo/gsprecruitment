@@ -38,12 +38,13 @@ const Admin = {
     return this.formatDate(d);
   },
   badge(status) {
-    const map = { active: 'badge-green', open: 'badge-green', placed: 'badge-blue',
-      pending: 'badge-blue', suspended: 'badge-red', closed: 'badge-red',
-      draft: 'badge-blue', admin: 'badge-red', candidate: 'badge-gold', client: 'badge-blue',
-      sent: 'badge-green', rejected: 'badge', failed: 'badge-red',
-      published: 'badge-green', archived: 'badge' };
-    return map[status?.toLowerCase()] || 'badge';
+    const map = { active: 'green', open: 'green', placed: 'blue',
+      pending: 'blue', suspended: 'red', closed: 'red',
+      draft: 'blue', admin: 'red', candidate: 'gold', client: 'blue',
+      sent: 'green', rejected: 'default', failed: 'red',
+      published: 'green', archived: 'default' };
+    const colors = { green: 'bg-green-lt', blue: 'bg-blue-lt', gold: 'bg-yellow-lt', red: 'bg-red-lt', default: 'bg-secondary-lt' };
+    return `badge ${colors[map[status?.toLowerCase()] || 'default']}`;
   },
   esc(s) {
     if (s == null) return '';
@@ -193,12 +194,12 @@ const Admin = {
       <tr>
         <td style="font-weight:600;color:var(--white);">${this.esc(u.full_name || '—')}</td>
         <td style="color:var(--navy-200);font-size:var(--font-size-xs);">${this.esc(u.email)}</td>
-        <td><span class="badge ${this.badge(u.role)}">${this.esc(u.role)}</span></td>
-        <td><span class="badge ${u.is_verified ? 'badge-green' : 'badge-blue'}">${u.is_verified ? 'Verified' : 'Pending'}</span></td>
+        <td><span class="${this.badge(u.role)}">${this.esc(u.role)}</span></td>
+        <td><span class="${u.is_verified ? 'badge bg-green-lt' : 'badge bg-blue-lt'}">${u.is_verified ? 'Verified' : 'Pending'}</span></td>
         <td style="font-size:var(--font-size-xs);color:var(--navy-300);">${this.timeAgo(u.created_at)}</td>
         <td>
           <div class="action-menu-wrap" style="position:relative;">
-            <button class="btn btn-sm btn-ghost" onclick="Admin.toggleUserMenu(${u.id}, event)">
+            <button class="btn btn-sm btn-ghost-secondary" onclick="Admin.toggleUserMenu(${u.id}, event)">
               <i class="fa-regular fa-ellipsis-vertical"></i>
             </button>
             <div class="action-menu" id="user-menu-${u.id}" style="display:none;">
@@ -248,7 +249,7 @@ const Admin = {
       </div>
       <div style="display:flex;gap:var(--space-md);margin-top:var(--space-lg);">
         <button class="btn btn-primary" onclick="Admin.saveUserEdit(${userId})">Save Changes</button>
-        <button class="btn btn-ghost" onclick="Admin.closeModal()">Cancel</button>
+        <button class="btn btn-ghost-secondary" onclick="Admin.closeModal()">Cancel</button>
       </div>
     `);
   },
@@ -340,20 +341,20 @@ const Admin = {
         <td style="font-weight:600;color:var(--white);">${this.esc(j.title || 'Untitled')}</td>
         <td style="color:var(--navy-200);">${this.esc(j.company_name || '—')}</td>
         <td style="text-align:center;">${j.application_count ?? '—'}</td>
-        <td><span class="badge ${this.badge(j.status)}">${this.esc(j.status || 'draft')}</span></td>
+        <td><span class="${this.badge(j.status)}">${this.esc(j.status || 'draft')}</span></td>
         <td>
           ${j.status === 'draft' || j.status === 'pending' ? `
             <button class="btn btn-sm btn-primary" onclick="Admin.setJobStatus(${j.id}, 'open')" title="Approve">
               <i class="fa-regular fa-circle-check"></i> Approve
             </button>` : ''}
           ${j.status === 'open' ? `
-            <button class="btn btn-sm btn-ghost" onclick="Admin.setJobStatus(${j.id}, 'closed')" title="Close" style="color:#f87171;">
+            <button class="btn btn-sm btn-ghost-secondary" onclick="Admin.setJobStatus(${j.id}, 'closed')" title="Close" style="color:#f87171;">
               <i class="fa-regular fa-xmark"></i> Close
             </button>` : ''}
-          <button class="btn btn-sm btn-ghost" onclick="Admin.triggerMatching(${j.id})" title="Run AI matching">
+          <button class="btn btn-sm btn-ghost-secondary" onclick="Admin.triggerMatching(${j.id})" title="Run AI matching">
             <i class="fa-regular fa-wand-magic-sparkles"></i>
           </button>
-          <button class="btn btn-sm btn-ghost" onclick="Admin.confirmDeleteJob(${j.id})" title="Delete" style="color:#f87171;">
+          <button class="btn btn-sm btn-ghost-secondary" onclick="Admin.confirmDeleteJob(${j.id})" title="Delete" style="color:#f87171;">
             <i class="fa-regular fa-trash"></i>
           </button>
         </td>
@@ -446,13 +447,13 @@ const Admin = {
           ${c.placement_count ? ` / <span style="color:#4ade80;" title="Placed">${c.placement_count} placed</span>` : ''}
         </td>
         <td>
-          <span class="badge ${this.badge(c.status || 'active')}">${this.esc(c.status || 'active')}</span>
+          <span class="${this.badge(c.status || 'active')}">${this.esc(c.status || 'active')}</span>
         </td>
         <td>
-          <button class="btn btn-sm btn-ghost" onclick="Admin.viewCandidate(${c.id})" title="View profile">
+          <button class="btn btn-sm btn-ghost-secondary" onclick="Admin.viewCandidate(${c.id})" title="View profile">
             <i class="fa-regular fa-eye"></i>
           </button>
-          <button class="btn btn-sm btn-ghost" onclick="Admin.triggerCandidateMatch(${c.id})" title="Run matching">
+          <button class="btn btn-sm btn-ghost-secondary" onclick="Admin.triggerCandidateMatch(${c.id})" title="Run matching">
             <i class="fa-regular fa-wand-magic-sparkles"></i>
           </button>
         </td>
@@ -473,7 +474,7 @@ const Admin = {
         <div><div style="font-size:var(--font-size-xs);color:var(--navy-300);margin-bottom:4px;">Experience</div><div>${c.years_experience ? c.years_experience + ' years' : '—'}</div></div>
         <div><div style="font-size:var(--font-size-xs);color:var(--navy-300);margin-bottom:4px;">Location</div><div>${this.esc(c.location || '—')}</div></div>
         <div><div style="font-size:var(--font-size-xs);color:var(--navy-300);margin-bottom:4px;">Source</div><div>${this.esc(c.source || '—')}</div></div>
-        <div><div style="font-size:var(--font-size-xs);color:var(--navy-300);margin-bottom:4px;">Status</div><div><span class="badge ${this.badge(c.status)}">${this.esc(c.status || 'active')}</span></div></div>
+        <div><div style="font-size:var(--font-size-xs);color:var(--navy-300);margin-bottom:4px;">Status</div><div><span class="${this.badge(c.status)}">${this.esc(c.status || 'active')}</span></div></div>
       </div>
       <div style="margin-bottom:var(--space-md);">
         <div style="font-size:var(--font-size-xs);color:var(--navy-300);margin-bottom:4px;">Skills</div>
@@ -493,7 +494,7 @@ const Admin = {
         <button class="btn btn-primary btn-sm" onclick="Admin.triggerCandidateMatch(${c.id});Admin.closeModal()">
           <i class="fa-regular fa-wand-magic-sparkles"></i> Run Matching
         </button>
-        <button class="btn btn-ghost btn-sm" onclick="Admin.closeModal()">Close</button>
+        <button class="btn btn-ghost-secondary btn-sm" onclick="Admin.closeModal()">Close</button>
       </div>
     `);
   },
@@ -548,19 +549,19 @@ const Admin = {
         <td style="color:var(--navy-200);font-size:var(--font-size-xs);">${this.esc(d.target_name || d.target_email || '—')}</td>
         <td style="color:var(--navy-200);">${this.esc(d.company || '—')}</td>
         <td style="color:var(--white);">${this.esc(d.subject || '—')}</td>
-        <td><span class="badge ${this.badge(d.target_type)}">${this.esc(d.target_type)}</span></td>
+        <td><span class="${this.badge(d.target_type)}">${this.esc(d.target_type)}</span></td>
         <td style="font-size:var(--font-size-xs);color:var(--navy-300);">${this.esc(d.ai_model || '—')}</td>
         <td style="font-size:var(--font-size-xs);color:var(--navy-300);">${this.timeAgo(d.created_at)}</td>
-        <td><span class="badge ${this.badge(d.status)}">${this.esc(d.status)}</span></td>
+        <td><span class="${this.badge(d.status)}">${this.esc(d.status)}</span></td>
         <td>
-          <button class="btn btn-sm btn-ghost" onclick="Admin.openDraftModal(${d.id})" title="Review">
+          <button class="btn btn-sm btn-ghost-secondary" onclick="Admin.openDraftModal(${d.id})" title="Review">
             <i class="fa-regular fa-eye"></i>
           </button>
           ${d.status === 'draft' ? `
-            <button class="btn btn-sm btn-ghost" onclick="Admin.approveDraft(${d.id})" title="Approve &amp; send" style="color:#4ade80;">
+            <button class="btn btn-sm btn-ghost-secondary" onclick="Admin.approveDraft(${d.id})" title="Approve &amp; send" style="color:#4ade80;">
               <i class="fa-regular fa-paper-plane"></i>
             </button>
-            <button class="btn btn-sm btn-ghost" onclick="Admin.rejectDraft(${d.id})" title="Reject" style="color:#f87171;">
+            <button class="btn btn-sm btn-ghost-secondary" onclick="Admin.rejectDraft(${d.id})" title="Reject" style="color:#f87171;">
               <i class="fa-regular fa-xmark"></i>
             </button>` : ''}
         </td>
@@ -576,8 +577,8 @@ const Admin = {
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:var(--space-md);margin-bottom:var(--space-lg);">
         <div><div style="font-size:var(--font-size-xs);color:var(--navy-300);margin-bottom:4px;">To</div><div>${this.esc(d.target_name || '—')} &lt;${this.esc(d.target_email || '')}&gt;</div></div>
         <div><div style="font-size:var(--font-size-xs);color:var(--navy-300);margin-bottom:4px;">Company</div><div>${this.esc(d.company || '—')}</div></div>
-        <div><div style="font-size:var(--font-size-xs);color:var(--navy-300);margin-bottom:4px;">Type</div><div><span class="badge ${this.badge(d.target_type)}">${this.esc(d.target_type)}</span></div></div>
-        <div><div style="font-size:var(--font-size-xs);color:var(--navy-300);margin-bottom:4px;">Status</div><div><span class="badge ${this.badge(d.status)}">${this.esc(d.status)}</span></div></div>
+        <div><div style="font-size:var(--font-size-xs);color:var(--navy-300);margin-bottom:4px;">Type</div><div><span class="${this.badge(d.target_type)}">${this.esc(d.target_type)}</span></div></div>
+        <div><div style="font-size:var(--font-size-xs);color:var(--navy-300);margin-bottom:4px;">Status</div><div><span class="${this.badge(d.status)}">${this.esc(d.status)}</span></div></div>
         <div><div style="font-size:var(--font-size-xs);color:var(--navy-300);margin-bottom:4px;">Channel</div><div>${this.esc(d.channel || '—')}</div></div>
         <div><div style="font-size:var(--font-size-xs);color:var(--navy-300);margin-bottom:4px;">Language</div><div>${this.esc(d.language || '—')}</div></div>
         <div><div style="font-size:var(--font-size-xs);color:var(--navy-300);margin-bottom:4px;">AI Model</div><div>${this.esc(d.ai_model || '—')}</div></div>
@@ -593,10 +594,10 @@ const Admin = {
       </div>
       <div style="display:flex;gap:var(--space-md);margin-top:var(--space-lg);flex-wrap:wrap;">
         ${editable ? `
-          <button class="btn btn-ghost" onclick="Admin.saveDraft(${d.id})"><i class="fa-regular fa-floppy-disk"></i> Save</button>
+          <button class="btn btn-ghost-secondary" onclick="Admin.saveDraft(${d.id})"><i class="fa-regular fa-floppy-disk"></i> Save</button>
           <button class="btn btn-primary" onclick="Admin.approveDraft(${d.id})"><i class="fa-regular fa-paper-plane"></i> Approve &amp; Send</button>
-          <button class="btn btn-ghost" onclick="Admin.rejectDraft(${d.id})" style="color:#f87171;"><i class="fa-regular fa-xmark"></i> Reject</button>` : ''}
-        <button class="btn btn-ghost" onclick="Admin.closeModal()">Close</button>
+          <button class="btn btn-ghost-secondary" onclick="Admin.rejectDraft(${d.id})" style="color:#f87171;"><i class="fa-regular fa-xmark"></i> Reject</button>` : ''}
+        <button class="btn btn-ghost-secondary" onclick="Admin.closeModal()">Close</button>
       </div>
     `);
   },
@@ -708,18 +709,18 @@ const Admin = {
         <td style="font-weight:600;color:var(--white);">${this.esc(p.title_nl || '—')}</td>
         <td style="color:var(--navy-200);font-size:var(--font-size-xs);">${this.esc(p.slug)}</td>
         <td style="color:var(--navy-200);font-size:var(--font-size-xs);">${this.esc(tags)}</td>
-        <td><span class="badge ${this.badge(p.status)}">${this.esc(p.status)}</span></td>
+        <td><span class="${this.badge(p.status)}">${this.esc(p.status)}</span></td>
         <td style="font-size:var(--font-size-xs);color:var(--navy-300);">${p.published_at ? this.formatDate(p.published_at) : '—'}</td>
         <td>
-          <button class="btn btn-sm btn-ghost" onclick="Admin.openBlogModal(${p.id})" title="Edit">
+          <button class="btn btn-sm btn-ghost-secondary" onclick="Admin.openBlogModal(${p.id})" title="Edit">
             <i class="fa-regular fa-pen"></i>
           </button>
           ${p.status === 'draft' ? `
-            <button class="btn btn-sm btn-ghost" onclick="Admin.publishBlogPost(${p.id})" title="Publish" style="color:#4ade80;">
+            <button class="btn btn-sm btn-ghost-secondary" onclick="Admin.publishBlogPost(${p.id})" title="Publish" style="color:#4ade80;">
               <i class="fa-regular fa-circle-check"></i>
             </button>` : ''}
           ${p.status === 'published' ? `
-            <button class="btn btn-sm btn-ghost" onclick="Admin.archiveBlogPost(${p.id})" title="Archive" style="color:#f87171;">
+            <button class="btn btn-sm btn-ghost-secondary" onclick="Admin.archiveBlogPost(${p.id})" title="Archive" style="color:#f87171;">
               <i class="fa-regular fa-box-archive"></i>
             </button>` : ''}
         </td>
@@ -769,7 +770,7 @@ const Admin = {
       </div>
       <div style="display:flex;gap:var(--space-md);margin-top:var(--space-lg);">
         <button class="btn btn-primary" onclick="Admin.saveBlogPost(${p ? p.id : 'null'})">Save</button>
-        <button class="btn btn-ghost" onclick="Admin.closeModal()">Cancel</button>
+        <button class="btn btn-ghost-secondary" onclick="Admin.closeModal()">Cancel</button>
       </div>
     `);
   },
@@ -855,18 +856,38 @@ const Admin = {
     if (growthEl && data.user_growth) {
       const entries = Object.entries(data.user_growth).sort(([a], [b]) => a.localeCompare(b));
       if (!entries.length) { growthEl.innerHTML = '<div style="color:var(--navy-300);font-size:var(--font-size-sm);">No data yet</div>'; return; }
-      const max = Math.max(...entries.map(([, v]) => v), 1);
-      growthEl.innerHTML = `<div style="display:flex;align-items:flex-end;gap:6px;height:120px;width:100%;">
-        ${entries.map(([month, count]) => {
-          const h = Math.round((count / max) * 110);
-          const label = new Date(month).toLocaleDateString('en-GB', { month: 'short' });
-          return `<div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:4px;">
-            <div style="font-size:9px;color:var(--navy-300);">${count}</div>
-            <div style="width:100%;border-radius:4px 4px 0 0;background:var(--gold-gradient);height:${h}px;"></div>
-            <div style="font-size:9px;color:var(--navy-300);">${label}</div>
-          </div>`;
-        }).join('')}
-      </div>`;
+
+      if (window.ApexCharts) {
+        growthEl.innerHTML = '';
+        growthEl.style.display = '';
+        const labels = entries.map(([month]) => new Date(month).toLocaleDateString('en-GB', { month: 'short' }));
+        const values = entries.map(([, count]) => count);
+        if (this._growthChart) { this._growthChart.destroy(); this._growthChart = null; }
+        this._growthChart = new ApexCharts(growthEl, {
+          chart: { type: 'bar', height: 200, background: 'transparent', toolbar: { show: false } },
+          series: [{ name: 'Users', data: values }],
+          xaxis: { categories: labels, axisBorder: { show: false }, axisTicks: { show: false } },
+          colors: ['#E8B400'],
+          plotOptions: { bar: { borderRadius: 4, columnWidth: '55%' } },
+          dataLabels: { enabled: false },
+          grid: { borderColor: 'rgba(255,255,255,0.06)' },
+          theme: { mode: 'dark' },
+        });
+        this._growthChart.render();
+      } else {
+        const max = Math.max(...entries.map(([, v]) => v), 1);
+        growthEl.innerHTML = `<div style="display:flex;align-items:flex-end;gap:6px;height:120px;width:100%;">
+          ${entries.map(([month, count]) => {
+            const h = Math.round((count / max) * 110);
+            const label = new Date(month).toLocaleDateString('en-GB', { month: 'short' });
+            return `<div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:4px;">
+              <div style="font-size:9px;color:var(--navy-300);">${count}</div>
+              <div style="width:100%;border-radius:4px 4px 0 0;background:var(--gold-gradient);height:${h}px;"></div>
+              <div style="font-size:9px;color:var(--navy-300);">${label}</div>
+            </div>`;
+          }).join('')}
+        </div>`;
+      }
     }
   },
 
@@ -972,7 +993,7 @@ const Admin = {
           <div style="font-size:var(--font-size-xs);color:var(--navy-300);">${this.esc(item.section)} / ${this.esc(item.key)}</div>
           <div style="color:var(--navy-100);margin-top:2px;font-size:var(--font-size-sm);">${this.esc((item.value || '').slice(0, 80))}${(item.value || '').length > 80 ? '…' : ''}</div>
         </div>
-        <button class="btn btn-sm btn-ghost" onclick="Admin.editContent(${item.id}, '${this.esc(item.key)}', \`${this.esc(item.value || '')}\`)">
+        <button class="btn btn-sm btn-ghost-secondary" onclick="Admin.editContent(${item.id}, '${this.esc(item.key)}', \`${this.esc(item.value || '')}\`)">
           <i class="fa-regular fa-pen"></i>
         </button>
       </div>`).join('');
@@ -987,7 +1008,7 @@ const Admin = {
       </div>
       <div style="display:flex;gap:var(--space-md);margin-top:var(--space-lg);">
         <button class="btn btn-primary" onclick="Admin.saveContent(${id})">Save</button>
-        <button class="btn btn-ghost" onclick="Admin.closeModal()">Cancel</button>
+        <button class="btn btn-ghost-secondary" onclick="Admin.closeModal()">Cancel</button>
       </div>
     `);
   },
