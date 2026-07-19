@@ -6,8 +6,10 @@
 <meta name="theme-color" content="#0E1B2E">
 <title id="pageTitleTag">Blog — GSP Recruitment | Tech & IT Recruitment in de Brainport</title>
 <meta name="description" content="Artikelen over tech & IT recruitment, embedded software, C++, cloud engineering en de Brainport Eindhoven arbeidsmarkt.">
-<link rel="canonical" id="canonicalLink" href="https://gsprecruitment.nl/blog/post.html">
+<link rel="canonical" id="canonicalLink" href="https://gsprecruitment.nl/blog/post">
 <meta property="og:type" content="article">
+<meta property="og:title" id="ogTitle" content="Kennisbank — GSP Recruitment">
+<meta property="og:description" id="ogDescription" content="Artikelen over tech & IT recruitment, embedded software, C++, cloud engineering en de Brainport Eindhoven arbeidsmarkt.">
 <meta property="og:image" content="https://gsprecruitment.nl/og-image.png">
 <meta name="twitter:card" content="summary_large_image">
 <link rel="icon" type="image/png" sizes="32x32" href="../favicon-32.png">
@@ -180,13 +182,17 @@
     document.title = pageTitle;
     document.getElementById('pageTitleTag').textContent = pageTitle;
 
-    const canonicalHref = `https://gsprecruitment.nl/blog/post.html?slug=${encodeURIComponent(p.slug || slug)}`;
+    const canonicalHref = `https://gsprecruitment.nl/blog/post?slug=${encodeURIComponent(p.slug || slug)}`;
     document.getElementById('canonicalLink').setAttribute('href', canonicalHref);
 
     const metaDescTag = document.createElement('meta');
     metaDescTag.name = 'description';
     metaDescTag.content = (lang === 'nl' ? p.excerpt_nl : p.excerpt_en) || '';
     document.head.appendChild(metaDescTag);
+
+    const postExcerpt = (lang === 'nl' ? p.excerpt_nl : p.excerpt_en) || '';
+    document.getElementById('ogTitle').setAttribute('content', pageTitle);
+    document.getElementById('ogDescription').setAttribute('content', postExcerpt);
 
     if (p.published_at) {
       const d = new Date(p.published_at);

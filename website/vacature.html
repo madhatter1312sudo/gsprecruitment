@@ -7,16 +7,16 @@
 <meta name="robots" content="index, follow, max-image-preview:large">
 <meta name="googlebot" content="index, follow, max-snippet:-1, max-image-preview:large">
 <meta name="author" content="GSP Recruitment">
-<link rel="alternate" hreflang="nl" href="https://gsprecruitment.nl/vacature.html">
-<link rel="alternate" hreflang="en" href="https://gsprecruitment.nl/vacature.html">
-<link rel="alternate" hreflang="x-default" href="https://gsprecruitment.nl/vacature.html">
+<link rel="alternate" hreflang="nl" href="https://gsprecruitment.nl/vacature">
+<link rel="alternate" hreflang="en" href="https://gsprecruitment.nl/vacature">
+<link rel="alternate" hreflang="x-default" href="https://gsprecruitment.nl/vacature">
 <title>Vacature — GSP Recruitment | Tech & IT Vacatures Nederland</title>
 <meta name="description" content="Bekijk deze tech & IT vacature. GSP Recruitment verbindt tech-professionals met topbedrijven in de Brainport regio.">
-<link rel="canonical" href="https://gsprecruitment.nl/vacature.html">
+<link rel="canonical" href="https://gsprecruitment.nl/vacature">
 <meta property="og:type" content="website">
-<meta property="og:title" content="Vacature — GSP Recruitment | Tech & IT Vacatures Nederland">
-<meta property="og:description" content="Bekijk deze tech & IT vacature. GSP Recruitment verbindt tech-professionals met topbedrijven in de Brainport regio.">
-<meta property="og:url" content="https://gsprecruitment.nl/vacature.html">
+<meta property="og:title" id="ogTitle" content="Vacature — GSP Recruitment">
+<meta property="og:description" id="ogDescription" content="Bekijk deze tech & IT vacature. GSP Recruitment verbindt tech-professionals met topbedrijven in de Brainport regio.">
+<meta property="og:url" content="https://gsprecruitment.nl/vacature">
 <meta property="og:image" content="https://gsprecruitment.nl/og-image.png">
 <meta property="og:locale" content="nl_NL">
 <meta property="og:locale:alternate" content="en_US">
@@ -132,10 +132,13 @@
     document.title = lang === 'nl'
       ? `${job.title} — Vacature bij GSP Recruitment`
       : `${job.title} — Job at GSP Recruitment`;
-    document.querySelector('meta[name="description"]').content = lang === 'nl'
+    const jobDescription = lang === 'nl'
       ? `${job.title} bij ${job.company || 'een Brainport techbedrijf'}. Solliciteer direct of stuur je CV.`
       : `${job.title} at ${job.company || 'a Brainport tech company'}. Apply directly or send your CV.`;
+    document.querySelector('meta[name="description"]').content = jobDescription;
     document.querySelector('link[rel="canonical"]').href = window.location.href;
+    document.getElementById('ogTitle').setAttribute('content', document.title);
+    document.getElementById('ogDescription').setAttribute('content', jobDescription);
     document.getElementById('jobTitle').textContent = job.title;
     const metaHtml = [];
     if (job.company) metaHtml.push(`<div class="meta-item"><strong><span class="lang-en">Company</span><span class="lang-nl">Bedrijf</span></strong>${job.company}</div>`);

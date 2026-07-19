@@ -3,6 +3,9 @@ Allow: /
 Disallow: /admin/
 Disallow: /candidate/
 Disallow: /client/
-Disallow: /*?*
+Allow: /blog/post?slug=
+Allow: /blog/post.html?slug=
+Allow: /vacature?id=
+Allow: /vacature.html?id=
 
 Sitemap: https://gsprecruitment.nl/sitemap.xml
