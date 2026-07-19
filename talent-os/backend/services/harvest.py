@@ -198,11 +198,12 @@ async def harvest_candidates() -> dict:
                             """INSERT INTO candidates
                                (full_name, email, current_company, current_title, location,
                                 linkedin_url, skills, source, source_url, sourced_by_agent, is_passive)
-                               SELECT $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11
+                               SELECT $1::varchar,$2::varchar,$3::varchar,$4::varchar,$5::varchar,
+                                      $6::varchar,$7::text[],$8::varchar,$9::varchar,$10::varchar,$11::boolean
                                WHERE NOT EXISTS (
                                    SELECT 1 FROM candidates
-                                   WHERE full_name = $1
-                                     AND COALESCE(current_company, '') = COALESCE($3, '')
+                                   WHERE full_name = $1::varchar
+                                     AND COALESCE(current_company, '') = COALESCE($3::varchar, '')
                                )
                                RETURNING id""",
                             full_name, email, company, row_title, location,
@@ -300,10 +301,11 @@ async def harvest_prospects() -> dict:
                         """INSERT INTO client_prospects
                            (company_name, domain, contact_name, contact_title, contact_email,
                             contact_linkedin, location, industry, source, status)
-                           SELECT $1,$2,$3,$4,$5,$6,$7,$8,$9,'new'
+                           SELECT $1::varchar,$2::varchar,$3::varchar,$4::varchar,$5::varchar,
+                                  $6::varchar,$7::varchar,$8::varchar,$9::varchar,'new'
                            WHERE NOT EXISTS (
                                SELECT 1 FROM client_prospects
-                               WHERE company_name = $1 AND contact_name = $3
+                               WHERE company_name = $1::varchar AND contact_name = $3::varchar
                            )
                            RETURNING id""",
                         company_name, domain, contact_name, contact_title, contact_email,
