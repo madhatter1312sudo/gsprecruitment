@@ -105,7 +105,10 @@ async def approve_draft(
     if draft["status"] != "draft":
         raise HTTPException(status_code=400, detail=f"Draft already '{draft['status']}'")
     if not draft["target_email"]:
-        raise HTTPException(status_code=400, detail="Draft has no target email")
+        raise HTTPException(
+            status_code=400,
+            detail="No email — use LinkedIn URL in draft",
+        )
 
     sent_ok = await email_service.send_email(
         to_email=draft["target_email"],

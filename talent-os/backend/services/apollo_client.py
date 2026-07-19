@@ -32,7 +32,9 @@ class ApolloClient:
         self,
         q: str = "",
         title: str = "",
+        titles: Optional[List[str]] = None,
         location: str = "",
+        locations: Optional[List[str]] = None,
         company: str = "",
         limit: int = 25,
         page: int = 1,
@@ -40,14 +42,20 @@ class ApolloClient:
         """
         Search Apollo.io's people database.
         POST /api/v1/mixed_people/search
+
+        `titles`/`locations` accept multiple values (Apollo OR-matches within
+        each field) for bulk sourcing jobs; the singular `title`/`location`
+        kwargs remain for existing single-value callers.
         """
         client = await self._get_client()
+        person_titles = titles if titles else ([title] if title else [])
+        person_locations = locations if locations else ([location] if location else [])
         payload = {
             "api_key": self.api_key,
             "q_organization": company,
             "q_keywords": q,
-            "person_titles": [title] if title else [],
-            "person_locations": [location] if location else [],
+            "person_titles": person_titles,
+            "person_locations": person_locations,
             "per_page": min(limit, 100),
             "page": page,
         }

@@ -20,6 +20,7 @@ from core.config import settings
 from core.database import fetch_all, fetch_one, fetch_val, execute
 from services.apollo_client import ApolloClient
 from services import outreach_ai
+from services import harvest as harvest_service
 
 logger = logging.getLogger("talent_os.scheduler")
 
@@ -359,4 +360,10 @@ JOBS_BY_NAME = {
     "matching": matching,
     "drafting": draft_outreach,
     "blog": draft_blog_post,
+    # Manual-trigger only — deliberately NOT added to start_scheduler()'s
+    # cron jobs below. One-shot Apollo bulk-harvest (services/harvest.py)
+    # and its outreach-draft catch-up, both run via routers/outreach.py's
+    # POST /run/{job_name}.
+    "harvest": harvest_service.harvest_all,
+    "morningdrafts": harvest_service.morning_drafts,
 }
