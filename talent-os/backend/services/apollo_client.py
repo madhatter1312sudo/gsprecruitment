@@ -88,6 +88,7 @@ class ApolloClient:
             payload: Dict[str, Any] = {
                 "id": person_id,
                 "reveal_personal_emails": True,
+                "reveal_phone": False,
             }
         else:
             payload = {

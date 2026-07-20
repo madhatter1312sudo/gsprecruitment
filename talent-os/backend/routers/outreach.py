@@ -8,6 +8,7 @@ sent. There is no auto-send path anywhere in this router.
 import logging
 from typing import Optional
 
+import json
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from pydantic import BaseModel
 
@@ -151,7 +152,7 @@ async def approve_draft(
             "INSERT INTO audit_log (action, actor_id, target_type, target_id, changes) "
             "VALUES ($1, $2, $3, $4, $5)",
             "outreach_draft_approved", current_user["id"], "outreach_draft", draft_id,
-            {"target_email": draft["target_email"], "sent": True},
+            json.dumps({"target_email": draft["target_email"], "sent": True}),
         )
         return row
     else:
@@ -163,7 +164,7 @@ async def approve_draft(
             "INSERT INTO audit_log (action, actor_id, target_type, target_id, changes) "
             "VALUES ($1, $2, $3, $4, $5)",
             "outreach_draft_send_failed", current_user["id"], "outreach_draft", draft_id,
-            {"target_email": draft["target_email"], "sent": False},
+            json.dumps({"target_email": draft["target_email"], "sent": False}),
         )
         return row
 
@@ -184,7 +185,7 @@ async def reject_draft(
     await execute(
         "INSERT INTO audit_log (action, actor_id, target_type, target_id, changes) "
         "VALUES ($1, $2, $3, $4, $5)",
-        "outreach_draft_rejected", current_user["id"], "outreach_draft", draft_id, {},
+        "outreach_draft_rejected", current_user["id"], "outreach_draft", draft_id, json.dumps({}),
     )
     return row
 

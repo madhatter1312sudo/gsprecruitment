@@ -1,5 +1,5 @@
-import json
 """
+import json
 Talent OS — Admin Portal Router (JWT-protected, role='admin').
 Endpoints for platform administration: dashboard, users, jobs, candidates,
 analytics, audit log, content management, system settings.
