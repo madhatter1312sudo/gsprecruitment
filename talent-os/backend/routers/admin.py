@@ -1,3 +1,4 @@
+import json
 """
 Talent OS — Admin Portal Router (JWT-protected, role='admin').
 Endpoints for platform administration: dashboard, users, jobs, candidates,
@@ -168,8 +169,8 @@ async def update_user(
 
     # Audit log
     await execute(
-        "INSERT INTO audit_log (action, actor_id, target_type, target_id, changes) VALUES ($1, $2, $3, $4, $5)",
-        "user_update", current_user["id"], "user", user_id, update_dict,
+        "INSERT INTO audit_log (action, actor_id, target_type, target_id, changes) VALUES ($1, $2, $3, $4, $5::jsonb)",
+        "user_update", current_user["id"], "user", user_id, json.dumps(update_dict),
     )
 
     return row
@@ -193,8 +194,8 @@ async def delete_user(
 
     # Audit log
     await execute(
-        "INSERT INTO audit_log (action, actor_id, target_type, target_id, changes) VALUES ($1, $2, $3, $4, $5)",
-        "user_delete", current_user["id"], "user", user_id, {"deleted": True},
+        "INSERT INTO audit_log (action, actor_id, target_type, target_id, changes) VALUES ($1, $2, $3, $4, $5::jsonb)",
+        "user_delete", current_user["id"], "user", user_id, json.dumps({"deleted": True}),
     )
 
     return {"message": f"User '{row['email']}' deleted successfully"}
@@ -221,8 +222,8 @@ async def impersonate_user(
 
     # Audit log
     await execute(
-        "INSERT INTO audit_log (action, actor_id, target_type, target_id, changes) VALUES ($1, $2, $3, $4, $5)",
-        "impersonate", current_user["id"], "user", user_id, {"impersonated_email": target["email"]},
+        "INSERT INTO audit_log (action, actor_id, target_type, target_id, changes) VALUES ($1, $2, $3, $4, $5::jsonb)",
+        "impersonate", current_user["id"], "user", user_id, json.dumps({"impersonated_email": target["email"]}),
     )
 
     return {
@@ -310,8 +311,8 @@ async def update_any_job(
 
     # Audit log
     await execute(
-        "INSERT INTO audit_log (action, actor_id, target_type, target_id, changes) VALUES ($1, $2, $3, $4, $5)",
-        "job_update", current_user["id"], "job", job_id, update_dict,
+        "INSERT INTO audit_log (action, actor_id, target_type, target_id, changes) VALUES ($1, $2, $3, $4, $5::jsonb)",
+        "job_update", current_user["id"], "job", job_id, json.dumps(update_dict),
     )
 
     return row
@@ -496,8 +497,8 @@ async def update_content_item(
 
     # Audit log
     await execute(
-        "INSERT INTO audit_log (action, actor_id, target_type, target_id, changes) VALUES ($1, $2, $3, $4, $5)",
-        "content_update", current_user["id"], "content", content_id, {"value": updates.value},
+        "INSERT INTO audit_log (action, actor_id, target_type, target_id, changes) VALUES ($1, $2, $3, $4, $5::jsonb)",
+        "content_update", current_user["id"], "content", content_id, json.dumps({"value": updates.value}),
     )
 
     return row
@@ -531,8 +532,8 @@ async def update_system_settings(
 
     # Audit log
     await execute(
-        "INSERT INTO audit_log (action, actor_id, target_type, changes) VALUES ($1, $2, $3, $4)",
-        "settings_update", current_user["id"], "settings", {"updated_keys": updated},
+        "INSERT INTO audit_log (action, actor_id, target_type, changes) VALUES ($1, $2, $3, $4::jsonb)",
+        "settings_update", current_user["id"], "settings", json.dumps({"updated_keys": updated}),
     )
 
     return {"message": "Settings updated", "keys_updated": updated}

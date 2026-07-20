@@ -5,6 +5,7 @@ AI drafts blog posts (services/outreach_ai.draft_blog + services/scheduler.py)
 but a human always reviews/edits and explicitly publishes before anything
 goes live on the public site. There is no auto-publish path anywhere here.
 """
+import json
 import logging
 import re
 from typing import List, Optional
@@ -110,7 +111,7 @@ async def create_blog_post(
         "INSERT INTO audit_log (action, actor_id, target_type, target_id, changes) "
         "VALUES ($1, $2, $3, $4, $5)",
         "blog_post_created", current_user["id"], "blog_post", row["id"],
-        {"slug": data.slug},
+        json.dumps({"slug": data.slug}),
     )
     return row
 
@@ -156,7 +157,7 @@ async def update_blog_post(
     await execute(
         "INSERT INTO audit_log (action, actor_id, target_type, target_id, changes) "
         "VALUES ($1, $2, $3, $4, $5)",
-        "blog_post_updated", current_user["id"], "blog_post", post_id, update_dict,
+        "blog_post_updated", current_user["id"], "blog_post", post_id, json.dumps(update_dict),
     )
     return row
 
@@ -182,7 +183,7 @@ async def publish_blog_post(
         "INSERT INTO audit_log (action, actor_id, target_type, target_id, changes) "
         "VALUES ($1, $2, $3, $4, $5)",
         "blog_post_published", current_user["id"], "blog_post", post_id,
-        {"slug": row["slug"]},
+        json.dumps({"slug": row["slug"]}),
     )
     return row
 
@@ -205,6 +206,6 @@ async def archive_blog_post(
         "INSERT INTO audit_log (action, actor_id, target_type, target_id, changes) "
         "VALUES ($1, $2, $3, $4, $5)",
         "blog_post_archived", current_user["id"], "blog_post", post_id,
-        {"slug": row["slug"]},
+        json.dumps({"slug": row["slug"]}),
     )
     return row
