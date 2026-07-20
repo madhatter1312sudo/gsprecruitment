@@ -366,4 +366,5 @@ JOBS_BY_NAME = {
     # POST /run/{job_name}.
     "harvest": harvest_service.harvest_all,
     "morningdrafts": harvest_service.morning_drafts,
+    "enrichmatched": harvest_service.enrich_matched,
 }

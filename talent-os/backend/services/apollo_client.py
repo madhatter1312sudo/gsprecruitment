@@ -67,20 +67,36 @@ class ApolloClient:
         resp.raise_for_status()
         return resp.json()
 
-    async def enrich_person(self, linkedin_url: str) -> Dict[str, Any]:
+    async def enrich_person(
+        self,
+        linkedin_url: Optional[str] = None,
+        person_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
         """
-        Enrich a LinkedIn URL to verified email and full profile.
-        POST /api/v1/people/match
+        Enrich a LinkedIn URL or Apollo person id to verified email and full
+        profile. POST /api/v1/people/match
+
+        `person_id` takes priority when both are given — it's the cheaper,
+        more precise lookup (used for candidates already sourced via Apollo
+        search, whose person id is carried in candidates.source_url as
+        'apollo:{id}'). `linkedin_url` remains the fallback path for records
+        (e.g. client_prospects) that never had an Apollo id stored.
         """
         client = await self._get_client()
-        payload = {
-            "reveal_personal_emails": True,
-            "reveal_phone": False,
-        }
 
-        # Support both full URL and just the LinkedIn ID
-        if linkedin_url:
-            payload["linkedin_url"] = linkedin_url
+        if person_id:
+            payload: Dict[str, Any] = {
+                "id": person_id,
+                "reveal_personal_emails": True,
+            }
+        else:
+            payload = {
+                "reveal_personal_emails": True,
+                "reveal_phone": False,
+            }
+            # Support both full URL and just the LinkedIn ID
+            if linkedin_url:
+                payload["linkedin_url"] = linkedin_url
 
         resp = await client.post("/people/match", json=payload)
         resp.raise_for_status()

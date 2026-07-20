@@ -93,8 +93,14 @@ RATE_LIMIT_SLEEP_S = 1.2
 
 # ── One-shot outreach catch-up (morningdrafts job) ──────────────────────
 
-DRAFT_CANDIDATE_CAP = 25
+DRAFT_CANDIDATE_CAP = 40
 DRAFT_PROSPECT_CAP = 15
+
+# ── One-shot targeted enrichment (enrichmatched job) ────────────────────
+
+ENRICH_CAP_CANDIDATES = 500
+ENRICH_CAP_PROSPECTS = 1500
+ENRICH_TOTAL_API_CALLS_CAP = 2000  # hard stop across both, leaves credit buffer
 
 
 async def _flag_enabled(key: str) -> bool:
@@ -394,7 +400,183 @@ async def harvest_all() -> dict:
     }
 
 
-# ── Job 2: morning_drafts (registered as scheduler job 'morningdrafts') ──
+# ── Job 2: enrich_matched (registered as scheduler job 'enrichmatched') ──
+
+async def _enrich_matched_candidates(client: ApolloClient, api_calls: int) -> Dict[str, Any]:
+    """Enrich matched candidates (best match_score first) that were
+    sourced via harvest_candidates() and still have no email. Their Apollo
+    person id was preserved at insert time in source_url as 'apollo:{id}'
+    (see harvest_candidates() above), so this uses the cheaper id-based
+    /people/match lookup rather than a linkedin_url one."""
+    rows = await fetch_all(
+        """SELECT c.id, c.source_url
+           FROM candidates c
+           JOIN (
+               SELECT candidate_id, MAX(match_score) AS match_score
+               FROM matches
+               GROUP BY candidate_id
+           ) best ON best.candidate_id = c.id
+           WHERE c.email IS NULL
+             AND c.source_url LIKE 'apollo:%'
+           ORDER BY best.match_score DESC
+           LIMIT $1""",
+        ENRICH_CAP_CANDIDATES,
+    )
+
+    enriched = 0
+    revealed = 0
+    no_email = 0
+    for row in rows:
+        if api_calls >= ENRICH_TOTAL_API_CALLS_CAP:
+            logger.warning("enrich_matched: hit hard total api_calls cap, stopping candidates")
+            break
+
+        person_id = (row["source_url"] or "").split(":", 1)[-1]
+        if not person_id:
+            continue
+
+        try:
+            result = await client.enrich_person(person_id=person_id)
+        except Exception:
+            logger.exception("enrich_matched: enrich failed for candidate %s", row["id"])
+            continue
+        finally:
+            api_calls += 1
+            await asyncio.sleep(RATE_LIMIT_SLEEP_S)
+
+        person = result.get("person") or result.get("data") or {}
+        email = _clean_email(person.get("email") or person.get("personal_email"))
+        if email:
+            await execute(
+                "UPDATE candidates SET email = $1, updated_at = NOW() WHERE id = $2",
+                email, row["id"],
+            )
+            enriched += 1
+            revealed += 1
+            logger.info("enrich_matched: revealed email for candidate %s", row["id"])
+        else:
+            no_email += 1
+
+    return {
+        "considered": len(rows), "enriched": enriched, "revealed": revealed,
+        "no_email": no_email, "api_calls": api_calls,
+    }
+
+
+async def _enrich_top_prospects(client: ApolloClient, api_calls: int) -> Dict[str, Any]:
+    """Enrich top client_prospects with no contact_email. harvest_prospects()
+    never stores an Apollo person id for prospects (see its insert above),
+    so these must go through the linkedin_url /people/match path instead —
+    prospects without a stored contact_linkedin are skipped entirely, since
+    there's nothing to enrich against."""
+    rows = await fetch_all(
+        """SELECT id, contact_linkedin
+           FROM client_prospects
+           WHERE contact_email IS NULL
+             AND source = 'apollo_bulk'
+             AND contact_linkedin IS NOT NULL
+             AND contact_linkedin != ''
+           ORDER BY created_at ASC
+           LIMIT $1""",
+        ENRICH_CAP_PROSPECTS,
+    )
+
+    enriched = 0
+    revealed = 0
+    no_email = 0
+    for row in rows:
+        if api_calls >= ENRICH_TOTAL_API_CALLS_CAP:
+            logger.warning("enrich_matched: hit hard total api_calls cap, stopping prospects")
+            break
+
+        try:
+            result = await client.enrich_person(linkedin_url=row["contact_linkedin"])
+        except Exception:
+            logger.exception("enrich_matched: enrich failed for prospect %s", row["id"])
+            continue
+        finally:
+            api_calls += 1
+            await asyncio.sleep(RATE_LIMIT_SLEEP_S)
+
+        person = result.get("person") or result.get("data") or {}
+        email = _clean_email(person.get("email") or person.get("personal_email"))
+        if email:
+            await execute(
+                "UPDATE client_prospects SET contact_email = $1 WHERE id = $2",
+                email, row["id"],
+            )
+            enriched += 1
+            revealed += 1
+            logger.info("enrich_matched: revealed email for prospect %s", row["id"])
+        else:
+            no_email += 1
+
+    return {
+        "considered": len(rows), "enriched": enriched, "revealed": revealed,
+        "no_email": no_email, "api_calls": api_calls,
+    }
+
+
+async def enrich_matched() -> dict:
+    """Targeted (paid) Apollo enrichment — spends /people/match credits,
+    unlike harvest_candidates()/harvest_prospects() above which never do.
+
+    Two pools, cheapest/most-valuable first:
+      1. Matched candidates (best match_score DESC) with no email yet,
+         enriched by Apollo person id (id-based /people/match — cheaper,
+         no LinkedIn scrape needed since we already have the id).
+      2. Top client_prospects with no contact_email, enriched via
+         contact_linkedin (no Apollo id was ever stored for prospects).
+
+    Resumable: both pools filter on the relevant email column IS NULL, so
+    a re-run only ever touches rows a prior run didn't already fill in.
+    Capped at ENRICH_CAP_CANDIDATES / ENRICH_CAP_PROSPECTS per pool, with a
+    hard ENRICH_TOTAL_API_CALLS_CAP stop across both to leave Apollo credit
+    buffer. Manual trigger only — see services/scheduler.py JOBS_BY_NAME
+    and routers/outreach.py run/{job_name}."""
+    if not await _flag_enabled("apollo_sync_enabled"):
+        logger.info("enrich_matched: disabled via system_settings, skipping")
+        return {"status": "skipped", "reason": "apollo_sync_enabled=false"}
+
+    if not settings.apollo_api_key:
+        logger.warning("enrich_matched: Apollo API key not configured, skipping")
+        return {"status": "skipped", "reason": "Apollo API key not configured"}
+
+    client = ApolloClient(api_key=settings.apollo_api_key)
+    try:
+        candidates_result = await _enrich_matched_candidates(client, api_calls=0)
+        api_calls_after_candidates = candidates_result["api_calls"]
+        prospects_result = await _enrich_top_prospects(client, api_calls=api_calls_after_candidates)
+
+        api_calls = prospects_result["api_calls"]
+        changes = {
+            "candidates_enriched": candidates_result["enriched"],
+            "prospects_enriched": prospects_result["enriched"],
+            "api_calls": api_calls,
+            "emails_revealed": candidates_result["revealed"] + prospects_result["revealed"],
+            "no_email_available": candidates_result["no_email"] + prospects_result["no_email"],
+        }
+
+        try:
+            await execute(
+                "INSERT INTO audit_log (action, changes) VALUES ($1, $2::jsonb)",
+                "apollo_enrich_matched", json.dumps(changes),
+            )
+        except Exception:
+            logger.exception("enrich_matched: failed to write audit_log row")
+
+        logger.info("enrich_matched: %s", changes)
+        return {
+            "status": "success",
+            "candidates": candidates_result,
+            "prospects": prospects_result,
+            **changes,
+        }
+    finally:
+        await client.close()
+
+
+# ── Job 3: morning_drafts (registered as scheduler job 'morningdrafts') ──
 
 async def _draft_candidate_outreach() -> Dict[str, int]:
     """Up to DRAFT_CANDIDATE_CAP drafts for candidates with an email,
