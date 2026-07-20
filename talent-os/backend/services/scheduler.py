@@ -367,4 +367,5 @@ JOBS_BY_NAME = {
     "harvest": harvest_service.harvest_all,
     "morningdrafts": harvest_service.morning_drafts,
     "enrichmatched": harvest_service.enrich_matched,
+    "backfillids": harvest_service.backfill_prospect_ids,
 }

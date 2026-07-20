@@ -318,20 +318,27 @@ async def harvest_prospects() -> dict:
                 location = _person_location(person)
                 industry = org.get("industry") or ""
 
+                # Preview records carry the Apollo person id but no
+                # linkedin_url/email — keep it in the free intent_signal
+                # column (client_prospects has no dedicated apollo-id
+                # column) so a later people/match reveal can enrich by id
+                # without re-searching. See _enrich_top_prospects() below.
+                apollo_ref = f"apollo:{person.get('id')}" if person.get("id") else None
+
                 try:
                     row = await fetch_one(
                         """INSERT INTO client_prospects
                            (company_name, domain, contact_name, contact_title, contact_email,
-                            contact_linkedin, location, industry, source, status)
+                            contact_linkedin, location, industry, source, status, intent_signal)
                            SELECT $1::varchar,$2::varchar,$3::varchar,$4::varchar,$5::varchar,
-                                  $6::varchar,$7::varchar,$8::varchar,$9::varchar,'new'
+                                  $6::varchar,$7::varchar,$8::varchar,$9::varchar,'new',$10::varchar
                            WHERE NOT EXISTS (
                                SELECT 1 FROM client_prospects
                                WHERE company_name = $1::varchar AND contact_name = $3::varchar
                            )
                            RETURNING id""",
                         company_name, domain, contact_name, contact_title, contact_email,
-                        contact_linkedin, location, industry, "apollo_bulk",
+                        contact_linkedin, location, industry, "apollo_bulk", apollo_ref,
                     )
                 except Exception:
                     logger.exception(
@@ -400,6 +407,106 @@ async def harvest_all() -> dict:
     }
 
 
+# ── Job 1c: backfill_prospect_ids (registered as scheduler job 'backfillids') ──
+
+async def backfill_prospect_ids() -> dict:
+    """One-shot backfill for client_prospects rows inserted before
+    harvest_prospects() started storing the Apollo person id in
+    intent_signal (see that function's insert above). Re-pages the exact
+    same Apollo search (PROSPECT_TITLES x SOURCE_LOCATIONS) and, for each
+    preview person, writes 'apollo:{id}' onto the matching existing row —
+    matched by the same natural key (company_name, contact_name) used by
+    harvest_prospects()'s WHERE NOT EXISTS guard — but only if that row
+    doesn't already have an intent_signal, so a re-run is safe and simply
+    skips rows already backfilled. Manual trigger only."""
+    if not await _flag_enabled("apollo_sync_enabled"):
+        logger.info("backfill_prospect_ids: disabled via system_settings, skipping")
+        return {"status": "skipped", "reason": "apollo_sync_enabled=false", "api_calls": 0, "ids_backfilled": 0}
+
+    if not settings.apollo_api_key:
+        logger.warning("backfill_prospect_ids: Apollo API key not configured, skipping")
+        return {"status": "skipped", "reason": "Apollo API key not configured", "api_calls": 0, "ids_backfilled": 0}
+
+    client = ApolloClient(api_key=settings.apollo_api_key)
+    api_calls = 0
+    ids_backfilled = 0
+    try:
+        for page in range(1, MAX_PAGES_PROSPECTS + 1):
+            try:
+                # Same search as harvest_prospects() — titles+locations only.
+                result = await client.search_people(
+                    titles=PROSPECT_TITLES,
+                    locations=SOURCE_LOCATIONS,
+                    limit=PER_PAGE,
+                    page=page,
+                )
+            except Exception:
+                logger.exception("backfill_prospect_ids: search failed page=%s", page)
+                break
+            finally:
+                api_calls += 1
+                await asyncio.sleep(RATE_LIMIT_SLEEP_S)
+
+            people = result.get("people") or result.get("data") or []
+
+            for person in people:
+                contact_name = _person_name(person)
+                if not contact_name:
+                    continue
+
+                org = person.get("organization") or {}
+                company_name = org.get("name") or _person_company(person)
+                if not company_name:
+                    continue
+
+                person_id = person.get("id")
+                if not person_id:
+                    continue
+
+                apollo_ref = f"apollo:{person_id}"
+
+                try:
+                    updated_rows = await fetch_all(
+                        """UPDATE client_prospects
+                           SET intent_signal = $1::varchar
+                           WHERE company_name = $2::varchar AND contact_name = $3::varchar
+                             AND (intent_signal IS NULL OR intent_signal = '')
+                           RETURNING id""",
+                        apollo_ref, company_name, contact_name,
+                    )
+                except Exception:
+                    logger.exception(
+                        "backfill_prospect_ids: update failed for %s @ %s", contact_name, company_name
+                    )
+                    continue
+
+                ids_backfilled += len(updated_rows)
+
+            if page % 5 == 0:
+                logger.info(
+                    "backfill_prospect_ids: progress page=%s api_calls=%s ids_backfilled=%s",
+                    page, api_calls, ids_backfilled,
+                )
+
+            if len(people) < PER_PAGE:
+                break
+
+        changes = {"api_calls": api_calls, "ids_backfilled": ids_backfilled}
+
+        try:
+            await execute(
+                "INSERT INTO audit_log (action, changes) VALUES ($1, $2::jsonb)",
+                "apollo_backfill_ids", json.dumps(changes),
+            )
+        except Exception:
+            logger.exception("backfill_prospect_ids: failed to write audit_log row")
+
+        logger.info("backfill_prospect_ids: done %s", changes)
+        return {"status": "success", **changes}
+    finally:
+        await client.close()
+
+
 # ── Job 2: enrich_matched (registered as scheduler job 'enrichmatched') ──
 
 async def _enrich_matched_candidates(client: ApolloClient, api_calls: int) -> Dict[str, Any]:
@@ -464,19 +571,34 @@ async def _enrich_matched_candidates(client: ApolloClient, api_calls: int) -> Di
 
 
 async def _enrich_top_prospects(client: ApolloClient, api_calls: int) -> Dict[str, Any]:
-    """Enrich top client_prospects with no contact_email. harvest_prospects()
-    never stores an Apollo person id for prospects (see its insert above),
-    so these must go through the linkedin_url /people/match path instead —
-    prospects without a stored contact_linkedin are skipped entirely, since
-    there's nothing to enrich against."""
+    """Enrich top client_prospects with no contact_email.
+
+    Two eligibility paths:
+      1. intent_signal LIKE 'apollo:%' — the Apollo person id preserved at
+         insert time (harvest_prospects()) or backfilled after the fact
+         (backfill_prospect_ids()) — enriched via the cheaper id-based
+         /people/match lookup.
+      2. Fallback: rows with a stored contact_linkedin but no id, enriched
+         via the linkedin_url /people/match path (pre-existing behaviour
+         for rows harvested before the id was captured, that never got
+         backfilled either).
+
+    Rows at companies that appear most often in client_prospects are
+    prioritized first — bigger orgs with multiple contacts on file are
+    the better BD targets."""
     rows = await fetch_all(
-        """SELECT id, contact_linkedin
+        """SELECT id, contact_linkedin, intent_signal
            FROM client_prospects
            WHERE contact_email IS NULL
              AND source = 'apollo_bulk'
-             AND contact_linkedin IS NOT NULL
-             AND contact_linkedin != ''
-           ORDER BY created_at ASC
+             AND (
+                 (intent_signal LIKE 'apollo:%')
+                 OR (contact_linkedin IS NOT NULL AND contact_linkedin != '')
+             )
+           ORDER BY (
+               SELECT COUNT(*) FROM client_prospects p2
+               WHERE p2.company_name = client_prospects.company_name
+           ) DESC
            LIMIT $1""",
         ENRICH_CAP_PROSPECTS,
     )
@@ -489,8 +611,14 @@ async def _enrich_top_prospects(client: ApolloClient, api_calls: int) -> Dict[st
             logger.warning("enrich_matched: hit hard total api_calls cap, stopping prospects")
             break
 
+        intent_signal = row["intent_signal"] or ""
+        person_id = intent_signal.split(":", 1)[-1] if intent_signal.startswith("apollo:") else None
+
         try:
-            result = await client.enrich_person(linkedin_url=row["contact_linkedin"])
+            if person_id:
+                result = await client.enrich_person(person_id=person_id)
+            else:
+                result = await client.enrich_person(linkedin_url=row["contact_linkedin"])
         except Exception:
             logger.exception("enrich_matched: enrich failed for prospect %s", row["id"])
             continue
@@ -525,8 +653,11 @@ async def enrich_matched() -> dict:
       1. Matched candidates (best match_score DESC) with no email yet,
          enriched by Apollo person id (id-based /people/match — cheaper,
          no LinkedIn scrape needed since we already have the id).
-      2. Top client_prospects with no contact_email, enriched via
-         contact_linkedin (no Apollo id was ever stored for prospects).
+      2. Top client_prospects with no contact_email, prioritized by
+         company size (most contacts on file first), enriched by Apollo
+         person id where intent_signal carries one (harvest_prospects()/
+         backfill_prospect_ids()), falling back to contact_linkedin for
+         older rows that never got an id.
 
     Resumable: both pools filter on the relevant email column IS NULL, so
     a re-run only ever touches rows a prior run didn't already fill in.
