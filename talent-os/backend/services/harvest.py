@@ -34,6 +34,7 @@ from typing import Any, Dict, Optional
 
 import asyncio
 import httpx
+from asyncpg.exceptions import UniqueViolationError
 
 from core.config import settings
 from core.database import execute, fetch_all, fetch_one, fetch_val
@@ -593,10 +594,17 @@ async def _enrich_apollo_candidates(client: ApolloClient, api_calls: int) -> Dic
         person = result.get("person") or result.get("data") or {}
         email = _clean_email(person.get("email") or person.get("personal_email"))
         if email:
-            await execute(
-                "UPDATE candidates SET email = $1, updated_at = NOW() WHERE id = $2",
-                email, row["id"],
-            )
+            try:
+                await execute(
+                    "UPDATE candidates SET email = $1, updated_at = NOW() WHERE id = $2",
+                    email, row["id"],
+                )
+            except UniqueViolationError:
+                # candidates.email is UNIQUE — two Apollo records can resolve
+                # to the same address; skip the duplicate rather than abort.
+                logger.info("enrich_matched: duplicate email for candidate %s, skipping", row["id"])
+                no_email += 1
+                continue
             enriched += 1
             revealed += 1
             logger.info("enrich_matched: revealed email for candidate %s", row["id"])
@@ -692,10 +700,19 @@ async def _enrich_top_prospects(client: ApolloClient, api_calls: int) -> Dict[st
         person = result.get("person") or result.get("data") or {}
         email = _clean_email(person.get("email") or person.get("personal_email"))
         if email:
-            await execute(
-                "UPDATE client_prospects SET contact_email = $1 WHERE id = $2",
-                email, row["id"],
-            )
+            try:
+                await execute(
+                    "UPDATE client_prospects SET contact_email = $1 WHERE id = $2",
+                    email, row["id"],
+                )
+            except UniqueViolationError:
+                # Two contacts at the same company can resolve to the same
+                # email (shared/role inbox). The (company_name, contact_email)
+                # unique constraint then rejects the second — skip it, don't
+                # abort the whole burn run.
+                logger.info("enrich_matched: duplicate email for prospect %s, skipping", row["id"])
+                no_email += 1
+                continue
             enriched += 1
             revealed += 1
             logger.info("enrich_matched: revealed email for prospect %s", row["id"])
