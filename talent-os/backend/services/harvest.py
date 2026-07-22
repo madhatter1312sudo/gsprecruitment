@@ -33,6 +33,7 @@ import time
 from typing import Any, Dict, Optional
 
 import asyncio
+import httpx
 
 from core.config import settings
 from core.database import execute, fetch_all, fetch_one, fetch_val
@@ -98,9 +99,14 @@ DRAFT_PROSPECT_CAP = 15
 
 # ── One-shot targeted enrichment (enrichmatched job) ────────────────────
 
-ENRICH_CAP_CANDIDATES = 500
-ENRICH_CAP_PROSPECTS = 1500
-ENRICH_TOTAL_API_CALLS_CAP = 2000  # hard stop across both, leaves credit buffer
+# Sized so a single BackgroundTask run takes ~30-40 min instead of one giant
+# run that risks dying mid-way (the previous run died at 140 prospects done).
+# The orchestrator re-triggers this job repeatedly until Apollo credits run
+# dry (see stopped_reason on the audit_log row), so caps here bound a single
+# run rather than the total remaining pool (~14k candidates / ~1869 prospects).
+ENRICH_CAP_CANDIDATES = 1200
+ENRICH_CAP_PROSPECTS = 1200
+ENRICH_TOTAL_API_CALLS_CAP = 1800  # hard stop across both, per run — leaves credit buffer
 
 
 async def _flag_enabled(key: str) -> bool:
@@ -509,23 +515,35 @@ async def backfill_prospect_ids() -> dict:
 
 # ── Job 2: enrich_matched (registered as scheduler job 'enrichmatched') ──
 
-async def _enrich_matched_candidates(client: ApolloClient, api_calls: int) -> Dict[str, Any]:
-    """Enrich matched candidates (best match_score first) that were
-    sourced via harvest_candidates() and still have no email. Their Apollo
-    person id was preserved at insert time in source_url as 'apollo:{id}'
-    (see harvest_candidates() above), so this uses the cheaper id-based
-    /people/match lookup rather than a linkedin_url one."""
+def _is_credit_or_rate_limit(exc: httpx.HTTPStatusError) -> bool:
+    """Apollo returns 402 when the account is out of credits, 403 when the
+    plan/key no longer has access to the endpoint, and 429 when we're
+    rate-limited. Treat all three as 'stop the run' signals so the burn
+    loop self-terminates instead of grinding through hundreds of rows that
+    will only ever fail the same way."""
+    return exc.response.status_code in (402, 403, 429)
+
+
+async def _enrich_apollo_candidates(client: ApolloClient, api_calls: int) -> Dict[str, Any]:
+    """Enrich ANY apollo_bulk candidate with a preserved Apollo person id
+    and no email yet — not just matched ones. Matched candidates (best
+    match_score first) are ordered first via a LEFT JOIN onto matches, but
+    once those run out this pool keeps going into the much larger
+    (~14k row) unmatched apollo_bulk backlog, so a subscription's
+    remaining credits don't go to waste once the matched set is done.
+
+    Their Apollo person id was preserved at insert time in source_url as
+    'apollo:{id}' (see harvest_candidates() above), so this uses the
+    cheaper id-based /people/match lookup rather than a linkedin_url one."""
     rows = await fetch_all(
         """SELECT c.id, c.source_url
            FROM candidates c
-           JOIN (
-               SELECT candidate_id, MAX(match_score) AS match_score
-               FROM matches
-               GROUP BY candidate_id
-           ) best ON best.candidate_id = c.id
+           LEFT JOIN matches m ON m.candidate_id = c.id
            WHERE c.email IS NULL
+             AND c.source = 'apollo_bulk'
              AND c.source_url LIKE 'apollo:%'
-           ORDER BY best.match_score DESC
+           GROUP BY c.id, c.source_url
+           ORDER BY MAX(m.match_score) DESC NULLS LAST, c.id
            LIMIT $1""",
         ENRICH_CAP_CANDIDATES,
     )
@@ -533,23 +551,44 @@ async def _enrich_matched_candidates(client: ApolloClient, api_calls: int) -> Di
     enriched = 0
     revealed = 0
     no_email = 0
+    stopped_reason: Optional[str] = None
     for row in rows:
         if api_calls >= ENRICH_TOTAL_API_CALLS_CAP:
             logger.warning("enrich_matched: hit hard total api_calls cap, stopping candidates")
+            stopped_reason = "cap_reached"
             break
 
         person_id = (row["source_url"] or "").split(":", 1)[-1]
         if not person_id:
             continue
 
+        credit_limit_hit = False
+        result = None
         try:
             result = await client.enrich_person(person_id=person_id)
+        except httpx.HTTPStatusError as e:
+            if _is_credit_or_rate_limit(e):
+                logger.warning(
+                    "apollo credit/rate limit hit — stopping run (status=%s, candidate=%s)",
+                    e.response.status_code, row["id"],
+                )
+                credit_limit_hit = True
+            else:
+                logger.exception(
+                    "enrich_matched: enrich failed (http %s) for candidate %s",
+                    e.response.status_code, row["id"],
+                )
         except Exception:
             logger.exception("enrich_matched: enrich failed for candidate %s", row["id"])
-            continue
         finally:
             api_calls += 1
             await asyncio.sleep(RATE_LIMIT_SLEEP_S)
+
+        if credit_limit_hit:
+            stopped_reason = "credit_limit"
+            break
+        if result is None:
+            continue
 
         person = result.get("person") or result.get("data") or {}
         email = _clean_email(person.get("email") or person.get("personal_email"))
@@ -564,9 +603,12 @@ async def _enrich_matched_candidates(client: ApolloClient, api_calls: int) -> Di
         else:
             no_email += 1
 
+    if stopped_reason is None:
+        stopped_reason = "cap_reached" if len(rows) >= ENRICH_CAP_CANDIDATES else "pool_empty"
+
     return {
         "considered": len(rows), "enriched": enriched, "revealed": revealed,
-        "no_email": no_email, "api_calls": api_calls,
+        "no_email": no_email, "api_calls": api_calls, "stopped_reason": stopped_reason,
     }
 
 
@@ -606,25 +648,46 @@ async def _enrich_top_prospects(client: ApolloClient, api_calls: int) -> Dict[st
     enriched = 0
     revealed = 0
     no_email = 0
+    stopped_reason: Optional[str] = None
     for row in rows:
         if api_calls >= ENRICH_TOTAL_API_CALLS_CAP:
             logger.warning("enrich_matched: hit hard total api_calls cap, stopping prospects")
+            stopped_reason = "cap_reached"
             break
 
         intent_signal = row["intent_signal"] or ""
         person_id = intent_signal.split(":", 1)[-1] if intent_signal.startswith("apollo:") else None
 
+        credit_limit_hit = False
+        result = None
         try:
             if person_id:
                 result = await client.enrich_person(person_id=person_id)
             else:
                 result = await client.enrich_person(linkedin_url=row["contact_linkedin"])
+        except httpx.HTTPStatusError as e:
+            if _is_credit_or_rate_limit(e):
+                logger.warning(
+                    "apollo credit/rate limit hit — stopping run (status=%s, prospect=%s)",
+                    e.response.status_code, row["id"],
+                )
+                credit_limit_hit = True
+            else:
+                logger.exception(
+                    "enrich_matched: enrich failed (http %s) for prospect %s",
+                    e.response.status_code, row["id"],
+                )
         except Exception:
             logger.exception("enrich_matched: enrich failed for prospect %s", row["id"])
-            continue
         finally:
             api_calls += 1
             await asyncio.sleep(RATE_LIMIT_SLEEP_S)
+
+        if credit_limit_hit:
+            stopped_reason = "credit_limit"
+            break
+        if result is None:
+            continue
 
         person = result.get("person") or result.get("data") or {}
         email = _clean_email(person.get("email") or person.get("personal_email"))
@@ -639,32 +702,58 @@ async def _enrich_top_prospects(client: ApolloClient, api_calls: int) -> Dict[st
         else:
             no_email += 1
 
+    if stopped_reason is None:
+        stopped_reason = "cap_reached" if len(rows) >= ENRICH_CAP_PROSPECTS else "pool_empty"
+
     return {
         "considered": len(rows), "enriched": enriched, "revealed": revealed,
-        "no_email": no_email, "api_calls": api_calls,
+        "no_email": no_email, "api_calls": api_calls, "stopped_reason": stopped_reason,
     }
+
+
+_STOPPED_REASON_PRIORITY = {"credit_limit": 0, "error": 1, "cap_reached": 2, "pool_empty": 3}
+
+
+def _combine_stopped_reasons(*reasons: Optional[str]) -> str:
+    """Pick the most urgent stopped_reason across both pools so the
+    orchestrator knows whether to re-trigger: a credit/rate-limit hit in
+    either pool always wins (nothing left to spend), otherwise a cap hit
+    means there's more pool to burn through next run, and pool_empty only
+    wins when both pools are genuinely exhausted."""
+    present = [r for r in reasons if r]
+    if not present:
+        return "pool_empty"
+    return min(present, key=lambda r: _STOPPED_REASON_PRIORITY.get(r, 99))
 
 
 async def enrich_matched() -> dict:
     """Targeted (paid) Apollo enrichment — spends /people/match credits,
     unlike harvest_candidates()/harvest_prospects() above which never do.
 
-    Two pools, cheapest/most-valuable first:
-      1. Matched candidates (best match_score DESC) with no email yet,
-         enriched by Apollo person id (id-based /people/match — cheaper,
-         no LinkedIn scrape needed since we already have the id).
-      2. Top client_prospects with no contact_email, prioritized by
+    Two pools, prospects FIRST since they're higher value (client leads),
+    then candidates:
+      1. Top client_prospects with no contact_email, prioritized by
          company size (most contacts on file first), enriched by Apollo
          person id where intent_signal carries one (harvest_prospects()/
          backfill_prospect_ids()), falling back to contact_linkedin for
          older rows that never got an id.
+      2. ANY apollo_bulk candidate with no email yet and a preserved Apollo
+         person id — matched candidates (best match_score DESC) ordered
+         first via a LEFT JOIN onto matches, then falling through into the
+         much larger unmatched apollo_bulk backlog once those run out, so
+         remaining Apollo credits keep getting spent instead of idling.
 
     Resumable: both pools filter on the relevant email column IS NULL, so
     a re-run only ever touches rows a prior run didn't already fill in.
     Capped at ENRICH_CAP_CANDIDATES / ENRICH_CAP_PROSPECTS per pool, with a
-    hard ENRICH_TOTAL_API_CALLS_CAP stop across both to leave Apollo credit
-    buffer. Manual trigger only — see services/scheduler.py JOBS_BY_NAME
-    and routers/outreach.py run/{job_name}."""
+    hard ENRICH_TOTAL_API_CALLS_CAP stop across both (shared api_calls
+    counter) so a single run stays ~30-40 min — the orchestrator re-triggers
+    this job repeatedly until stopped_reason on the audit_log row comes back
+    'credit_limit' (Apollo out of credits/rate-limited — a 402/403/429 from
+    /people/match was caught and the run stopped cleanly) rather than
+    'cap_reached' (more pool left, re-run) or 'pool_empty' (that run's pools
+    were exhausted). Manual trigger only — see services/scheduler.py
+    JOBS_BY_NAME and routers/outreach.py run/{job_name}."""
     if not await _flag_enabled("apollo_sync_enabled"):
         logger.info("enrich_matched: disabled via system_settings, skipping")
         return {"status": "skipped", "reason": "apollo_sync_enabled=false"}
@@ -675,17 +764,32 @@ async def enrich_matched() -> dict:
 
     client = ApolloClient(api_key=settings.apollo_api_key)
     try:
-        candidates_result = await _enrich_matched_candidates(client, api_calls=0)
-        api_calls_after_candidates = candidates_result["api_calls"]
-        prospects_result = await _enrich_top_prospects(client, api_calls=api_calls_after_candidates)
+        empty_pool_result = {
+            "considered": 0, "enriched": 0, "revealed": 0, "no_email": 0,
+            "api_calls": 0, "stopped_reason": "error",
+        }
+        prospects_result = empty_pool_result
+        candidates_result = empty_pool_result
+        try:
+            prospects_result = await _enrich_top_prospects(client, api_calls=0)
+            api_calls_after_prospects = prospects_result["api_calls"]
+            candidates_result = await _enrich_apollo_candidates(client, api_calls=api_calls_after_prospects)
+            api_calls = candidates_result["api_calls"]
+            stopped_reason = _combine_stopped_reasons(
+                prospects_result["stopped_reason"], candidates_result["stopped_reason"],
+            )
+        except Exception:
+            logger.exception("enrich_matched: unexpected failure, aborting run")
+            api_calls = max(prospects_result["api_calls"], candidates_result["api_calls"])
+            stopped_reason = "error"
 
-        api_calls = prospects_result["api_calls"]
         changes = {
             "candidates_enriched": candidates_result["enriched"],
             "prospects_enriched": prospects_result["enriched"],
             "api_calls": api_calls,
             "emails_revealed": candidates_result["revealed"] + prospects_result["revealed"],
             "no_email_available": candidates_result["no_email"] + prospects_result["no_email"],
+            "stopped_reason": stopped_reason,
         }
 
         try:
