@@ -517,12 +517,20 @@ async def backfill_prospect_ids() -> dict:
 # ── Job 2: enrich_matched (registered as scheduler job 'enrichmatched') ──
 
 def _is_credit_or_rate_limit(exc: httpx.HTTPStatusError) -> bool:
-    """Apollo returns 402 when the account is out of credits, 403 when the
-    plan/key no longer has access to the endpoint, and 429 when we're
-    rate-limited. Treat all three as 'stop the run' signals so the burn
-    loop self-terminates instead of grinding through hundreds of rows that
-    will only ever fail the same way."""
-    return exc.response.status_code in (402, 403, 429)
+    """Stop-the-run signals. Apollo actually returns 422 with body
+    'You have insufficient credits!' when the balance is exhausted (NOT 402),
+    plus 403 (endpoint access lost) and 429 (rate limited). Treat all as
+    'stop' so the burn loop self-terminates instead of grinding through
+    hundreds of rows that will only ever fail the same way."""
+    code = exc.response.status_code
+    if code in (402, 403, 429):
+        return True
+    if code == 422:
+        try:
+            return "insufficient credit" in exc.response.text.lower()
+        except Exception:
+            return False
+    return False
 
 
 async def _enrich_apollo_candidates(client: ApolloClient, api_calls: int) -> Dict[str, Any]:
