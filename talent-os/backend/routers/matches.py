@@ -140,14 +140,15 @@ async def candidates_for_job(job_id: int, limit: int = Query(30, ge=1, le=100)):
     # plus a bonus for skills[] overlap with the job's keyword tokens
     # (also GIN-indexed) — no AI/embeddings involved.
     rows = await fetch_all(
-        """SELECT c.id, c.full_name, c.current_title, c.current_company, c.skills,
-                  c.location, c.years_experience, c.cv_text,
-                  ts_rank(c.cv_search, plainto_tsquery('dutch', $1)) AS cv_rank,
-                  (SELECT COUNT(*) FROM unnest(c.skills) s WHERE lower(s) = ANY($2::text[])) AS skill_matches
-           FROM candidates c
-           WHERE c.deleted_at IS NULL AND c.consent_withdrawn_at IS NULL
-           ORDER BY (ts_rank(c.cv_search, plainto_tsquery('dutch', $1)) + skill_matches * 0.05) DESC,
-                    c.updated_at DESC NULLS LAST
+        """SELECT * FROM (
+               SELECT c.id, c.full_name, c.current_title, c.current_company, c.skills,
+                      c.location, c.years_experience, c.cv_text, c.updated_at,
+                      ts_rank(c.cv_search, plainto_tsquery('dutch', $1)) AS cv_rank,
+                      (SELECT COUNT(*) FROM unnest(c.skills) s WHERE lower(s) = ANY($2::text[])) AS skill_matches
+               FROM candidates c
+               WHERE c.deleted_at IS NULL AND c.consent_withdrawn_at IS NULL
+           ) ranked
+           ORDER BY (cv_rank + skill_matches * 0.05) DESC, updated_at DESC NULLS LAST
            LIMIT $3""",
         job_text, tokens, limit,
     )
