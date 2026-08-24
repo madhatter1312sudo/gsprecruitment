@@ -20,11 +20,12 @@
  *     (frontend/backend/devops_cloud/data_ai/security/softskills) — see
  *     lib/quiz-data.ts, which keeps the old question bank + domains only
  *     as an offline fallback for when the fetch fails.
- *   - `/v1/mobile/push-token` is now LIVE in production, but
- *     expo-notifications still isn't part of this app's dependency list,
- *     so push registration is still not wired up anywhere in the UI.
- *     `registerPushToken()` below is left in place, ready to call once
- *     expo-notifications is added — it is still never called today.
+ *   - `POST`/`DELETE /v1/mobile/push-token` are LIVE in production, but the
+ *     backend only STORES tokens — no sender pipeline (Expo push/FCM/APNs)
+ *     exists yet, so push registration is deliberately not wired up.
+ *     `registerPushToken()` below is left in place, ready to call once the
+ *     backend can actually send and expo-notifications is added — see
+ *     README-APP.md "API adjustments" for the full decision.
  */
 import Constants from 'expo-constants';
 import { getAuthState, useAuthStore, type AuthUser } from './auth';
@@ -407,9 +408,14 @@ export function gdprDeleteAccount() {
   return apiRequest<{ message: string }>('/v1/gdpr/account', { method: 'DELETE', auth: true });
 }
 
-// ── Push (endpoint live, UI not wired — see file header) ────────────────
+// ── Push (endpoints live, UI deliberately not wired — see file header) ──
 
-/** `POST /v1/mobile/push-token` is live in production; this is unused until expo-notifications is added. */
+/** `POST /v1/mobile/push-token` is live but the backend has no sender pipeline yet; unused until it does. */
 export function registerPushToken(token: string, platform: 'ios' | 'android') {
   return apiRequest<{ message?: string }>('/v1/mobile/push-token', { method: 'POST', auth: true, body: { token, platform } });
+}
+
+/** `DELETE /v1/mobile/push-token` — call on logout once push registration is wired up. */
+export function deletePushToken(token: string) {
+  return apiRequest<{ message?: string }>('/v1/mobile/push-token', { method: 'DELETE', auth: true, body: { token } });
 }
