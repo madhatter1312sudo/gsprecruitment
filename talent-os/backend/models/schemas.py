@@ -1,5 +1,5 @@
 """Talent OS — Pydantic schemas for request/response models."""
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field, field_validator
 from typing import Optional, List, Any
 from datetime import datetime
 
@@ -89,6 +89,13 @@ class CandidateCreate(BaseModel):
     strength_score: Optional[float] = Field(None, ge=1.0, le=10.0)
     switch_readiness: Optional[str] = Field(None, pattern=r"^(LOW|MEDIUM|HIGH|ACTIVE)$")
     tags: List[str] = []
+
+    # DB rows (esp. the Apollo-bulk pool) store NULL for these array columns;
+    # coerce NULL -> [] so ResponseValidationError isn't raised on read.
+    @field_validator("skills", "languages", "tags", mode="before")
+    @classmethod
+    def _none_to_empty_list(cls, v):
+        return v if v is not None else []
 
 
 class CandidateResponse(CandidateCreate):
