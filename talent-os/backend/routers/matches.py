@@ -139,16 +139,23 @@ async def candidates_for_job(job_id: int, limit: int = Query(30, ge=1, le=100)):
     # Rank on the existing `cv_search` tsvector (GIN-indexed, dutch stemmed)
     # plus a bonus for skills[] overlap with the job's keyword tokens
     # (also GIN-indexed) — no AI/embeddings involved.
+    # NOTE: the Apollo-bulk candidate pool has empty skills[] and cv_text, so
+    # cv_search/skills ranking scores 0 for nearly everyone. current_title is the
+    # one populated free-text signal, so we rank primarily on it (falling back to
+    # cv_search + skills bonus where they do exist). A hard tsvector filter would
+    # return nothing for such candidates, so we rank-and-limit instead of filtering.
     rows = await fetch_all(
         """SELECT * FROM (
                SELECT c.id, c.full_name, c.current_title, c.current_company, c.skills,
                       c.location, c.years_experience, c.cv_text, c.updated_at,
+                      ts_rank(to_tsvector('dutch', coalesce(c.current_title, '')),
+                              plainto_tsquery('dutch', $1)) AS title_rank,
                       ts_rank(c.cv_search, plainto_tsquery('dutch', $1)) AS cv_rank,
                       (SELECT COUNT(*) FROM unnest(c.skills) s WHERE lower(s) = ANY($2::text[])) AS skill_matches
                FROM candidates c
                WHERE c.deleted_at IS NULL AND c.consent_withdrawn_at IS NULL
            ) ranked
-           ORDER BY (cv_rank + skill_matches * 0.05) DESC, updated_at DESC NULLS LAST
+           ORDER BY (title_rank + cv_rank + skill_matches * 0.05) DESC, updated_at DESC NULLS LAST
            LIMIT $3""",
         job_text, tokens, limit,
     )
