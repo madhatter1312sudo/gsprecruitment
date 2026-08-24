@@ -12,7 +12,9 @@ A human must approve a draft via routers/outreach.py before it is sent.
 """
 import logging
 from datetime import datetime, timedelta, timezone
+from typing import Optional
 
+import asyncpg
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 
@@ -25,6 +27,13 @@ from services import harvest as harvest_service
 logger = logging.getLogger("talent_os.scheduler")
 
 TIMEZONE = "Europe/Amsterdam"
+
+# uvicorn runs this app with --workers 4 (talent-os/Dockerfile), and each
+# worker process starts its own AsyncIOScheduler — without this lock every
+# job would run once per worker (3-4x/day instead of once). A Postgres
+# session-level advisory lock, held on a dedicated connection for the app's
+# lifetime, ensures only one worker actually starts the scheduler.
+SCHEDULER_LOCK_KEY = 911911
 
 SOURCING_TITLES = [
     "Embedded Software Engineer",
@@ -39,6 +48,11 @@ APOLLO_ENRICH_CAP = 10
 DRAFT_OUTREACH_CAP = 10
 
 scheduler = AsyncIOScheduler(timezone=TIMEZONE)
+
+# Held open for the app's lifetime if this worker wins the advisory lock —
+# deliberately NOT a pooled connection, so it's never returned/reused and
+# the lock stays held until the process closes it (or dies).
+_lock_conn: Optional[asyncpg.Connection] = None
 
 
 async def _flag_enabled(key: str) -> bool:
@@ -170,6 +184,10 @@ async def apollo_enrich_batch() -> dict:
 async def matching() -> dict:
     """Run semantic matching for every open job order."""
     from routers.matches import _run_matching_for_job
+
+    if not await _flag_enabled("matching_enabled"):
+        logger.info("matching: disabled via system_settings, skipping")
+        return {"status": "skipped", "reason": "matching_enabled=false"}
 
     jobs = await fetch_all(
         "SELECT id FROM job_orders WHERE status = 'open' AND deleted_at IS NULL",
@@ -316,10 +334,29 @@ async def draft_blog_post() -> dict:
 
 # ── Scheduler lifecycle ──────────────────────────────────────────────────
 
-def start_scheduler() -> None:
-    """Register the four daily jobs and start the scheduler. Safe to call
-    once at app startup (main.py lifespan)."""
+async def start_scheduler() -> None:
+    """Acquire the cross-worker advisory lock and, if won, register the four
+    daily jobs and start the scheduler. Safe to call once per worker at app
+    startup (main.py lifespan) — only the worker that wins the lock actually
+    starts APScheduler; the others skip it entirely so jobs run exactly
+    once, not once per uvicorn worker."""
+    global _lock_conn
+
     if scheduler.running:
+        return
+
+    _lock_conn = await asyncpg.connect(
+        host=settings.postgres_host,
+        port=settings.postgres_port,
+        database=settings.postgres_db,
+        user=settings.postgres_user,
+        password=settings.postgres_password,
+    )
+    got_lock = await _lock_conn.fetchval("SELECT pg_try_advisory_lock($1)", SCHEDULER_LOCK_KEY)
+    if not got_lock:
+        logger.info("scheduler: another worker holds the lock, not starting")
+        await _lock_conn.close()
+        _lock_conn = None
         return
 
     scheduler.add_job(
@@ -347,11 +384,23 @@ def start_scheduler() -> None:
     logger.info("scheduler: started with 4 daily jobs + 1 weekly job (Europe/Amsterdam)")
 
 
-def shutdown_scheduler() -> None:
-    """Stop the scheduler cleanly on app shutdown."""
+async def shutdown_scheduler() -> None:
+    """Stop the scheduler cleanly and release the advisory lock (if this
+    worker held it) on app shutdown."""
+    global _lock_conn
+
     if scheduler.running:
         scheduler.shutdown(wait=False)
         logger.info("scheduler: stopped")
+
+    if _lock_conn is not None:
+        try:
+            await _lock_conn.execute("SELECT pg_advisory_unlock($1)", SCHEDULER_LOCK_KEY)
+        except Exception:
+            logger.exception("scheduler: failed to release advisory lock")
+        finally:
+            await _lock_conn.close()
+            _lock_conn = None
 
 
 JOBS_BY_NAME = {

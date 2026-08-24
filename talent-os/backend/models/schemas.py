@@ -194,6 +194,16 @@ class JobOrderUpdate(BaseModel):
 
 # ── Match ───────────────────────────────────────────────────────────────
 
+class MatchCreate(BaseModel):
+    """Create/upsert a match — used by external agents (e.g. a Claude cloud
+    agent doing matching) instead of the in-backend OpenRouter matcher."""
+    candidate_id: int
+    job_id: int
+    match_score: float = Field(..., ge=0, le=100)
+    status: str = "suggested"
+    rationale: Optional[str] = None  # no rationale column yet — accepted but not persisted
+
+
 class MatchResponse(BaseModel):
     id: int
     job_id: int

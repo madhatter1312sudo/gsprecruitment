@@ -7,6 +7,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from core.database import fetch_all, fetch_one, execute
 from core.security import verify_api_key
 from services.matcher import EmbeddingMatcher
+from models.schemas import MatchCreate
 from typing import Optional
 
 logger = logging.getLogger("talent_os.matches")
@@ -80,6 +81,92 @@ async def run_matching(
     for j in jobs:
         background_tasks.add_task(_run_matching_for_job, j["id"])
     return {"message": "Matching started", "job_ids": [j["id"] for j in jobs]}
+
+
+@router.post("", status_code=201)
+async def create_match(payload: MatchCreate):
+    """Create/upsert a match. Lets an external agent (e.g. a Claude cloud
+    agent doing matching) write results directly, instead of the in-backend
+    OpenRouter matcher in _run_matching_for_job. Same upsert semantics as
+    that job. `rationale` is accepted but not persisted — no column for it
+    yet."""
+    candidate = await fetch_one(
+        "SELECT id FROM candidates WHERE id = $1 AND deleted_at IS NULL", payload.candidate_id,
+    )
+    if not candidate:
+        raise HTTPException(status_code=400, detail=f"Candidate {payload.candidate_id} not found")
+
+    job = await fetch_one(
+        "SELECT id FROM job_orders WHERE id = $1 AND deleted_at IS NULL", payload.job_id,
+    )
+    if not job:
+        raise HTTPException(status_code=400, detail=f"Job {payload.job_id} not found")
+
+    row = await fetch_one(
+        """INSERT INTO matches (candidate_id, job_id, match_score, status)
+           VALUES ($1, $2, $3, $4)
+           ON CONFLICT (candidate_id, job_id)
+           DO UPDATE SET match_score = EXCLUDED.match_score, status = EXCLUDED.status
+           WHERE matches.status = 'suggested'
+           RETURNING *""",
+        payload.candidate_id, payload.job_id, payload.match_score, payload.status,
+    )
+    return row
+
+
+@router.get("/candidates-for-job/{job_id}")
+async def candidates_for_job(job_id: int, limit: int = Query(30, ge=1, le=100)):
+    """Cheap keyword-overlap prefilter — NO AI, NO OpenRouter. Ranks active
+    candidates against a job's title/requirements so an external agent (e.g.
+    a Claude cloud agent) can shortlist without pulling all candidates."""
+    job = await fetch_one(
+        "SELECT id, title, description, requirements FROM job_orders "
+        "WHERE id = $1 AND deleted_at IS NULL", job_id,
+    )
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    job_text = f"{job['title'] or ''} {job['requirements'] or ''}"
+    # Cheap tokenization for the skills-overlap bonus: distinct alphanumeric
+    # words of length >= 3, lowercased.
+    tokens = sorted(set(
+        w for w in job_text.lower().replace("/", " ").replace(",", " ").split()
+        if len(w) >= 3
+    ))
+    if not tokens:
+        return []
+
+    # Rank on the existing `cv_search` tsvector (GIN-indexed, dutch stemmed)
+    # plus a bonus for skills[] overlap with the job's keyword tokens
+    # (also GIN-indexed) — no AI/embeddings involved.
+    rows = await fetch_all(
+        """SELECT c.id, c.full_name, c.current_title, c.current_company, c.skills,
+                  c.location, c.years_experience, c.cv_text,
+                  ts_rank(c.cv_search, plainto_tsquery('dutch', $1)) AS cv_rank,
+                  (SELECT COUNT(*) FROM unnest(c.skills) s WHERE lower(s) = ANY($2::text[])) AS skill_matches
+           FROM candidates c
+           WHERE c.deleted_at IS NULL AND c.consent_withdrawn_at IS NULL
+           ORDER BY (ts_rank(c.cv_search, plainto_tsquery('dutch', $1)) + skill_matches * 0.05) DESC,
+                    c.updated_at DESC NULLS LAST
+           LIMIT $3""",
+        job_text, tokens, limit,
+    )
+
+    return [
+        {
+            "id": r["id"],
+            "full_name": r["full_name"],
+            "current_title": r["current_title"],
+            "current_company": r["current_company"],
+            "skills": r["skills"],
+            "location": r["location"],
+            "years_experience": float(r["years_experience"]) if r["years_experience"] is not None else None,
+            "cv_excerpt": (r["cv_text"] or "")[:500],
+            "cv_rank": float(r["cv_rank"]),
+            "skill_matches": r["skill_matches"],
+        }
+        for r in rows
+    ]
 
 
 @router.get("")

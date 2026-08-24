@@ -27,7 +27,59 @@ class DraftUpdate(BaseModel):
     body: Optional[str] = None
 
 
+class DraftCreate(BaseModel):
+    """Create an outreach draft — used by external agents (e.g. a Claude
+    cloud agent doing outreach drafting) instead of the in-backend
+    OpenRouter drafting job (services/scheduler.py draft_outreach)."""
+    target_type: str
+    target_id: int
+    target_email: str
+    target_name: str
+    company: Optional[str] = None
+    job_id: Optional[int] = None
+    channel: str = "email"
+    language: str = "nl"
+    subject: str
+    body: str
+    ai_model: str = "claude"
+
+
 # ── Drafts ───────────────────────────────────────────────────────────────
+
+@router.post("/drafts", status_code=201)
+async def create_draft(
+    payload: DraftCreate,
+    current_user: dict = Depends(require_role("admin")),
+):
+    """Create a new outreach draft with status='draft'. Never sends —
+    approval happens via POST /drafts/{id}/approve. Rejects (409) if a
+    draft already exists for the same (target_type, target_id, job_id)
+    with status='draft', mirroring the dedupe in services/scheduler.py's
+    draft_outreach job."""
+    existing = await fetch_one(
+        """SELECT id FROM outreach_drafts
+           WHERE target_type = $1 AND target_id = $2 AND job_id IS NOT DISTINCT FROM $3
+             AND status = 'draft'""",
+        payload.target_type, payload.target_id, payload.job_id,
+    )
+    if existing:
+        raise HTTPException(
+            status_code=409,
+            detail=f"A draft already exists for this target/job (id={existing['id']})",
+        )
+
+    row = await fetch_one(
+        """INSERT INTO outreach_drafts
+           (target_type, target_id, target_email, target_name, company,
+            job_id, channel, language, subject, body, ai_model, status)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'draft')
+           RETURNING *""",
+        payload.target_type, payload.target_id, payload.target_email, payload.target_name,
+        payload.company, payload.job_id, payload.channel, payload.language,
+        payload.subject, payload.body, payload.ai_model,
+    )
+    return row
+
 
 @router.get("/drafts")
 async def list_drafts(

@@ -40,13 +40,13 @@ async def lifespan(app: FastAPI):
     logger.info("ALL AI/LLM calls go through OpenRouter. NO models on VPS.")
 
     try:
-        start_scheduler()
+        await start_scheduler()
     except Exception:
         logger.exception("Failed to start sourcing/outreach scheduler — continuing without it")
 
     yield
     logger.info("Shutting down...")
-    shutdown_scheduler()
+    await shutdown_scheduler()
     await close_pool()
 
 
