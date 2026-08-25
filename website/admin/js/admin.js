@@ -61,6 +61,26 @@ const Admin = {
     const el = document.querySelector(tbodyId);
     if (el) el.innerHTML = `<tr><td colspan="${cols}" style="text-align:center;padding:2rem;color:var(--navy-300);">${msg}</td></tr>`;
   },
+  // Table-row error state with a retry link — replaces an infinite spinner
+  // when a fetch fails or times out.
+  setLoadError(tbodyId, cols, retryFn) {
+    const el = document.querySelector(tbodyId);
+    if (!el) return;
+    const id = '_retry_' + Math.random().toString(36).slice(2, 9);
+    el.innerHTML = `<tr><td colspan="${cols}" style="text-align:center;padding:2rem;color:var(--navy-300);">
+      <i class="fa-regular fa-triangle-exclamation"></i> Kon niet laden — <a href="#" id="${id}">probeer opnieuw</a>
+    </td></tr>`;
+    document.getElementById(id)?.addEventListener('click', (e) => { e.preventDefault(); if (typeof retryFn === 'function') retryFn(); });
+  },
+  // Non-table container error state with a retry link.
+  setContainerLoadError(el, retryFn) {
+    if (!el) return;
+    const id = '_retry_' + Math.random().toString(36).slice(2, 9);
+    el.innerHTML = `<div style="color:var(--navy-300);font-size:var(--font-size-sm);padding:1rem 0;">
+      <i class="fa-regular fa-triangle-exclamation"></i> Kon niet laden — <a href="#" id="${id}">probeer opnieuw</a>
+    </div>`;
+    document.getElementById(id)?.addEventListener('click', (e) => { e.preventDefault(); if (typeof retryFn === 'function') retryFn(); });
+  },
 
   /* ============================================================
      DASHBOARD
@@ -95,6 +115,8 @@ const Admin = {
       }
     } catch (err) {
       console.error('Dashboard load error:', err);
+      this.setContainerLoadError(document.getElementById('recentActivityList'), () => this.loadDashboard());
+      this.setContainerLoadError(document.getElementById('pendingRegistrationsList'), () => this.loadDashboard());
     }
   },
 

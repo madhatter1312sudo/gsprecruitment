@@ -112,10 +112,16 @@ const Auth = {
     const cleanUrl = url.startsWith('/') ? url : '/' + url;
     const fullUrl = url.startsWith('http') ? url : `${this.API}${cleanUrl}`;
 
+    // Hard timeout: a stalled request must fail, not spin forever — callers
+    // rely on the catch/reject to swap a loading spinner for a retry state.
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 10000);
+
     try {
       const response = await fetch(fullUrl, {
         ...options,
-        headers
+        headers,
+        signal: options.signal || controller.signal
       });
 
       if (response.status === 401 && token) {
@@ -131,7 +137,30 @@ const Auth = {
     } catch (err) {
       console.error('Auth fetch error:', err);
       throw err;
+    } finally {
+      clearTimeout(timeoutId);
     }
+  },
+
+  /* ---- Render a "could not load, retry" state into a container ----
+     Use on any fetch-driven list/spinner that can fail or hang.
+     retryFn is called (no args) when the retry link is clicked. */
+  renderLoadError(container, retryFn) {
+    if (!container) return;
+    const id = '_retry_' + Math.random().toString(36).slice(2, 9);
+    container.innerHTML = `<div style="text-align:center;padding:2rem 1rem;color:var(--navy-200, var(--text-muted));">
+      <i class="fas fa-triangle-exclamation" style="font-size:1.3rem;opacity:0.7;"></i>
+      <p style="margin-top:0.6rem;">
+        <span class="lang-nl">Kon niet laden — <a href="#" id="${id}">probeer opnieuw</a></span>
+        <span class="lang-en">Could not load — <a href="#" id="${id}_en">try again</a></span>
+      </p>
+    </div>`;
+    const bind = (elId) => {
+      const el = document.getElementById(elId);
+      if (el) el.addEventListener('click', (e) => { e.preventDefault(); if (typeof retryFn === 'function') retryFn(); });
+    };
+    bind(id);
+    bind(id + '_en');
   },
 
   /* ---- Parse JWT payload ---- */

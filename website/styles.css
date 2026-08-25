@@ -800,6 +800,18 @@ section { padding: 100px 0; }
   box-shadow: 0 0 0 3px var(--gold-glow);
 }
 .contact-form textarea { min-height: 120px; resize: vertical; }
+.contact-form select {
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8' fill='none'%3E%3Cpath d='M1 1.5L6 6.5L11 1.5' stroke='%23E8B400' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 16px center;
+  background-size: 12px 8px;
+  padding-right: 42px;
+  cursor: pointer;
+}
+.contact-form select:invalid { color: var(--text-secondary); }
 
 .gdpr-checkbox {
   display: flex;
