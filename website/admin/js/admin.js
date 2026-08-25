@@ -373,9 +373,6 @@ const Admin = {
             <button class="btn btn-sm btn-ghost-secondary" onclick="Admin.setJobStatus(${j.id}, 'closed')" title="Close" style="color:#f87171;">
               <i class="fa-regular fa-xmark"></i> Close
             </button>` : ''}
-          <button class="btn btn-sm btn-ghost-secondary" onclick="Admin.triggerMatching(${j.id})" title="Run AI matching">
-            <i class="fa-regular fa-wand-magic-sparkles"></i>
-          </button>
           <button class="btn btn-sm btn-ghost-secondary" onclick="Admin.confirmDeleteJob(${j.id})" title="Delete" style="color:#f87171;">
             <i class="fa-regular fa-trash"></i>
           </button>
@@ -395,15 +392,6 @@ const Admin = {
         const d = await res?.json();
         Auth.toast(d?.detail || 'Update failed', 'error');
       }
-    } catch { Auth.toast('Network error', 'error'); }
-  },
-
-  async triggerMatching(jobId) {
-    Auth.toast('Running AI matching…', 'info');
-    try {
-      const res = await Auth.fetch(`/v1/matches/run?job_id=${jobId}`, { method: 'POST' });
-      if (res?.ok) Auth.toast('Matching queued — results will appear shortly', 'success');
-      else Auth.toast('Failed to start matching', 'error');
     } catch { Auth.toast('Network error', 'error'); }
   },
 
@@ -475,9 +463,6 @@ const Admin = {
           <button class="btn btn-sm btn-ghost-secondary" onclick="Admin.viewCandidate(${c.id})" title="View profile">
             <i class="fa-regular fa-eye"></i>
           </button>
-          <button class="btn btn-sm btn-ghost-secondary" onclick="Admin.triggerCandidateMatch(${c.id})" title="Run matching">
-            <i class="fa-regular fa-wand-magic-sparkles"></i>
-          </button>
         </td>
       </tr>`).join('');
   },
@@ -513,21 +498,9 @@ const Admin = {
         </div>
       </div>
       <div style="margin-top:var(--space-lg);display:flex;gap:var(--space-md);">
-        <button class="btn btn-primary btn-sm" onclick="Admin.triggerCandidateMatch(${c.id});Admin.closeModal()">
-          <i class="fa-regular fa-wand-magic-sparkles"></i> Run Matching
-        </button>
         <button class="btn btn-ghost-secondary btn-sm" onclick="Admin.closeModal()">Close</button>
       </div>
     `);
-  },
-
-  async triggerCandidateMatch(candidateId) {
-    Auth.toast('Running AI matching for candidate…', 'info');
-    try {
-      const res = await Auth.fetch(`/v1/matches/run`, { method: 'POST' });
-      if (res?.ok) Auth.toast('Matching queued', 'success');
-      else Auth.toast('Failed to start matching', 'error');
-    } catch { Auth.toast('Network error', 'error'); }
   },
 
   /* ============================================================
