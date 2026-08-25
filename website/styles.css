@@ -133,11 +133,21 @@ section { padding: 100px 0; }
   font-weight: 500;
   text-transform: uppercase;
   letter-spacing: 0.12em;
-  color: var(--gold-dark);
+  /* --gold-dark (#D4A800) is 2.04:1 on our light section backgrounds — fails
+     WCAG AA. This darker gold-ochre hits 4.72:1 on --off-white / 5.17:1 on
+     white while still reading as brand gold. Sections on a dark surface
+     (e.g. .page-hero, .cta-band) opt back into the bright gold below. */
+  color: #8A6800;
   margin-bottom: 16px;
 }
 .section-label::before {
   content: none;
+}
+.page-hero .section-label,
+.hero .section-label,
+.cta-band .section-label,
+.on-dark .section-label {
+  color: var(--gold);
 }
 .section-header { text-align: center; max-width: 640px; margin: 0 auto 48px; }
 .section-header p { font-size: 1.1rem; }
@@ -226,6 +236,11 @@ section { padding: 100px 0; }
 
 .nav { display: flex; align-items: center; }
 .nav-list { display: flex; list-style: none; gap: 4px; }
+/* CTA / language / login entries injected into the drawer by
+   initHamburger() (script.js) — desktop keeps the real controls in
+   .header-actions instead, so these stay hidden until the <=768px
+   media query below turns them back on. */
+.nav-mobile-action { display: none; }
 .nav-link {
   font-size: 0.9rem;
   font-weight: 500;
@@ -634,7 +649,8 @@ section { padding: 100px 0; }
 #process .story-tag {
   display: block; background: none; padding: 0; border-radius: 0;
   font-family: var(--font-display); font-size: 2.1rem; font-weight: 500;
-  color: var(--gold-dark); margin-bottom: 10px; line-height: 1;
+  /* --gold-dark was 2.23:1 on white — same fix as .section-label above. */
+  color: #8A6800; margin-bottom: 10px; line-height: 1;
 }
 #process .story-card h3 { font-family: var(--font); font-size: 1rem; font-weight: 600; }
 #process .story-card p { font-size: 0.9rem; }
@@ -893,10 +909,17 @@ section { padding: 100px 0; }
 
 /* ── Line-icon (werkwijze / services) ───────────────────── */
 .line-icon { width: 32px; height: 32px; display: block; }
-.step-icon, .service-icon-svg {
+.step-icon {
   width: 52px; height: 52px; border-radius: 14px;
   background: var(--gold-light); display: flex; align-items: center; justify-content: center;
   margin-bottom: 18px; color: var(--navy);
+}
+/* Expertise grid icons: bare stroke gold line icon per approved mockup —
+   no chip container, no rounded box. */
+.service-icon-svg {
+  width: 52px; height: 52px;
+  display: flex; align-items: center; justify-content: center;
+  margin-bottom: 18px; color: var(--gold-dark);
 }
 .step-icon svg, .service-icon-svg svg { width: 28px; height: 28px; }
 
@@ -1164,7 +1187,20 @@ section { padding: 100px 0; }
   .nav.active .nav-list .nav-link:nth-child(5) { transition-delay: 0.25s; }
   .nav.active .nav-list .nav-link:nth-child(6) { transition-delay: 0.30s; }
   .header-actions { gap: 6px; }
+  /* Only logo + hamburger stay in the bar at this width — CTA, language
+     toggle and login move into the drawer (nav-mobile-action items,
+     injected by initHamburger() in script.js) so they stay reachable. */
+  .header-actions .btn-gold,
+  .header-actions .lang-btn,
+  .header-actions #loginBtn { display: none; }
   .hamburger { display: flex; }
+  .nav-mobile-action { display: block; margin-top: 10px; padding-top: 14px; border-top: 1px solid var(--navy-600, #152B4A); }
+  .nav-list .nav-link ~ .nav-mobile-action { margin-top: 0; }
+  .nav-mobile-cta .btn,
+  .nav-mobile-login .btn { width: 100%; justify-content: center; }
+  .nav-mobile-lang-toggle { display: flex; gap: 8px; }
+  .nav-mobile-lang-toggle .lang-btn { flex: 1; padding: 8px 10px; text-align: center; }
+  .nav-mobile-login { border-top: none; padding-top: 0; margin-top: 8px; }
   .hero { min-height: 85vh; }
   .hero h1 { font-size: 2.2rem; }
   .service-card,
@@ -1190,6 +1226,11 @@ section { padding: 100px 0; }
   .partners-grid { gap: 10px 12px; }
   .eco-badge { padding: 0.4rem 1rem; font-size: 0.72rem; }
   .container { padding: 0 16px; }
+  /* The cookie card (script.js initCookieConsent) is a single row at wider
+     widths; too tight for 3 inline items under ~480px, so stack it. */
+  #cookieConsentBanner { flex-direction: column; align-items: stretch !important; gap: 8px !important; }
+  #cookieConsentBanner span { white-space: normal !important; overflow: visible !important; text-overflow: clip !important; }
+  #cookieConsentBanner a { align-self: flex-start; }
 }
 
 /* ── Reduced Motion ─────────────────────────────────────── */
@@ -1577,6 +1618,9 @@ html[data-lang="en"] .lang-nl { display: none; }
 .trust-strip { display: flex; gap: 40px; flex-wrap: wrap; margin-top: 40px; position: relative; z-index: 1; }
 .ts-item { display: flex; align-items: center; gap: 10px; font-size: 0.9rem; color: var(--navy-100, #C5D6EB); }
 .ts-item i { color: var(--navy-200, #7FA0C9); }
+/* Overridden by the higher-specificity ".trust-strip .ts-item" rule below,
+   which is the one actually rendered on the (dark) page-hero — its color
+   is what carries the WCAG AA fix. */
 
 /* ── Value props row (icon + text) ──────────────────────── */
 .props-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 22px; margin-top: 8px; }
@@ -1590,6 +1634,10 @@ html[data-lang="en"] .lang-nl { display: none; }
   display: flex; align-items: center; justify-content: center;
   font-size: 1.1rem; margin-bottom: 16px;
 }
+/* Content icons are inline SVG (not Font Awesome) so they never render
+   empty when the FA font fails to load (e.g. ad-blockers). See
+   .contact-method svg.line-icon below for the contact-card variant. */
+.prop-icon svg.line-icon { width: 22px; height: 22px; }
 .prop h3 { font-size: 1.08rem; }
 .prop p { font-size: 0.93rem; margin-top: 6px; }
 
@@ -1617,7 +1665,7 @@ html[data-lang="en"] .lang-nl { display: none; }
 
 /* ── Trust strip (honest props, no fake numbers) ────────── */
 .trust-strip { display: flex; flex-wrap: wrap; gap: 10px 26px; margin-top: 36px; }
-.trust-strip .ts-item { display: inline-flex; align-items: center; gap: 8px; font-size: 0.92rem; font-weight: 500; color: var(--text-secondary); }
+.trust-strip .ts-item { display: inline-flex; align-items: center; gap: 8px; font-size: 0.92rem; font-weight: 500; color: var(--navy-200, #7FA0C9); }
 .trust-strip .ts-item i { color: var(--gold-dark); font-size: 0.95rem; }
 
 /* ── Role/need paths ("Waar ben je naar op zoek?") ──────── */
@@ -1645,7 +1693,8 @@ html[data-lang="en"] .lang-nl { display: none; }
   background: var(--bg-card); flex: 1; min-width: 220px; transition: var(--transition);
 }
 .contact-method:hover { border-color: var(--navy); box-shadow: var(--shadow-sm); }
-.contact-method i { width: 42px; height: 42px; border-radius: 11px; background: var(--gold-light); color: var(--gold-dark); display: flex; align-items: center; justify-content: center; font-size: 1.1rem; flex-shrink: 0; }
+.contact-method i,
+.contact-method svg.line-icon { width: 42px; height: 42px; border-radius: 11px; background: var(--gold-light); color: var(--gold-dark); display: flex; align-items: center; justify-content: center; font-size: 1.1rem; flex-shrink: 0; padding: 10px; box-sizing: border-box; }
 .contact-method .cm-label { font-size: 0.74rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; }
 .contact-method .cm-value { font-weight: 600; font-size: 0.95rem; color: var(--text); margin-top: 2px; }
 /* Audience links inside the mobile menu (shown only on small screens) */

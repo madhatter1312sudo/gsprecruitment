@@ -53,11 +53,15 @@
   --space-3xl: 64px;
 
   /* ── Radii ──────────────────────────────────────────────── */
-  --radius-sm: 8px;
-  --radius-md: 10px;
-  --radius: 12px;
-  --radius-lg: 16px;
-  --radius-xl: 20px;
+  /* Flat 3px system site-wide (see SITE-DESIGN-SPEC.md §1.2) — cards,
+     inputs, tables and stat tiles all use these. --radius-full stays a
+     pill and is reserved for chips/badges only. */
+  --radius-xs: 3px;
+  --radius-sm: 3px;
+  --radius-md: 3px;
+  --radius: 3px;
+  --radius-lg: 3px;
+  --radius-xl: 3px;
   --radius-full: 9999px;
 
   /* ── Layout ─────────────────────────────────────────────── */

@@ -61,7 +61,10 @@ const GSP_WHATSAPP = '31617913965';
       });
 
       document.querySelectorAll('.lang-btn').forEach(btn => {
-        btn.classList.toggle('active', btn.id === 'lang' + lang.charAt(0).toUpperCase() + lang.slice(1));
+        // data-lang is set on the real header buttons (#langEn/#langNl,
+        // below) and on the mobile-drawer copies injected by
+        // initHamburger(), which have no id of their own.
+        btn.classList.toggle('active', btn.dataset.lang === lang);
       });
 
       document.querySelectorAll('option[data-lang-' + lang + ']').forEach(opt => {
@@ -69,8 +72,12 @@ const GSP_WHATSAPP = '31617913965';
       });
     }
 
-    $('langEn')?.addEventListener('click', () => setLang('en'));
-    $('langNl')?.addEventListener('click', () => setLang('nl'));
+    const enBtn = $('langEn');
+    const nlBtn = $('langNl');
+    if (enBtn) enBtn.dataset.lang = 'en';
+    if (nlBtn) nlBtn.dataset.lang = 'nl';
+    enBtn?.addEventListener('click', () => setLang('en'));
+    nlBtn?.addEventListener('click', () => setLang('nl'));
     setLang(currentLang);
   }
 
@@ -136,7 +143,68 @@ const GSP_WHATSAPP = '31617913965';
       nav.classList.toggle('active');
     });
 
-    nav.querySelectorAll('.nav-link').forEach(link => {
+    // Below 768px, styles.css hides the CTA / language toggle / login button
+    // in .header-actions so only the logo + hamburger fit the bar — inject
+    // matching entries into the drawer so those actions stay reachable.
+    // These forward clicks to the real controls (or replicate a plain href)
+    // instead of re-registering handlers, so there is only ever one
+    // listener wired per action (see commit d0917af on duplicate binds).
+    const navList = nav.querySelector('.nav-list');
+    const actions = document.querySelector('.header-actions');
+    if (navList && actions) {
+      const cta = actions.querySelector('.btn-gold');
+      const langEn = $('langEn');
+      const langNl = $('langNl');
+      const loginBtn = $('loginBtn');
+
+      if (cta) {
+        const li = document.createElement('li');
+        li.className = 'nav-mobile-action nav-mobile-cta';
+        const a = document.createElement('a');
+        a.href = cta.getAttribute('href');
+        a.className = 'btn btn-gold btn-sm';
+        a.innerHTML = cta.innerHTML;
+        li.appendChild(a);
+        navList.appendChild(li);
+      }
+
+      if (langEn && langNl) {
+        const li = document.createElement('li');
+        li.className = 'nav-mobile-action nav-mobile-lang';
+        const wrap = document.createElement('div');
+        wrap.className = 'nav-mobile-lang-toggle';
+        const bEn = document.createElement('button');
+        bEn.type = 'button';
+        bEn.className = 'lang-btn';
+        bEn.dataset.lang = 'en';
+        bEn.textContent = 'EN';
+        bEn.addEventListener('click', () => langEn.click());
+        const bNl = document.createElement('button');
+        bNl.type = 'button';
+        bNl.className = 'lang-btn';
+        bNl.dataset.lang = 'nl';
+        bNl.textContent = 'NL';
+        bNl.addEventListener('click', () => langNl.click());
+        wrap.appendChild(bEn);
+        wrap.appendChild(bNl);
+        li.appendChild(wrap);
+        navList.appendChild(li);
+      }
+
+      if (loginBtn) {
+        const li = document.createElement('li');
+        li.className = 'nav-mobile-action nav-mobile-login';
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'btn btn-ghost btn-sm';
+        btn.innerHTML = loginBtn.innerHTML;
+        btn.addEventListener('click', () => loginBtn.click());
+        li.appendChild(btn);
+        navList.appendChild(li);
+      }
+    }
+
+    nav.querySelectorAll('.nav-link, .nav-mobile-action a, .nav-mobile-action button').forEach(link => {
       link.addEventListener('click', () => {
         hamburger.classList.remove('active');
         nav.classList.remove('active');
@@ -160,8 +228,9 @@ const GSP_WHATSAPP = '31617913965';
   // ── Scroll Animations ──────────────────────────────────
   function initScrollAnimations() {
     const SELECTOR = '.fade-in, .fade-in-left, .fade-in-right';
+    const revealEl = el => el.classList.add('visible');
     const revealAll = () => {
-      document.querySelectorAll(SELECTOR).forEach(el => el.classList.add('visible'));
+      document.querySelectorAll(SELECTOR).forEach(revealEl);
     };
 
     // No IntersectionObserver support: just show everything — visible is the
@@ -170,6 +239,12 @@ const GSP_WHATSAPP = '31617913965';
       revealAll();
       return;
     }
+
+    // Set once the 1.5s hard fallback has fired. After that point any new
+    // .fade-in node (e.g. blog/job cards injected by a slow async fetch)
+    // is revealed immediately by observeAll() instead of being queued onto
+    // an IntersectionObserver that may never trigger for it.
+    let fallbackFired = false;
 
     const observer = new IntersectionObserver((entries) => {
       entries.forEach(entry => {
@@ -183,6 +258,10 @@ const GSP_WHATSAPP = '31617913965';
     const observeAll = () => {
       document.querySelectorAll(SELECTOR).forEach(el => {
         if (el.classList.contains('visible')) return;
+        if (fallbackFired) {
+          revealEl(el);
+          return;
+        }
         // Already in the viewport on load — reveal immediately instead of
         // waiting on a trigger that may never re-fire for it.
         const r = el.getBoundingClientRect();
@@ -196,16 +275,20 @@ const GSP_WHATSAPP = '31617913965';
     observeAll();
 
     // Content added dynamically after this ran (job cards, blog cards, etc.)
-    // still needs to be picked up.
+    // still needs to be picked up. This observer is intentionally never
+    // disconnected — a page whose primary content loads via a slow async
+    // fetch (e.g. the blog's 10s API timeout) can inject .fade-in nodes long
+    // after the 1.5s fallback below, and they still need to be caught here.
     const mo = new MutationObserver(() => observeAll());
     mo.observe(document.body, { childList: true, subtree: true });
 
-    // Hard fallback: whatever hasn't revealed by itself gets revealed anyway.
-    // Covers a trigger that never fires (short pages, stalled layout, slow
-    // fonts/API) so content is never stuck invisible.
+    // Hard fallback: whatever hasn't revealed by itself within 1.5s gets
+    // revealed anyway. Covers a trigger that never fires (short pages,
+    // stalled layout, slow fonts/API) so content is never stuck invisible.
+    // The IntersectionObserver/MutationObserver stay alive after this so
+    // late-added nodes still get revealed (see fallbackFired above).
     setTimeout(() => {
-      observer.disconnect();
-      mo.disconnect();
+      fallbackFired = true;
       revealAll();
     }, 1500);
   }
@@ -1136,31 +1219,37 @@ const GSP_WHATSAPP = '31617913965';
 
     const banner = document.createElement('div');
     banner.id = 'cookieConsentBanner';
+    // Compact single-row corner card (not a full-width bar) so it never
+    // sits over a page's primary content at first paint — e.g. the
+    // vacatures filter bar or the contact form heading, both of which sit
+    // close to the fold on a 1440x900 first view. Kept to one line (text
+    // ellipsizes, full copy in the title attribute) so its footprint stays
+    // small enough not to reach up into that content.
     banner.style.cssText = `
-      position:fixed;bottom:0;left:0;right:0;z-index:10000;
-      background:var(--bg-card);border-top:1px solid var(--border);
-      padding:16px 24px;box-shadow:0 -4px 20px rgba(0,0,0,0.15);
-      display:flex;flex-wrap:wrap;align-items:center;justify-content:center;
-      gap:16px;font-size:0.9rem;
+      position:fixed;bottom:16px;right:16px;left:auto;z-index:10000;
+      max-width:460px;width:calc(100% - 32px);
+      background:var(--bg-card);border:1px solid var(--border);
+      border-radius:var(--radius, 8px);
+      padding:10px 14px;box-shadow:0 8px 28px rgba(0,0,0,0.18);
+      display:flex;align-items:center;gap:12px;font-size:0.82rem;
     `;
 
     const lang = localStorage.getItem('gsp_lang') || 'nl';
     const text = lang === 'nl'
-      ? 'Deze site gebruikt functionele cookies voor authenticatie en taalvoorkeur. Geen tracking.'
-      : 'This site uses functional cookies for authentication and language preference. No tracking.';
+      ? 'Deze site gebruikt functionele cookies. Geen tracking.'
+      : 'This site uses functional cookies. No tracking.';
 
     banner.innerHTML = `
-      <span style="color:var(--text-secondary);flex:1;min-width:200px">${text}</span>
-      <div style="display:flex;gap:8px;flex-shrink:0">
-        <a href="privacy.html" style="font-size:0.85rem;color:var(--gold);text-decoration:none">${lang === 'nl' ? 'Privacybeleid' : 'Privacy Policy'}</a>
-        <button id="cookieConsentAccept" class="btn btn-primary btn-sm">${lang === 'nl' ? 'Accepteren' : 'Accept'}</button>
-      </div>
+      <span title="${text}" style="color:var(--text-secondary);flex:1;min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis">${text}</span>
+      <a href="privacy.html" style="font-size:0.8rem;color:var(--gold);text-decoration:none;flex-shrink:0;white-space:nowrap">${lang === 'nl' ? 'Privacybeleid' : 'Privacy Policy'}</a>
+      <button id="cookieConsentAccept" class="btn btn-primary btn-sm" style="flex-shrink:0">${lang === 'nl' ? 'Accepteren' : 'Accept'}</button>
     `;
 
     document.body.appendChild(banner);
 
-    // Reserve space so the fixed banner never sits on top of a tap target
-    // (e.g. a job card CTA) at the bottom of the page.
+    // Reserve space so the fixed corner card never sits on top of a tap
+    // target (e.g. a job card CTA) at the bottom-right of the page. Kept in
+    // sync with the card's real (now much smaller) height via offsetHeight.
     const applyBodyOffset = () => {
       document.body.style.paddingBottom = banner.offsetHeight + 'px';
     };
