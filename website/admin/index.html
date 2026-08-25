@@ -10,7 +10,7 @@
   <link rel="icon" type="image/x-icon" href="../favicon.ico">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Newsreader:opsz,wght@6..72,400;6..72,500;6..72,600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
   <!-- Vendored locally (website/admin/vendor/) so the panel doesn't depend on
        cdnjs/jsdelivr staying up. onerror falls back to the CDN copy if the
        vendored file is ever missing. -->
@@ -28,23 +28,38 @@
       --navy-900:#142235; --navy-800:#142235; --navy-700:#18293d; --navy-600:#1a2a42;
       --navy-500:#24354f; --navy-400:#3a4f6e; --navy-300:#8695ac; --navy-200:#b8c4d6; --navy-100:#e2e8f0;
       --white:#ffffff;
-      --gold-gradient: linear-gradient(135deg,#f5cf4d 0%,#E8B400 45%,#b38900 100%);
-      --gold-400: #f5cf4d;
-      --gold-500: #E8B400;
+      --gold-gradient: linear-gradient(135deg,#FBD74A 0%,#FAC800 45%,#D4A800 100%);
+      --gold-400: #FBD74A;
+      --gold-500: #FAC800;
       --space-xs:4px; --space-sm:8px; --space-md:16px; --space-lg:24px; --space-xl:32px; --space-2xl:48px;
       --radius-sm:8px; --radius-md:10px; --radius:12px; --radius-lg:16px; --radius-xl:20px;
-      --font-primary:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;
+      --font-primary:'IBM Plex Sans','Segoe UI',system-ui,-apple-system,sans-serif;
+      --font-display:'Newsreader',Georgia,'Times New Roman',serif;
+      --font-mono:'IBM Plex Mono',ui-monospace,'SF Mono',Menlo,monospace;
       --font-size-xs:.75rem; --font-size-sm:.875rem; --font-size-md:1rem; --font-size-xl:1.25rem;
 
       /* ==== Tabler brand overrides — GSP navy/gold ==== */
-      --tblr-primary:#E8B400;
-      --tblr-primary-rgb:232,180,0;
+      --tblr-primary:#FAC800;
+      --tblr-primary-rgb:250,200,0;
       --tblr-body-bg:#0E1B2E;
       --tblr-bg-surface:#142235;
       --tblr-bg-surface-tertiary:#1a2a42;
       --tblr-border-color:#24354f;
     }
+    body, .page { font-family: var(--font-primary); }
     .navbar-brand img { height: 28px; width: auto; }
+    h1, h2, h3, h4, .navbar-brand, .page-title, .card-title {
+      font-family: var(--font-display);
+      font-weight: 500;
+      letter-spacing: 0;
+    }
+    /* Eyebrow-style small section captions */
+    .text-uppercase { font-family: var(--font-mono); }
+    /* KPI tiles: numeric value in mono, matching the salary/data-chip convention */
+    .card .h1, .card .display-6, .card [class*="fs-"].fw-bold, .subheader + .h1 {
+      font-family: var(--font-mono);
+      font-weight: 500;
+    }
 
     /* ==== Toast (auth.js Auth.toast) — admin no longer loads the site stylesheet ==== */
     .toast-container { position:fixed; bottom:24px; right:24px; z-index:9998; display:flex; flex-direction:column; gap:8px; }

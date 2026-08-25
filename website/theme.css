@@ -30,8 +30,9 @@
   --off-white: #F1F5F9;
 
   /* ── Typography ─────────────────────────────────────────── */
-  --font-primary: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
-  --font-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+  --font-primary: 'IBM Plex Sans', 'Segoe UI', system-ui, -apple-system, sans-serif;
+  --font-display: 'Newsreader', Georgia, 'Times New Roman', serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, 'SF Mono', Menlo, monospace;
   --font-size-xs:  0.75rem;   /* 12 */
   --font-size-sm:  0.875rem;  /* 14 */
   --font-size-md:  1rem;      /* 16 */

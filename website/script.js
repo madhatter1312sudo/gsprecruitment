@@ -555,10 +555,13 @@ const GSP_WHATSAPP = '31617913965';
         const jobs = data.slice(0, 3);
         grid.innerHTML = jobs.map(job => `
           <div class="vac-card">
-            <div class="vac-ref">GSP-${job.id}</div>
+            <div class="vac-tags">
+              <span class="vac-chip">${job.location_type || job.location || 'Netherlands'}</span>
+              ${job.seniority ? `<span class="vac-chip">${job.seniority}</span>` : ''}
+            </div>
             <h3>${job.title}</h3>
-            <span class="vac-chip">${job.department || ''}</span>
-            <div class="vac-meta"><i class="fas fa-map-marker-alt"></i> ${job.location_type || job.location || 'Netherlands'}</div>
+            <p class="vac-desc">${job.department || ''}</p>
+            ${(job.salary_min && job.salary_max) ? `<div class="vac-salary">€${Number(job.salary_min).toLocaleString('nl-NL')} – €${Number(job.salary_max).toLocaleString('nl-NL')}</div>` : ''}
             <a href="vacature.html?id=${job.slug || job.id}" class="vac-link"><span class="lang-en">View vacancy →</span><span class="lang-nl">Bekijk vacature →</span></a>
           </div>
         `).join('');
