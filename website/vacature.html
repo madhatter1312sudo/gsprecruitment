@@ -121,7 +121,10 @@
   const jobId = params.get('id') || params.get('slug');
   if (!jobId) { document.getElementById('loadingSpinner').style.display = 'none'; document.getElementById('jobNotFound').style.display = 'block'; return; }
   try {
-    const res = await fetch('https://api.gsprecruitment.nl/api/public/jobs');
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 10000);
+    const res = await fetch('https://api.gsprecruitment.nl/api/public/jobs', { signal: controller.signal });
+    clearTimeout(timeoutId);
     if (!res.ok) throw new Error('API error');
     const jobs = await res.json();
     const job = Array.isArray(jobs) ? jobs.find(j => j.id == jobId || j.slug === jobId) : null;

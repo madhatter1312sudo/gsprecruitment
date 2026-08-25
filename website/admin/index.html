@@ -11,8 +11,12 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" crossorigin="anonymous" referrerpolicy="no-referrer">
-  <link href="https://cdn.jsdelivr.net/npm/@tabler/core@1.4.0/dist/css/tabler.min.css" rel="stylesheet">
+  <!-- Vendored locally (website/admin/vendor/) so the panel doesn't depend on
+       cdnjs/jsdelivr staying up. onerror falls back to the CDN copy if the
+       vendored file is ever missing. -->
+  <link rel="stylesheet" href="vendor/fontawesome/css/all.min.css" onerror="this.onerror=null;this.href='https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css'">
+  <link href="vendor/tabler/css/tabler.min.css" rel="stylesheet" onerror="this.onerror=null;this.href='https://cdn.jsdelivr.net/npm/@tabler/core@1.4.0/dist/css/tabler.min.css'">
+  <!-- ApexCharts is not vendored (chart-only, non-blocking for layout/nav) — TODO: vendor if this becomes a reliability problem. -->
   <script src="https://cdn.jsdelivr.net/npm/apexcharts@4.7.0"></script>
   <style>
     /* ==== Legacy design-token compatibility ====
@@ -615,7 +619,7 @@
 
 <script src="../auth.js"></script>
 <script src="js/admin.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@tabler/core@1.4.0/dist/js/tabler.min.js"></script>
+<script src="vendor/tabler/js/tabler.min.js" onerror="var s=document.createElement('script');s.src='https://cdn.jsdelivr.net/npm/@tabler/core@1.4.0/dist/js/tabler.min.js';document.body.appendChild(s);"></script>
 <script>
   /* ---- Navigation ---- */
   const sectionTitles = {

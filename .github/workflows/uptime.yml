@@ -1,0 +1,54 @@
+name: Uptime Monitoring
+
+on:
+  schedule:
+    - cron: "*/30 * * * *"
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Probe production endpoints
+        id: probe
+        run: |
+          set +e
+
+          check() {
+            local name="$1"
+            local url="$2"
+            code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 20 \
+              -H "User-Agent: gsp-ops" "$url")
+            echo "${name}: ${url} -> HTTP ${code}"
+            if [ "$code" != "200" ]; then
+              echo "${name}=${code}" >> "$GITHUB_OUTPUT"
+            fi
+          }
+
+          check api "https://api.gsprecruitment.nl/api/public/jobs"
+          check site "https://gsprecruitment.nl"
+
+          exit 0
+
+      - name: Send Telegram alert if something is down
+        if: steps.probe.outputs.api != '' || steps.probe.outputs.site != ''
+        run: |
+          if [ -z "${{ secrets.TELEGRAM_BOT_TOKEN }}" ] || [ -z "${{ secrets.TELEGRAM_CHAT_ID }}" ]; then
+            echo "::error::TELEGRAM_BOT_TOKEN and/or TELEGRAM_CHAT_ID secrets are not set -- cannot send downtime alert. Add them under Settings > Secrets and variables > Actions."
+            exit 1
+          fi
+
+          message="GSP uptime waarschuwing:"
+
+          if [ -n "${{ steps.probe.outputs.api }}" ]; then
+            message="${message}$(printf '\n')- api.gsprecruitment.nl/api/public/jobs is niet bereikbaar (HTTP ${{ steps.probe.outputs.api }})"
+          fi
+
+          if [ -n "${{ steps.probe.outputs.site }}" ]; then
+            message="${message}$(printf '\n')- gsprecruitment.nl is niet bereikbaar (HTTP ${{ steps.probe.outputs.site }})"
+          fi
+
+          curl -sS --max-time 20 \
+            -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage" \
+            -d chat_id="${{ secrets.TELEGRAM_CHAT_ID }}" \
+            --data-urlencode text="$message"

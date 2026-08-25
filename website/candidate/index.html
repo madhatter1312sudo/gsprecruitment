@@ -1278,6 +1278,8 @@
         }
       } catch (err) {
         console.error('Dashboard load error:', err);
+        Auth.renderLoadError(document.getElementById('topMatchesList'), loadDashboard);
+        Auth.renderLoadError(document.getElementById('recentActivity'), loadDashboard);
       }
     }
 
@@ -1459,6 +1461,7 @@
         }).join('');
       } catch (err) {
         console.error('Matches load error:', err);
+        Auth.renderLoadError(document.getElementById('matchesList'), loadMatches);
       }
     }
 
@@ -1513,6 +1516,16 @@
         }).join('');
       } catch (err) {
         console.error('Applications load error:', err);
+        const tbody = document.querySelector('#section-applications table tbody');
+        if (tbody) {
+          const id = '_retryApps';
+          tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;color:var(--navy-200);padding:var(--space-2xl);">
+            <span class="lang-nl">Kon niet laden — <a href="#" id="${id}">probeer opnieuw</a></span>
+            <span class="lang-en">Could not load — <a href="#" id="${id}_en">try again</a></span>
+          </td></tr>`;
+          document.getElementById(id)?.addEventListener('click', (e) => { e.preventDefault(); loadApplications(); });
+          document.getElementById(id + '_en')?.addEventListener('click', (e) => { e.preventDefault(); loadApplications(); });
+        }
       }
     }
 
@@ -1546,6 +1559,8 @@
         }).join('');
       } catch (err) {
         console.error('Messages load error:', err);
+        const msgContainer = document.querySelector('#section-messages .dashboard-grid > div:first-child');
+        Auth.renderLoadError(msgContainer, loadMessages);
       }
     }
 

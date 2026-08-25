@@ -18,6 +18,14 @@ const GSP_WHATSAPP = '31617913965';
   const qs = (sel, ctx) => (ctx || document).querySelector(sel);
   const qsa = (sel, ctx) => (ctx || document).querySelectorAll(sel);
 
+  // fetch() with a hard timeout — a stalled request must reject, not hang a
+  // spinner forever. Default 10s per the site-wide fetch error-state rule.
+  function fetchTimeout(url, options = {}, ms = 10000) {
+    const controller = new AbortController();
+    const t = setTimeout(() => controller.abort(), ms);
+    return fetch(url, { ...options, signal: options.signal || controller.signal }).finally(() => clearTimeout(t));
+  }
+
   // ── Language Toggle ────────────────────────────────────
   function initLang() {
     let currentLang = localStorage.getItem('gsp_lang') || 'nl';
@@ -82,11 +90,20 @@ const GSP_WHATSAPP = '31617913965';
       if (fill) fill.style.width = progress + '%';
     }, 120);
 
+    let dismissed = false;
+    const dismiss = () => {
+      if (dismissed) return;
+      dismissed = true;
+      clearInterval(interval);
+      if (fill) fill.style.width = '100%';
+      setTimeout(() => preloader.classList.add('hidden'), 200);
+    };
+
     window.addEventListener('load', () => {
       clearInterval(interval);
       const finish = () => {
         if (fill) fill.style.width = '100%';
-        setTimeout(() => preloader.classList.add('hidden'), 300);
+        setTimeout(() => { dismissed = true; preloader.classList.add('hidden'); }, 300);
       };
       if (progress >= 90) {
         finish();
@@ -102,13 +119,10 @@ const GSP_WHATSAPP = '31617913965';
       }
     });
 
-    setTimeout(() => {
-      clearInterval(interval);
-      if (!preloader.classList.contains('hidden')) {
-        if (fill) fill.style.width = '100%';
-        setTimeout(() => preloader.classList.add('hidden'), 200);
-      }
-    }, 5000);
+    // Never let the preloader sit on top of content: dismiss unconditionally
+    // if resources stall or a script errors before 'load' fires.
+    window.addEventListener('error', dismiss);
+    setTimeout(dismiss, 2500);
   }
 
   // ── Hamburger Menu ─────────────────────────────────────
@@ -145,6 +159,18 @@ const GSP_WHATSAPP = '31617913965';
 
   // ── Scroll Animations ──────────────────────────────────
   function initScrollAnimations() {
+    const SELECTOR = '.fade-in, .fade-in-left, .fade-in-right';
+    const revealAll = () => {
+      document.querySelectorAll(SELECTOR).forEach(el => el.classList.add('visible'));
+    };
+
+    // No IntersectionObserver support: just show everything — visible is the
+    // only acceptable failure mode.
+    if (!('IntersectionObserver' in window)) {
+      revealAll();
+      return;
+    }
+
     const observer = new IntersectionObserver((entries) => {
       entries.forEach(entry => {
         if (entry.isIntersecting) {
@@ -154,9 +180,34 @@ const GSP_WHATSAPP = '31617913965';
       });
     }, { threshold: 0.1, rootMargin: '0px 0px -40px 0px' });
 
-    document.querySelectorAll('.fade-in, .fade-in-left, .fade-in-right').forEach(el => {
-      observer.observe(el);
-    });
+    const observeAll = () => {
+      document.querySelectorAll(SELECTOR).forEach(el => {
+        if (el.classList.contains('visible')) return;
+        // Already in the viewport on load — reveal immediately instead of
+        // waiting on a trigger that may never re-fire for it.
+        const r = el.getBoundingClientRect();
+        if (r.top < window.innerHeight && r.bottom > 0) {
+          el.classList.add('visible');
+          return;
+        }
+        observer.observe(el);
+      });
+    };
+    observeAll();
+
+    // Content added dynamically after this ran (job cards, blog cards, etc.)
+    // still needs to be picked up.
+    const mo = new MutationObserver(() => observeAll());
+    mo.observe(document.body, { childList: true, subtree: true });
+
+    // Hard fallback: whatever hasn't revealed by itself gets revealed anyway.
+    // Covers a trigger that never fires (short pages, stalled layout, slow
+    // fonts/API) so content is never stuck invisible.
+    setTimeout(() => {
+      observer.disconnect();
+      mo.disconnect();
+      revealAll();
+    }, 1500);
   }
 
   // ── FAQ Accordion ──────────────────────────────────────
@@ -349,7 +400,7 @@ const GSP_WHATSAPP = '31617913965';
     async function fetchJobs() {
       showLoading();
       try {
-        const res = await fetch(`${API}/api/public/jobs`);
+        const res = await fetchTimeout(`${API}/api/public/jobs`);
         if (res.ok) {
           const data = await res.json();
           if (Array.isArray(data) && data.length > 0) {
@@ -491,7 +542,7 @@ const GSP_WHATSAPP = '31617913965';
     const grid = $('homeVacanciesGrid');
     if (!section || !grid) return; // safe no-op on other pages
 
-    fetch(`${API}/api/public/jobs`)
+    fetchTimeout(`${API}/api/public/jobs`)
       .then(res => {
         if (!res.ok) throw new Error('bad response');
         return res.json();
@@ -638,7 +689,7 @@ const GSP_WHATSAPP = '31617913965';
 
       // Try API first
       try {
-        const res = await fetch(
+        const res = await fetchTimeout(
           `${API}/api/v1/public/salary-data?role_title=${encodeURIComponent(role)}&seniority=${level}&location=${encodeURIComponent(location)}`
         );
         if (res.ok) {
@@ -960,7 +1011,7 @@ const GSP_WHATSAPP = '31617913965';
     const token = Auth.getToken();
     if (!token) return;
 
-    fetch(`${API}/api/v1/admin/dashboard`, {
+    fetchTimeout(`${API}/api/v1/admin/dashboard`, {
       headers: { 'Authorization': 'Bearer ' + token }
     })
       .then(r => {
@@ -1105,8 +1156,18 @@ const GSP_WHATSAPP = '31617913965';
 
     document.body.appendChild(banner);
 
+    // Reserve space so the fixed banner never sits on top of a tap target
+    // (e.g. a job card CTA) at the bottom of the page.
+    const applyBodyOffset = () => {
+      document.body.style.paddingBottom = banner.offsetHeight + 'px';
+    };
+    applyBodyOffset();
+    window.addEventListener('resize', applyBodyOffset);
+
     $('cookieConsentAccept')?.addEventListener('click', () => {
       localStorage.setItem(CONSENT_KEY, 'true');
+      window.removeEventListener('resize', applyBodyOffset);
+      document.body.style.paddingBottom = '';
       banner.remove();
     });
   }
@@ -1176,7 +1237,7 @@ const GSP_WHATSAPP = '31617913965';
       return;
     }
 
-    fetch(`${Auth.API}/auth/me`, { headers: { 'Authorization': `Bearer ${token}` } })
+    fetchTimeout(`${Auth.API}/auth/me`, { headers: { 'Authorization': `Bearer ${token}` } })
       .then((res) => {
         if (!res.ok) throw new Error('Failed to fetch profile');
         return res.json();
