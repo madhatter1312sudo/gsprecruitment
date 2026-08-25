@@ -1,0 +1,54 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  backend:
+    name: Backend (Python)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+          cache-dependency-path: talent-os/backend/requirements.txt
+
+      - name: Install backend dependencies
+        run: pip install -r talent-os/backend/requirements.txt
+
+      - name: Compile / import sanity check
+        run: python -m compileall talent-os/backend
+
+      # scripts/check_api_contract.py is pure static analysis (regex over the
+      # backend router files and the website's frontend JS/HTML) -- it does
+      # not hit the live API and needs no secrets, so it's safe to run in CI.
+      - name: API contract check (frontend calls vs backend routes)
+        run: python3 scripts/check_api_contract.py
+
+  mobile:
+    name: Mobile (Expo/TypeScript)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: app/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npx tsc --noEmit
+
+      - name: Unit tests
+        run: npm test -- --ci
