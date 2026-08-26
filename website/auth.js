@@ -57,7 +57,14 @@ const Auth = {
     if (returnTo && typeof returnTo.focus === 'function') returnTo.focus();
   },
 
-  /* ---- Get stored token ---- */
+  /* ---- Get stored token ----
+     NB (test-trap): both this and getUser() below return null whenever
+     hasCookieConsent() is false, regardless of what's actually in
+     localStorage — so a missing/false gsp_cookie_consent effectively logs
+     the visitor out even with a valid stored token/user. When
+     injecting a synthetic session for testing (e.g. portal screenshots),
+     gsp_cookie_consent must be set to 'true' or the session silently
+     reads as logged-out. */
   getToken() {
     if (!this.hasCookieConsent()) return null;
     return localStorage.getItem(this.TOKEN_KEY);

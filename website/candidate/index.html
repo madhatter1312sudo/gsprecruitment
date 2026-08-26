@@ -10,7 +10,7 @@
   <link rel="icon" type="image/x-icon" href="../favicon.ico">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Newsreader:opsz,wght@6..72,400;6..72,500;6..72,600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" crossorigin="anonymous" referrerpolicy="no-referrer">
   <link rel="stylesheet" href="../theme.css">
   <link rel="stylesheet" href="../styles.css">
@@ -156,8 +156,9 @@
     }
 
     .portal-header h1 {
-      font-size: var(--font-size-xl);
-      font-weight: 700;
+      font-family: var(--font-display);
+      font-size: 1.6rem;
+      font-weight: 500;
       color: var(--white);
     }
 
@@ -210,18 +211,18 @@
     }
 
     .match-score {
-      width: 56px;
-      height: 56px;
-      border-radius: 50%;
-      display: flex;
+      display: inline-flex;
       align-items: center;
       justify-content: center;
-      font-weight: 800;
-      font-size: var(--font-size-sm);
+      padding: 4px 10px;
+      border-radius: 2px;
+      font-family: var(--font-mono);
+      font-weight: 500;
+      font-size: 0.78rem;
       flex-shrink: 0;
-      background: rgba(250, 200, 0, 0.1);
-      color: var(--gold-500);
-      border: 2px solid rgba(250, 200, 0, 0.3);
+      background: var(--gold-500);
+      color: var(--navy-900);
+      white-space: nowrap;
     }
 
     .match-info {
@@ -1229,7 +1230,7 @@
             const salary = m.salary_min && m.salary_max ? `€${m.salary_min/1000}K – €${m.salary_max/1000}K` : '';
             const location = m.location ? ` — ${m.location}` : '';
             return `<div class="match-card">
-              <div class="match-score">${score}%</div>
+              <div class="match-score">Match ${score}</div>
               <div class="match-info">
                 <h4>${m.job_title || 'Job'}</h4>
                 <p class="match-company">${m.company_name || ''}${location}</p>
@@ -1446,7 +1447,7 @@
           const salary = m.salary_min && m.salary_max ? `€${m.salary_min/1000}K – €${m.salary_max/1000}K` : '';
           const location = m.location ? ` — ${m.location}` : '';
           return `<div class="match-card">
-            <div class="match-score">${score}%</div>
+            <div class="match-score">Match ${score}</div>
             <div class="match-info">
               <h4>${m.job_title || 'Job'}</h4>
               <p class="match-company">${m.company_name || ''}${location}</p>

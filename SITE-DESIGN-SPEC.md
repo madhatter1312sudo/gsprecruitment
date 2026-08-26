@@ -1,11 +1,11 @@
 # GSP Recruitment — Complete Site Architecture & Design Specification
 
-> **Brand**: GSP Recruitment  
-> **Tagline**: Founder-Led Recruitment — Built by Engineers, for Engineers  
+> **Brand**: GSP Recruitment — faceless agency voice ("wij", never a founder name)  
+> **Tagline**: Tech & IT-recruitment specialist — Brainport Eindhoven  
 > **Region**: Brainport Eindhoven (High-Tech Corridor, Netherlands)  
-> **Audience**: Mid–Senior Embedded, C++, Mechatronics, FPGA & Cybersecurity Engineers; High-Tech Hiring Managers  
-> **Version**: 1.0 — Enterprise-Grade Specification  
-> **Date**: June 2026
+> **Audience**: Embedded, C++, cloud/DevOps, data, mechatronics, cybersecurity & IT professionals; Dutch tech employers  
+> **Version**: 2.0 — Newsreader/Plex redesign  
+> **Date**: August 2026
 
 ---
 
@@ -32,9 +32,8 @@
 | Element | Value |
 |---|---|
 | Agency name | GSP Recruitment |
-| Founder | Gijs van den Berg |
-| Voice | Technical, warm, direct, founder-led |
-| Languages | English (primary), Dutch (NL) |
+| Voice | Faceless — "wij", never a founder name or photo; NRC/FD register: plain, direct, zero hype |
+| Languages | Dutch (primary), English toggle |
 | Logo | Golden yellow "G" icon on dark bg; full wordmark "GSP Recruitment" |
 
 ### 1.2 Color Palette
@@ -55,15 +54,15 @@
 
 #### Accent — GOLD (`colors_gold`)
 ```
---gold-500:  #FAC800     (primary accent — buttons, highlights, links)
+--gold-500:  #FAC800     (primary accent — the single primary CTA per page, active nav underline, eyebrows, arrows)
 --gold-400:  #FBD74A     (hover, lighter accents)
 --gold-300:  #FCE488     (subtle backgrounds, badges)
---gold-600:  #D4A800     (active, pressed states)
+--gold-600:  #D4A800     (eyebrow/link text on light backgrounds, active/pressed states)
 --gold-700:  #AD8800     (deep accent, decorative borders)
---gold-glow: rgba(250, 200, 0, 0.35)  (glow/shadow tokens)
+--gold-glow: rgba(250, 200, 0, 0.28)  (glow/shadow tokens)
 ```
 
-> **Note**: The current codebase uses orange (`#f97316`). All orange tokens in the existing CSS must be replaced with the gold equivalents above. The gradient in the existing hero highlight (`#fbbf24`) is retained as a secondary highlight but gold becomes the primary brand color.
+> **Rule**: gold is reserved for the single primary action per page plus small accents (eyebrows, the active nav underline, arrows/chevrons). It is never used as a background fill for cards, sections, or secondary buttons — those stay navy-on-white or outline/ghost.
 
 #### Neutrals (`colors_neutral`)
 ```
@@ -92,10 +91,13 @@
 
 ### 1.3 Typography
 
+Three-family system, loaded via Google Fonts (`Newsreader:opsz,wght@6..72,400;6..72,500;6..72,600` + `IBM+Plex+Sans:wght@400;500;600` + `IBM+Plex+Mono:wght@400;500`):
+
 | Token | Value | Usage |
 |---|---|---|
-| Font family | `'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif` | All UI |
-| Monospace (code) | `'JetBrains Mono', 'Fira Code', monospace` | Salary tables, technical data |
+| Display / serif | `'Newsreader', Georgia, 'Times New Roman', serif` | All headings (h1–h3), hero headlines, werkwijze step numerals, portal greetings. Weight 500 (600 for the wordmark only) — never the old bold/negative-letter-spacing treatment. |
+| Body / UI | `'IBM Plex Sans', 'Segoe UI', system-ui, -apple-system, sans-serif` | Body copy, nav, buttons, form fields. |
+| Monospace | `'IBM Plex Mono', ui-monospace, 'SF Mono', Menlo, monospace` | Eyebrows (uppercase, letter-spacing 0.12–0.14em), salary figures, mono chips/pill tags (Hybride, Senior, location), KPI numerals, timestamps. |
 | --font-size-xs | 0.75rem (12px) | Captions, metadata |
 | --font-size-sm | 0.875rem (14px) | Body small, nav items |
 | --font-size-base | 1rem (16px) | Body text |
@@ -106,6 +108,8 @@
 | --font-size-4xl | 2.5rem (40px) | Page headings |
 | --font-size-5xl | 3.25rem (52px) | Hero headline |
 | --font-size-6xl | 4rem (64px) | Dashboard hero stats |
+
+Radius: flat 3px on buttons and cards site-wide (`--radius`/`--radius-sm`/`--radius-xs: 3px`); `--radius-full` (999px) is reserved for pill chips/badges only.
 
 ### 1.4 Spacing System
 
@@ -192,34 +196,19 @@ Auth flow: Email + password, Google OAuth, LinkedIn OAuth. JWT-based with refres
 
 ### 3.1 Current State
 
-The existing `index.html` already has a complete single-page landing with:
-- Fixed header with nav + language toggle (EN/NL)
-- Hero with badge, headline, subtext, dual CTA, stats counter, specialisation card
-- Services (6-card grid)
-- About (founder bio, values)
-- Salary data table + lead magnet form
-- Case studies (3 cards)
-- Testimonials (3 cards)
-- CTA section
-- Contact form + info
-- Footer + WhatsApp floating button
+`index.html` is a complete single-page landing (as of the August 2026 Newsreader/Plex redesign):
+- Fixed dark-navy header with nav, audience quick-switch, and language toggle (EN/NL)
+- Dark hero (`.page-hero`) with mono eyebrow, serif headline, two audience "choice cards" (gold/navy top border), trust strip, thin concentric-circle decoration
+- Ecosystem/partner logo strip (mono pill badges)
+- Expertise grid (8-card, flat bordered cards, gold line-icons)
+- Live vacancies preview (mono chips + salary, pulled from `/api/public/jobs`)
+- Werkwijze: numbered steps (serif gold numerals over a navy top rule) — 5 steps, not the 4 shown in the mockup artboards
+- Case studies, "commitments" trust badges, dark CTA band, 4-column footer
+- No founder bio anywhere on the site — the "About us" page speaks as "wij"
 
-### 3.2 Required Upgrades
+### 3.2 Redesign status (August 2026)
 
-| Component | Current | Upgrade |
-|---|---|---|
-| **Color accent** | Orange (`#f97316`) | GOLD (`#FAC800`) — replace all orange tokens |
-| **Hero animation** | Static | Particle grid + animated gold gradient orbs |
-| **Stats** | Static numbers | Animated counter on scroll |
-| **Specialisation card** | Static grid | Interactive hover with tech-stack tags |
-| **Salary table** | Static HTML | Interactive chart (Chart.js/Recharts) with role/level filters |
-| **Lead magnet** | Simple email form | Registration modal trigger (see §4) |
-| **Case studies** | 3 cards | Expandable with modal detail view |
-| **Testimonials** | Carousel (grid) | True carousel with navigation dots + auto-rotate |
-| **Contact form** | Basic POST | Multi-route: candidate / client / general |
-| **Blog preview** | Missing | Latest 3 articles from CMS |
-| **SEO** | Basic meta | JSON-LD structured data (Organization, JobPosting, FAQ) |
-| **PWA** | None | Service worker for offline-capable loading |
+The visual system described in §1.2–§1.3 (Newsreader/Plex fonts, flat 3px radius, gold reserved for the primary CTA) is implemented across the homepage, vacatures/vacature, kandidaten (signup split), the candidate portal, and — as a font/token pass on top of vendored Tabler — the admin panel. Not yet built (tracked separately, no invented ship dates): animated hero particles/counters, an interactive salary chart component (the salary table is still static HTML), a true auto-rotating testimonial carousel, expandable case-study modals, multi-route contact form, and PWA/service-worker support.
 
 ### 3.3 New Sections to Add
 
@@ -1327,16 +1316,20 @@ ADMIN
 6. **Keyboard accessibility**: All portal features work without a mouse. Tab order, aria labels, focus management.
 7. **Zero cold outreach promise**: The warm introduction ethos is reflected in every touchpoint — no aggressive popups, no spam.
 
-## Appendix B: Existing Code Migration Requirements
+## Appendix B: Design system implementation notes (August 2026)
 
-When upgrading the current `index.html` / `styles.css` / `script.js`:
+The Newsreader/Plex redesign is implemented as a token-and-component-class change in the existing files, not a rebuild:
 
-| File | Required Changes |
+| File | What changed |
 |---|---|
-| `styles.css` | Replace all `--orange-*` tokens with `--gold-*` tokens (see §1.2). Update `.btn-primary`, `.section-label`, `.hero h1 .highlight`, `.nav-link::after`, `.lang-btn.active`, `.hero-badge`, `.service-icon`, `.service-card::before` etc. |
-| `styles.css` | Add dashboard/portal layout styles (sidebar, kanban, metric cards, data tables, charts) |
-| `index.html` | Add auth modal markup, dashboard page templates, client portal templates |
-| `script.js` | Add dashboard interactivity (drag-drop pipeline, chart rendering, match score display), registration modal logic (multi-step wizard), client-side routing for portal pages |
+| `website/styles.css` | `:root` now carries the full canonical navy scale + gold scale from §1.2, plus `--font`/`--font-display`/`--font-mono` (Plex Sans / Newsreader / Plex Mono). Legacy variable names (`--gold`, `--navy`, `--text`, etc.) are kept as aliases pointing at the new values so most component rules didn't need renaming. `.header`, `.page-hero`, `.choice-card`, `.trust-strip`, `.job-card`, `.vac-card`, `.eco-badge`, `#process .story-card` (werkwijze numerals) were restyled to the artboards; radius tokens flattened to 3px. |
+| `website/theme.css` | `--font-primary`/`--font-mono` updated to Plex Sans/Plex Mono, `--font-display` (Newsreader) added — read by the candidate/client portals. |
+| `website/kandidaten.html` | Top `.page-hero` replaced with a `.signup-split` two-column layout (dark value-prop panel + light form card) per the Aanmelden artboard; the primary CTA (`#registerBtn`) opens the existing registration modal — no new auth logic. |
+| `website/candidate/index.html`, `website/portal.css` | Match-score badges now read "Match NN" in mono instead of a percentage circle; portal header title set to the display serif. Sidebar/gold-active-state styling was already on-brand via `theme.css` tokens. |
+| `website/admin/index.html` | Font tokens and the Tabler brand-color override (`--tblr-primary`) updated to the canonical gold; headings and KPI numerals set to serif/mono. The vendored Tabler theme itself was not touched. |
+| All other pages (werkgevers, werkwijze, over-ons, contact, blog, privacy, 404, vacature) | No page-specific CSS existed for header/hero/footer — they inherit the new look automatically via the shared `.header`/`.page-hero`/`.eyebrow`/`.footer` classes in `styles.css`. |
+| Google Fonts `<link>` (all pages) | Swapped from Inter+Fraunces to `Newsreader:opsz,wght@6..72,400;6..72,500;6..72,600` + `IBM+Plex+Sans:wght@400;500;600` + `IBM+Plex+Mono:wght@400;500`. |
+| Logos | Header/preloader now use `logo.png` (light wordmark) everywhere, since the header is dark navy on every page, not `logo-dark.png` (dark wordmark, footer/print use only). |
 
 ---
 
