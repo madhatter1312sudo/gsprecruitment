@@ -56,8 +56,12 @@ const Admin = {
   // breakout but not a javascript:/data: scheme, so whitelist http(s) only.
   safeUrl(s) {
     if (!s) return '';
+    let v = String(s).trim();
+    // Sourced-pipeline rows may hold bare domains ("linkedin.com/in/x") —
+    // treat those as https rather than resolving against a dummy base.
+    if (!/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(v)) v = 'https://' + v;
     try {
-      const u = new URL(String(s).trim(), 'https://invalid.example');
+      const u = new URL(v);
       if (u.protocol === 'http:' || u.protocol === 'https:') return u.href;
     } catch { /* unparseable -> drop */ }
     return '';

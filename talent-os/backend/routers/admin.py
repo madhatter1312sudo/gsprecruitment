@@ -1,9 +1,9 @@
 """
-import json
 Talent OS — Admin Portal Router (JWT-protected, role='admin').
 Endpoints for platform administration: dashboard, users, jobs, candidates,
 analytics, audit log, content management, system settings.
 """
+import json
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from core.database import fetch_one, fetch_all, execute, fetch_val
 from core.deps import get_current_user, require_role
@@ -473,7 +473,7 @@ async def get_candidate_detail(
         candidate["languages"] = candidate["languages"] or []
         candidate["tags"] = candidate["tags"] or []
         user = await fetch_one(
-            "SELECT id, is_verified FROM users WHERE email = $1 AND deleted_at IS NULL",
+            "SELECT id, is_verified FROM users WHERE LOWER(email) = LOWER($1) AND deleted_at IS NULL",
             candidate["email"],
         )
         candidate["kind"] = "self-registered" if candidate["source"] == "portal_registration" else "sourced"
@@ -502,7 +502,7 @@ async def get_candidate_detail(
         # person (lazy _get_candidate_id(), or a separate sourced entry that
         # shares this email), surface it too -- read-only, no merge.
         candidate = await fetch_one(
-            "SELECT id, status, source FROM candidates WHERE email = $1 AND deleted_at IS NULL",
+            "SELECT id, status, source FROM candidates WHERE LOWER(email) = LOWER($1) AND deleted_at IS NULL",
             user["email"],
         )
         if candidate:
