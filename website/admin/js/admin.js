@@ -113,17 +113,58 @@ const Admin = {
         const pd = await pendingRes.json();
         this.renderPendingRegistrations(pd.items || []);
       }
+
+      // Newest self-registered candidates — the owner should see someone
+      // like a same-day sign-up here without having to open the Candidates
+      // tab and apply the kind filter themselves.
+      const newRegRes = await Auth.fetch('/v1/admin/candidates?kind=self-registered&limit=5&offset=0');
+      if (newRegRes?.ok) {
+        const nd = await newRegRes.json();
+        const items = (nd.items || []).slice().sort((a, b) => new Date(b.created_at) - new Date(a.created_at)).slice(0, 5);
+        this.renderNewRegistrations(items);
+      } else {
+        this.setContainerLoadError(document.getElementById('newRegistrationsList'), () => this.loadDashboard());
+      }
     } catch (err) {
       console.error('Dashboard load error:', err);
       this.setContainerLoadError(document.getElementById('recentActivityList'), () => this.loadDashboard());
       this.setContainerLoadError(document.getElementById('pendingRegistrationsList'), () => this.loadDashboard());
+      this.setContainerLoadError(document.getElementById('newRegistrationsList'), () => this.loadDashboard());
     }
+  },
+
+  renderNewRegistrations(items) {
+    const el = document.getElementById('newRegistrationsList');
+    const badge = document.getElementById('newRegBadge');
+    if (badge) badge.textContent = items.length || '0';
+    if (!el) return;
+    if (!items.length) {
+      el.innerHTML = `<div style="color:var(--navy-300);font-size:var(--font-size-sm);padding:0.5rem 0;">
+        Nog geen zelf geregistreerde kandidaten. Nieuwe registraties via het kandidatenportaal verschijnen hier automatisch.
+      </div>`;
+      return;
+    }
+    el.innerHTML = items.map(c => `
+      <div class="activity-item">
+        <div class="activity-icon" style="background:rgba(74,222,128,0.12);color:#4ade80;"><i class="fa-regular fa-user-plus"></i></div>
+        <div class="activity-content" style="flex:1;min-width:0;">
+          <div class="activity-text" style="font-weight:500;color:var(--white);">
+            ${this.esc(c.full_name || c.email || 'Onbekend')}
+            ${c.is_verified ? '<i class="fa-regular fa-circle-check ms-1" style="color:#4ade80;" title="Geverifieerd"></i>' : ''}
+          </div>
+          <div class="activity-text" style="color:var(--navy-300);">${this.esc(c.current_title || '—')}${c.location ? ' · ' + this.esc(c.location) : ''}</div>
+          <div class="activity-time">${this.timeAgo(c.created_at)}</div>
+        </div>
+        <button class="btn btn-sm btn-ghost-secondary" onclick="Admin.viewCandidate('self-registered', ${c.user_id ?? c.id})" style="flex-shrink:0;" title="Profiel bekijken">
+          <i class="fa-regular fa-eye"></i>
+        </button>
+      </div>`).join('');
   },
 
   renderRecentActivity(items) {
     const el = document.getElementById('recentActivityList');
     if (!el) return;
-    if (!items.length) { el.innerHTML = '<div style="color:var(--navy-300);font-size:var(--font-size-sm);padding:1rem 0;">No recent activity</div>'; return; }
+    if (!items.length) { el.innerHTML = '<div style="color:var(--navy-300);font-size:var(--font-size-sm);padding:1rem 0;">Nog geen activiteit.</div>'; return; }
     const icons = { user_update: 'fa-user-pen', user_delete: 'fa-user-xmark', impersonate: 'fa-mask',
       job_update: 'fa-briefcase', content_update: 'fa-newspaper', settings_update: 'fa-gear',
       placement: 'fa-calendar-check' };
@@ -144,7 +185,7 @@ const Admin = {
     const badge = document.getElementById('pendingBadge');
     if (badge) badge.textContent = items.length || '0';
     if (!el) return;
-    if (!items.length) { el.innerHTML = '<div style="color:var(--navy-300);font-size:var(--font-size-sm);padding:0.5rem 0;">No pending registrations</div>'; return; }
+    if (!items.length) { el.innerHTML = '<div style="color:var(--navy-300);font-size:var(--font-size-sm);padding:0.5rem 0;">Geen openstaande verificaties.</div>'; return; }
     el.innerHTML = items.map(u => `
       <div class="activity-item">
         <div class="activity-icon" style="background:rgba(250,200,0,0.1);color:var(--gold-500);"><i class="fa-regular fa-user-plus"></i></div>
@@ -211,7 +252,7 @@ const Admin = {
     const tbody = document.querySelector('#section-users table tbody');
     if (!tbody) return;
     const items = data.items || [];
-    if (!items.length) { this.setEmpty('#section-users table tbody', 6, 'No users found'); return; }
+    if (!items.length) { this.setEmpty('#section-users table tbody', 6, 'Geen gebruikers gevonden voor deze filters.'); return; }
     tbody.innerHTML = items.map(u => `
       <tr>
         <td style="font-weight:600;color:var(--white);">${this.esc(u.full_name || '—')}</td>
@@ -357,7 +398,7 @@ const Admin = {
     const tbody = document.querySelector('#section-jobs table tbody');
     if (!tbody) return;
     const items = data.items || [];
-    if (!items.length) { this.setEmpty('#section-jobs table tbody', 5, 'No jobs found'); return; }
+    if (!items.length) { this.setEmpty('#section-jobs table tbody', 5, 'Nog geen vacatures. Vacatures die klanten aanleveren verschijnen hier voor goedkeuring.'); return; }
     tbody.innerHTML = items.map(j => `
       <tr>
         <td style="font-weight:600;color:var(--white);">${this.esc(j.title || 'Untitled')}</td>
@@ -421,10 +462,11 @@ const Admin = {
     const offset = ((this._currentPage.candidates || 1) - 1) * limit;
     if (params.search) qs.set('search', params.search);
     if (params.status) qs.set('status', params.status);
+    if (params.kind) qs.set('kind', params.kind);
     qs.set('limit', limit);
     qs.set('offset', offset);
 
-    this.setLoading('#section-candidates table tbody', 6);
+    this.setLoading('#section-candidates table tbody', 8);
     try {
       const res = await Auth.fetch(`/v1/admin/candidates?${qs}`);
       if (!res) return;
@@ -437,18 +479,35 @@ const Admin = {
         this.loadCandidates(params);
       });
     } catch (err) {
-      this.setEmpty('#section-candidates table tbody', 6, 'Failed to load candidates');
+      this.setLoadError('#section-candidates table tbody', 8, () => this.loadCandidates(params));
     }
+  },
+
+  // "sourced" (blue) came in via our own search/outreach pipeline;
+  // "self-registered" (green) signed up on the candidate portal themselves.
+  kindBadge(kind) {
+    if (kind === 'self-registered') return { cls: 'badge bg-green-lt', label: 'Zelf geregistreerd' };
+    return { cls: 'badge bg-blue-lt', label: 'Gesourced' };
   },
 
   renderCandidates(data) {
     const tbody = document.querySelector('#section-candidates table tbody');
     if (!tbody) return;
     const items = data.items || [];
-    if (!items.length) { this.setEmpty('#section-candidates table tbody', 6, 'No candidates found'); return; }
-    tbody.innerHTML = items.map(c => `
+    if (!items.length) {
+      this.setEmpty('#section-candidates table tbody', 8,
+        'Geen kandidaten gevonden voor deze filters. Pas de zoekopdracht of het type-filter aan.');
+      return;
+    }
+    tbody.innerHTML = items.map(c => {
+      const kb = this.kindBadge(c.kind);
+      const itemId = c.kind === 'self-registered' ? (c.user_id ?? c.id) : (c.candidate_id ?? c.id);
+      return `
       <tr>
-        <td style="font-weight:600;color:var(--white);">${this.esc(c.full_name || '—')}</td>
+        <td style="font-weight:600;color:var(--white);">
+          ${this.esc(c.full_name || '—')}
+          ${c.is_verified ? '<i class="fa-regular fa-circle-check ms-1" style="color:#4ade80;" title="Geverifieerd"></i>' : '<i class="fa-regular fa-circle-dashed ms-1" style="color:var(--navy-300);" title="Niet geverifieerd"></i>'}
+        </td>
         <td style="color:var(--navy-200);font-size:var(--font-size-xs);">${this.esc(c.email)}</td>
         <td>${this.esc(c.current_title || '—')}</td>
         <td style="text-align:center;">${c.years_experience ? c.years_experience + ' yrs' : '—'}</td>
@@ -456,48 +515,179 @@ const Admin = {
           <span title="Matches">${c.match_count ?? 0}</span>
           ${c.placement_count ? ` / <span style="color:#4ade80;" title="Placed">${c.placement_count} placed</span>` : ''}
         </td>
+        <td><span class="${kb.cls}" title="${c.source ? 'Bron: ' + this.esc(c.source) : ''}">${kb.label}</span></td>
         <td>
           <span class="${this.badge(c.status || 'active')}">${this.esc(c.status || 'active')}</span>
         </td>
         <td>
-          <button class="btn btn-sm btn-ghost-secondary" onclick="Admin.viewCandidate(${c.id})" title="View profile">
+          <button class="btn btn-sm btn-ghost-secondary" onclick="Admin.viewCandidate('${c.kind === 'self-registered' ? 'self-registered' : 'sourced'}', ${itemId})" title="View profile">
             <i class="fa-regular fa-eye"></i>
           </button>
         </td>
-      </tr>`).join('');
+      </tr>`;
+    }).join('');
   },
 
-  viewCandidate(candidateId) {
-    const c = (this._data.candidates?.items || []).find(x => x.id === candidateId);
-    if (!c) return;
-    const skills = Array.isArray(c.skills) ? c.skills.join(', ') : (c.skills || '—');
+  /* ---- Candidate detail modal (kind-aware) ---- */
+  async viewCandidate(kind, itemId) {
     this.openModal('viewCandidateModal', `
-      <h3 style="color:var(--white);margin-bottom:var(--space-lg);">${this.esc(c.full_name)}</h3>
+      <div style="text-align:center;padding:2rem 0;color:var(--navy-300);">
+        <i class="fa-regular fa-spinner fa-spin"></i> Laden…
+      </div>`);
+    try {
+      const res = await Auth.fetch(`/v1/admin/candidates/${kind}/${itemId}`);
+      if (!res?.ok) {
+        const d = await res?.json().catch(() => null);
+        this.openModal('viewCandidateModal', `
+          <h3 style="color:var(--white);margin-bottom:var(--space-md);">Kon profiel niet laden</h3>
+          <p style="color:var(--navy-300);">${this.esc(d?.detail || 'Er ging iets mis bij het ophalen van dit profiel.')}</p>
+          <div style="display:flex;gap:var(--space-md);margin-top:var(--space-lg);">
+            <button class="btn btn-primary btn-sm" onclick="Admin.viewCandidate('${kind}', ${itemId})">Opnieuw proberen</button>
+            <button class="btn btn-ghost-secondary btn-sm" onclick="Admin.closeModal()">Sluiten</button>
+          </div>`);
+        return;
+      }
+      const detail = await res.json();
+      this.renderCandidateDetailModal(kind, itemId, detail);
+    } catch {
+      this.openModal('viewCandidateModal', `
+        <h3 style="color:var(--white);margin-bottom:var(--space-md);">Netwerkfout</h3>
+        <p style="color:var(--navy-300);">Kon geen verbinding maken met de server.</p>
+        <div style="display:flex;gap:var(--space-md);margin-top:var(--space-lg);">
+          <button class="btn btn-primary btn-sm" onclick="Admin.viewCandidate('${kind}', ${itemId})">Opnieuw proberen</button>
+          <button class="btn btn-ghost-secondary btn-sm" onclick="Admin.closeModal()">Sluiten</button>
+        </div>`);
+    }
+  },
+
+  // The detail endpoint's exact response shape depends on kind (a user +
+  // candidate_profiles record for self-registered, a candidates row +
+  // linked user for sourced). Flatten every nested object we might get
+  // (user / profile / candidate_profile / candidate) onto one bag so the
+  // renderer below doesn't have to guess which container a field lives in.
+  _flattenDetail(detail) {
+    const merged = {};
+    const layer = (obj) => { if (obj && typeof obj === 'object') Object.assign(merged, obj); };
+    layer(detail);
+    layer(detail.user);
+    layer(detail.candidate);
+    layer(detail.candidate_profile);
+    layer(detail.profile);
+    return merged;
+  },
+
+  _pick(obj, ...keys) {
+    for (const k of keys) {
+      if (obj[k] !== undefined && obj[k] !== null && obj[k] !== '') return obj[k];
+    }
+    return null;
+  },
+
+  renderCandidateDetailModal(kind, itemId, detail) {
+    const d = this._flattenDetail(detail);
+    const p = this._pick.bind(this, d);
+    const esc = this.esc.bind(this);
+
+    const fullName = p('full_name', 'name') || 'Onbekend';
+    const email = p('email');
+    const phone = p('phone', 'phone_number');
+    const linkedin = p('linkedin_url', 'linkedin');
+    const github = p('github_url', 'github');
+    const portfolio = p('portfolio_url', 'website_url', 'website', 'portfolio');
+    const skills = Array.isArray(d.skills) ? d.skills : (typeof d.skills === 'string' && d.skills ? d.skills.split(',').map(s => s.trim()) : []);
+    const languages = Array.isArray(d.languages) ? d.languages : (typeof d.languages === 'string' && d.languages ? d.languages.split(',').map(s => s.trim()) : []);
+    const salaryMin = p('salary_expectation_min', 'salary_min', 'desired_salary_min');
+    const salaryMax = p('salary_expectation_max', 'salary_max', 'desired_salary_max');
+    const salarySingle = p('salary_expectation', 'desired_salary');
+    const notice = p('notice_period_days', 'notice_period', 'notice_period_weeks');
+    const relocationRaw = this._pick(d, 'willing_to_relocate', 'relocation', 'relocation_willing', 'open_to_relocation');
+    const education = p('education', 'education_level');
+    const cvText = p('cv_text');
+    const cvFilePath = p('cv_file_path');
+    const kb = this.kindBadge(kind);
+
+    const chips = (arr, color) => arr.length
+      ? `<div style="display:flex;flex-wrap:wrap;gap:6px;">${arr.map(s => `<span class="badge" style="background:${color};color:var(--white);font-weight:500;">${esc(s)}</span>`).join('')}</div>`
+      : '<div style="color:var(--navy-300);">—</div>';
+
+    const field = (label, value) => `
+      <div><div style="font-size:var(--font-size-xs);color:var(--navy-300);margin-bottom:4px;">${esc(label)}</div><div>${value}</div></div>`;
+
+    let salaryDisplay = '—';
+    if (salaryMin || salaryMax) {
+      salaryDisplay = `€${esc(salaryMin ?? '?')} – €${esc(salaryMax ?? '?')}`;
+    } else if (salarySingle) {
+      salaryDisplay = `€${esc(salarySingle)}`;
+    }
+
+    let relocationDisplay = '—';
+    if (relocationRaw === true || relocationRaw === 'true' || relocationRaw === 'yes') relocationDisplay = 'Ja';
+    else if (relocationRaw === false || relocationRaw === 'false' || relocationRaw === 'no') relocationDisplay = 'Nee';
+    else if (relocationRaw) relocationDisplay = esc(relocationRaw);
+
+    const contactLinks = [
+      email ? `<a href="mailto:${esc(email)}" class="btn btn-sm btn-ghost-secondary"><i class="fa-regular fa-envelope me-1"></i>${esc(email)}</a>` : '',
+      linkedin ? `<a href="${esc(linkedin)}" target="_blank" rel="noopener" class="btn btn-sm btn-ghost-secondary"><i class="fa-brands fa-linkedin me-1"></i>LinkedIn</a>` : '',
+      github ? `<a href="${esc(github)}" target="_blank" rel="noopener" class="btn btn-sm btn-ghost-secondary"><i class="fa-brands fa-github me-1"></i>GitHub</a>` : '',
+      portfolio ? `<a href="${esc(portfolio)}" target="_blank" rel="noopener" class="btn btn-sm btn-ghost-secondary"><i class="fa-regular fa-globe me-1"></i>Portfolio</a>` : '',
+    ].filter(Boolean).join(' ');
+
+    this.openModal('viewCandidateModal', `
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:var(--space-md);margin-bottom:var(--space-md);">
+        <h3 style="color:var(--white);margin:0;">${esc(fullName)}</h3>
+        <span class="${kb.cls}">${kb.label}</span>
+      </div>
+      ${contactLinks ? `<div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:var(--space-lg);">${contactLinks}</div>` : ''}
+
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:var(--space-md);margin-bottom:var(--space-lg);">
-        <div><div style="font-size:var(--font-size-xs);color:var(--navy-300);margin-bottom:4px;">Email</div><div>${this.esc(c.email)}</div></div>
-        <div><div style="font-size:var(--font-size-xs);color:var(--navy-300);margin-bottom:4px;">Phone</div><div>${this.esc(c.phone || '—')}</div></div>
-        <div><div style="font-size:var(--font-size-xs);color:var(--navy-300);margin-bottom:4px;">Current Title</div><div>${this.esc(c.current_title || '—')}</div></div>
-        <div><div style="font-size:var(--font-size-xs);color:var(--navy-300);margin-bottom:4px;">Company</div><div>${this.esc(c.current_company || '—')}</div></div>
-        <div><div style="font-size:var(--font-size-xs);color:var(--navy-300);margin-bottom:4px;">Experience</div><div>${c.years_experience ? c.years_experience + ' years' : '—'}</div></div>
-        <div><div style="font-size:var(--font-size-xs);color:var(--navy-300);margin-bottom:4px;">Location</div><div>${this.esc(c.location || '—')}</div></div>
-        <div><div style="font-size:var(--font-size-xs);color:var(--navy-300);margin-bottom:4px;">Source</div><div>${this.esc(c.source || '—')}</div></div>
-        <div><div style="font-size:var(--font-size-xs);color:var(--navy-300);margin-bottom:4px;">Status</div><div><span class="${this.badge(c.status)}">${this.esc(c.status || 'active')}</span></div></div>
+        ${field('Phone', esc(phone || '—'))}
+        ${field('Current Title', esc(p('current_title') || '—'))}
+        ${field('Company', esc(p('current_company') || '—'))}
+        ${field('Experience', p('years_experience') ? esc(p('years_experience')) + ' years' : '—')}
+        ${field('Location', esc(p('location') || '—'))}
+        ${field('Source', esc(p('source', 'candidate_source') || '—'))}
+        ${field('Status', `<span class="${this.badge(p('status') || p('candidate_status'))}">${esc(p('status') || p('candidate_status') || (kind === 'self-registered' ? 'new' : 'active'))}</span>`)}
+        ${field('Education', esc(education || '—'))}
+        ${field('Salary expectation', salaryDisplay)}
+        ${field('Notice period', notice ? esc(notice) + ' days' : '—')}
+        ${field('Open to relocation', relocationDisplay)}
+        ${field('Registered', p('created_at') ? this.formatDate(p('created_at')) : '—')}
       </div>
+
       <div style="margin-bottom:var(--space-md);">
-        <div style="font-size:var(--font-size-xs);color:var(--navy-300);margin-bottom:4px;">Skills</div>
-        <div>${this.esc(skills)}</div>
+        <div style="font-size:var(--font-size-xs);color:var(--navy-300);margin-bottom:6px;">Skills</div>
+        ${chips(skills, 'rgba(250,200,0,0.18)')}
       </div>
-      <div style="display:flex;gap:var(--space-md);flex-wrap:wrap;margin-top:var(--space-lg);">
+      <div style="margin-bottom:var(--space-lg);">
+        <div style="font-size:var(--font-size-xs);color:var(--navy-300);margin-bottom:6px;">Languages</div>
+        ${chips(languages, 'rgba(74,111,159,0.25)')}
+      </div>
+
+      <div style="margin-bottom:var(--space-lg);padding:var(--space-md);background:rgba(74,111,159,0.08);border:1px solid rgba(74,111,159,0.18);border-radius:var(--radius-md);">
+        <div style="font-size:var(--font-size-xs);color:var(--navy-300);margin-bottom:6px;"><i class="fa-regular fa-file-lines me-1"></i>CV</div>
+        ${cvFilePath
+          ? `<div style="color:#4ade80;"><i class="fa-regular fa-circle-check me-1"></i>CV geüpload</div>
+             <div style="font-size:var(--font-size-xs);color:var(--navy-300);margin-top:4px;">
+               Het bestand zelf is nog niet downloadbaar vanuit dit paneel — alleen via de geauthenticeerde kandidaatroute.
+             </div>`
+          : `<div style="color:var(--navy-300);">Geen CV geüpload</div>`}
+        ${cvText ? `
+          <div style="margin-top:10px;font-size:var(--font-size-xs);color:var(--navy-300);margin-bottom:4px;">Preview (tekst uit CV)</div>
+          <div style="max-height:160px;overflow-y:auto;font-size:var(--font-size-sm);color:var(--navy-100);white-space:pre-wrap;background:rgba(6,13,26,0.5);border-radius:var(--radius-sm);padding:10px;">${esc(cvText).slice(0, 2000)}${cvText.length > 2000 ? '…' : ''}</div>
+        ` : ''}
+      </div>
+
+      <div style="display:flex;gap:var(--space-md);flex-wrap:wrap;margin-bottom:var(--space-lg);">
         <div style="background:rgba(74,111,159,0.1);border:1px solid rgba(74,111,159,0.2);border-radius:var(--radius-md);padding:var(--space-md) var(--space-lg);text-align:center;flex:1;">
-          <div style="font-size:var(--font-size-xl);font-weight:700;color:var(--gold-500);">${c.match_count ?? 0}</div>
+          <div style="font-size:var(--font-size-xl);font-weight:700;color:var(--gold-500);">${p('match_count') ?? 0}</div>
           <div style="font-size:var(--font-size-xs);color:var(--navy-300);">Matches</div>
         </div>
         <div style="background:rgba(74,111,159,0.1);border:1px solid rgba(74,111,159,0.2);border-radius:var(--radius-md);padding:var(--space-md) var(--space-lg);text-align:center;flex:1;">
-          <div style="font-size:var(--font-size-xl);font-weight:700;color:#4ade80;">${c.placement_count ?? 0}</div>
+          <div style="font-size:var(--font-size-xl);font-weight:700;color:#4ade80;">${p('placement_count') ?? 0}</div>
           <div style="font-size:var(--font-size-xs);color:var(--navy-300);">Placed</div>
         </div>
       </div>
-      <div style="margin-top:var(--space-lg);display:flex;gap:var(--space-md);">
+      <div style="display:flex;gap:var(--space-md);">
         <button class="btn btn-ghost-secondary btn-sm" onclick="Admin.closeModal()">Close</button>
       </div>
     `);
@@ -538,7 +728,7 @@ const Admin = {
     const tbody = document.querySelector('#section-outreach table tbody');
     if (!tbody) return;
     const items = data.items || [];
-    if (!items.length) { this.setEmpty('#section-outreach table tbody', 8, 'No outreach drafts found'); return; }
+    if (!items.length) { this.setEmpty('#section-outreach table tbody', 8, 'Nog geen outreach-concepten. Start een sourcing- of drafting-run hierboven om concepten te genereren.'); return; }
     tbody.innerHTML = items.map(d => `
       <tr>
         <td style="color:var(--navy-200);font-size:var(--font-size-xs);">${this.esc(d.target_name || d.target_email || '—')}</td>
@@ -696,7 +886,7 @@ const Admin = {
     const tbody = document.querySelector('#section-blog table tbody');
     if (!tbody) return;
     const items = data.items || [];
-    if (!items.length) { this.setEmpty('#section-blog table tbody', 6, 'No blog posts found'); return; }
+    if (!items.length) { this.setEmpty('#section-blog table tbody', 6, 'Nog geen blogposts. Klik op "New post" of "Draft new post (AI)" hierboven om te beginnen.'); return; }
     tbody.innerHTML = items.map(p => {
       const tags = Array.isArray(p.tags) ? p.tags.join(', ') : (p.tags || '—');
       return `
@@ -918,7 +1108,7 @@ const Admin = {
     const tbody = document.querySelector('#section-audit table tbody');
     if (!tbody) return;
     const items = data.items || [];
-    if (!items.length) { this.setEmpty('#section-audit table tbody', 4, 'No audit entries'); return; }
+    if (!items.length) { this.setEmpty('#section-audit table tbody', 4, 'Nog geen audit-log entries voor dit filter.'); return; }
     const colors = { user_delete: '#f87171', impersonate: '#fb923c', settings_update: '#a78bfa' };
     tbody.innerHTML = items.map(e => `
       <tr>
@@ -981,7 +1171,7 @@ const Admin = {
   renderContent(rows) {
     const el = document.getElementById('contentList');
     if (!el) return;
-    if (!rows.length) { el.innerHTML = '<div style="color:var(--navy-300);padding:1rem;">No content items found</div>'; return; }
+    if (!rows.length) { el.innerHTML = '<div style="color:var(--navy-300);padding:1rem;">Nog geen content-items. Voeg ze toe via de API of database.</div>'; return; }
     el.innerHTML = rows.map(item => `
       <div style="display:flex;align-items:center;gap:var(--space-md);padding:var(--space-md) 0;border-bottom:1px solid rgba(74,111,159,0.08);">
         <div style="flex:1;">
@@ -1088,7 +1278,13 @@ const Admin = {
       this.loadUsers({ status: ['verified','unverified'].includes(v) ? v : '' });
     });
 
-    const debouncedCandidates = debounce(val => this.loadCandidates({ search: val }), 400);
+    // Debounced search keeps whatever status/kind filters are currently
+    // selected instead of silently resetting them on every keystroke.
+    const debouncedCandidates = debounce(val => this.loadCandidates({
+      search: val,
+      status: document.getElementById('candidateStatusFilter')?.value || undefined,
+      kind: document.getElementById('candidateKindFilter')?.value || undefined,
+    }), 400);
     document.querySelectorAll('#section-candidates .search-bar input').forEach(el => {
       el.addEventListener('input', e => debouncedCandidates(e.target.value));
     });

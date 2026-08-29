@@ -225,7 +225,22 @@
             <div class="col-lg-4">
               <div class="card mb-3">
                 <div class="card-header">
-                  <h3 class="card-title"><i class="fa-regular fa-user-plus text-primary me-2"></i>Pending Verifications</h3>
+                  <h3 class="card-title"><i class="fa-regular fa-user-plus text-primary me-2"></i>Nieuwe registraties</h3>
+                  <span class="badge bg-blue-lt ms-auto" id="newRegBadge">0</span>
+                </div>
+                <div class="card-body">
+                  <div id="newRegistrationsList" class="text-secondary">Loading…</div>
+                </div>
+                <div class="card-footer py-2">
+                  <button class="btn btn-sm btn-ghost-secondary w-100" onclick="navigateTo('candidates')">
+                    <i class="fa-regular fa-arrow-right me-1"></i> Alle kandidaten bekijken
+                  </button>
+                </div>
+              </div>
+
+              <div class="card mb-3">
+                <div class="card-header">
+                  <h3 class="card-title"><i class="fa-regular fa-shield-check text-primary me-2"></i>Pending Verifications</h3>
                   <span class="badge bg-yellow-lt ms-auto" id="pendingBadge">0</span>
                 </div>
                 <div class="card-body">
@@ -420,6 +435,11 @@
                   <span class="input-icon-addon"><i class="fa-regular fa-magnifying-glass"></i></span>
                   <input type="text" class="form-control" placeholder="Search by name, email or title…">
                 </div>
+                <select class="form-select" style="max-width:180px;" id="candidateKindFilter">
+                  <option value="">Alle</option>
+                  <option value="self-registered">Zelf geregistreerd</option>
+                  <option value="sourced">Gesourced</option>
+                </select>
                 <select class="form-select" style="max-width:160px;" id="candidateStatusFilter">
                   <option value="">All Status</option>
                   <option value="active">Active</option>
@@ -437,11 +457,12 @@
                     <th>Current Role</th>
                     <th class="text-center">Exp</th>
                     <th class="text-center">Matches</th>
+                    <th>Type</th>
                     <th>Status</th>
                     <th style="width:90px;">Actions</th>
                   </tr>
                 </thead>
-                <tbody><tr><td colspan="7" class="text-center text-secondary py-4"><i class="fa-regular fa-spinner fa-spin"></i></td></tr></tbody>
+                <tbody><tr><td colspan="8" class="text-center text-secondary py-4"><i class="fa-regular fa-spinner fa-spin"></i></td></tr></tbody>
               </table>
             </div>
             <div class="card-footer d-flex justify-content-center">
@@ -736,7 +757,16 @@
   if (candStatusFilter) {
     candStatusFilter.addEventListener('change', e => {
       Admin._currentPage.candidates = 1;
-      Admin.loadCandidates({ status: e.target.value || undefined });
+      Admin.loadCandidates({ status: e.target.value || undefined, kind: document.getElementById('candidateKindFilter')?.value || undefined });
+    });
+  }
+
+  /* ---- Candidate kind filter (Alle / Zelf geregistreerd / Gesourced) ---- */
+  const candKindFilter = document.getElementById('candidateKindFilter');
+  if (candKindFilter) {
+    candKindFilter.addEventListener('change', e => {
+      Admin._currentPage.candidates = 1;
+      Admin.loadCandidates({ kind: e.target.value || undefined, status: document.getElementById('candidateStatusFilter')?.value || undefined });
     });
   }
 
