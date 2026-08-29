@@ -138,6 +138,7 @@ section { padding: 100px 0; }
      white while still reading as brand gold. Sections on a dark surface
      (e.g. .page-hero, .cta-band) opt back into the bright gold below. */
   color: #8A6800;
+  font-weight: 700;
   margin-bottom: 16px;
 }
 .section-label::before {
@@ -608,6 +609,9 @@ section { padding: 100px 0; }
 
 /* ── Case Studies ───────────────────────────────────────── */
 #stories { background: var(--bg-alt); }
+/* #cases sits directly after #process, which now also uses --bg-alt as its
+   distinct band — a hairline keeps the two sections from visually fusing. */
+#cases { border-top: 1px solid var(--border); }
 .stories-grid { display: flex; flex-wrap: wrap; justify-content: center; gap: 24px; margin-top: 8px; }
 .story-card {
   flex: 1 1 calc(33.333% - 16px);
@@ -640,20 +644,31 @@ section { padding: 100px 0; }
   border-top: 1px solid var(--border);
 }
 
-/* Werkwijze: numbered steps — serif gold numerals over a navy top rule, flat (no card box) */
+/* Werkwijze: numbered steps — bold navy serif numerals with a short gold
+   underline accent, over a navy top rule, flat (no card box). Section gets
+   its own off-white band so it reads as a distinct block on the page
+   instead of blending into the white sections around it. */
+#process { background: var(--bg-alt); }
 #process .story-card {
   background: transparent; border: none; box-shadow: none; border-radius: 0;
-  padding: 20px 0 0; border-top: 2px solid var(--navy);
+  padding: 22px 0 0; border-top: 3px solid var(--navy);
 }
 #process .story-card:hover { transform: none; box-shadow: none; }
 #process .story-tag {
   display: block; background: none; padding: 0; border-radius: 0;
-  font-family: var(--font-display); font-size: 2.1rem; font-weight: 500;
-  /* --gold-dark was 2.23:1 on white — same fix as .section-label above. */
-  color: #8A6800; margin-bottom: 10px; line-height: 1;
+  font-family: var(--font-display); font-size: 2.6rem; font-weight: 600;
+  /* Navy on white/off-white is ~18-19:1 — far above AA. The gold-dark
+     numeral used previously (#8A6800, 4.7:1) passed AA but read as faint;
+     navy plus a short gold underline accent below keeps the palette but
+     gives the numerals real visual weight. */
+  color: var(--navy); margin-bottom: 4px; line-height: 1; position: relative;
 }
-#process .story-card h3 { font-family: var(--font); font-size: 1rem; font-weight: 600; }
-#process .story-card p { font-size: 0.9rem; }
+#process .story-tag::after {
+  content: ''; display: block; width: 32px; height: 3px; margin-top: 12px;
+  background: var(--gold);
+}
+#process .story-card h3 { font-family: var(--font); font-size: 1.05rem; font-weight: 700; margin-top: 6px; }
+#process .story-card p { font-size: 0.92rem; }
 
 /* ── Testimonials Carousel ──────────────────────────────── */
 #testimonials { background: var(--bg); overflow: hidden; }
@@ -930,8 +945,19 @@ section { padding: 100px 0; }
   padding: 28px 30px; background: var(--bg-card);
   border: 1px solid var(--border); border-radius: var(--radius);
 }
-.step-num { font-family: var(--font-display); font-size: 1.4rem; font-weight: 700; color: var(--gold-dark); flex-shrink: 0; width: 36px; }
-.step-body h3 { margin-bottom: 4px; }
+.step-num {
+  font-family: var(--font-display); font-size: 1.7rem; font-weight: 600;
+  /* Navy numeral + short gold underline, matching the homepage #process
+     treatment — var(--gold-dark) alone was 2.04:1 on white, well under the
+     3:1 AA floor for large text. Navy is ~18:1. */
+  color: var(--navy); flex-shrink: 0; width: 44px; line-height: 1;
+  position: relative; padding-bottom: 14px;
+}
+.step-num::after {
+  content: ''; position: absolute; left: 0; bottom: 0; width: 22px; height: 3px;
+  background: var(--gold);
+}
+.step-body h3 { margin-bottom: 4px; font-weight: 700; }
 
 /* ── Homepage vacancy module ────────────────────────────── */
 .vac-card { display: flex; flex-direction: column; gap: 12px; padding: 28px; border: 1px solid var(--border); border-radius: 0; background: var(--bg-subtle, var(--bg-card)); transition: var(--transition); }
