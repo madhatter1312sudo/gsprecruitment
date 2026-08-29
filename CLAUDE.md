@@ -24,10 +24,12 @@ Faceless recruitment agency (Brainport/Eindhoven, NL) placing embedded software 
 ## The agent team (`.claude/agents/`)
 Delegate work to the specialist, don't do it inline: `backend-dev`, `frontend-dev`, `mobile-dev`, `devops-engineer`, `qa-engineer`, `security-auditor`, `code-reviewer`, `ui-designer`, `design-reviewer`, `growth-marketer`, `chief-of-staff`.
 
-Company workflow (applies to every non-trivial deliverable):
-1. Specialist builds it (ui-designer first when visual).
-2. The matching reviewer checks craft: code-reviewer for code, design-reviewer for anything visual, qa-engineer for behavior; security-auditor before releases touching auth or personal data.
-3. `chief-of-staff` gives the final internal verdict (APPROVED / FIX FIRST) before anything is pushed to a PR — route FIX FIRST items back to the specialist and re-review.
-4. The owner merges the PR: that is the only human approval step. Never merge to main or deploy without it unless the owner explicitly says so.
+Company workflow — scale the review chain to the risk of the change:
+- **Small, low-risk changes** (a bugfix of a few lines, copy tweaks, config, docs — nothing touching auth, personal data, payments, or outreach): one code-reviewer pass (design-reviewer for visual tweaks) is enough; skip chief-of-staff.
+- **Everything else** (new features, refactors, anything visual or user-facing, and always auth/data/GDPR work):
+  1. Specialist builds it (ui-designer first when visual).
+  2. The matching reviewer checks craft: code-reviewer for code, design-reviewer for anything visual, qa-engineer for behavior; security-auditor before releases touching auth or personal data.
+  3. `chief-of-staff` gives the final internal verdict (APPROVED / FIX FIRST) before anything is pushed to a PR — route FIX FIRST items back to the specialist and re-review.
+- The owner merges the PR: that is the only human approval step. Never merge to main or deploy without it unless the owner explicitly says so.
 
 Scheduled business ops run as Claude Routines (not in this repo): gsp-morning-brief, gsp-draft-qa, gsp-match-and-draft, gsp-client-leads, gsp-candidate-scout, gsp-blog-weekly, gsp-weekly-review — all report to Telegram.
