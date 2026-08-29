@@ -120,6 +120,16 @@ class CandidateCreate(BaseModel):
 
 
 class CandidateResponse(CandidateCreate):
+    # Read path: harvest.py writes these columns via raw SQL (no model), so
+    # a bad scheme in one row must not 500 the whole list — coerce, don't raise.
+    @field_validator("linkedin_url", "github_url", "portfolio_url")
+    @classmethod
+    def _url_scheme_http_only(cls, v):
+        try:
+            return _normalize_http_url(v)
+        except ValueError:
+            return None
+
     id: int
     status: str = "sourced"
     is_passive: bool = True
