@@ -319,56 +319,207 @@ async def update_any_job(
 
 
 # ── Candidate Management ────────────────────────────────────────────────
+#
+# Two independent origins feed the admin candidate list:
+#   - `candidates`: the sourcing pipeline (Apollo pulls, manual entry, and
+#     also the lazily-created row `candidate.py:_get_candidate_id()` inserts
+#     the first time a self-registered user touches matches/applications
+#     /saved-jobs/messages -- source='portal_registration' for that case).
+#   - `candidate_profiles` (+ `users`): every self-registered candidate gets
+#     one at POST /api/auth/register, regardless of whether a `candidates`
+#     row was ever created for them.
+#
+# A self-registered candidate who never triggered the lazy-create only has a
+# candidate_profiles row and was previously invisible to GET /candidates,
+# which read `candidates` exclusively. The CTE below unions both origins,
+# using NOT EXISTS (by email) to skip candidate_profiles rows that already
+# have a matching candidates row so each real person appears exactly once.
+# No data is copied between tables -- this is read-only.
+_CANDIDATES_UNION_CTE = """
+WITH combined AS (
+    SELECT
+        c.id AS candidate_id,
+        u.id AS user_id,
+        CASE WHEN c.source = 'portal_registration' THEN 'self-registered' ELSE 'sourced' END AS kind,
+        c.full_name, c.email, c.phone, c.current_title, c.current_company, c.location,
+        COALESCE(c.skills, '{}') AS skills, COALESCE(c.languages, '{}') AS languages,
+        c.years_experience, c.status, c.source, c.cv_file_path,
+        u.is_verified, c.created_at, c.updated_at
+    FROM candidates c
+    LEFT JOIN users u ON u.email = c.email AND u.deleted_at IS NULL
+    WHERE c.deleted_at IS NULL
+
+    UNION ALL
+
+    SELECT
+        NULL::int AS candidate_id,
+        u.id AS user_id,
+        'self-registered' AS kind,
+        u.full_name, u.email, cp.phone, cp.current_title, cp.current_company, cp.location,
+        COALESCE(cp.skills, '{}') AS skills, COALESCE(cp.languages, '{}') AS languages,
+        cp.years_experience, 'new'::varchar AS status, 'self_registered'::varchar AS source, cp.cv_file_path,
+        u.is_verified, cp.created_at, cp.updated_at
+    FROM candidate_profiles cp
+    JOIN users u ON u.id = cp.user_id AND u.deleted_at IS NULL
+    WHERE u.role = 'candidate'
+      AND NOT EXISTS (
+          SELECT 1 FROM candidates c2 WHERE c2.email = u.email AND c2.deleted_at IS NULL
+      )
+)
+"""
+
 
 @router.get("/candidates")
 async def list_all_candidates(
     status: Optional[str] = Query(None),
     source: Optional[str] = Query(None),
+    kind: Optional[str] = Query(None, description="'sourced' or 'self-registered'"),
     search: Optional[str] = Query(None),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
     current_user: dict = Depends(require_role("admin")),
 ):
-    """List all candidates across the platform."""
-    conditions = ["c.deleted_at IS NULL"]
+    """List all candidates across the platform -- sourced (candidates table)
+    and self-registered (candidate_profiles + users) in one consistent shape.
+
+    Each item carries `kind` ('sourced' | 'self-registered') plus `candidate_id`
+    and/or `user_id` (one may be null depending on origin) and a convenience
+    `id` = candidate_id if present else user_id, for addressing the detail
+    endpoint at GET /candidates/{kind}/{id}.
+    """
+    conditions = ["1=1"]
     params = []
     idx = 1
 
     if status:
-        conditions.append(f"c.status = ${idx}")
+        conditions.append(f"status = ${idx}")
         params.append(status)
         idx += 1
     if source:
-        conditions.append(f"c.source = ${idx}")
+        conditions.append(f"source = ${idx}")
         params.append(source)
         idx += 1
+    if kind:
+        conditions.append(f"kind = ${idx}")
+        params.append(kind)
+        idx += 1
     if search:
-        conditions.append(f"(c.full_name ILIKE ${idx} OR c.email ILIKE ${idx} OR c.current_title ILIKE ${idx})")
+        conditions.append(f"(full_name ILIKE ${idx} OR email ILIKE ${idx} OR current_title ILIKE ${idx})")
         params.append(f"%{search}%")
         idx += 1
 
     where = " AND ".join(conditions)
 
-    total = await fetch_val(f"SELECT COUNT(*) FROM candidates c WHERE {where}", *params) or 0
+    total = await fetch_val(
+        f"{_CANDIDATES_UNION_CTE} SELECT COUNT(*) FROM combined WHERE {where}", *params,
+    ) or 0
     params_ext = params + [limit, offset]
     rows = await fetch_all(
-        f"""SELECT c.*, COALESCE(m.match_count, 0) AS match_count,
+        f"""{_CANDIDATES_UNION_CTE}
+            SELECT combined.*,
+                   COALESCE(combined.candidate_id, combined.user_id) AS id,
+                   COALESCE(m.match_count, 0) AS match_count,
                    COALESCE(m.placement_count, 0) AS placement_count
-            FROM candidates c
+            FROM combined
             LEFT JOIN (
                 SELECT candidate_id,
                        COUNT(*) AS match_count,
                        COUNT(*) FILTER (WHERE status = 'placed') AS placement_count
                 FROM matches
                 GROUP BY candidate_id
-            ) m ON m.candidate_id = c.id
+            ) m ON m.candidate_id = combined.candidate_id
             WHERE {where}
-            ORDER BY c.created_at DESC
+            ORDER BY combined.created_at DESC
             LIMIT ${idx} OFFSET ${idx + 1}""",
         *params_ext,
     )
 
     return {"items": rows, "total": total, "limit": limit, "offset": offset}
+
+
+@router.get("/candidates/{kind}/{item_id}")
+async def get_candidate_detail(
+    kind: str,
+    item_id: int,
+    current_user: dict = Depends(require_role("admin")),
+):
+    """Full detail for one candidate, addressed by the `kind`/`id` pair
+    returned from GET /candidates.
+
+    - kind='sourced': item_id is a `candidates.id`.
+    - kind='self-registered': item_id is a `users.id` -- returns the full
+      candidate_profiles row, the linked user's email/verification status,
+      and (if the sourcing pipeline separately created one, e.g. via the
+      lazy _get_candidate_id() path) the matching `candidates` row too.
+    """
+    if kind == "sourced":
+        candidate = await fetch_one(
+            """SELECT c.*, COALESCE(m.match_count, 0) AS match_count,
+                      COALESCE(m.placement_count, 0) AS placement_count
+               FROM candidates c
+               LEFT JOIN (
+                   SELECT candidate_id,
+                          COUNT(*) AS match_count,
+                          COUNT(*) FILTER (WHERE status = 'placed') AS placement_count
+                   FROM matches
+                   GROUP BY candidate_id
+               ) m ON m.candidate_id = c.id
+               WHERE c.id = $1 AND c.deleted_at IS NULL""",
+            item_id,
+        )
+        if not candidate:
+            raise HTTPException(status_code=404, detail="Candidate not found")
+        candidate["skills"] = candidate["skills"] or []
+        candidate["languages"] = candidate["languages"] or []
+        candidate["tags"] = candidate["tags"] or []
+        user = await fetch_one(
+            "SELECT id, is_verified FROM users WHERE email = $1 AND deleted_at IS NULL",
+            candidate["email"],
+        )
+        candidate["kind"] = "self-registered" if candidate["source"] == "portal_registration" else "sourced"
+        candidate["user_id"] = user["id"] if user else None
+        candidate["is_verified"] = user["is_verified"] if user else None
+        return candidate
+
+    if kind == "self-registered":
+        user = await fetch_one(
+            "SELECT id, email, full_name, role, is_verified, created_at, updated_at FROM users WHERE id = $1 AND deleted_at IS NULL",
+            item_id,
+        )
+        if not user or user["role"] != "candidate":
+            raise HTTPException(status_code=404, detail="Candidate not found")
+
+        profile = await fetch_one(
+            "SELECT * FROM candidate_profiles WHERE user_id = $1", item_id,
+        )
+        if profile:
+            profile["skills"] = profile["skills"] or []
+            profile["languages"] = profile["languages"] or []
+        user["profile"] = profile
+        user["kind"] = "self-registered"
+
+        # If the sourcing pipeline also created a candidates row for this
+        # person (lazy _get_candidate_id(), or a separate sourced entry that
+        # shares this email), surface it too -- read-only, no merge.
+        candidate = await fetch_one(
+            "SELECT id, status, source FROM candidates WHERE email = $1 AND deleted_at IS NULL",
+            user["email"],
+        )
+        if candidate:
+            user["candidate_id"] = candidate["id"]
+            user["candidate_status"] = candidate["status"]
+            user["candidate_source"] = candidate["source"]
+            match_count = await fetch_val(
+                "SELECT COUNT(*) FROM matches WHERE candidate_id = $1", candidate["id"],
+            )
+            user["match_count"] = match_count or 0
+        else:
+            user["candidate_id"] = None
+            user["match_count"] = 0
+
+        return user
+
+    raise HTTPException(status_code=400, detail="kind must be 'sourced' or 'self-registered'")
 
 
 # ── Analytics ───────────────────────────────────────────────────────────
