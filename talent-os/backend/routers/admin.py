@@ -346,7 +346,7 @@ WITH combined AS (
         c.years_experience, c.status, c.source, c.cv_file_path,
         u.is_verified, c.created_at, c.updated_at
     FROM candidates c
-    LEFT JOIN users u ON u.email = c.email AND u.deleted_at IS NULL
+    LEFT JOIN users u ON LOWER(u.email) = LOWER(c.email) AND u.deleted_at IS NULL
     WHERE c.deleted_at IS NULL
 
     UNION ALL
@@ -363,7 +363,7 @@ WITH combined AS (
     JOIN users u ON u.id = cp.user_id AND u.deleted_at IS NULL
     WHERE u.role = 'candidate'
       AND NOT EXISTS (
-          SELECT 1 FROM candidates c2 WHERE c2.email = u.email AND c2.deleted_at IS NULL
+          SELECT 1 FROM candidates c2 WHERE LOWER(c2.email) = LOWER(u.email) AND c2.deleted_at IS NULL
       )
 )
 """

@@ -52,6 +52,16 @@ const Admin = {
     d.textContent = String(s);
     return d.innerHTML;
   },
+  // Candidate-supplied URLs go into href attributes: esc() stops attribute
+  // breakout but not a javascript:/data: scheme, so whitelist http(s) only.
+  safeUrl(s) {
+    if (!s) return '';
+    try {
+      const u = new URL(String(s).trim(), 'https://invalid.example');
+      if (u.protocol === 'http:' || u.protocol === 'https:') return u.href;
+    } catch { /* unparseable -> drop */ }
+    return '';
+  },
   setLoading(tbodyId, cols) {
     const el = document.querySelector(tbodyId);
     if (el) el.innerHTML = `<tr><td colspan="${cols}" style="text-align:center;padding:2rem;color:var(--navy-300);">
@@ -501,7 +511,10 @@ const Admin = {
     }
     tbody.innerHTML = items.map(c => {
       const kb = this.kindBadge(c.kind);
-      const itemId = c.kind === 'self-registered' ? (c.user_id ?? c.id) : (c.candidate_id ?? c.id);
+      // A self-registered row without a resolved user_id (email-case edge) is
+      // really a candidates-table row: view it via the sourced detail path.
+      const effKind = (c.kind === 'self-registered' && c.user_id == null && c.candidate_id != null) ? 'sourced' : c.kind;
+      const itemId = effKind === 'self-registered' ? (c.user_id ?? c.id) : (c.candidate_id ?? c.id);
       return `
       <tr>
         <td style="font-weight:600;color:var(--white);">
@@ -520,7 +533,7 @@ const Admin = {
           <span class="${this.badge(c.status || 'active')}">${this.esc(c.status || 'active')}</span>
         </td>
         <td>
-          <button class="btn btn-sm btn-ghost-secondary" onclick="Admin.viewCandidate('${c.kind === 'self-registered' ? 'self-registered' : 'sourced'}', ${itemId})" title="View profile">
+          <button class="btn btn-sm btn-ghost-secondary" onclick="Admin.viewCandidate('${effKind === 'self-registered' ? 'self-registered' : 'sourced'}', ${itemId})" title="View profile">
             <i class="fa-regular fa-eye"></i>
           </button>
         </td>
@@ -627,9 +640,9 @@ const Admin = {
 
     const contactLinks = [
       email ? `<a href="mailto:${esc(email)}" class="btn btn-sm btn-ghost-secondary"><i class="fa-regular fa-envelope me-1"></i>${esc(email)}</a>` : '',
-      linkedin ? `<a href="${esc(linkedin)}" target="_blank" rel="noopener" class="btn btn-sm btn-ghost-secondary"><i class="fa-brands fa-linkedin me-1"></i>LinkedIn</a>` : '',
-      github ? `<a href="${esc(github)}" target="_blank" rel="noopener" class="btn btn-sm btn-ghost-secondary"><i class="fa-brands fa-github me-1"></i>GitHub</a>` : '',
-      portfolio ? `<a href="${esc(portfolio)}" target="_blank" rel="noopener" class="btn btn-sm btn-ghost-secondary"><i class="fa-regular fa-globe me-1"></i>Portfolio</a>` : '',
+      this.safeUrl(linkedin) ? `<a href="${esc(this.safeUrl(linkedin))}" target="_blank" rel="noopener" class="btn btn-sm btn-ghost-secondary"><i class="fa-brands fa-linkedin me-1"></i>LinkedIn</a>` : '',
+      this.safeUrl(github) ? `<a href="${esc(this.safeUrl(github))}" target="_blank" rel="noopener" class="btn btn-sm btn-ghost-secondary"><i class="fa-brands fa-github me-1"></i>GitHub</a>` : '',
+      this.safeUrl(portfolio) ? `<a href="${esc(this.safeUrl(portfolio))}" target="_blank" rel="noopener" class="btn btn-sm btn-ghost-secondary"><i class="fa-regular fa-globe me-1"></i>Portfolio</a>` : '',
     ].filter(Boolean).join(' ');
 
     this.openModal('viewCandidateModal', `

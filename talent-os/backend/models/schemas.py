@@ -144,6 +144,23 @@ class CandidateProfileUpdate(BaseModel):
     linkedin_url: Optional[str] = None
     github_url: Optional[str] = None
     portfolio_url: Optional[str] = None
+
+    @field_validator("linkedin_url", "github_url", "portfolio_url")
+    @classmethod
+    def _url_scheme_http_only(cls, v):
+        # These values are rendered as links in the admin panel; refuse
+        # javascript:/data:/etc. schemes at the source (defense in depth —
+        # the admin UI also whitelists schemes before emitting an href).
+        if v is None or v.strip() == "":
+            return v
+        s = v.strip()
+        lowered = s.lower()
+        if lowered.startswith("http://") or lowered.startswith("https://"):
+            return s
+        if "://" in lowered or lowered.startswith(("javascript:", "data:", "vbscript:")):
+            raise ValueError("URL must start with http:// or https://")
+        # Bare domain like "linkedin.com/in/x" — normalize to https.
+        return "https://" + s
     current_company: Optional[str] = None
     current_title: Optional[str] = None
     location: Optional[str] = None
