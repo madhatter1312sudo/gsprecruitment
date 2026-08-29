@@ -65,6 +65,22 @@ class RefreshRequest(BaseModel):
 
 # ── Candidate ───────────────────────────────────────────────────────────
 
+def _normalize_http_url(v: Optional[str]) -> Optional[str]:
+    # These values are rendered as links in the admin panel; refuse
+    # javascript:/data:/etc. schemes at the source (defense in depth —
+    # the admin UI also whitelists schemes before emitting an href).
+    if v is None or v.strip() == "":
+        return v
+    s = v.strip()
+    lowered = s.lower()
+    if lowered.startswith("http://") or lowered.startswith("https://"):
+        return s
+    if "://" in lowered or lowered.startswith(("javascript:", "data:", "vbscript:")):
+        raise ValueError("URL must start with http:// or https://")
+    # Bare domain like "linkedin.com/in/x" — normalize to https.
+    return "https://" + s
+
+
 class CandidateCreate(BaseModel):
     full_name: str = Field(..., min_length=1, max_length=255)
     email: Optional[str] = Field(None, max_length=255)
@@ -89,6 +105,11 @@ class CandidateCreate(BaseModel):
     strength_score: Optional[float] = Field(None, ge=1.0, le=10.0)
     switch_readiness: Optional[str] = Field(None, pattern=r"^(LOW|MEDIUM|HIGH|ACTIVE)$")
     tags: List[str] = []
+
+    @field_validator("linkedin_url", "github_url", "portfolio_url")
+    @classmethod
+    def _url_scheme_http_only(cls, v):
+        return _normalize_http_url(v)
 
     # DB rows (esp. the Apollo-bulk pool) store NULL for these array columns;
     # coerce NULL -> [] so ResponseValidationError isn't raised on read.
@@ -148,19 +169,7 @@ class CandidateProfileUpdate(BaseModel):
     @field_validator("linkedin_url", "github_url", "portfolio_url")
     @classmethod
     def _url_scheme_http_only(cls, v):
-        # These values are rendered as links in the admin panel; refuse
-        # javascript:/data:/etc. schemes at the source (defense in depth —
-        # the admin UI also whitelists schemes before emitting an href).
-        if v is None or v.strip() == "":
-            return v
-        s = v.strip()
-        lowered = s.lower()
-        if lowered.startswith("http://") or lowered.startswith("https://"):
-            return s
-        if "://" in lowered or lowered.startswith(("javascript:", "data:", "vbscript:")):
-            raise ValueError("URL must start with http:// or https://")
-        # Bare domain like "linkedin.com/in/x" — normalize to https.
-        return "https://" + s
+        return _normalize_http_url(v)
     current_company: Optional[str] = None
     current_title: Optional[str] = None
     location: Optional[str] = None
