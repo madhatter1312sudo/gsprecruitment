@@ -65,7 +65,7 @@ const Admin = {
   setLoading(tbodyId, cols) {
     const el = document.querySelector(tbodyId);
     if (el) el.innerHTML = `<tr><td colspan="${cols}" style="text-align:center;padding:2rem;color:var(--navy-300);">
-      <i class="fa-regular fa-spinner fa-spin"></i> Loading…</td></tr>`;
+      <i class="fa-solid fa-spinner fa-spin"></i> Loading…</td></tr>`;
   },
   setEmpty(tbodyId, cols, msg = 'No results') {
     const el = document.querySelector(tbodyId);
@@ -78,7 +78,7 @@ const Admin = {
     if (!el) return;
     const id = '_retry_' + Math.random().toString(36).slice(2, 9);
     el.innerHTML = `<tr><td colspan="${cols}" style="text-align:center;padding:2rem;color:var(--navy-300);">
-      <i class="fa-regular fa-triangle-exclamation"></i> Kon niet laden — <a href="#" id="${id}">probeer opnieuw</a>
+      <i class="fa-solid fa-triangle-exclamation"></i> Kon niet laden — <a href="#" id="${id}">probeer opnieuw</a>
     </td></tr>`;
     document.getElementById(id)?.addEventListener('click', (e) => { e.preventDefault(); if (typeof retryFn === 'function') retryFn(); });
   },
@@ -87,7 +87,7 @@ const Admin = {
     if (!el) return;
     const id = '_retry_' + Math.random().toString(36).slice(2, 9);
     el.innerHTML = `<div style="color:var(--navy-300);font-size:var(--font-size-sm);padding:1rem 0;">
-      <i class="fa-regular fa-triangle-exclamation"></i> Kon niet laden — <a href="#" id="${id}">probeer opnieuw</a>
+      <i class="fa-solid fa-triangle-exclamation"></i> Kon niet laden — <a href="#" id="${id}">probeer opnieuw</a>
     </div>`;
     document.getElementById(id)?.addEventListener('click', (e) => { e.preventDefault(); if (typeof retryFn === 'function') retryFn(); });
   },
@@ -156,7 +156,7 @@ const Admin = {
     }
     el.innerHTML = items.map(c => `
       <div class="activity-item">
-        <div class="activity-icon" style="background:rgba(74,222,128,0.12);color:#4ade80;"><i class="fa-regular fa-user-plus"></i></div>
+        <div class="activity-icon" style="background:rgba(74,222,128,0.12);color:#4ade80;"><i class="fa-solid fa-user-plus"></i></div>
         <div class="activity-content" style="flex:1;min-width:0;">
           <div class="activity-text" style="font-weight:500;color:var(--white);">
             ${this.esc(c.full_name || c.email || 'Onbekend')}
@@ -198,7 +198,7 @@ const Admin = {
     if (!items.length) { el.innerHTML = '<div style="color:var(--navy-300);font-size:var(--font-size-sm);padding:0.5rem 0;">Geen openstaande verificaties.</div>'; return; }
     el.innerHTML = items.map(u => `
       <div class="activity-item">
-        <div class="activity-icon" style="background:rgba(250,200,0,0.1);color:var(--gold-500);"><i class="fa-regular fa-user-plus"></i></div>
+        <div class="activity-icon" style="background:rgba(250,200,0,0.1);color:var(--gold-500);"><i class="fa-solid fa-user-plus"></i></div>
         <div class="activity-content" style="flex:1;">
           <div class="activity-text">${this.esc(u.full_name || u.email)} — <span style="color:var(--gold-400);">${this.esc(u.role)}</span></div>
           <div class="activity-time">${this.timeAgo(u.created_at)}</div>
@@ -273,13 +273,13 @@ const Admin = {
         <td>
           <div class="action-menu-wrap" style="position:relative;">
             <button class="btn btn-sm btn-ghost-secondary" onclick="Admin.toggleUserMenu(${u.id}, event)">
-              <i class="fa-regular fa-ellipsis-vertical"></i>
+              <i class="fa-solid fa-ellipsis-vertical"></i>
             </button>
             <div class="action-menu" id="user-menu-${u.id}" style="display:none;">
               ${!u.is_verified ? `<button onclick="Admin.verifyUser(${u.id});Admin.closeMenus()"><i class="fa-regular fa-circle-check"></i> Verify</button>` : ''}
-              <button onclick="Admin.openEditUserModal(${u.id});Admin.closeMenus()"><i class="fa-regular fa-pen"></i> Edit Role</button>
-              <button onclick="Admin.impersonateUser(${u.id}, '${this.esc(u.email)}');Admin.closeMenus()"><i class="fa-regular fa-mask"></i> Impersonate</button>
-              <button onclick="Admin.confirmDeleteUser(${u.id}, '${this.esc(u.email)}');Admin.closeMenus()" style="color:#f87171;"><i class="fa-regular fa-trash"></i> Delete</button>
+              <button onclick="Admin.openEditUserModal(${u.id});Admin.closeMenus()"><i class="fa-solid fa-pen"></i> Edit Role</button>
+              <button onclick="Admin.impersonateUser(${u.id}, '${this.esc(u.email)}');Admin.closeMenus()"><i class="fa-solid fa-mask"></i> Impersonate</button>
+              <button onclick="Admin.confirmDeleteUser(${u.id}, '${this.esc(u.email)}');Admin.closeMenus()" style="color:#f87171;"><i class="fa-solid fa-trash"></i> Delete</button>
             </div>
           </div>
         </td>
@@ -422,10 +422,10 @@ const Admin = {
             </button>` : ''}
           ${j.status === 'open' ? `
             <button class="btn btn-sm btn-ghost-secondary" onclick="Admin.setJobStatus(${j.id}, 'closed')" title="Close" style="color:#f87171;">
-              <i class="fa-regular fa-xmark"></i> Close
+              <i class="fa-solid fa-xmark"></i> Close
             </button>` : ''}
           <button class="btn btn-sm btn-ghost-secondary" onclick="Admin.confirmDeleteJob(${j.id})" title="Delete" style="color:#f87171;">
-            <i class="fa-regular fa-trash"></i>
+            <i class="fa-solid fa-trash"></i>
           </button>
         </td>
       </tr>`).join('');
@@ -519,7 +519,7 @@ const Admin = {
       <tr>
         <td style="font-weight:600;color:var(--white);">
           ${this.esc(c.full_name || '—')}
-          ${c.is_verified ? '<i class="fa-regular fa-circle-check ms-1" style="color:#4ade80;" title="Geverifieerd"></i>' : '<i class="fa-regular fa-circle-dashed ms-1" style="color:var(--navy-300);" title="Niet geverifieerd"></i>'}
+          ${c.is_verified ? '<i class="fa-regular fa-circle-check ms-1" style="color:#4ade80;" title="Geverifieerd"></i>' : '<i class="fa-regular fa-circle ms-1" style="color:var(--navy-300);" title="Niet geverifieerd"></i>'}
         </td>
         <td style="color:var(--navy-200);font-size:var(--font-size-xs);">${this.esc(c.email)}</td>
         <td>${this.esc(c.current_title || '—')}</td>
@@ -545,7 +545,7 @@ const Admin = {
   async viewCandidate(kind, itemId) {
     this.openModal('viewCandidateModal', `
       <div style="text-align:center;padding:2rem 0;color:var(--navy-300);">
-        <i class="fa-regular fa-spinner fa-spin"></i> Laden…
+        <i class="fa-solid fa-spinner fa-spin"></i> Laden…
       </div>`);
     try {
       const res = await Auth.fetch(`/v1/admin/candidates/${kind}/${itemId}`);
@@ -642,7 +642,7 @@ const Admin = {
       email ? `<a href="mailto:${esc(email)}" class="btn btn-sm btn-ghost-secondary"><i class="fa-regular fa-envelope me-1"></i>${esc(email)}</a>` : '',
       this.safeUrl(linkedin) ? `<a href="${esc(this.safeUrl(linkedin))}" target="_blank" rel="noopener" class="btn btn-sm btn-ghost-secondary"><i class="fa-brands fa-linkedin me-1"></i>LinkedIn</a>` : '',
       this.safeUrl(github) ? `<a href="${esc(this.safeUrl(github))}" target="_blank" rel="noopener" class="btn btn-sm btn-ghost-secondary"><i class="fa-brands fa-github me-1"></i>GitHub</a>` : '',
-      this.safeUrl(portfolio) ? `<a href="${esc(this.safeUrl(portfolio))}" target="_blank" rel="noopener" class="btn btn-sm btn-ghost-secondary"><i class="fa-regular fa-globe me-1"></i>Portfolio</a>` : '',
+      this.safeUrl(portfolio) ? `<a href="${esc(this.safeUrl(portfolio))}" target="_blank" rel="noopener" class="btn btn-sm btn-ghost-secondary"><i class="fa-solid fa-globe me-1"></i>Portfolio</a>` : '',
     ].filter(Boolean).join(' ');
 
     this.openModal('viewCandidateModal', `
@@ -652,7 +652,7 @@ const Admin = {
       </div>
       ${contactLinks ? `<div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:var(--space-lg);">${contactLinks}</div>` : ''}
 
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:var(--space-md);margin-bottom:var(--space-lg);">
+      <div class="detail-grid">
         ${field('Phone', esc(phone || '—'))}
         ${field('Current Title', esc(p('current_title') || '—'))}
         ${field('Company', esc(p('current_company') || '—'))}
@@ -760,7 +760,7 @@ const Admin = {
               <i class="fa-regular fa-paper-plane"></i>
             </button>
             <button class="btn btn-sm btn-ghost-secondary" onclick="Admin.rejectDraft(${d.id})" title="Reject" style="color:#f87171;">
-              <i class="fa-regular fa-xmark"></i>
+              <i class="fa-solid fa-xmark"></i>
             </button>` : ''}
         </td>
       </tr>`).join('');
@@ -772,7 +772,7 @@ const Admin = {
     const editable = d.status === 'draft';
     this.openModal('outreachDraftModal', `
       <h3 style="color:var(--white);margin-bottom:var(--space-lg);">Outreach Draft</h3>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:var(--space-md);margin-bottom:var(--space-lg);">
+      <div class="detail-grid">
         <div><div style="font-size:var(--font-size-xs);color:var(--navy-300);margin-bottom:4px;">To</div><div>${this.esc(d.target_name || '—')} &lt;${this.esc(d.target_email || '')}&gt;</div></div>
         <div><div style="font-size:var(--font-size-xs);color:var(--navy-300);margin-bottom:4px;">Company</div><div>${this.esc(d.company || '—')}</div></div>
         <div><div style="font-size:var(--font-size-xs);color:var(--navy-300);margin-bottom:4px;">Type</div><div><span class="${this.badge(d.target_type)}">${this.esc(d.target_type)}</span></div></div>
@@ -794,7 +794,7 @@ const Admin = {
         ${editable ? `
           <button class="btn btn-ghost-secondary" onclick="Admin.saveDraft(${d.id})"><i class="fa-regular fa-floppy-disk"></i> Save</button>
           <button class="btn btn-primary" onclick="Admin.approveDraft(${d.id})"><i class="fa-regular fa-paper-plane"></i> Approve &amp; Send</button>
-          <button class="btn btn-ghost-secondary" onclick="Admin.rejectDraft(${d.id})" style="color:#f87171;"><i class="fa-regular fa-xmark"></i> Reject</button>` : ''}
+          <button class="btn btn-ghost-secondary" onclick="Admin.rejectDraft(${d.id})" style="color:#f87171;"><i class="fa-solid fa-xmark"></i> Reject</button>` : ''}
         <button class="btn btn-ghost-secondary" onclick="Admin.closeModal()">Close</button>
       </div>
     `);
@@ -851,7 +851,7 @@ const Admin = {
   },
 
   async runOutreachJob(name, btn) {
-    if (btn) { btn.disabled = true; btn.dataset.origText = btn.innerHTML; btn.innerHTML = '<i class="fa-regular fa-spinner fa-spin"></i>'; }
+    if (btn) { btn.disabled = true; btn.dataset.origText = btn.innerHTML; btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>'; }
     try {
       const res = await Auth.fetch(`/v1/admin/outreach/run/${name}`, { method: 'POST' });
       if (res?.ok || res?.status === 202) {
@@ -911,7 +911,7 @@ const Admin = {
         <td style="font-size:var(--font-size-xs);color:var(--navy-300);">${p.published_at ? this.formatDate(p.published_at) : '—'}</td>
         <td>
           <button class="btn btn-sm btn-ghost-secondary" onclick="Admin.openBlogModal(${p.id})" title="Edit">
-            <i class="fa-regular fa-pen"></i>
+            <i class="fa-solid fa-pen"></i>
           </button>
           ${p.status === 'draft' ? `
             <button class="btn btn-sm btn-ghost-secondary" onclick="Admin.publishBlogPost(${p.id})" title="Publish" style="color:#4ade80;">
@@ -919,7 +919,7 @@ const Admin = {
             </button>` : ''}
           ${p.status === 'published' ? `
             <button class="btn btn-sm btn-ghost-secondary" onclick="Admin.archiveBlogPost(${p.id})" title="Archive" style="color:#f87171;">
-              <i class="fa-regular fa-box-archive"></i>
+              <i class="fa-solid fa-box-archive"></i>
             </button>` : ''}
         </td>
       </tr>`;
@@ -1033,7 +1033,7 @@ const Admin = {
      ============================================================ */
   async loadAnalytics() {
     const container = document.getElementById('analyticsContent');
-    if (container) container.innerHTML = '<div style="text-align:center;padding:3rem;color:var(--navy-300);"><i class="fa-regular fa-spinner fa-spin"></i> Loading analytics…</div>';
+    if (container) container.innerHTML = '<div style="text-align:center;padding:3rem;color:var(--navy-300);"><i class="fa-solid fa-spinner fa-spin"></i> Loading analytics…</div>';
     try {
       const res = await Auth.fetch('/v1/admin/analytics');
       if (!res?.ok) throw new Error('Failed');
@@ -1153,7 +1153,7 @@ const Admin = {
 
   async saveSettings() {
     const btn = document.getElementById('saveSettingsBtn');
-    if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fa-regular fa-spinner fa-spin"></i> Saving…'; }
+    if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Saving…'; }
     const settings = {};
     document.querySelectorAll('[data-setting-key]').forEach(el => {
       settings[el.dataset.settingKey] = el.type === 'checkbox' ? String(el.checked) : el.value;
@@ -1192,7 +1192,7 @@ const Admin = {
           <div style="color:var(--navy-100);margin-top:2px;font-size:var(--font-size-sm);">${this.esc((item.value || '').slice(0, 80))}${(item.value || '').length > 80 ? '…' : ''}</div>
         </div>
         <button class="btn btn-sm btn-ghost-secondary" onclick="Admin.editContent(${item.id}, '${this.esc(item.key)}', \`${this.esc(item.value || '')}\`)">
-          <i class="fa-regular fa-pen"></i>
+          <i class="fa-solid fa-pen"></i>
         </button>
       </div>`).join('');
   },
@@ -1236,12 +1236,12 @@ const Admin = {
     if (pages <= 1) { el.innerHTML = ''; return; }
 
     const buttons = [];
-    buttons.push(`<button ${current === 1 ? 'disabled' : ''} onclick="(${onPage.toString()})(${current - 1})"><i class="fa-regular fa-chevron-left"></i></button>`);
+    buttons.push(`<button ${current === 1 ? 'disabled' : ''} onclick="(${onPage.toString()})(${current - 1})"><i class="fa-solid fa-chevron-left"></i></button>`);
     for (let i = 1; i <= Math.min(pages, 7); i++) {
       buttons.push(`<button class="${i === current ? 'active' : ''}" onclick="(${onPage.toString()})(${i})">${i}</button>`);
     }
     if (pages > 7) buttons.push(`<span style="color:var(--navy-300);padding:0 4px;">…${pages}</span>`);
-    buttons.push(`<button ${current === pages ? 'disabled' : ''} onclick="(${onPage.toString()})(${current + 1})"><i class="fa-regular fa-chevron-right"></i></button>`);
+    buttons.push(`<button ${current === pages ? 'disabled' : ''} onclick="(${onPage.toString()})(${current + 1})"><i class="fa-solid fa-chevron-right"></i></button>`);
     el.innerHTML = buttons.join('');
   },
 
@@ -1260,7 +1260,7 @@ const Admin = {
     overlay.innerHTML = `
       <div style="background:var(--navy-900);border:1px solid rgba(74,111,159,0.2);border-radius:var(--radius-xl);padding:var(--space-2xl);max-width:520px;width:100%;max-height:80vh;overflow-y:auto;position:relative;">
         <button onclick="Admin.closeModal()" style="position:absolute;top:1rem;right:1rem;background:none;border:none;color:var(--navy-200);cursor:pointer;font-size:1.2rem;">
-          <i class="fa-regular fa-xmark"></i>
+          <i class="fa-solid fa-xmark"></i>
         </button>
         ${html}
       </div>`;

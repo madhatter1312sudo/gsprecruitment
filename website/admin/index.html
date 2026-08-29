@@ -93,6 +93,14 @@
     .pagination-wrap button.active { background:var(--tblr-primary); color:#1a1a1a; border-color:var(--tblr-primary); font-weight:700; }
     .pagination-wrap button:hover:not(.active):not(:disabled) { border-color:var(--tblr-primary); color:var(--tblr-primary); }
     .pagination-wrap button:disabled { opacity:.35; cursor:not-allowed; }
+    /* Detail-modal field grid: 2 columns on desktop, single column on phones */
+    .detail-grid { display:grid; grid-template-columns:1fr 1fr; gap:var(--space-md); margin-bottom:var(--space-lg); }
+    @media (max-width:576px) { .detail-grid { grid-template-columns:1fr; } }
+    /* Wide tables scroll inside their own container on small screens — keep the
+       scrollbar visible as an affordance instead of silently clipping columns. */
+    .table-responsive { overflow-x:auto; -webkit-overflow-scrolling:touch; scrollbar-width:thin; }
+    .table-responsive::-webkit-scrollbar { height:6px; }
+    .table-responsive::-webkit-scrollbar-thumb { background:var(--navy-400); border-radius:3px; }
   </style>
 </head>
 <body>
@@ -110,18 +118,18 @@
       <div class="collapse navbar-collapse" id="sidebar-menu">
         <div class="text-secondary text-uppercase px-3 pt-3 pb-1 fw-bold" style="font-size:10px;letter-spacing:.1em;">Overview</div>
         <ul class="navbar-nav">
-          <li class="nav-item"><a class="nav-link active" href="#" data-section="dashboard"><span class="nav-link-icon"><i class="fa-regular fa-chart-pie"></i></span><span class="nav-link-title">Dashboard</span></a></li>
+          <li class="nav-item"><a class="nav-link active" href="#" data-section="dashboard"><span class="nav-link-icon"><i class="fa-solid fa-chart-pie"></i></span><span class="nav-link-title">Dashboard</span></a></li>
         </ul>
 
         <div class="text-secondary text-uppercase px-3 pt-3 pb-1 fw-bold" style="font-size:10px;letter-spacing:.1em;">People</div>
         <ul class="navbar-nav">
-          <li class="nav-item"><a class="nav-link" href="#" data-section="users"><span class="nav-link-icon"><i class="fa-regular fa-users"></i></span><span class="nav-link-title">Users</span></a></li>
-          <li class="nav-item"><a class="nav-link" href="#" data-section="candidates"><span class="nav-link-icon"><i class="fa-regular fa-user-tie"></i></span><span class="nav-link-title">Candidates</span></a></li>
+          <li class="nav-item"><a class="nav-link" href="#" data-section="users"><span class="nav-link-icon"><i class="fa-solid fa-users"></i></span><span class="nav-link-title">Users</span></a></li>
+          <li class="nav-item"><a class="nav-link" href="#" data-section="candidates"><span class="nav-link-icon"><i class="fa-solid fa-user-tie"></i></span><span class="nav-link-title">Candidates</span></a></li>
         </ul>
 
         <div class="text-secondary text-uppercase px-3 pt-3 pb-1 fw-bold" style="font-size:10px;letter-spacing:.1em;">Jobs</div>
         <ul class="navbar-nav">
-          <li class="nav-item"><a class="nav-link" href="#" data-section="jobs"><span class="nav-link-icon"><i class="fa-regular fa-briefcase"></i></span><span class="nav-link-title">All Jobs</span></a></li>
+          <li class="nav-item"><a class="nav-link" href="#" data-section="jobs"><span class="nav-link-icon"><i class="fa-solid fa-briefcase"></i></span><span class="nav-link-title">All Jobs</span></a></li>
         </ul>
 
         <div class="text-secondary text-uppercase px-3 pt-3 pb-1 fw-bold" style="font-size:10px;letter-spacing:.1em;">Growth</div>
@@ -132,14 +140,14 @@
 
         <div class="text-secondary text-uppercase px-3 pt-3 pb-1 fw-bold" style="font-size:10px;letter-spacing:.1em;">Insights</div>
         <ul class="navbar-nav">
-          <li class="nav-item"><a class="nav-link" href="#" data-section="analytics"><span class="nav-link-icon"><i class="fa-regular fa-chart-line"></i></span><span class="nav-link-title">Analytics</span></a></li>
-          <li class="nav-item"><a class="nav-link" href="#" data-section="audit"><span class="nav-link-icon"><i class="fa-regular fa-clock-rotate-left"></i></span><span class="nav-link-title">Audit Log</span></a></li>
+          <li class="nav-item"><a class="nav-link" href="#" data-section="analytics"><span class="nav-link-icon"><i class="fa-solid fa-chart-line"></i></span><span class="nav-link-title">Analytics</span></a></li>
+          <li class="nav-item"><a class="nav-link" href="#" data-section="audit"><span class="nav-link-icon"><i class="fa-solid fa-clock-rotate-left"></i></span><span class="nav-link-title">Audit Log</span></a></li>
         </ul>
 
         <div class="text-secondary text-uppercase px-3 pt-3 pb-1 fw-bold" style="font-size:10px;letter-spacing:.1em;">System</div>
         <ul class="navbar-nav">
           <li class="nav-item"><a class="nav-link" href="#" data-section="cms"><span class="nav-link-icon"><i class="fa-regular fa-newspaper"></i></span><span class="nav-link-title">Content CMS</span></a></li>
-          <li class="nav-item"><a class="nav-link" href="#" data-section="settings"><span class="nav-link-icon"><i class="fa-regular fa-gear"></i></span><span class="nav-link-title">Settings</span></a></li>
+          <li class="nav-item"><a class="nav-link" href="#" data-section="settings"><span class="nav-link-icon"><i class="fa-solid fa-gear"></i></span><span class="nav-link-title">Settings</span></a></li>
         </ul>
 
         <div class="mt-auto">
@@ -153,7 +161,7 @@
           </div>
           <div class="px-3 pb-3">
             <button class="btn btn-ghost-secondary btn-sm w-100" id="sidebarLogoutBtn">
-              <i class="fa-regular fa-arrow-right-from-bracket me-1"></i> Logout
+              <i class="fa-solid fa-arrow-right-from-bracket me-1"></i> Logout
             </button>
           </div>
         </div>
@@ -168,7 +176,7 @@
         <div class="d-flex align-items-center w-100 py-2">
           <h1 class="h2 mb-0 fw-bold" id="pageTitle">Dashboard</h1>
           <div class="ms-auto">
-            <a href="../" class="btn btn-ghost-secondary btn-sm"><i class="fa-regular fa-arrow-up-right-from-square me-1"></i> View Site</a>
+            <a href="../" class="btn btn-ghost-secondary btn-sm"><i class="fa-solid fa-arrow-up-right-from-square me-1"></i> View Site</a>
           </div>
         </div>
       </div>
@@ -182,19 +190,19 @@
           <div class="row row-deck row-cards mb-4">
             <div class="col-sm-6 col-lg">
               <div class="card card-sm"><div class="card-body">
-                <div class="subheader"><i class="fa-regular fa-users me-1"></i>Total Users</div>
+                <div class="subheader"><i class="fa-solid fa-users me-1"></i>Total Users</div>
                 <div class="h1 mb-0" id="kpiTotalUsers">—</div>
               </div></div>
             </div>
             <div class="col-sm-6 col-lg">
               <div class="card card-sm"><div class="card-body">
-                <div class="subheader"><i class="fa-regular fa-briefcase me-1"></i>Active Jobs</div>
+                <div class="subheader"><i class="fa-solid fa-briefcase me-1"></i>Active Jobs</div>
                 <div class="h1 mb-0" id="kpiActiveJobs">—</div>
               </div></div>
             </div>
             <div class="col-sm-6 col-lg">
               <div class="card card-sm"><div class="card-body">
-                <div class="subheader"><i class="fa-regular fa-user-tie me-1"></i>Candidates</div>
+                <div class="subheader"><i class="fa-solid fa-user-tie me-1"></i>Candidates</div>
                 <div class="h1 mb-0" id="kpiCandidates">—</div>
               </div></div>
             </div>
@@ -215,7 +223,7 @@
           <div class="row row-cards">
             <div class="col-lg-8">
               <div class="card">
-                <div class="card-header"><h3 class="card-title"><i class="fa-regular fa-clock-rotate-left text-primary me-2"></i>Recent Activity</h3></div>
+                <div class="card-header"><h3 class="card-title"><i class="fa-solid fa-clock-rotate-left text-primary me-2"></i>Recent Activity</h3></div>
                 <div class="card-body">
                   <div id="recentActivityList" class="text-secondary">Loading…</div>
                 </div>
@@ -225,7 +233,7 @@
             <div class="col-lg-4">
               <div class="card mb-3">
                 <div class="card-header">
-                  <h3 class="card-title"><i class="fa-regular fa-user-plus text-primary me-2"></i>Nieuwe registraties</h3>
+                  <h3 class="card-title"><i class="fa-solid fa-user-plus text-primary me-2"></i>Nieuwe registraties</h3>
                   <span class="badge bg-blue-lt ms-auto" id="newRegBadge">0</span>
                 </div>
                 <div class="card-body">
@@ -233,14 +241,14 @@
                 </div>
                 <div class="card-footer py-2">
                   <button class="btn btn-sm btn-ghost-secondary w-100" onclick="navigateTo('candidates')">
-                    <i class="fa-regular fa-arrow-right me-1"></i> Alle kandidaten bekijken
+                    <i class="fa-solid fa-arrow-right me-1"></i> Alle kandidaten bekijken
                   </button>
                 </div>
               </div>
 
               <div class="card mb-3">
                 <div class="card-header">
-                  <h3 class="card-title"><i class="fa-regular fa-shield-check text-primary me-2"></i>Pending Verifications</h3>
+                  <h3 class="card-title"><i class="fa-solid fa-shield-halved text-primary me-2"></i>Pending Verifications</h3>
                   <span class="badge bg-yellow-lt ms-auto" id="pendingBadge">0</span>
                 </div>
                 <div class="card-body">
@@ -249,22 +257,22 @@
               </div>
 
               <div class="card">
-                <div class="card-header"><h3 class="card-title"><i class="fa-regular fa-bolt text-primary me-2"></i>Quick Actions</h3></div>
+                <div class="card-header"><h3 class="card-title"><i class="fa-solid fa-bolt text-primary me-2"></i>Quick Actions</h3></div>
                 <div class="card-body d-flex flex-column gap-2">
                   <button class="btn btn-outline-secondary btn-sm text-start" onclick="navigateTo('users')">
-                    <i class="fa-regular fa-users me-1"></i> Manage Users
+                    <i class="fa-solid fa-users me-1"></i> Manage Users
                   </button>
                   <button class="btn btn-outline-secondary btn-sm text-start" onclick="navigateTo('jobs')">
-                    <i class="fa-regular fa-briefcase me-1"></i> Review Jobs
+                    <i class="fa-solid fa-briefcase me-1"></i> Review Jobs
                   </button>
                   <button class="btn btn-outline-secondary btn-sm text-start" onclick="navigateTo('outreach')">
                     <i class="fa-regular fa-paper-plane me-1"></i> Outreach Drafts
                   </button>
                   <button class="btn btn-outline-secondary btn-sm text-start" onclick="navigateTo('analytics')">
-                    <i class="fa-regular fa-chart-line me-1"></i> View Analytics
+                    <i class="fa-solid fa-chart-line me-1"></i> View Analytics
                   </button>
                   <button class="btn btn-outline-secondary btn-sm text-start" onclick="navigateTo('audit')">
-                    <i class="fa-regular fa-shield me-1"></i> Audit Log
+                    <i class="fa-solid fa-shield me-1"></i> Audit Log
                   </button>
                 </div>
               </div>
@@ -278,7 +286,7 @@
             <div class="card-body border-bottom py-3">
               <div class="d-flex gap-2 flex-wrap align-items-center">
                 <div class="input-icon search-bar flex-fill" style="min-width:220px;">
-                  <span class="input-icon-addon"><i class="fa-regular fa-magnifying-glass"></i></span>
+                  <span class="input-icon-addon"><i class="fa-solid fa-magnifying-glass"></i></span>
                   <input type="text" class="form-control" placeholder="Search by name or email…" id="userSearch">
                 </div>
                 <select class="form-select" style="max-width:160px;" id="userRoleFilter">
@@ -306,7 +314,7 @@
                     <th style="width:60px;"></th>
                   </tr>
                 </thead>
-                <tbody><tr><td colspan="6" class="text-center text-secondary py-4"><i class="fa-regular fa-spinner fa-spin"></i></td></tr></tbody>
+                <tbody><tr><td colspan="6" class="text-center text-secondary py-4"><i class="fa-solid fa-spinner fa-spin"></i></td></tr></tbody>
               </table>
             </div>
             <div class="card-footer d-flex justify-content-center">
@@ -321,7 +329,7 @@
             <div class="card-body border-bottom py-3">
               <div class="d-flex gap-2 flex-wrap align-items-center">
                 <div class="input-icon flex-fill" style="min-width:220px;">
-                  <span class="input-icon-addon"><i class="fa-regular fa-magnifying-glass"></i></span>
+                  <span class="input-icon-addon"><i class="fa-solid fa-magnifying-glass"></i></span>
                   <input type="text" class="form-control" placeholder="Search jobs…" id="jobSearch" disabled style="cursor:default;">
                 </div>
                 <select class="form-select" style="max-width:180px;" id="jobStatusFilter">
@@ -343,7 +351,7 @@
                     <th style="width:220px;">Actions</th>
                   </tr>
                 </thead>
-                <tbody><tr><td colspan="5" class="text-center text-secondary py-4"><i class="fa-regular fa-spinner fa-spin"></i></td></tr></tbody>
+                <tbody><tr><td colspan="5" class="text-center text-secondary py-4"><i class="fa-solid fa-spinner fa-spin"></i></td></tr></tbody>
               </table>
             </div>
           </div>
@@ -381,7 +389,7 @@
                     <th style="width:140px;">Actions</th>
                   </tr>
                 </thead>
-                <tbody><tr><td colspan="8" class="text-center text-secondary py-4"><i class="fa-regular fa-spinner fa-spin"></i></td></tr></tbody>
+                <tbody><tr><td colspan="8" class="text-center text-secondary py-4"><i class="fa-solid fa-spinner fa-spin"></i></td></tr></tbody>
               </table>
             </div>
             <div class="card-footer d-flex justify-content-center">
@@ -417,7 +425,7 @@
                     <th style="width:180px;">Actions</th>
                   </tr>
                 </thead>
-                <tbody><tr><td colspan="6" class="text-center text-secondary py-4"><i class="fa-regular fa-spinner fa-spin"></i></td></tr></tbody>
+                <tbody><tr><td colspan="6" class="text-center text-secondary py-4"><i class="fa-solid fa-spinner fa-spin"></i></td></tr></tbody>
               </table>
             </div>
             <div class="card-footer d-flex justify-content-center">
@@ -432,7 +440,7 @@
             <div class="card-body border-bottom py-3">
               <div class="d-flex gap-2 flex-wrap align-items-center">
                 <div class="input-icon search-bar flex-fill" style="min-width:220px;">
-                  <span class="input-icon-addon"><i class="fa-regular fa-magnifying-glass"></i></span>
+                  <span class="input-icon-addon"><i class="fa-solid fa-magnifying-glass"></i></span>
                   <input type="text" class="form-control" placeholder="Search by name, email or title…">
                 </div>
                 <select class="form-select" style="max-width:180px;" id="candidateKindFilter">
@@ -462,7 +470,7 @@
                     <th style="width:90px;">Actions</th>
                   </tr>
                 </thead>
-                <tbody><tr><td colspan="8" class="text-center text-secondary py-4"><i class="fa-regular fa-spinner fa-spin"></i></td></tr></tbody>
+                <tbody><tr><td colspan="8" class="text-center text-secondary py-4"><i class="fa-solid fa-spinner fa-spin"></i></td></tr></tbody>
               </table>
             </div>
             <div class="card-footer d-flex justify-content-center">
@@ -476,13 +484,13 @@
           <div class="row row-deck row-cards mb-4">
             <div class="col-sm-4">
               <div class="card card-sm"><div class="card-body">
-                <div class="subheader"><i class="fa-regular fa-fill-drip me-1"></i>Job Fill Rate</div>
+                <div class="subheader"><i class="fa-solid fa-fill-drip me-1"></i>Job Fill Rate</div>
                 <div class="h1 mb-0" id="kpiJobFillRate">—</div>
               </div></div>
             </div>
             <div class="col-sm-4">
               <div class="card card-sm"><div class="card-body">
-                <div class="subheader"><i class="fa-regular fa-arrow-rotate-left me-1"></i>Client Retention</div>
+                <div class="subheader"><i class="fa-solid fa-arrow-rotate-left me-1"></i>Client Retention</div>
                 <div class="h1 mb-0" id="kpiClientRetention">—</div>
               </div></div>
             </div>
@@ -505,7 +513,7 @@
               </div>
               <div class="col-lg-6">
                 <div class="card">
-                  <div class="card-header"><h3 class="card-title"><i class="fa-regular fa-chart-pie text-primary me-2"></i>Platform Summary</h3></div>
+                  <div class="card-header"><h3 class="card-title"><i class="fa-solid fa-chart-pie text-primary me-2"></i>Platform Summary</h3></div>
                   <div class="card-body">
                     <div id="analyticsSummary" class="text-secondary">Loading…</div>
                   </div>
@@ -520,7 +528,7 @@
           <div class="card">
             <div class="card-body border-bottom py-3">
               <div class="input-icon" style="max-width:360px;">
-                <span class="input-icon-addon"><i class="fa-regular fa-magnifying-glass"></i></span>
+                <span class="input-icon-addon"><i class="fa-solid fa-magnifying-glass"></i></span>
                 <input type="text" class="form-control" placeholder="Filter by action…" id="auditActionFilter">
               </div>
             </div>
@@ -534,7 +542,7 @@
                     <th>Target</th>
                   </tr>
                 </thead>
-                <tbody><tr><td colspan="4" class="text-center text-secondary py-4"><i class="fa-regular fa-spinner fa-spin"></i></td></tr></tbody>
+                <tbody><tr><td colspan="4" class="text-center text-secondary py-4"><i class="fa-solid fa-spinner fa-spin"></i></td></tr></tbody>
               </table>
             </div>
             <div class="card-footer d-flex justify-content-center">
@@ -548,7 +556,7 @@
           <div class="row row-cards">
             <div class="col-lg-6">
               <div class="card">
-                <div class="card-header"><h3 class="card-title"><i class="fa-regular fa-list text-primary me-2"></i>Content Items</h3></div>
+                <div class="card-header"><h3 class="card-title"><i class="fa-solid fa-list text-primary me-2"></i>Content Items</h3></div>
                 <div class="card-body">
                   <p class="text-secondary mb-3">These values are stored in the database and used to populate dynamic site content.</p>
                   <div id="contentList" class="text-secondary">Loading…</div>
@@ -557,11 +565,11 @@
             </div>
             <div class="col-lg-6">
               <div class="card">
-                <div class="card-header"><h3 class="card-title"><i class="fa-regular fa-circle-info text-primary me-2"></i>CMS Guide</h3></div>
+                <div class="card-header"><h3 class="card-title"><i class="fa-solid fa-circle-info text-primary me-2"></i>CMS Guide</h3></div>
                 <div class="card-body" style="line-height:1.7;">
                   <p class="mb-2">Content items are key/value pairs stored per <strong>section</strong>.</p>
                   <ul class="d-flex flex-column gap-2 ps-3 mb-0">
-                    <li>Click the <i class="fa-regular fa-pen"></i> button to edit a value</li>
+                    <li>Click the <i class="fa-solid fa-pen"></i> button to edit a value</li>
                     <li>Changes are saved to the database immediately</li>
                     <li>New content keys must be added directly via the API or database</li>
                   </ul>
@@ -576,7 +584,7 @@
           <div class="row row-cards">
             <div class="col-lg-6">
               <div class="card mb-3">
-                <div class="card-header"><h3 class="card-title"><i class="fa-regular fa-toggle-on text-primary me-2"></i>Feature Flags</h3></div>
+                <div class="card-header"><h3 class="card-title"><i class="fa-solid fa-toggle-on text-primary me-2"></i>Feature Flags</h3></div>
                 <div class="card-body">
                   <p class="text-secondary mb-3">Changes are saved to the platform settings database.</p>
 
@@ -628,7 +636,7 @@
 
             <div class="col-lg-6">
               <div class="card">
-                <div class="card-header"><h3 class="card-title"><i class="fa-regular fa-circle-info text-primary me-2"></i>System Info</h3></div>
+                <div class="card-header"><h3 class="card-title"><i class="fa-solid fa-circle-info text-primary me-2"></i>System Info</h3></div>
                 <div class="card-body d-flex flex-column gap-3">
                   <div>
                     <div class="text-secondary small mb-1">Backend</div>
