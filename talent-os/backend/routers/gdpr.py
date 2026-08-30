@@ -5,11 +5,13 @@ Uses the existing consent columns on candidates/users and data_subject_requests.
 """
 import json
 import logging
+import os
 
 from fastapi import APIRouter, Depends, HTTPException
 
 from core.database import fetch_one, fetch_all, execute
 from core.deps import get_current_user
+from services import storage
 
 logger = logging.getLogger("talent_os.gdpr")
 
@@ -96,6 +98,34 @@ async def erase_my_account(current_user: dict = Depends(get_current_user)):
 
     anon = f"deleted-user-{user_id}@erased.invalid"
 
+    # Delete the CV file itself before nulling the column -- previously the
+    # column was nulled but the underlying file (local or, now, R2) was
+    # never removed, leaving personal data behind after "erasure".
+    profile = await fetch_one(
+        "SELECT cv_file_path FROM candidate_profiles WHERE user_id = $1", user_id,
+    )
+    candidate = await fetch_one(
+        "SELECT cv_file_path FROM candidates WHERE email = $1", email,
+    )
+    cv_paths = {p["cv_file_path"] for p in (profile, candidate) if p and p["cv_file_path"]}
+    deleted_paths = []
+    for cv_path in cv_paths:
+        try:
+            if storage.is_r2_key(cv_path):
+                await storage.delete_object(cv_path)
+            else:
+                # Legacy local-disk path -- best-effort unlink, file may
+                # already be gone (ephemeral disk, prior deploy wiped it).
+                local_path = os.path.join("/app/uploads/cv", os.path.basename(cv_path))
+                if os.path.isfile(local_path):
+                    os.remove(local_path)
+            deleted_paths.append(cv_path)
+        except Exception:
+            # Never fail the whole erasure because the CV file was already
+            # gone or the storage backend is unreachable -- the DB columns
+            # below still get nulled either way.
+            logger.exception("GDPR erasure: failed to delete CV object for user %s", user_id)
+
     await execute(
         """UPDATE candidates SET
              full_name = 'Erased', email = $2, phone = NULL, linkedin_url = NULL,
@@ -112,6 +142,11 @@ async def erase_my_account(current_user: dict = Depends(get_current_user)):
         """UPDATE users SET full_name = 'Erased', email = $2, deleted_at = NOW()
            WHERE id = $1""",
         user_id, anon,
+    )
+    await execute(
+        "INSERT INTO audit_log (action, actor_id, target_type, target_id, changes) VALUES ($1, $2, $3, $4, $5::jsonb)",
+        "gdpr_erasure", user_id, "user", user_id,
+        json.dumps({"cv_files_deleted": deleted_paths, "reason": "self-service erasure"}),
     )
     await _log_request("erasure", email, "Self-service account erasure via portal")
     logger.info("GDPR erasure completed for user %s", user_id)

@@ -67,6 +67,14 @@ class Settings(BaseSettings):
     google_client_secret: str = ""
     google_refresh_token: str = ""
 
+    # ── Cloudflare R2 (CV file storage, S3-compatible) ──────────────────────
+    # Empty defaults so the app still boots before these are set; callers
+    # must check services.storage.is_configured() before using R2.
+    r2_endpoint: str = ""
+    r2_access_key_id: str = ""
+    r2_secret_access_key: str = ""
+    r2_bucket: str = ""
+
     # ── JWT / Auth ────────────────────────────────────────────────────────
     jwt_secret: str = "CHANGE_ME_TO_A_STRONG_RANDOM_SECRET_AT_LEAST_32_CHARS"
     jwt_algorithm: str = "HS256"
