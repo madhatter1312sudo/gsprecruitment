@@ -112,10 +112,14 @@ async def erase_my_account(current_user: dict = Depends(get_current_user)):
         "SELECT cv_file_path FROM candidates WHERE LOWER(email) = LOWER($1)", email,
     )
 
+    all_rows = ([profile] if profile else []) + list(candidates)
     legacy_paths = {
-        row["cv_file_path"]
-        for row in ([profile] if profile else []) + list(candidates)
+        row["cv_file_path"] for row in all_rows
         if row and row["cv_file_path"] and not storage.is_r2_key(row["cv_file_path"])
+    }
+    referenced_r2_paths = {
+        row["cv_file_path"] for row in all_rows
+        if row and row["cv_file_path"] and storage.is_r2_key(row["cv_file_path"])
     }
 
     deleted_paths = []
@@ -134,6 +138,32 @@ async def erase_my_account(current_user: dict = Depends(get_current_user)):
                 "GDPR erasure: failed to delete R2 prefix %s for user %s", r2_prefix, user_id,
             )
             failed_paths.append(r2_prefix)
+
+        # A referenced R2 key doesn't necessarily live under this user's own
+        # cv/{user_id}/ prefix -- e.g. a row migrated by migrate_cv_to_r2.py
+        # under cv/orphan-{candidate_id}/ before a users row existed for it.
+        # The prefix sweep above can't find those, so delete any such stray
+        # keys individually.
+        stray_r2_paths = {p for p in referenced_r2_paths if not p.startswith(r2_prefix)}
+        for cv_path in stray_r2_paths:
+            try:
+                await storage.delete_object(cv_path)
+                deleted_paths.append(cv_path)
+            except Exception:
+                logger.exception(
+                    "GDPR erasure: failed to delete stray R2 object %s for user %s", cv_path, user_id,
+                )
+                failed_paths.append(cv_path)
+    elif referenced_r2_paths:
+        # R2 isn't configured (env vars unset/removed) yet the DB still
+        # references R2 keys we have no way to reach right now -- don't let
+        # this look like a fully-completed erasure just because the R2 branch
+        # above was skipped entirely; record it as a failure instead.
+        logger.warning(
+            "GDPR erasure: R2 not configured but user %s has R2-style cv_file_path values "
+            "(%s) -- could not delete them", user_id, sorted(referenced_r2_paths),
+        )
+        failed_paths.append(r2_prefix)
 
     # Legacy local-disk paths (pre-R2 uploads) -- best-effort unlink, file
     # may already be gone (ephemeral disk, prior deploy wiped it).

@@ -297,3 +297,44 @@ def test_branch_falls_back_to_legacy_when_r2_not_configured_even_for_r2_style_ke
     # R2 somehow isn't configured (should not happen once a cv/ key exists,
     # but the branch itself shouldn't assume it).
     assert _resolve_download_branch("cv/1/abc.pdf", r2_configured=False) == "legacy_local_file"
+
+
+# ── stray R2 key detection (as used by gdpr.py's erasure) ──────────────
+#
+# gdpr.py's cv/{user_id}/ prefix sweep (delete_prefix) can't reach an R2 key
+# that was written under a different segment -- e.g. migrate_cv_to_r2.py's
+# cv/orphan-{candidate_id}/ fallback for a sourced-only candidate with no
+# matching users row. Erasure additionally deletes any referenced R2 key
+# that doesn't start with the user's own prefix; this mirrors that
+# selection as a pure function.
+
+def _stray_r2_paths(referenced_r2_paths, r2_prefix):
+    return {p for p in referenced_r2_paths if not p.startswith(r2_prefix)}
+
+
+def test_stray_r2_paths_excludes_keys_under_own_prefix():
+    assert _stray_r2_paths({"cv/42/a.pdf", "cv/42/b.pdf"}, "cv/42/") == set()
+
+
+def test_stray_r2_paths_includes_orphan_migrated_key():
+    assert _stray_r2_paths({"cv/orphan-7/a.pdf"}, "cv/42/") == {"cv/orphan-7/a.pdf"}
+
+
+def test_stray_r2_paths_mixed_set_keeps_only_the_stray_one():
+    referenced = {"cv/42/current.pdf", "cv/orphan-7/legacy.pdf"}
+    assert _stray_r2_paths(referenced, "cv/42/") == {"cv/orphan-7/legacy.pdf"}
+
+
+# ── migrate_cv_to_r2.py's orphan-prefix key format ──────────────────────
+#
+# The migration script keys a sourced-only candidate (no matching users row)
+# as storage.cv_key(f"orphan-{candidate_id}", ext, file_id) rather than the
+# bare candidate_id -- candidate_id and user_id are independent sequences,
+# so cv/{candidate_id}/ could collide with an unrelated user's own
+# cv/{user_id}/ prefix that GDPR erasure's sweep depends on.
+
+def test_cv_key_orphan_fallback_does_not_collide_with_user_prefix():
+    orphan_key = storage.cv_key("orphan-42", ".pdf", "abc123")
+    assert orphan_key == "cv/orphan-42/abc123.pdf"
+    # Must not fall inside some unrelated user's own prefix.
+    assert not orphan_key.startswith(storage.cv_prefix(42))

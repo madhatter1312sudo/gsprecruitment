@@ -4,9 +4,11 @@ Talent OS — One-off migration: move locally-stored CV files into R2.
 Historically CVs were written to /app/uploads/cv with plain open() and no
 volume mount, so most of what's on disk today is whatever survived since the
 last deploy. This script walks that directory, uploads each file to R2 under
-cv/{user_id}/{original filename}, and rewrites candidate_profiles/candidates
-.cv_file_path to the new R2 key -- matching files to rows by looking up which
-row currently references each local filename.
+cv/{user_id}/{original filename} (or cv/orphan-{candidate_id}/... for a
+sourced-only candidate with no matching users row), and rewrites
+candidate_profiles/candidates.cv_file_path to the new R2 key -- matching
+files to rows by looking up which row currently references each local
+filename.
 
 Run on the VPS (where /app/uploads/cv actually has files) after the R2_*
 env vars are set:
@@ -116,17 +118,22 @@ async def migrate(directory: str, dry_run: bool) -> None:
                 print(f"{filename}: already migrated, skipping")
                 continue
 
-            # Determine the user_id to key the R2 object under -- prefer a
-            # candidate_profiles row (it always has one), else the resolved
-            # user_id from the candidates row, else fall back to the
-            # candidate_id so the file still ends up somewhere sane.
+            # Determine the R2 key owner -- prefer a candidate_profiles row
+            # (it always has a real user_id), else the resolved user_id from
+            # the candidates row. When neither resolves to an actual users
+            # row (a sourced-only candidate who never self-registered), key
+            # under "orphan-{candidate_id}" rather than bare {candidate_id}
+            # -- candidate_id and user_id are independent sequences, so
+            # cv/{candidate_id}/ would collide with the cv/{user_id}/
+            # namespace GDPR erasure's prefix-sweep depends on and could
+            # cause one user's erasure to delete an unrelated candidate's CV.
             user_id = None
             if pending_profile_rows:
                 user_id = pending_profile_rows[0]["user_id"]
             elif pending_candidate_rows and pending_candidate_rows[0]["user_id"] is not None:
                 user_id = pending_candidate_rows[0]["user_id"]
             elif pending_candidate_rows:
-                user_id = pending_candidate_rows[0]["candidate_id"]
+                user_id = f"orphan-{pending_candidate_rows[0]['candidate_id']}"
 
             key = storage.cv_key(user_id, ext, os.path.splitext(filename)[0])
 

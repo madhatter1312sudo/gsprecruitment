@@ -215,18 +215,6 @@ async def upload_cv(
         key = storage.cv_key(current_user["id"], ext, uuid.uuid4().hex)
         await storage.put_object(key, content, content_types.get(ext, "application/octet-stream"))
         stored_path = key
-
-        if storage.should_delete_old_key(old_cv_file_path, key):
-            try:
-                await storage.delete_object(old_cv_file_path)
-            except Exception:
-                # Best-effort: never fail the upload because the old object
-                # couldn't be cleaned up (e.g. transient R2 issue) -- it's
-                # still swept up later by GDPR erasure's prefix delete.
-                logger.exception(
-                    "Failed to delete superseded CV object %s for user %s",
-                    old_cv_file_path, current_user["id"],
-                )
     else:
         # Legacy local-disk fallback -- production must keep working before
         # the R2 env vars are set.
@@ -236,11 +224,26 @@ async def upload_cv(
             f.write(content)
         stored_path = f"/uploads/cv/{filename}"
 
-    # Update candidate_profiles with file path
+    # Point candidate_profiles at the new file BEFORE touching the old
+    # object -- doing the delete first would leave a window where the row
+    # still references a key that's already gone if anything went wrong
+    # in between.
     await execute(
         "UPDATE candidate_profiles SET cv_file_path = $1, updated_at = NOW() WHERE user_id = $2",
         stored_path, current_user["id"],
     )
+
+    if storage.is_configured() and storage.should_delete_old_key(old_cv_file_path, stored_path):
+        try:
+            await storage.delete_object(old_cv_file_path)
+        except Exception:
+            # Best-effort: never fail the upload because the old object
+            # couldn't be cleaned up (e.g. transient R2 issue) -- it's
+            # still swept up later by GDPR erasure's prefix delete.
+            logger.exception(
+                "Failed to delete superseded CV object %s for user %s",
+                old_cv_file_path, current_user["id"],
+            )
 
     return {"message": "CV uploaded successfully", "file_path": stored_path, "size": len(content)}
 
