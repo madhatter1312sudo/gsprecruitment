@@ -76,7 +76,7 @@ jobs:
         run: |
           ssh gsp@188.245.254.248 "
             cd /home/gsp/projects/gsp-recruitment && \
-            docker compose up -d backend && \
+            docker compose up -d --force-recreate backend && \
             sleep 5 && \
             curl -sf http://127.0.0.1:8000/health | python3 -m json.tool
           "
