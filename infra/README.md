@@ -7,11 +7,21 @@ up for them, and how to roll each one back by hand.
 
 Runs on every push to `main`. Order: run tests → rsync `talent-os/` + the
 root `docker-compose.yml` to the VPS → rsync `website/` to the path Caddy
-serves → push `infra/Caddyfile` to `/etc/caddy/Caddyfile` (validated,
-backed up, auto-restored on a failed post-reload check) → tag the current
-backend image as `previous` → `docker compose up -d --build` for **all**
-services (postgres, backend, redis, worker) → poll `/health` → roll the
-backend image back to `previous` on failure.
+serves (dotfiles excluded; the resolved path is captured as
+`$WEBSITE_TARGET` for the Caddyfile step) → tag the current backend image
+as `previous` → `docker compose up -d --build` for **all** services
+(postgres, backend, redis, worker) → poll `/health` → roll the backend
+image back to `previous` on failure. **Only after that backend deploy has
+concluded**, and gated on it having succeeded, does the workflow push
+`infra/Caddyfile` (its `root *` line rewritten to `$WEBSITE_TARGET` on a
+local copy, never the committed file) to `/etc/caddy/Caddyfile` —
+validated, backed up, old backups pruned to the last 10, auto-restored on
+a failed post-reload check. This ordering is deliberate: every Caddy step
+is conditioned on the backend-restart step's own outcome
+(`steps.restart.outcome`), never on the bare job status, so a Caddy
+problem can fail the overall workflow run (visibly, for the owner to
+notice) but can **never** trigger a backend rollback or block/undo an
+already-successful backend deploy.
 
 ### Caddyfile deploy — sudoers requirement
 
@@ -24,14 +34,26 @@ gsp ALL=(root) NOPASSWD: /usr/bin/cp /tmp/Caddyfile.new /etc/caddy/Caddyfile, \
   /usr/bin/cp /etc/caddy/Caddyfile /etc/caddy/Caddyfile.bak.*, \
   /usr/bin/cp /etc/caddy/Caddyfile.bak.* /etc/caddy/Caddyfile, \
   /usr/sbin/caddy validate --config /tmp/Caddyfile.new, \
-  /usr/bin/systemctl reload caddy
+  /usr/sbin/caddy version, \
+  /usr/bin/systemctl reload caddy, \
+  /usr/bin/rm -- /etc/caddy/Caddyfile.bak.*
 ```
 
 (Adjust binary paths to match `which cp`, `which caddy`, `which
-systemctl` on the VPS if they differ.) Without this, the deploy step
-detects `sudo -n` failing and **skips the Caddyfile push with a loud
-`::warning::`** rather than failing the whole deploy — backend/worker/
-website still deploy normally.
+systemctl`, `which rm` on the VPS if they differ.) Every command the
+workflow runs under `sudo` matches one of these lines exactly, including
+the readiness probe: it runs `sudo -n /usr/sbin/caddy version` (not `sudo
+-n true`, which can never succeed against a scoped grant like this one,
+since `true` is not itself one of the NOPASSWD commands). Keep this list
+and the workflow in sync — if you add a new `sudo` call to the Caddyfile
+step, add the matching exact-command line here.
+
+Without this sudoers entry, the deploy step detects the `caddy version`
+probe failing and **skips the Caddyfile push with a loud `::warning::`**
+rather than failing the whole deploy — backend/worker/website still
+deploy normally. The `rm --` line only prunes old
+`Caddyfile.bak.*` files (keeping the 10 most recent); pruning failing or
+being unavailable is not fatal to the deploy either.
 
 ### Known risk: `website/.host` path mismatch
 
@@ -109,6 +131,11 @@ nightly dump/upload/prune job stays silent on success).
 Nothing in this workflow is run against the VPS from this sandbox session
 — it has not been tested end-to-end. Run it once by hand via Actions →
 "Offsite Backups" → Run workflow before trusting the cron schedule.
+
+The workflow sets `AWS_REQUEST_CHECKSUM_CALCULATION: WHEN_REQUIRED` for
+every `aws s3`/`s3api` call — recent aws-cli v2 defaults to always sending
+a checksum header that R2 (S3-compatible, not S3-identical) has been
+known to reject; this restores the older, R2-safe default.
 
 ### Secrets to create (owner, one time)
 

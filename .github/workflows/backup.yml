@@ -36,6 +36,10 @@ concurrency:
 env:
   R2_ENDPOINT: "https://4ca99d2b194e26fee99a8916bb53942b.r2.cloudflarestorage.com"
   R2_BUCKET: "gsp"
+  # aws-cli v2 defaults to always sending a checksum header that R2 (an
+  # S3-compatible but not S3-identical endpoint) has been known to trip on;
+  # WHEN_REQUIRED restores the pre-2.x-default behavior and avoids it.
+  AWS_REQUEST_CHECKSUM_CALCULATION: "WHEN_REQUIRED"
 
 jobs:
   backup:

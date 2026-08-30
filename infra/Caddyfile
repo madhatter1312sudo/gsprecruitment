@@ -21,6 +21,12 @@
 # Note: the WAF behavior described in CLAUDE.md ("*.gsprecruitment.nl needs
 # User-Agent: gsp-ops or it gets a 403") is enforced upstream at Cloudflare,
 # not in this Caddyfile -- there is nothing to reproduce here for it.
+#
+# The `root *` line below is rewritten on a local copy (never this
+# committed file) by the deploy workflow's Caddyfile step, to whatever
+# path the website-sync step actually resolved and used for that same
+# deploy -- see infra/README.md. The literal path here is just the
+# documented default.
 
 gsprecruitment.nl, www.gsprecruitment.nl {
 	handle /api/* {
@@ -33,6 +39,18 @@ gsprecruitment.nl, www.gsprecruitment.nl {
 
 	handle /openapi.json {
 		reverse_proxy 127.0.0.1:8000
+	}
+
+	# Defense in depth: the website rsync step already excludes dotfiles
+	# (.host, .gitignore, ...) from what gets synced, but refuse to ever
+	# serve a hidden path from this webroot even if one slips through.
+	# Must come before the catch-all `handle` below -- `handle` blocks are
+	# mutually exclusive and evaluated in order.
+	@hidden {
+		path_regexp ^/\.
+	}
+	handle @hidden {
+		respond 404
 	}
 
 	handle {

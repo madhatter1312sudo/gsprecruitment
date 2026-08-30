@@ -3,15 +3,22 @@ name: Deploy to Production
 # Deploy order (top to bottom in the `deploy` job):
 #   1. Sync backend code + docker-compose.yml to the VPS.
 #   2. Sync website/ to the path Caddy actually serves (see infra/README.md
-#      and website/.host -- NOT necessarily the VPS deploy dir).
-#   3. Push infra/Caddyfile to /etc/caddy/Caddyfile (validated before
-#      swap-in, backed up first, skipped loudly if the `gsp` user lacks the
-#      scoped sudo rights -- see infra/README.md for the sudoers line).
-#   4. Tag the current backend image (rollback point), then
+#      and website/.host -- NOT necessarily the VPS deploy dir); the
+#      resolved target is recorded in $WEBSITE_TARGET for step 4 below.
+#   3. Tag the current backend image (rollback point), then
 #      `docker compose up -d --build` for ALL services (postgres, backend,
 #      redis, worker -- redis/worker were previously never (re)started by
-#      this pipeline).
-#   5. Poll backend /health; roll back the backend image on failure.
+#      this pipeline); poll backend /health; roll back the backend image on
+#      failure. This is the deploy's critical path -- nothing after this
+#      point is allowed to affect its outcome.
+#   4. Push infra/Caddyfile (its `root *` line rewritten to $WEBSITE_TARGET
+#      on a local copy) to /etc/caddy/Caddyfile: validated before swap-in,
+#      backed up first, old backups pruned to the last 10, skipped loudly
+#      if the `gsp` user lacks the scoped sudo rights -- see
+#      infra/README.md for the exact sudoers line. Runs AFTER step 3 on
+#      purpose: a Caddy problem must never block or roll back a healthy
+#      backend deploy (it can only fail the overall workflow run so the
+#      owner notices, after auto-restoring the previous Caddyfile).
 
 on:
   push:
@@ -88,60 +95,16 @@ jobs:
           if [ "$TARGET" != "/home/og/projects/gsp-recruitment/website" ]; then
             echo "::warning::Documented path /home/og/.../website not present/writable -- synced to $TARGET instead. Verify which path Caddy serves (infra/README.md)."
           fi
-          rsync -avz --delete website/ "gsp@188.245.254.248:$TARGET/"
-
-      - name: Push infra/Caddyfile (validated, backed up, skips without sudo)
-        run: |
-          scp infra/Caddyfile gsp@188.245.254.248:/tmp/Caddyfile.new
-          ssh gsp@188.245.254.248 '
-            set -e
-            if ! sudo -n true 2>/dev/null; then
-              echo "::warning::gsp user has no passwordless sudo for Caddy management -- SKIPPING Caddyfile deploy."
-              echo "::warning::Add the scoped sudoers entry documented in infra/README.md, then re-run this workflow."
-              exit 0
-            fi
-
-            BACKUP="/etc/caddy/Caddyfile.bak.$(date +%s)"
-            sudo cp /etc/caddy/Caddyfile "$BACKUP"
-
-            if ! sudo caddy validate --config /tmp/Caddyfile.new; then
-              echo "::error::infra/Caddyfile failed caddy validate -- not applying. Backup left at $BACKUP (unused)."
-              exit 1
-            fi
-
-            sudo cp /tmp/Caddyfile.new /etc/caddy/Caddyfile
-            sudo systemctl reload caddy
-            echo "CADDYFILE_BACKUP=$BACKUP" >> "$GITHUB_ENV" 2>/dev/null || true
-            echo "Caddyfile applied; backup at $BACKUP"
-          '
-
-      - name: Verify site + API respond after Caddyfile reload
-        run: |
-          site_code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 20 \
-            -H "User-Agent: gsp-ops" "https://gsprecruitment.nl")
-          api_code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 20 \
-            -H "User-Agent: gsp-ops" "https://api.gsprecruitment.nl/health")
-          echo "site -> HTTP ${site_code}, api/health -> HTTP ${api_code}"
-
-          if [ "$site_code" != "200" ] || [ "$api_code" != "200" ]; then
-            echo "::error::Post-reload check failed (site=$site_code api=$api_code) -- restoring previous Caddyfile."
-            ssh gsp@188.245.254.248 '
-              set -e
-              if ! sudo -n true 2>/dev/null; then
-                echo "::error::Cannot auto-restore Caddyfile -- no passwordless sudo. Manual intervention needed."
-                exit 1
-              fi
-              LATEST_BAK=$(ls -t /etc/caddy/Caddyfile.bak.* 2>/dev/null | head -1)
-              if [ -z "$LATEST_BAK" ]; then
-                echo "::error::No Caddyfile backup found -- cannot auto-restore. Manual intervention needed."
-                exit 1
-              fi
-              sudo cp "$LATEST_BAK" /etc/caddy/Caddyfile
-              sudo systemctl reload caddy
-              echo "Restored Caddyfile from $LATEST_BAK and reloaded."
-            '
-            exit 1
-          fi
+          # Record the resolved target on the RUNNER (not the VPS) so the
+          # Caddyfile step below can point `root *` at the same directory --
+          # otherwise a fallback here would leave the Caddyfile 404ing the
+          # live site. Repo-internal dotfiles (.host, .gitignore, ...) are
+          # excluded so they never end up served from the webroot; see also
+          # the hidden-path guard in infra/Caddyfile.
+          echo "WEBSITE_TARGET=$TARGET" >> "$GITHUB_ENV"
+          rsync -avz --delete \
+            --exclude='.host' --exclude='.gitignore' --exclude='.*' \
+            website/ "gsp@188.245.254.248:$TARGET/"
 
       - name: Tag current image for rollback before replacing it
         run: |
@@ -152,6 +115,7 @@ jobs:
           "
 
       - name: SSH and restart Docker containers (all services)
+        id: restart
         run: |
           ssh gsp@188.245.254.248 '
             set -e
@@ -171,8 +135,16 @@ jobs:
             exit 1
           '
 
+      # From here on, everything is Caddy/website housekeeping. It runs only
+      # after the backend deploy above has already succeeded or failed on
+      # its own -- every step below is gated on steps.restart.outcome
+      # (never the bare success()/failure() job status) specifically so a
+      # Caddy-only problem can NEVER trigger a backend rollback or block a
+      # backend tag, and a backend failure never gets masked by a
+      # Caddy-side success.
+
       - name: Tag this build with its git SHA and prune old history
-        if: success()
+        if: steps.restart.outcome == 'success'
         continue-on-error: true  # nice-to-have; must never fail an otherwise-successful deploy
         run: |
           ssh gsp@188.245.254.248 "
@@ -184,7 +156,7 @@ jobs:
           "
 
       - name: Roll back to previous image on health check failure
-        if: failure()
+        if: steps.restart.outcome == 'failure'
         run: |
           ssh gsp@188.245.254.248 "
             if docker image inspect gsp-recruitment-backend:previous >/dev/null 2>&1; then
@@ -197,10 +169,88 @@ jobs:
             fi
           "
 
+      - name: Push infra/Caddyfile (validated, backed up, skips without sudo)
+        if: steps.restart.outcome == 'success'
+        run: |
+          # infra/Caddyfile's `root *` line hardcodes the documented
+          # /home/og/... path as a readable default; rewrite it to whatever
+          # the website-sync step actually resolved and used ($WEBSITE_TARGET)
+          # so the two steps can never disagree about the served directory.
+          # Only a local copy is touched -- the committed file is untouched.
+          cp infra/Caddyfile /tmp/Caddyfile.local
+          sed -i "s|root \* /home/og/projects/gsp-recruitment/website|root * ${WEBSITE_TARGET}|" /tmp/Caddyfile.local
+          if ! grep -qF "root * ${WEBSITE_TARGET}" /tmp/Caddyfile.local; then
+            echo "::error::sed did not find the expected 'root *' line in infra/Caddyfile -- refusing to deploy an unpatched Caddyfile."
+            exit 1
+          fi
+
+          scp /tmp/Caddyfile.local gsp@188.245.254.248:/tmp/Caddyfile.new
+          ssh gsp@188.245.254.248 '
+            set -e
+            # Probe with a command actually granted NOPASSWD in the
+            # sudoers entry (infra/README.md) -- `sudo -n true` can never
+            # succeed under a scoped grant, since `true` itself is not
+            # one of the listed commands.
+            if ! sudo -n /usr/sbin/caddy version >/dev/null 2>&1; then
+              echo "::warning::gsp user has no passwordless sudo for Caddy management -- SKIPPING Caddyfile deploy."
+              echo "::warning::Add the scoped sudoers entry documented in infra/README.md, then re-run this workflow."
+              exit 0
+            fi
+
+            BACKUP="/etc/caddy/Caddyfile.bak.$(date +%s)"
+            sudo cp /etc/caddy/Caddyfile "$BACKUP"
+
+            if ! sudo caddy validate --config /tmp/Caddyfile.new; then
+              echo "::error::infra/Caddyfile failed caddy validate -- not applying. Backup left at $BACKUP (unused)."
+              exit 1
+            fi
+
+            sudo cp /tmp/Caddyfile.new /etc/caddy/Caddyfile
+            sudo systemctl reload caddy
+            echo "Caddyfile applied; backup at $BACKUP"
+
+            # Keep the last 10 backups only. Scoped to exactly this
+            # pattern in sudoers; one rm per file so each invocation
+            # matches the single-argument sudoers glob.
+            ls -t /etc/caddy/Caddyfile.bak.* 2>/dev/null \
+              | tail -n +11 \
+              | xargs -r -n1 sudo rm --
+          '
+
+      - name: Verify site + API respond after Caddyfile reload
+        if: steps.restart.outcome == 'success'
+        run: |
+          site_code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 20 \
+            -H "User-Agent: gsp-ops" "https://gsprecruitment.nl")
+          api_code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 20 \
+            -H "User-Agent: gsp-ops" "https://api.gsprecruitment.nl/health")
+          echo "site -> HTTP ${site_code}, api/health -> HTTP ${api_code}"
+
+          if [ "$site_code" != "200" ] || [ "$api_code" != "200" ]; then
+            echo "::error::Post-reload check failed (site=$site_code api=$api_code) -- restoring previous Caddyfile."
+            ssh gsp@188.245.254.248 '
+              set -e
+              if ! sudo -n /usr/sbin/caddy version >/dev/null 2>&1; then
+                echo "::error::Cannot auto-restore Caddyfile -- no passwordless sudo. Manual intervention needed."
+                exit 1
+              fi
+              LATEST_BAK=$(ls -t /etc/caddy/Caddyfile.bak.* 2>/dev/null | head -1)
+              if [ -z "$LATEST_BAK" ]; then
+                echo "::error::No Caddyfile backup found -- cannot auto-restore. Manual intervention needed."
+                exit 1
+              fi
+              sudo cp "$LATEST_BAK" /etc/caddy/Caddyfile
+              sudo systemctl reload caddy
+              echo "Restored Caddyfile from $LATEST_BAK and reloaded."
+            '
+            echo "::error::Caddyfile problem -- restored previous config. Backend deploy itself is unaffected and NOT rolled back."
+            exit 1
+          fi
+
       - name: Health check success notification
-        if: success()
+        if: steps.restart.outcome == 'success'
         run: echo "✅ Deployment successful! All services (postgres, backend, redis, worker) started; frontend synced; Caddyfile applied (or skipped -- see logs above)."
 
       - name: Health check failure notification
-        if: failure()
+        if: steps.restart.outcome == 'failure'
         run: echo "❌ Deployment failed! Rolled back to the previous image if one was available -- check the VPS."
