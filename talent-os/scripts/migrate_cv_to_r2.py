@@ -49,20 +49,26 @@ async def _connect():
 
 
 async def _rows_referencing(conn, filename: str):
-    """Find candidate_profiles/candidates rows whose cv_file_path basename
-    matches this local file, along with the user_id to key the R2 object on."""
+    """Find candidate_profiles/candidates rows whose cv_file_path is exactly
+    the legacy local path for this file (upload_cv always wrote
+    "/uploads/cv/{filename}"), along with the user_id to key the R2 object
+    on. Exact match rather than a LIKE '%'||filename pattern -- filename
+    comes straight from os.listdir() and could contain '%'/'_', which would
+    be interpreted as SQL LIKE wildcards; it also sidesteps re-matching an
+    already-migrated row whose R2 key happens to end in the same filename."""
+    legacy_path = "/uploads/cv/" + filename
     profile_rows = await conn.fetch(
         """SELECT user_id, cv_file_path FROM candidate_profiles
-           WHERE cv_file_path IS NOT NULL AND cv_file_path LIKE '%' || $1""",
-        filename,
+           WHERE cv_file_path = $1""",
+        legacy_path,
     )
     # candidates rows don't carry a user_id directly -- resolve via email.
     candidate_rows = await conn.fetch(
         """SELECT c.id AS candidate_id, c.cv_file_path, u.id AS user_id
            FROM candidates c
            LEFT JOIN users u ON LOWER(u.email) = LOWER(c.email)
-           WHERE c.cv_file_path IS NOT NULL AND c.cv_file_path LIKE '%' || $1""",
-        filename,
+           WHERE c.cv_file_path = $1""",
+        legacy_path,
     )
     return profile_rows, candidate_rows
 
@@ -96,22 +102,36 @@ async def migrate(directory: str, dry_run: bool) -> None:
                 unmatched.append(filename)
                 continue
 
+            # Skip rows that are already migrated (cv_file_path already
+            # starts with "cv/") BEFORE uploading anything -- checked here,
+            # ahead of put_object, so a re-run of this script never
+            # re-uploads a file it already moved. (_rows_referencing's exact
+            # match against the legacy "/uploads/cv/..." path means this
+            # should already be empty in practice, but a matched row could
+            # in principle have been migrated by a different filename/key
+            # scheme, so still worth guarding explicitly.)
+            pending_profile_rows = [r for r in profile_rows if not r["cv_file_path"].startswith("cv/")]
+            pending_candidate_rows = [r for r in candidate_rows if not r["cv_file_path"].startswith("cv/")]
+            if not pending_profile_rows and not pending_candidate_rows:
+                print(f"{filename}: already migrated, skipping")
+                continue
+
             # Determine the user_id to key the R2 object under -- prefer a
             # candidate_profiles row (it always has one), else the resolved
             # user_id from the candidates row, else fall back to the
             # candidate_id so the file still ends up somewhere sane.
             user_id = None
-            if profile_rows:
-                user_id = profile_rows[0]["user_id"]
-            elif candidate_rows and candidate_rows[0]["user_id"] is not None:
-                user_id = candidate_rows[0]["user_id"]
-            elif candidate_rows:
-                user_id = candidate_rows[0]["candidate_id"]
+            if pending_profile_rows:
+                user_id = pending_profile_rows[0]["user_id"]
+            elif pending_candidate_rows and pending_candidate_rows[0]["user_id"] is not None:
+                user_id = pending_candidate_rows[0]["user_id"]
+            elif pending_candidate_rows:
+                user_id = pending_candidate_rows[0]["candidate_id"]
 
             key = storage.cv_key(user_id, ext, os.path.splitext(filename)[0])
 
             print(f"{'[dry-run] ' if dry_run else ''}{filename} -> {key} "
-                  f"({len(profile_rows)} profile row(s), {len(candidate_rows)} candidate row(s))")
+                  f"({len(pending_profile_rows)} profile row(s), {len(pending_candidate_rows)} candidate row(s))")
 
             if dry_run:
                 continue
@@ -126,17 +146,13 @@ async def migrate(directory: str, dry_run: bool) -> None:
                 errors.append(f"{filename}: upload failed -- {e}")
                 continue
 
-            for row in profile_rows:
-                if row["cv_file_path"].startswith("cv/"):
-                    continue
+            for row in pending_profile_rows:
                 await conn.execute(
                     "UPDATE candidate_profiles SET cv_file_path = $1 WHERE user_id = $2",
                     key, row["user_id"],
                 )
                 updated_rows += 1
-            for row in candidate_rows:
-                if row["cv_file_path"].startswith("cv/"):
-                    continue
+            for row in pending_candidate_rows:
                 await conn.execute(
                     "UPDATE candidates SET cv_file_path = $1 WHERE id = $2",
                     key, row["candidate_id"],

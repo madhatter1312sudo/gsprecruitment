@@ -105,6 +105,49 @@ def _object_exists_sync(key: str) -> bool:
         raise
 
 
+def _delete_prefix_sync(prefix: str) -> list:
+    """Delete every object under `prefix` (e.g. "cv/42/"). Paginated
+    list_objects_v2 + batched delete_objects (max 1000 keys/call per the S3
+    API). Idempotent: an empty/missing prefix deletes nothing and is not an
+    error. Returns the list of keys actually deleted, so callers can log
+    what happened -- used by GDPR erasure to cover pre-existing orphans
+    (files left behind by an earlier upload that was never cleaned up)
+    alongside whatever key is currently referenced in the DB."""
+    client = _get_client()
+    deleted = []
+    continuation_token = None
+
+    while True:
+        kwargs = {"Bucket": settings.r2_bucket, "Prefix": prefix}
+        if continuation_token:
+            kwargs["ContinuationToken"] = continuation_token
+        resp = client.list_objects_v2(**kwargs)
+
+        keys = [{"Key": obj["Key"]} for obj in resp.get("Contents", [])]
+        for batch_start in range(0, len(keys), 1000):
+            batch = keys[batch_start:batch_start + 1000]
+            if not batch:
+                continue
+            del_resp = client.delete_objects(
+                Bucket=settings.r2_bucket,
+                Delete={"Objects": batch, "Quiet": True},
+            )
+            errors = del_resp.get("Errors") or []
+            if errors:
+                raise RuntimeError(
+                    f"delete_objects failed for {len(errors)} key(s) under prefix "
+                    f"{prefix!r}: {errors}"
+                )
+            deleted.extend(obj["Key"] for obj in batch)
+
+        if resp.get("IsTruncated"):
+            continuation_token = resp.get("NextContinuationToken")
+        else:
+            break
+
+    return deleted
+
+
 # ── Async wrappers used by routers ──────────────────────────────────────
 
 async def put_object(key: str, data: bytes, content_type: str) -> None:
@@ -124,6 +167,12 @@ async def object_exists(key: str) -> bool:
     return await asyncio.to_thread(_object_exists_sync, key)
 
 
+async def delete_prefix(prefix: str) -> list:
+    """Delete every object under `prefix`. Idempotent (a prefix with no
+    objects deletes nothing). Returns the keys that were deleted."""
+    return await asyncio.to_thread(_delete_prefix_sync, prefix)
+
+
 # ── Pure helpers (no I/O — safe to unit test without a client) ─────────────
 
 def cv_key(user_id: int, ext: str, file_id: str) -> str:
@@ -136,8 +185,28 @@ def cv_key(user_id: int, ext: str, file_id: str) -> str:
     return f"cv/{user_id}/{file_id}{ext}"
 
 
+def cv_prefix(user_id: int) -> str:
+    """The R2 key prefix under which all of a user's CV uploads live (past
+    and present) -- used by GDPR erasure to sweep up orphaned objects left
+    behind by a re-upload that predates the delete-old-key fix, not just the
+    single key currently referenced in the DB."""
+    return f"cv/{user_id}/"
+
+
 def is_r2_key(cv_file_path: Optional[str]) -> bool:
     """True if a stored cv_file_path value is an R2 object key rather than a
     legacy local-disk path. Factored out so both the branch logic and its
     unit tests can share it."""
     return bool(cv_file_path) and cv_file_path.startswith("cv/")
+
+
+def should_delete_old_key(old_cv_file_path: Optional[str], new_key: str) -> bool:
+    """True if a CV re-upload should best-effort delete the previously
+    stored R2 object. Factored out of routers/candidate.py's upload_cv so
+    the "when do we clean up the superseded object" decision is a plain,
+    testable function: only an old value that is itself an R2 key (not a
+    legacy local path, not empty) and actually different from the brand new
+    key qualifies -- deleting a legacy local path here is never correct
+    (that's local-disk cleanup, not R2), and a same-key no-op guards against
+    the vanishingly unlikely uuid4 collision wiping the file just written."""
+    return is_r2_key(old_cv_file_path) and old_cv_file_path != new_key

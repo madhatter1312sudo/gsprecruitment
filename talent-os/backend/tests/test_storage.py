@@ -151,6 +151,129 @@ def test_object_exists_false_on_404():
     stubber.assert_no_pending_responses()
 
 
+# ── delete_prefix (GDPR erasure sweep) ──────────────────────────────────
+
+def test_delete_prefix_empty_is_a_noop():
+    """No objects under the prefix -- one list call, no delete_objects call,
+    not an error."""
+    client, stubber = _stub_client()
+    stubber.add_response(
+        "list_objects_v2",
+        {"Contents": [], "IsTruncated": False},
+        {"Bucket": "gsp", "Prefix": "cv/999/"},
+    )
+    with stubber:
+        deleted = asyncio.run(storage.delete_prefix("cv/999/"))
+    assert deleted == []
+    stubber.assert_no_pending_responses()
+
+
+def test_delete_prefix_deletes_every_object_single_page():
+    client, stubber = _stub_client()
+    stubber.add_response(
+        "list_objects_v2",
+        {
+            "Contents": [{"Key": "cv/1/a.pdf"}, {"Key": "cv/1/b.pdf"}],
+            "IsTruncated": False,
+        },
+        {"Bucket": "gsp", "Prefix": "cv/1/"},
+    )
+    stubber.add_response(
+        "delete_objects",
+        {},
+        {
+            "Bucket": "gsp",
+            "Delete": {"Objects": [{"Key": "cv/1/a.pdf"}, {"Key": "cv/1/b.pdf"}], "Quiet": True},
+        },
+    )
+    with stubber:
+        deleted = asyncio.run(storage.delete_prefix("cv/1/"))
+    assert sorted(deleted) == ["cv/1/a.pdf", "cv/1/b.pdf"]
+    stubber.assert_no_pending_responses()
+
+
+def test_delete_prefix_paginates_across_list_calls():
+    """Covers the pre-existing-orphans case: a candidate who re-uploaded
+    several times before the delete-old-key fix could have many objects
+    under their prefix, spread across list_objects_v2 pages."""
+    client, stubber = _stub_client()
+    stubber.add_response(
+        "list_objects_v2",
+        {
+            "Contents": [{"Key": "cv/1/a.pdf"}],
+            "IsTruncated": True,
+            "NextContinuationToken": "page-2",
+        },
+        {"Bucket": "gsp", "Prefix": "cv/1/"},
+    )
+    stubber.add_response(
+        "delete_objects",
+        {},
+        {"Bucket": "gsp", "Delete": {"Objects": [{"Key": "cv/1/a.pdf"}], "Quiet": True}},
+    )
+    stubber.add_response(
+        "list_objects_v2",
+        {"Contents": [{"Key": "cv/1/b.pdf"}], "IsTruncated": False},
+        {"Bucket": "gsp", "Prefix": "cv/1/", "ContinuationToken": "page-2"},
+    )
+    stubber.add_response(
+        "delete_objects",
+        {},
+        {"Bucket": "gsp", "Delete": {"Objects": [{"Key": "cv/1/b.pdf"}], "Quiet": True}},
+    )
+    with stubber:
+        deleted = asyncio.run(storage.delete_prefix("cv/1/"))
+    assert sorted(deleted) == ["cv/1/a.pdf", "cv/1/b.pdf"]
+    stubber.assert_no_pending_responses()
+
+
+def test_delete_prefix_raises_on_partial_delete_errors():
+    """If R2 reports per-key errors from delete_objects, that's surfaced as
+    a failure rather than silently claimed as deleted -- the caller (GDPR
+    erasure) is responsible for catching this and recording it as a failed
+    path rather than a deleted one."""
+    client, stubber = _stub_client()
+    stubber.add_response(
+        "list_objects_v2",
+        {"Contents": [{"Key": "cv/1/a.pdf"}], "IsTruncated": False},
+        {"Bucket": "gsp", "Prefix": "cv/1/"},
+    )
+    stubber.add_response(
+        "delete_objects",
+        {"Errors": [{"Key": "cv/1/a.pdf", "Code": "AccessDenied", "Message": "nope"}]},
+        {"Bucket": "gsp", "Delete": {"Objects": [{"Key": "cv/1/a.pdf"}], "Quiet": True}},
+    )
+    with stubber:
+        with pytest.raises(RuntimeError):
+            asyncio.run(storage.delete_prefix("cv/1/"))
+
+
+# ── cv_prefix / should_delete_old_key (pure helpers) ────────────────────
+
+def test_cv_prefix_format():
+    assert storage.cv_prefix(42) == "cv/42/"
+
+
+def test_should_delete_old_key_true_for_different_r2_key():
+    assert storage.should_delete_old_key("cv/1/old.pdf", "cv/1/new.pdf") is True
+
+
+def test_should_delete_old_key_false_when_no_old_value():
+    assert storage.should_delete_old_key(None, "cv/1/new.pdf") is False
+    assert storage.should_delete_old_key("", "cv/1/new.pdf") is False
+
+
+def test_should_delete_old_key_false_for_legacy_local_path():
+    # Cleaning up a legacy local file is not this function's job -- it only
+    # decides whether to fire an R2 delete_object call.
+    assert storage.should_delete_old_key("/uploads/cv/old.pdf", "cv/1/new.pdf") is False
+
+
+def test_should_delete_old_key_false_when_old_equals_new():
+    # Guards a uuid4 collision from wiping the file that was just written.
+    assert storage.should_delete_old_key("cv/1/same.pdf", "cv/1/same.pdf") is False
+
+
 # ── legacy-path fallback branch logic (as used by candidate.py/gdpr.py) ──
 
 def _resolve_download_branch(cv_file_path, r2_configured):

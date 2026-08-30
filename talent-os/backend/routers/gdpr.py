@@ -98,40 +98,68 @@ async def erase_my_account(current_user: dict = Depends(get_current_user)):
 
     anon = f"deleted-user-{user_id}@erased.invalid"
 
-    # Delete the CV file itself before nulling the column -- previously the
+    # Delete the CV file(s) before nulling the columns -- previously the
     # column was nulled but the underlying file (local or, now, R2) was
-    # never removed, leaving personal data behind after "erasure".
+    # never removed, leaving personal data behind after "erasure". A
+    # candidate can have more than one `candidates` row match by email (the
+    # anonymising UPDATE below hits all of them), so this reads every one of
+    # them, not just the first -- and case-insensitively, matching how the
+    # rest of the codebase compares emails (see routers/admin.py).
     profile = await fetch_one(
         "SELECT cv_file_path FROM candidate_profiles WHERE user_id = $1", user_id,
     )
-    candidate = await fetch_one(
-        "SELECT cv_file_path FROM candidates WHERE email = $1", email,
+    candidates = await fetch_all(
+        "SELECT cv_file_path FROM candidates WHERE LOWER(email) = LOWER($1)", email,
     )
-    cv_paths = {p["cv_file_path"] for p in (profile, candidate) if p and p["cv_file_path"]}
+
+    legacy_paths = {
+        row["cv_file_path"]
+        for row in ([profile] if profile else []) + list(candidates)
+        if row and row["cv_file_path"] and not storage.is_r2_key(row["cv_file_path"])
+    }
+
     deleted_paths = []
-    for cv_path in cv_paths:
+    failed_paths = []
+
+    # R2: delete the whole cv/{user_id}/ prefix rather than just the single
+    # key currently referenced in the DB -- a re-upload before the
+    # delete-old-key fix could have left earlier objects orphaned under the
+    # same prefix, and this sweeps those up too.
+    r2_prefix = storage.cv_prefix(user_id)
+    if storage.is_configured():
         try:
-            if storage.is_r2_key(cv_path):
-                await storage.delete_object(cv_path)
-            else:
-                # Legacy local-disk path -- best-effort unlink, file may
-                # already be gone (ephemeral disk, prior deploy wiped it).
-                local_path = os.path.join("/app/uploads/cv", os.path.basename(cv_path))
-                if os.path.isfile(local_path):
-                    os.remove(local_path)
+            deleted_paths.extend(await storage.delete_prefix(r2_prefix))
+        except Exception:
+            logger.exception(
+                "GDPR erasure: failed to delete R2 prefix %s for user %s", r2_prefix, user_id,
+            )
+            failed_paths.append(r2_prefix)
+
+    # Legacy local-disk paths (pre-R2 uploads) -- best-effort unlink, file
+    # may already be gone (ephemeral disk, prior deploy wiped it).
+    for cv_path in legacy_paths:
+        try:
+            local_path = os.path.join("/app/uploads/cv", os.path.basename(cv_path))
+            if os.path.isfile(local_path):
+                os.remove(local_path)
             deleted_paths.append(cv_path)
         except Exception:
-            # Never fail the whole erasure because the CV file was already
-            # gone or the storage backend is unreachable -- the DB columns
-            # below still get nulled either way.
-            logger.exception("GDPR erasure: failed to delete CV object for user %s", user_id)
+            # Never fail the whole erasure because a CV file couldn't be
+            # removed (already gone, storage backend unreachable) -- the DB
+            # columns below still get nulled either way, but the failure is
+            # recorded in the audit log rather than silently swallowed, so
+            # it doesn't just disappear as if erasure fully succeeded.
+            logger.exception(
+                "GDPR erasure: failed to delete legacy CV file %s for user %s", cv_path, user_id,
+            )
+            failed_paths.append(cv_path)
 
     await execute(
         """UPDATE candidates SET
              full_name = 'Erased', email = $2, phone = NULL, linkedin_url = NULL,
              github_url = NULL, portfolio_url = NULL, cv_text = NULL, cv_file_path = NULL,
              education = NULL, deleted_at = NOW(), consent_withdrawn_at = COALESCE(consent_withdrawn_at, NOW())
-           WHERE email = $1""",
+           WHERE LOWER(email) = LOWER($1)""",
         email, anon,
     )
     await execute(
@@ -143,11 +171,35 @@ async def erase_my_account(current_user: dict = Depends(get_current_user)):
            WHERE id = $1""",
         user_id, anon,
     )
+
+    completion_status = "partial" if failed_paths else "complete"
     await execute(
         "INSERT INTO audit_log (action, actor_id, target_type, target_id, changes) VALUES ($1, $2, $3, $4, $5::jsonb)",
         "gdpr_erasure", user_id, "user", user_id,
-        json.dumps({"cv_files_deleted": deleted_paths, "reason": "self-service erasure"}),
+        json.dumps({
+            "reason": "self-service erasure",
+            "status": completion_status,
+            "r2_prefix": r2_prefix,
+            "cv_files_deleted": deleted_paths,
+            "cv_files_failed": failed_paths,
+        }),
     )
-    await _log_request("erasure", email, "Self-service account erasure via portal")
-    logger.info("GDPR erasure completed for user %s", user_id)
-    return {"message": "Your account and personal data have been erased."}
+    await _log_request(
+        "erasure", email,
+        "Self-service account erasure via portal"
+        + ("" if not failed_paths else f" -- WARNING: {len(failed_paths)} CV file(s)/prefix could not be deleted, see audit_log"),
+    )
+    if failed_paths:
+        logger.warning(
+            "GDPR erasure PARTIALLY completed for user %s -- %d CV path(s) failed to delete: %s",
+            user_id, len(failed_paths), failed_paths,
+        )
+    else:
+        logger.info("GDPR erasure completed for user %s", user_id)
+
+    return {
+        "message": "Your account and personal data have been erased."
+        if not failed_paths
+        else "Your account and personal data have been erased. Some CV file(s) could not be "
+             "removed from storage immediately -- this has been logged for manual follow-up.",
+    }

@@ -202,10 +202,31 @@ async def upload_cv(
         ".txt": "text/plain",
     }
 
+    # Look up the CV this upload is about to replace, so we can clean up the
+    # old R2 object after the new one is stored -- otherwise every re-upload
+    # orphans the previous object in the bucket forever.
+    existing = await fetch_one(
+        "SELECT cv_file_path FROM candidate_profiles WHERE user_id = $1",
+        current_user["id"],
+    )
+    old_cv_file_path = existing["cv_file_path"] if existing else None
+
     if storage.is_configured():
         key = storage.cv_key(current_user["id"], ext, uuid.uuid4().hex)
         await storage.put_object(key, content, content_types.get(ext, "application/octet-stream"))
         stored_path = key
+
+        if storage.should_delete_old_key(old_cv_file_path, key):
+            try:
+                await storage.delete_object(old_cv_file_path)
+            except Exception:
+                # Best-effort: never fail the upload because the old object
+                # couldn't be cleaned up (e.g. transient R2 issue) -- it's
+                # still swept up later by GDPR erasure's prefix delete.
+                logger.exception(
+                    "Failed to delete superseded CV object %s for user %s",
+                    old_cv_file_path, current_user["id"],
+                )
     else:
         # Legacy local-disk fallback -- production must keep working before
         # the R2 env vars are set.
@@ -239,7 +260,7 @@ async def download_own_cv(current_user: dict = Depends(get_current_user)):
 
     cv_file_path = profile["cv_file_path"]
 
-    if storage.is_r2_key(cv_file_path):
+    if storage.is_configured() and storage.is_r2_key(cv_file_path):
         ext = os.path.splitext(cv_file_path)[1]
         url = await storage.presigned_get(cv_file_path, ttl=300, filename=f"cv{ext}")
         from fastapi.responses import RedirectResponse
