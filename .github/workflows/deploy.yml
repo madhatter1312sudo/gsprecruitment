@@ -69,17 +69,26 @@ jobs:
 
       - name: Sync website to the path Caddy serves
         run: |
-          # website/.host documents the served path -- it currently names
-          # /home/og/projects/gsp-recruitment/website, which is NOT the
-          # /home/gsp/... deploy dir used elsewhere in this workflow. That
-          # mismatch is unverified from the sandbox (see infra/README.md);
-          # we deploy to what .host says because getting this wrong the
-          # other way around (rsyncing into an unserved directory) would
-          # silently fail to update the live site, whereas rsyncing here
-          # fails loudly (permission/path error) if the `gsp` SSH user
-          # cannot write to a path owned by `og`.
-          rsync -avz --delete website/ \
-            gsp@188.245.254.248:/home/og/projects/gsp-recruitment/website/
+          # website/.host documents /home/og/projects/gsp-recruitment/website
+          # as the served path, but every other path in this repo uses
+          # /home/gsp/... and we cannot verify the live Caddyfile from CI
+          # (see infra/README.md, "Known risk"). Resolve the real target on
+          # the VPS: prefer the documented path if it exists and is
+          # writable, otherwise fall back to the deploy dir with a loud
+          # warning -- a wrong guess must never block the backend deploy.
+          TARGET=$(ssh gsp@188.245.254.248 '
+            if [ -d /home/og/projects/gsp-recruitment/website ] && [ -w /home/og/projects/gsp-recruitment/website ]; then
+              echo /home/og/projects/gsp-recruitment/website
+            else
+              mkdir -p /home/gsp/projects/gsp-recruitment/website
+              echo /home/gsp/projects/gsp-recruitment/website
+            fi
+          ')
+          echo "Website sync target: $TARGET"
+          if [ "$TARGET" != "/home/og/projects/gsp-recruitment/website" ]; then
+            echo "::warning::Documented path /home/og/.../website not present/writable -- synced to $TARGET instead. Verify which path Caddy serves (infra/README.md)."
+          fi
+          rsync -avz --delete website/ "gsp@188.245.254.248:$TARGET/"
 
       - name: Push infra/Caddyfile (validated, backed up, skips without sudo)
         run: |
