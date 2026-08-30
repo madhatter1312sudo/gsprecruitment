@@ -17,6 +17,8 @@ import os
 import uuid
 import logging
 
+from services import storage
+
 logger = logging.getLogger("talent_os.candidate_portal")
 
 router = APIRouter(prefix="/api/v1/candidate", tags=["candidate-portal"])
@@ -182,10 +184,6 @@ async def upload_cv(
     if ext not in allowed_types:
         raise HTTPException(status_code=400, detail=f"File type '{ext}' not allowed. Use: {', '.join(allowed_types)}")
 
-    # Generate unique filename
-    filename = f"{uuid.uuid4().hex}{ext}"
-    file_path = os.path.join(UPLOAD_DIR, filename)
-
     # Read with a hard size cap (bounded memory use, rejects oversized uploads)
     content = bytearray()
     while True:
@@ -197,17 +195,57 @@ async def upload_cv(
             raise HTTPException(status_code=413, detail="CV file too large (max 5 MB)")
     content = bytes(content)
 
-    # Save file
-    with open(file_path, "wb") as f:
-        f.write(content)
+    content_types = {
+        ".pdf": "application/pdf",
+        ".doc": "application/msword",
+        ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        ".txt": "text/plain",
+    }
 
-    # Update candidate_profiles with file path
+    # Look up the CV this upload is about to replace, so we can clean up the
+    # old R2 object after the new one is stored -- otherwise every re-upload
+    # orphans the previous object in the bucket forever.
+    existing = await fetch_one(
+        "SELECT cv_file_path FROM candidate_profiles WHERE user_id = $1",
+        current_user["id"],
+    )
+    old_cv_file_path = existing["cv_file_path"] if existing else None
+
+    if storage.is_configured():
+        key = storage.cv_key(current_user["id"], ext, uuid.uuid4().hex)
+        await storage.put_object(key, content, content_types.get(ext, "application/octet-stream"))
+        stored_path = key
+    else:
+        # Legacy local-disk fallback -- production must keep working before
+        # the R2 env vars are set.
+        filename = f"{uuid.uuid4().hex}{ext}"
+        file_path = os.path.join(UPLOAD_DIR, filename)
+        with open(file_path, "wb") as f:
+            f.write(content)
+        stored_path = f"/uploads/cv/{filename}"
+
+    # Point candidate_profiles at the new file BEFORE touching the old
+    # object -- doing the delete first would leave a window where the row
+    # still references a key that's already gone if anything went wrong
+    # in between.
     await execute(
         "UPDATE candidate_profiles SET cv_file_path = $1, updated_at = NOW() WHERE user_id = $2",
-        f"/uploads/cv/{filename}", current_user["id"],
+        stored_path, current_user["id"],
     )
 
-    return {"message": "CV uploaded successfully", "file_path": f"/uploads/cv/{filename}", "size": len(content)}
+    if storage.is_configured() and storage.should_delete_old_key(old_cv_file_path, stored_path):
+        try:
+            await storage.delete_object(old_cv_file_path)
+        except Exception:
+            # Best-effort: never fail the upload because the old object
+            # couldn't be cleaned up (e.g. transient R2 issue) -- it's
+            # still swept up later by GDPR erasure's prefix delete.
+            logger.exception(
+                "Failed to delete superseded CV object %s for user %s",
+                old_cv_file_path, current_user["id"],
+            )
+
+    return {"message": "CV uploaded successfully", "file_path": stored_path, "size": len(content)}
 
 
 @router.get("/cv")
@@ -223,7 +261,16 @@ async def download_own_cv(current_user: dict = Depends(get_current_user)):
     if not profile or not profile["cv_file_path"]:
         raise HTTPException(status_code=404, detail="No CV uploaded")
 
-    filename = os.path.basename(profile["cv_file_path"])
+    cv_file_path = profile["cv_file_path"]
+
+    if storage.is_configured() and storage.is_r2_key(cv_file_path):
+        ext = os.path.splitext(cv_file_path)[1]
+        url = await storage.presigned_get(cv_file_path, ttl=300, filename=f"cv{ext}")
+        from fastapi.responses import RedirectResponse
+        return RedirectResponse(url, status_code=302)
+
+    # Legacy local-disk path (pre-R2 upload).
+    filename = os.path.basename(cv_file_path)
     file_path = os.path.join(UPLOAD_DIR, filename)
     if not os.path.isfile(file_path):
         raise HTTPException(status_code=404, detail="CV file missing on server")

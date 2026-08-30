@@ -22,6 +22,9 @@ email-validator>=2.0.0,<3.0.0
 # File uploads
 python-multipart>=0.0.9,<1.0.0
 
+# Object storage (Cloudflare R2, S3-compatible) for CV files
+boto3>=1.34.0,<2.0.0
+
 # Scheduled jobs (sourcing, enrichment, matching, outreach drafting)
 apscheduler>=3.10,<4.0.0
 

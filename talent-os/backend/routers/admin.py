@@ -107,7 +107,8 @@ async def get_user_detail(
             user["profile"] = profile
         # Also get the candidates record
         candidate = await fetch_one(
-            "SELECT id FROM candidates WHERE email = $1", user["email"],
+            "SELECT id FROM candidates WHERE LOWER(email) = LOWER($1) AND deleted_at IS NULL",
+            user["email"],
         )
         if candidate:
             user["candidate_id"] = candidate["id"]

@@ -1,0 +1,102 @@
+# One-off (re-runnable) operational workflow: configure R2 on the VPS and
+# migrate any surviving local CV files into the bucket.
+#
+# Prerequisites (owner, one time):
+#   - Repository secrets R2_ACCESS_KEY_ID and R2_SECRET_ACCESS_KEY
+#     (from Cloudflare -> R2 -> Manage R2 API Tokens -> Create API Token,
+#     "Object Read & Write", scoped to bucket `gsp`).
+#
+# Usage: Actions -> "R2 setup" -> Run workflow. Leave `apply` unchecked for a
+# dry-run of the CV migration first; re-run with `apply` checked to migrate.
+# The .env update itself always happens (it is idempotent and required for
+# even the dry-run to reach R2).
+
+name: R2 setup
+
+on:
+  workflow_dispatch:
+    inputs:
+      apply:
+        description: "Run the CV migration for real (unchecked = dry-run)"
+        type: boolean
+        default: false
+
+concurrency:
+  group: r2-setup
+  cancel-in-progress: false
+
+jobs:
+  configure:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check required secrets exist
+        run: |
+          if [ -z "${{ secrets.R2_ACCESS_KEY_ID }}" ] || [ -z "${{ secrets.R2_SECRET_ACCESS_KEY }}" ]; then
+            echo "::error::Repository secrets R2_ACCESS_KEY_ID and/or R2_SECRET_ACCESS_KEY are not set."
+            echo "Create them under Settings -> Secrets and variables -> Actions first."
+            exit 1
+          fi
+
+      - name: Setup SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.VPS_SSH_PRIVATE_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -H 188.245.254.248 >> ~/.ssh/known_hosts
+
+      - name: Write R2 vars into talent-os/.env on the VPS (idempotent)
+        env:
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+        run: |
+          # Secrets travel via stdin (never argv, never echoed; Actions masks
+          # them in logs regardless). Each key line is deleted then appended,
+          # so re-runs never duplicate and rotation just overwrites.
+          {
+            printf 'R2_ENDPOINT=%s\n' "https://4ca99d2b194e26fee99a8916bb53942b.r2.cloudflarestorage.com"
+            printf 'R2_ACCESS_KEY_ID=%s\n' "$R2_ACCESS_KEY_ID"
+            printf 'R2_SECRET_ACCESS_KEY=%s\n' "$R2_SECRET_ACCESS_KEY"
+            printf 'R2_BUCKET=%s\n' "gsp"
+          } | ssh gsp@188.245.254.248 '
+            set -euo pipefail
+            ENVFILE=/home/gsp/projects/gsp-recruitment/talent-os/.env
+            touch "$ENVFILE"
+            chmod 600 "$ENVFILE"
+            while IFS= read -r line; do
+              key=${line%%=*}
+              sed -i "/^${key}=/d" "$ENVFILE"
+              printf "%s\n" "$line" >> "$ENVFILE"
+            done
+            echo "Updated $(grep -c "^R2_" "$ENVFILE") R2_* lines in .env"
+          '
+
+      - name: Restart backend so it picks up the new env
+        run: |
+          ssh gsp@188.245.254.248 "
+            cd /home/gsp/projects/gsp-recruitment && \
+            docker compose up -d --force-recreate backend && \
+            sleep 5 && \
+            curl -sf http://127.0.0.1:8000/health | python3 -m json.tool
+          "
+
+      - name: Run CV migration (dry-run unless 'apply' was checked)
+        run: |
+          FLAG='--dry-run'
+          if [ "${{ inputs.apply }}" = "true" ]; then FLAG=''; fi
+          ssh gsp@188.245.254.248 "
+            cd /home/gsp/projects/gsp-recruitment && \
+            docker compose cp talent-os/scripts/migrate_cv_to_r2.py backend:/tmp/migrate_cv_to_r2.py && \
+            docker compose exec -T -e PYTHONPATH=/app backend \
+              python3 /tmp/migrate_cv_to_r2.py $FLAG
+          "
+
+      - name: Summary
+        run: |
+          if [ "${{ inputs.apply }}" = "true" ]; then
+            echo "R2 configured and CV migration APPLIED. Uploads/downloads now use bucket 'gsp'."
+          else
+            echo "R2 configured; migration ran in DRY-RUN mode. Review the output above,"
+            echo "then re-run this workflow with 'apply' checked to migrate for real."
+          fi
