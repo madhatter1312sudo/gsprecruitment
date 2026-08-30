@@ -14,7 +14,7 @@ from pydantic import BaseModel
 
 from core.database import fetch_one, fetch_all, fetch_val, execute
 from core.deps import require_role
-from services.email_service import email_service
+from services import mailer
 from services import scheduler as scheduler_service
 
 logger = logging.getLogger("talent_os.outreach")
@@ -163,11 +163,10 @@ async def approve_draft(
             detail="No email — use LinkedIn URL in draft",
         )
 
-    sent_ok = await email_service.send_email(
-        to_email=draft["target_email"],
+    sent_ok = await mailer.send_raw(
+        to=draft["target_email"],
         subject=draft["subject"] or "",
-        body_text=draft["body"] or "",
-        to_name=draft["target_name"],
+        body=draft["body"] or "",
     )
 
     if sent_ok:

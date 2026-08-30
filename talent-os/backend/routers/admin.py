@@ -689,3 +689,25 @@ async def update_system_settings(
     )
 
     return {"message": "Settings updated", "keys_updated": updated}
+
+
+# ── Email log (services/mailer.py send history) ─────────────────────────
+
+@router.get("/email-log")
+async def list_email_log(
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    current_user: dict = Depends(require_role("admin")),
+):
+    """List transactional email send attempts, newest first. Read-only —
+    no audit log entry (nothing is mutated)."""
+    rows = await fetch_all(
+        """SELECT id, to_email, template, subject, provider, provider_message_id,
+                  status, error, related_user_id, created_at
+           FROM email_log
+           ORDER BY created_at DESC
+           LIMIT $1 OFFSET $2""",
+        limit, offset,
+    )
+    total = await fetch_val("SELECT COUNT(*) FROM email_log")
+    return {"items": rows, "total": total, "limit": limit, "offset": offset}

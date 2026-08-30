@@ -1,0 +1,15 @@
+Wachtwoord resetten - GSP Recruitment
+
+Je hebt een wachtwoordreset aangevraagd voor je GSP Recruitment-account.
+
+Klik op de volgende link om een nieuw wachtwoord in te stellen:
+{{ reset_url }}
+
+Deze link is {{ expires_minutes }} minuten geldig.
+
+Heb je geen wachtwoordreset aangevraagd? Dan kun je dit bericht negeren -- er
+verandert niets aan je account.
+
+Met vriendelijke groet,
+GSP Recruitment
+info@gsprecruitment.nl

@@ -1,0 +1,18 @@
+Welkom bij GSP Recruitment
+
+Beste {{ full_name }},
+
+Welkom bij GSP Recruitment. Je account is aangemaakt en je kunt nu inloggen
+in het kandidatenportaal om je profiel aan te vullen en vacatures te
+bekijken.
+
+Wij bemiddelen embedded software-, C++- en mechatronica-engineers in de
+Brainport-regio en verbinden je op basis van openbaar beschikbare informatie
+met relevante vacatures. Jouw gegevens gebruiken we uitsluitend voor die
+bemiddeling.
+
+Vragen? Antwoord gerust op dit bericht.
+
+Met vriendelijke groet,
+GSP Recruitment
+info@gsprecruitment.nl

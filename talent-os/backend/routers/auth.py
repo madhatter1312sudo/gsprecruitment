@@ -13,7 +13,7 @@ from models.schemas import (
     ForgotPasswordRequest, ResetPasswordRequest, VerifyEmailRequest,
     ChangePasswordRequest,
 )
-from services.email_service import email_service
+from services import mailer
 from typing import Optional
 from urllib.parse import urlencode, quote
 import secrets
@@ -193,25 +193,16 @@ async def forgot_password(request: Request, data: ForgotPasswordRequest):
         reset_token, user["id"],
     )
 
-    # Send reset email via Gmail API
-    email_sent = await email_service.send_email(
-        to_email=email,
-        subject="Wachtwoord resetten - GSP Recruitment",
-        body_text=f"""Beste {user['full_name']},
-
-Je hebt een wachtwoord reset aangevraagd voor je GSP Recruitment account.
-
-Klik op de volgende link om je wachtwoord te resetten:
-https://gsprecruitment.nl/reset-password?token={reset_token}
-
-Deze link is 1 uur geldig.
-
-Als je geen wachtwoord reset hebt aangevraagd, kun je dit bericht negeren.
-
-Met vriendelijke groet,
-GSP Recruitment
-info@gsprecruitment.nl
-""",
+    # Send reset email via the transactional mailer (SMTP, falling back to
+    # the Gmail API if SMTP isn't configured yet).
+    email_sent = await mailer.send(
+        to=email,
+        template="wachtwoord_reset",
+        ctx={
+            "reset_url": f"https://gsprecruitment.nl/reset-password?token={reset_token}",
+            "expires_minutes": 60,
+        },
+        related_user_id=user["id"],
     )
     if not email_sent:
         logger.warning(f"Failed to send password reset email to {email}")

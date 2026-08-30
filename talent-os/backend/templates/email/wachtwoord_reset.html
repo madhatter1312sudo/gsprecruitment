@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block subject %}Wachtwoord resetten - GSP Recruitment{% endblock %}
+{% block content %}
+<p>Je hebt een wachtwoordreset aangevraagd voor je GSP Recruitment-account.</p>
+<p>Klik op onderstaande link om een nieuw wachtwoord in te stellen:</p>
+<p style="margin:24px 0;">
+  <a href="{{ reset_url }}" style="background:#1B2A4A; color:#FFFFFF; padding:12px 20px; text-decoration:none; font-size:14px; display:inline-block;">Wachtwoord resetten</a>
+</p>
+<p>Werkt de knop niet? Kopieer deze link naar je browser:<br>
+<a href="{{ reset_url }}" style="color:#1B2A4A; word-break:break-all;">{{ reset_url }}</a></p>
+<p>Deze link is {{ expires_minutes }} minuten geldig.</p>
+<p>Heb je geen wachtwoordreset aangevraagd? Dan kun je dit bericht negeren — er verandert niets aan je account.</p>
+{% endblock %}

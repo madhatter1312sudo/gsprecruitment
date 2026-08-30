@@ -43,7 +43,11 @@ class Settings(BaseSettings):
 
     apollo_api_key: str = ""
 
-    smtp_host: str = "smtp.zoho.com"
+    # ── SMTP (Google Workspace, STARTTLS) — used by services/mailer.py.
+    # Empty defaults so the app still boots before these are set; callers
+    # must check services.mailer.smtp_is_configured() and fall back to the
+    # Gmail-API EmailService when not.
+    smtp_host: str = "smtp.gmail.com"
     smtp_port: int = 587
     smtp_user: str = ""
     smtp_pass: str = ""
@@ -51,7 +55,10 @@ class Settings(BaseSettings):
     backend_host: str = "127.0.0.1"
     backend_port: int = 8000
     backend_workers: int = 4
-    cors_origins: str = "https://gsprecruitment.nl,https://www.gsprecruitment.nl,http://localhost:3000,http://127.0.0.1:3000,http://localhost:8081,http://localhost:19006,exp://localhost:8081"
+    # Production default: real origins only. Local/Expo dev origins are NOT
+    # included here — set them via the CORS_ORIGINS env var in your local
+    # .env (see .env.example) instead of widening the shipped default.
+    cors_origins: str = "https://gsprecruitment.nl,https://www.gsprecruitment.nl"
 
     @property
     def cors_origin_list(self) -> List[str]:
