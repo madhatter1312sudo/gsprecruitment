@@ -178,3 +178,13 @@ Run this on a host you trust with the passphrase in hand — never paste
 `BACKUP_PASSPHRASE` into a shared shell history; prefer `read -s
 BACKUP_PASSPHRASE` and `-pass env:BACKUP_PASSPHRASE` over `-pass pass:...`
 on argv where anything else on the box can read `/proc/*/cmdline`.
+
+## Hardening backlog (niet-blokkerend)
+
+- De sudoers-regel `/usr/bin/rm -- /etc/caddy/Caddyfile.bak.*` matcht in
+  sudoers-semantiek over argumentgrenzen heen en is daarmee breder dan één
+  bestand. De workflow roept hem netjes aan (`xargs -n1`), maar de nette
+  oplossing is een root-owned helperscript (bv.
+  `/usr/local/sbin/prune-caddy-baks` dat zelf `ls -t | tail -n +11 |
+  xargs rm` doet) met één argumentloze NOPASSWD-regel. Oppakken bij de
+  productie-hardening samen met de geplande secret-rotatie.

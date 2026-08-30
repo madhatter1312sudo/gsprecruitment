@@ -47,7 +47,7 @@ gsprecruitment.nl, www.gsprecruitment.nl {
 	# Must come before the catch-all `handle` below -- `handle` blocks are
 	# mutually exclusive and evaluated in order.
 	@hidden {
-		path_regexp ^/\.
+		path_regexp (^|/)\.
 	}
 	handle @hidden {
 		respond 404

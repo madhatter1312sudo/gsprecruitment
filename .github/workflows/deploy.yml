@@ -156,7 +156,7 @@ jobs:
           "
 
       - name: Roll back to previous image on health check failure
-        if: steps.restart.outcome == 'failure'
+        if: failure() && steps.restart.outcome == 'failure'
         run: |
           ssh gsp@188.245.254.248 "
             if docker image inspect gsp-recruitment-backend:previous >/dev/null 2>&1; then
@@ -214,7 +214,7 @@ jobs:
             # matches the single-argument sudoers glob.
             ls -t /etc/caddy/Caddyfile.bak.* 2>/dev/null \
               | tail -n +11 \
-              | xargs -r -n1 sudo rm --
+              | xargs -r -n1 sudo rm -- || echo "::warning::Caddyfile .bak prune failed (non-fatal, see infra/README.md)"
           '
 
       - name: Verify site + API respond after Caddyfile reload
@@ -252,5 +252,5 @@ jobs:
         run: echo "✅ Deployment successful! All services (postgres, backend, redis, worker) started; frontend synced; Caddyfile applied (or skipped -- see logs above)."
 
       - name: Health check failure notification
-        if: steps.restart.outcome == 'failure'
+        if: failure() && steps.restart.outcome == 'failure'
         run: echo "❌ Deployment failed! Rolled back to the previous image if one was available -- check the VPS."
