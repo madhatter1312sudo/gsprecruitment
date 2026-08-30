@@ -225,6 +225,125 @@ def test_email_log_insert_never_carries_smtp_credentials(monkeypatch):
     assert not any("super-secret-app-password" in str(a) for a in args)
 
 
+# ── header-injection guard (M1) ──────────────────────────────────────────
+
+def test_has_header_injection_true_for_crlf_in_to():
+    assert mailer.has_header_injection("x@a.com\r\nBcc: victim@b.org") is True
+
+
+def test_has_header_injection_true_for_bare_lf():
+    assert mailer.has_header_injection("x@a.com\nBcc: victim@b.org") is True
+
+
+def test_has_header_injection_false_for_clean_values():
+    assert mailer.has_header_injection("x@a.com", "A normal subject") is False
+
+
+def test_has_header_injection_ignores_none():
+    assert mailer.has_header_injection("x@a.com", None) is False
+
+
+def test_send_rejects_crlf_in_to_writes_failed_log_row(monkeypatch):
+    recorder = _FakeExecuteRecorder()
+    monkeypatch.setattr(mailer, "execute", recorder)
+    # Configure SMTP so a real (non-injection) send would otherwise go
+    # through -- proves the rejection happens before any transport is used.
+    monkeypatch.setattr(settings, "smtp_host", "smtp.gmail.com")
+    monkeypatch.setattr(settings, "smtp_user", "info@gsprecruitment.nl")
+    monkeypatch.setattr(settings, "smtp_pass", "app-password")
+
+    async def _boom(*a, **kw):
+        raise AssertionError("SMTP transport must not be reached for an injection attempt")
+    monkeypatch.setattr(mailer, "_send_via_smtp", _boom)
+
+    ok = asyncio.run(
+        mailer.send(
+            to="x@a.com\r\nBcc: victim@b.org",
+            template="welkom_kandidaat",
+            ctx={"full_name": "Jan"},
+        )
+    )
+    assert ok is False
+    assert len(recorder.calls) == 1
+    _, args = recorder.calls[0]
+    status, error = args[4], args[5]
+    assert status == "failed"
+    assert "injection" in error.lower()
+
+
+def test_send_rejects_crlf_in_explicit_subject_writes_failed_log_row(monkeypatch):
+    recorder = _FakeExecuteRecorder()
+    monkeypatch.setattr(mailer, "execute", recorder)
+    monkeypatch.setattr(settings, "smtp_host", "smtp.gmail.com")
+    monkeypatch.setattr(settings, "smtp_user", "info@gsprecruitment.nl")
+    monkeypatch.setattr(settings, "smtp_pass", "app-password")
+
+    async def _boom(*a, **kw):
+        raise AssertionError("SMTP transport must not be reached for an injection attempt")
+    monkeypatch.setattr(mailer, "_send_via_smtp", _boom)
+
+    ok = asyncio.run(
+        mailer.send(
+            to="kandidaat@example.com",
+            template="welkom_kandidaat",
+            ctx={"full_name": "Jan"},
+            subject="Welkom\r\nBcc: victim@b.org",
+        )
+    )
+    assert ok is False
+    _, args = recorder.calls[0]
+    status, error = args[4], args[5]
+    assert status == "failed"
+    assert "injection" in error.lower()
+
+
+def test_send_raw_rejects_crlf_in_to_writes_failed_log_row(monkeypatch):
+    recorder = _FakeExecuteRecorder()
+    monkeypatch.setattr(mailer, "execute", recorder)
+    monkeypatch.setattr(settings, "smtp_host", "smtp.gmail.com")
+    monkeypatch.setattr(settings, "smtp_user", "info@gsprecruitment.nl")
+    monkeypatch.setattr(settings, "smtp_pass", "app-password")
+
+    async def _boom(*a, **kw):
+        raise AssertionError("SMTP transport must not be reached for an injection attempt")
+    monkeypatch.setattr(mailer, "_send_via_smtp", _boom)
+
+    ok = asyncio.run(
+        mailer.send_raw(to="x@a.com\r\nBcc: victim@b.org", subject="Over jullie team", body="Beste,\n\n...")
+    )
+    assert ok is False
+    assert len(recorder.calls) == 1
+    _, args = recorder.calls[0]
+    status, error = args[4], args[5]
+    assert status == "failed"
+    assert "injection" in error.lower()
+
+
+def test_send_raw_rejects_crlf_in_subject_writes_failed_log_row(monkeypatch):
+    recorder = _FakeExecuteRecorder()
+    monkeypatch.setattr(mailer, "execute", recorder)
+    monkeypatch.setattr(settings, "smtp_host", "smtp.gmail.com")
+    monkeypatch.setattr(settings, "smtp_user", "info@gsprecruitment.nl")
+    monkeypatch.setattr(settings, "smtp_pass", "app-password")
+
+    async def _boom(*a, **kw):
+        raise AssertionError("SMTP transport must not be reached for an injection attempt")
+    monkeypatch.setattr(mailer, "_send_via_smtp", _boom)
+
+    ok = asyncio.run(
+        mailer.send_raw(
+            to="prospect@example.com",
+            subject="Over jullie team\nBcc: victim@b.org",
+            body="Beste,\n\n...",
+        )
+    )
+    assert ok is False
+    _, args = recorder.calls[0]
+    status, error = args[4], args[5]
+    assert status == "failed"
+    assert "injection" in error.lower()
+
+
 def test_no_template_leaves_double_curly_braces_anywhere():
     """Sweep every shipped template for a stray unrendered {{ }} once
     rendered with representative context -- guards against a typo'd

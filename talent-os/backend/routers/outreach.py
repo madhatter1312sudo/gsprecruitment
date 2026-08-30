@@ -10,7 +10,7 @@ from typing import Optional
 
 import json
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, EmailStr
 
 from core.database import fetch_one, fetch_all, fetch_val, execute
 from core.deps import require_role
@@ -33,7 +33,7 @@ class DraftCreate(BaseModel):
     OpenRouter drafting job (services/scheduler.py draft_outreach)."""
     target_type: str
     target_id: int
-    target_email: str
+    target_email: EmailStr
     target_name: str
     company: Optional[str] = None
     job_id: Optional[int] = None

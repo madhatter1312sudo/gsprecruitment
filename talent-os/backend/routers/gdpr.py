@@ -42,6 +42,12 @@ async def export_my_data(current_user: dict = Depends(get_current_user)):
         "SELECT * FROM candidates WHERE email = $1 AND deleted_at IS NULL", email,
     )
     applications = []
+    email_log_rows = await fetch_all(
+        """SELECT to_email, template, subject, status, created_at
+           FROM email_log WHERE LOWER(to_email) = LOWER($1)
+           ORDER BY created_at DESC""",
+        email,
+    )
     saved = []
     if candidate:
         applications = await fetch_all(
@@ -72,6 +78,7 @@ async def export_my_data(current_user: dict = Depends(get_current_user)):
         "candidate_record": _clean(candidate),
         "applications": [_clean(r) for r in applications],
         "saved_jobs": [_clean(r) for r in saved],
+        "email_log": [_clean(r) for r in email_log_rows],
     }
 
 
@@ -201,6 +208,39 @@ async def erase_my_account(current_user: dict = Depends(get_current_user)):
            WHERE id = $1""",
         user_id, anon,
     )
+
+    # email_log (migration 015) and outreach_messages both hold a plaintext
+    # recipient address outside the candidates/users/candidate_profiles rows
+    # anonymised above -- without this they'd keep the identifiable email
+    # after "erasure" completes. Rows are kept (subject/audit value, and
+    # email_log.status feeds the not-yet-built delivery-failure dashboard)
+    # but the address itself is anonymised, matching the `anon` placeholder
+    # used everywhere else in this function.
+    #
+    # NOTE: this only anonymises on erasure. A time-based 12-month
+    # email_log retention sweep (drop/anonymise rows older than that
+    # regardless of erasure) is Phase 0.3 ARQ-worker follow-up, not yet
+    # built -- see the plan doc's Fase 0.3.
+    await execute(
+        "UPDATE email_log SET to_email = $2, subject = NULL WHERE LOWER(to_email) = LOWER($1)",
+        email, anon,
+    )
+    try:
+        columns = await fetch_all(
+            "SELECT column_name FROM information_schema.columns WHERE table_name = 'outreach_messages'",
+        )
+        col_names = {c["column_name"] for c in columns}
+        if "recipient_email" in col_names:
+            await execute(
+                "UPDATE outreach_messages SET recipient_email = $2 WHERE LOWER(recipient_email) = LOWER($1)",
+                email, anon,
+            )
+    except Exception:
+        # Best-effort, same defensive stance as the outreach_messages mirror
+        # in routers/outreach.py -- schema can vary by deployment; erasure
+        # of the rows this function IS certain about must not be blocked by
+        # a missing/renamed column on this one.
+        logger.exception("GDPR erasure: failed to anonymise outreach_messages for user %s", user_id)
 
     completion_status = "partial" if failed_paths else "complete"
     await execute(

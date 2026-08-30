@@ -43,6 +43,15 @@ _env = Environment(
 
 # ── Pure helpers (unit-testable without network/DB) ─────────────────────
 
+def has_header_injection(*values: Optional[str]) -> bool:
+    """True if any value contains a CR or LF. `to`/`subject` land verbatim
+    in MIMEMultipart headers (see _send_via_smtp) -- outreach drafts carry
+    scraped, attacker-influenced target_email/subject, so a value like
+    "x@a.com\\nBcc: victim@b.org" would otherwise inject extra headers.
+    Pure/testable without touching SMTP."""
+    return any(v is not None and ("\r" in v or "\n" in v) for v in values)
+
+
 def smtp_is_configured() -> bool:
     """SMTP is usable once host/user/pass are all set (port always has a
     sane default)."""
@@ -157,6 +166,11 @@ async def send(
     """Render `template` with `ctx` and send it to `to`. Returns True iff
     the message was actually handed off successfully. Always writes an
     email_log row, whatever the outcome."""
+    if has_header_injection(to, subject):
+        logger.warning("mailer: refusing send -- CR/LF in to or subject (possible header injection), to=%r", to)
+        await _log_attempt(to, template, subject, "none", "failed", "rejected: CR/LF in to/subject (header injection)", related_user_id)
+        return False
+
     try:
         html_body, text_body = render_template(template, ctx)
         resolved_subject = resolve_subject(template, ctx, subject)
@@ -167,6 +181,15 @@ async def send(
     except Exception as e:
         logger.exception("mailer: template render failed for %s", template)
         await _log_attempt(to, template, subject, "none", "failed", f"render error: {e}", related_user_id)
+        return False
+
+    if has_header_injection(resolved_subject):
+        # Catches the rarer case where the subject came from a rendered
+        # {% block subject %} fed by attacker-influenced ctx (e.g. a
+        # candidate's own full_name) rather than the explicit arg checked
+        # above.
+        logger.warning("mailer: refusing send -- CR/LF in resolved subject (possible header injection)")
+        await _log_attempt(to, template, resolved_subject, "none", "failed", "rejected: CR/LF in resolved subject (header injection)", related_user_id)
         return False
 
     transport = resolve_transport()
@@ -204,6 +227,14 @@ async def send_raw(
     rendering. Used only for approved outreach sends, where a human has
     already written/edited the exact text and DRAFT-approval semantics must
     not add or alter a single character."""
+    if has_header_injection(to, subject):
+        # Outreach drafts carry scraped, attacker-influenced target_email
+        # and subject -- a CRLF here would otherwise inject extra SMTP
+        # headers (e.g. an extra Bcc:) when an admin approves the draft.
+        logger.warning("mailer: refusing send_raw -- CR/LF in to or subject (possible header injection), to=%r", to)
+        await _log_attempt(to, "outreach_raw", subject, "none", "failed", "rejected: CR/LF in to/subject (header injection)", related_user_id)
+        return False
+
     transport = resolve_transport()
 
     if transport == "smtp":
