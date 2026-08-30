@@ -69,13 +69,23 @@ jobs:
 
       - name: SSH and restart Docker containers
         run: |
-          ssh gsp@188.245.254.248 "
-            cd /home/gsp/projects/gsp-recruitment && \
-            docker compose up -d --build backend && \
-            sleep 5 && \
-            echo '=== Health Check ===' && \
-            curl -sf http://127.0.0.1:8000/health | python3 -m json.tool
-          "
+          ssh gsp@188.245.254.248 '
+            set -e
+            cd /home/gsp/projects/gsp-recruitment
+            docker compose up -d --build backend
+            echo "=== Health Check (up to 60s) ==="
+            # A fresh image boots 4 uvicorn workers from a cold dependency
+            # layer; a fixed 5s wait flaked on heavier rebuilds. Poll instead.
+            for i in $(seq 1 12); do
+              if curl -sf http://127.0.0.1:8000/health | python3 -m json.tool; then
+                exit 0
+              fi
+              sleep 5
+            done
+            echo "Backend not healthy after 60s -- container logs:"
+            docker logs --tail 100 gsp-backend
+            exit 1
+          '
 
       - name: Tag this build with its git SHA and prune old history
         if: success()
