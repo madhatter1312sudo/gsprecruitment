@@ -1,0 +1,47 @@
+# GSP Recruitment — production Caddyfile
+#
+# This file is the source of truth. It is deployed by
+# .github/workflows/deploy.yml, which scp's it to the VPS as
+# /tmp/Caddyfile.new, runs `caddy validate` against it, then (only on
+# success) copies it over /etc/caddy/Caddyfile and reloads the system
+# Caddy service. A timestamped backup of the previous live file is taken
+# first and restored automatically if the post-reload health check fails.
+#
+# Do not hand-edit /etc/caddy/Caddyfile on the VPS -- the next deploy will
+# overwrite it with this file. Edit this file instead.
+#
+# Behavior reproduced from website/.host (now a pointer doc, see that file):
+#   - gsprecruitment.nl and www.gsprecruitment.nl serve the built website
+#     as static files, with SPA-style fallback to /index.html.
+#   - /api/*, /health and /openapi.json on the apex domain proxy to the
+#     FastAPI backend on 127.0.0.1:8000 (talent-os backend container).
+#   - api.gsprecruitment.nl proxies everything to the same backend, for
+#     clients that call the API on its own subdomain.
+#
+# Note: the WAF behavior described in CLAUDE.md ("*.gsprecruitment.nl needs
+# User-Agent: gsp-ops or it gets a 403") is enforced upstream at Cloudflare,
+# not in this Caddyfile -- there is nothing to reproduce here for it.
+
+gsprecruitment.nl, www.gsprecruitment.nl {
+	handle /api/* {
+		reverse_proxy 127.0.0.1:8000
+	}
+
+	handle /health {
+		reverse_proxy 127.0.0.1:8000
+	}
+
+	handle /openapi.json {
+		reverse_proxy 127.0.0.1:8000
+	}
+
+	handle {
+		root * /home/og/projects/gsp-recruitment/website
+		file_server
+		try_files {path} /index.html
+	}
+}
+
+api.gsprecruitment.nl {
+	reverse_proxy 127.0.0.1:8000
+}

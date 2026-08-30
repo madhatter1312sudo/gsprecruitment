@@ -1,0 +1,263 @@
+# Offsite backups (Fase 0.5).
+#
+# Nightly: dump the recruitment_db database (pg_dump -Fc, restore-test
+# friendly) + Postgres globals (pg_dumpall --globals-only), encrypt both
+# with openssl AES-256-CBC, upload to R2 under backups/pg/ and
+# backups/globals/, upload an encrypted copy of talent-os/.env under
+# backups/env/, then prune backups/pg/ objects older than 30 days.
+#
+# On the 1st of the month (or on-demand via workflow_dispatch with
+# restore_test=true): additionally download the latest dump, decrypt it,
+# restore it into a throwaway postgres:16-alpine service container, and
+# sanity-check row counts on candidates + users.
+#
+# Prerequisites (owner, one time) -- see infra/README.md:
+#   - Secrets already in use elsewhere: VPS_SSH_PRIVATE_KEY,
+#     R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY.
+#   - New secret: BACKUP_PASSPHRASE (long random passphrase, store it in a
+#     password manager -- losing it makes every backup unreadable).
+
+name: Offsite Backups
+
+on:
+  schedule:
+    - cron: "15 3 * * *"
+  workflow_dispatch:
+    inputs:
+      restore_test:
+        description: "Run the restore test even if today isn't the 1st"
+        type: boolean
+        default: false
+
+concurrency:
+  group: backup
+  cancel-in-progress: false
+
+env:
+  R2_ENDPOINT: "https://4ca99d2b194e26fee99a8916bb53942b.r2.cloudflarestorage.com"
+  R2_BUCKET: "gsp"
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    outputs:
+      dump_date: ${{ steps.dump.outputs.date }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check required secrets exist
+        run: |
+          missing=""
+          [ -z "${{ secrets.VPS_SSH_PRIVATE_KEY }}" ] && missing="$missing VPS_SSH_PRIVATE_KEY"
+          [ -z "${{ secrets.R2_ACCESS_KEY_ID }}" ] && missing="$missing R2_ACCESS_KEY_ID"
+          [ -z "${{ secrets.R2_SECRET_ACCESS_KEY }}" ] && missing="$missing R2_SECRET_ACCESS_KEY"
+          [ -z "${{ secrets.BACKUP_PASSPHRASE }}" ] && missing="$missing BACKUP_PASSPHRASE"
+          if [ -n "$missing" ]; then
+            echo "::error::Missing required secret(s):$missing"
+            echo "Create them under Settings -> Secrets and variables -> Actions."
+            echo "See infra/README.md for BACKUP_PASSPHRASE guidance (it does not exist anywhere yet -- pick a long random passphrase and store it in a password manager; losing it makes every backup permanently unreadable)."
+            exit 1
+          fi
+
+      - name: Setup SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.VPS_SSH_PRIVATE_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -H 188.245.254.248 >> ~/.ssh/known_hosts
+
+      - name: Configure AWS CLI for R2
+        env:
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+        run: |
+          aws configure set aws_access_key_id "$R2_ACCESS_KEY_ID"
+          aws configure set aws_secret_access_key "$R2_SECRET_ACCESS_KEY"
+          aws configure set default.region auto
+
+      - name: Dump database + globals from the VPS, encrypt, upload
+        id: dump
+        env:
+          BACKUP_PASSPHRASE: ${{ secrets.BACKUP_PASSPHRASE }}
+        run: |
+          set -euo pipefail
+          DATE=$(date -u +%F)
+          echo "date=$DATE" >> "$GITHUB_OUTPUT"
+
+          echo "Streaming pg_dump (recruitment_db, custom format)..."
+          ssh gsp@188.245.254.248 \
+            'docker exec gsp-postgres pg_dump -U talentos_admin -Fc recruitment_db' \
+            > /tmp/db.dump
+          echo "recruitment_db dump: $(du -h /tmp/db.dump | cut -f1)"
+
+          echo "Streaming pg_dumpall (globals only -- roles/grants, no table data)..."
+          ssh gsp@188.245.254.248 \
+            'docker exec gsp-postgres pg_dumpall -U talentos_admin --globals-only' \
+            > /tmp/globals.sql
+          echo "globals dump: $(du -h /tmp/globals.sql | cut -f1)"
+
+          openssl enc -aes-256-cbc -pbkdf2 -iter 200000 -pass env:BACKUP_PASSPHRASE \
+            -in /tmp/db.dump -out /tmp/db.dump.enc
+          openssl enc -aes-256-cbc -pbkdf2 -iter 200000 -pass env:BACKUP_PASSPHRASE \
+            -in /tmp/globals.sql -out /tmp/globals.sql.enc
+          rm -f /tmp/db.dump /tmp/globals.sql
+
+          aws --endpoint-url "$R2_ENDPOINT" s3 cp /tmp/db.dump.enc \
+            "s3://${R2_BUCKET}/backups/pg/${DATE}.dump.enc"
+          aws --endpoint-url "$R2_ENDPOINT" s3 cp /tmp/globals.sql.enc \
+            "s3://${R2_BUCKET}/backups/globals/${DATE}.sql.enc"
+
+          echo "Uploaded backups/pg/${DATE}.dump.enc and backups/globals/${DATE}.sql.enc"
+          rm -f /tmp/db.dump.enc /tmp/globals.sql.enc
+
+      - name: Backup talent-os/.env from the VPS, encrypt, upload
+        env:
+          BACKUP_PASSPHRASE: ${{ secrets.BACKUP_PASSPHRASE }}
+        run: |
+          set -euo pipefail
+          DATE="${{ steps.dump.outputs.date }}"
+          ssh gsp@188.245.254.248 \
+            'cat /home/gsp/projects/gsp-recruitment/talent-os/.env' \
+            > /tmp/env.plain
+
+          openssl enc -aes-256-cbc -pbkdf2 -iter 200000 -pass env:BACKUP_PASSPHRASE \
+            -in /tmp/env.plain -out /tmp/env.enc
+          rm -f /tmp/env.plain
+
+          aws --endpoint-url "$R2_ENDPOINT" s3 cp /tmp/env.enc \
+            "s3://${R2_BUCKET}/backups/env/${DATE}.env.enc"
+          echo "Uploaded backups/env/${DATE}.env.enc"
+          rm -f /tmp/env.enc
+
+      - name: Prune backups/pg/ objects older than 30 days
+        run: |
+          set -euo pipefail
+          CUTOFF=$(date -u -d '30 days ago' +%Y-%m-%d)
+          aws --endpoint-url "$R2_ENDPOINT" s3api list-objects-v2 \
+            --bucket "$R2_BUCKET" --prefix "backups/pg/" \
+            --query 'Contents[].Key' --output text | tr '\t' '\n' > /tmp/pg_keys.txt || true
+
+          while IFS= read -r key; do
+            [ -z "$key" ] && continue
+            # Keys look like backups/pg/YYYY-MM-DD.dump.enc
+            fname=$(basename "$key")
+            file_date="${fname%%.*}"
+            case "$file_date" in
+              ????-??-??) ;;
+              *) echo "Skipping unrecognized key: $key"; continue ;;
+            esac
+            if [[ "$file_date" < "$CUTOFF" ]]; then
+              echo "Deleting expired backup: $key (older than $CUTOFF)"
+              aws --endpoint-url "$R2_ENDPOINT" s3api delete-object \
+                --bucket "$R2_BUCKET" --key "$key"
+            fi
+          done < /tmp/pg_keys.txt
+
+      - name: Notify Telegram on failure
+        if: failure()
+        run: |
+          if [ -z "${{ secrets.TELEGRAM_BOT_TOKEN }}" ] || [ -z "${{ secrets.TELEGRAM_CHAT_ID }}" ]; then
+            echo "::error::TELEGRAM_BOT_TOKEN and/or TELEGRAM_CHAT_ID secrets are not set -- cannot send backup failure alert."
+            exit 0
+          fi
+          curl -sS --max-time 20 \
+            -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage" \
+            -d chat_id="${{ secrets.TELEGRAM_CHAT_ID }}" \
+            --data-urlencode text="GSP backup waarschuwing: de nachtelijke backup-job is gefaald. Bekijk de Actions-log."
+
+  restore-test:
+    needs: backup
+    if: needs.backup.result == 'success'
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: restoretest
+          POSTGRES_PASSWORD: restoretest
+          POSTGRES_DB: restoretest
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U restoretest"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - name: Only actually run on the 1st of the month or an explicit request
+        id: gate
+        run: |
+          DOM=$(date -u +%d)
+          if [ "${{ github.event.inputs.restore_test }}" = "true" ] || [ "$DOM" = "01" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "Skipping restore test (not day 1, restore_test not requested)."
+          fi
+
+      - name: Configure AWS CLI for R2
+        if: steps.gate.outputs.run == 'true'
+        env:
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+        run: |
+          aws configure set aws_access_key_id "$R2_ACCESS_KEY_ID"
+          aws configure set aws_secret_access_key "$R2_SECRET_ACCESS_KEY"
+          aws configure set default.region auto
+
+      - name: Download + decrypt latest dump
+        if: steps.gate.outputs.run == 'true'
+        env:
+          BACKUP_PASSPHRASE: ${{ secrets.BACKUP_PASSPHRASE }}
+        run: |
+          set -euo pipefail
+          DATE="${{ needs.backup.outputs.dump_date }}"
+          aws --endpoint-url "$R2_ENDPOINT" s3 cp \
+            "s3://${R2_BUCKET}/backups/pg/${DATE}.dump.enc" /tmp/latest.dump.enc
+          openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:BACKUP_PASSPHRASE \
+            -in /tmp/latest.dump.enc -out /tmp/latest.dump
+          rm -f /tmp/latest.dump.enc
+          echo "Decrypted dump: $(du -h /tmp/latest.dump | cut -f1)"
+
+      - name: Restore into throwaway postgres and sanity-check
+        if: steps.gate.outputs.run == 'true'
+        id: restore
+        run: |
+          set -euo pipefail
+          export PGPASSWORD=restoretest
+          docker run --rm -v /tmp/latest.dump:/tmp/latest.dump \
+            --network host \
+            postgres:16-alpine \
+            pg_restore -h 127.0.0.1 -p 5432 -U restoretest -d restoretest \
+              --no-owner --no-privileges /tmp/latest.dump
+
+          candidates=$(docker run --rm --network host -e PGPASSWORD=restoretest postgres:16-alpine \
+            psql -h 127.0.0.1 -U restoretest -d restoretest -tAc "SELECT COUNT(*) FROM candidates")
+          users=$(docker run --rm --network host -e PGPASSWORD=restoretest postgres:16-alpine \
+            psql -h 127.0.0.1 -U restoretest -d restoretest -tAc "SELECT COUNT(*) FROM users")
+
+          echo "candidates=$candidates" >> "$GITHUB_OUTPUT"
+          echo "users=$users" >> "$GITHUB_OUTPUT"
+          echo "Restore test OK -- candidates=$candidates users=$users"
+
+          if [ "$candidates" -eq 0 ] && [ "$users" -eq 0 ]; then
+            echo "::error::Restore produced zero rows in both candidates and users -- treat as a failed restore test."
+            exit 1
+          fi
+
+      - name: "Notify Telegram (restore-test run: success or failure)"
+        if: always() && steps.gate.outputs.run == 'true'
+        run: |
+          if [ -z "${{ secrets.TELEGRAM_BOT_TOKEN }}" ] || [ -z "${{ secrets.TELEGRAM_CHAT_ID }}" ]; then
+            echo "::error::TELEGRAM_BOT_TOKEN and/or TELEGRAM_CHAT_ID secrets are not set -- cannot send restore-test notification."
+            exit 0
+          fi
+          if [ "${{ steps.restore.outcome }}" = "success" ]; then
+            text="GSP backup: maandelijkse restore-test geslaagd (kandidaten=${{ steps.restore.outputs.candidates }}, gebruikers=${{ steps.restore.outputs.users }})."
+          else
+            text="GSP backup waarschuwing: restore-test is gefaald. Bekijk de Actions-log."
+          fi
+          curl -sS --max-time 20 \
+            -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage" \
+            -d chat_id="${{ secrets.TELEGRAM_CHAT_ID }}" \
+            --data-urlencode text="$text"

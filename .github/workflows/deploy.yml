@@ -1,5 +1,18 @@
 name: Deploy to Production
 
+# Deploy order (top to bottom in the `deploy` job):
+#   1. Sync backend code + docker-compose.yml to the VPS.
+#   2. Sync website/ to the path Caddy actually serves (see infra/README.md
+#      and website/.host -- NOT necessarily the VPS deploy dir).
+#   3. Push infra/Caddyfile to /etc/caddy/Caddyfile (validated before
+#      swap-in, backed up first, skipped loudly if the `gsp` user lacks the
+#      scoped sudo rights -- see infra/README.md for the sudoers line).
+#   4. Tag the current backend image (rollback point), then
+#      `docker compose up -d --build` for ALL services (postgres, backend,
+#      redis, worker -- redis/worker were previously never (re)started by
+#      this pipeline).
+#   5. Poll backend /health; roll back the backend image on failure.
+
 on:
   push:
     branches: [main]
@@ -54,10 +67,72 @@ jobs:
           rsync -avz docker-compose.yml \
             gsp@188.245.254.248:/home/gsp/projects/gsp-recruitment/docker-compose.yml
 
-      - name: Sync website (frontend) to Cloudflare via git push
+      - name: Sync website to the path Caddy serves
         run: |
-          # The frontend is on Cloudflare Pages, which auto-deploys from this repo
-          echo "Frontend is auto-deployed by Cloudflare Pages from this repository"
+          # website/.host documents the served path -- it currently names
+          # /home/og/projects/gsp-recruitment/website, which is NOT the
+          # /home/gsp/... deploy dir used elsewhere in this workflow. That
+          # mismatch is unverified from the sandbox (see infra/README.md);
+          # we deploy to what .host says because getting this wrong the
+          # other way around (rsyncing into an unserved directory) would
+          # silently fail to update the live site, whereas rsyncing here
+          # fails loudly (permission/path error) if the `gsp` SSH user
+          # cannot write to a path owned by `og`.
+          rsync -avz --delete website/ \
+            gsp@188.245.254.248:/home/og/projects/gsp-recruitment/website/
+
+      - name: Push infra/Caddyfile (validated, backed up, skips without sudo)
+        run: |
+          scp infra/Caddyfile gsp@188.245.254.248:/tmp/Caddyfile.new
+          ssh gsp@188.245.254.248 '
+            set -e
+            if ! sudo -n true 2>/dev/null; then
+              echo "::warning::gsp user has no passwordless sudo for Caddy management -- SKIPPING Caddyfile deploy."
+              echo "::warning::Add the scoped sudoers entry documented in infra/README.md, then re-run this workflow."
+              exit 0
+            fi
+
+            BACKUP="/etc/caddy/Caddyfile.bak.$(date +%s)"
+            sudo cp /etc/caddy/Caddyfile "$BACKUP"
+
+            if ! sudo caddy validate --config /tmp/Caddyfile.new; then
+              echo "::error::infra/Caddyfile failed caddy validate -- not applying. Backup left at $BACKUP (unused)."
+              exit 1
+            fi
+
+            sudo cp /tmp/Caddyfile.new /etc/caddy/Caddyfile
+            sudo systemctl reload caddy
+            echo "CADDYFILE_BACKUP=$BACKUP" >> "$GITHUB_ENV" 2>/dev/null || true
+            echo "Caddyfile applied; backup at $BACKUP"
+          '
+
+      - name: Verify site + API respond after Caddyfile reload
+        run: |
+          site_code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 20 \
+            -H "User-Agent: gsp-ops" "https://gsprecruitment.nl")
+          api_code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 20 \
+            -H "User-Agent: gsp-ops" "https://api.gsprecruitment.nl/health")
+          echo "site -> HTTP ${site_code}, api/health -> HTTP ${api_code}"
+
+          if [ "$site_code" != "200" ] || [ "$api_code" != "200" ]; then
+            echo "::error::Post-reload check failed (site=$site_code api=$api_code) -- restoring previous Caddyfile."
+            ssh gsp@188.245.254.248 '
+              set -e
+              if ! sudo -n true 2>/dev/null; then
+                echo "::error::Cannot auto-restore Caddyfile -- no passwordless sudo. Manual intervention needed."
+                exit 1
+              fi
+              LATEST_BAK=$(ls -t /etc/caddy/Caddyfile.bak.* 2>/dev/null | head -1)
+              if [ -z "$LATEST_BAK" ]; then
+                echo "::error::No Caddyfile backup found -- cannot auto-restore. Manual intervention needed."
+                exit 1
+              fi
+              sudo cp "$LATEST_BAK" /etc/caddy/Caddyfile
+              sudo systemctl reload caddy
+              echo "Restored Caddyfile from $LATEST_BAK and reloaded."
+            '
+            exit 1
+          fi
 
       - name: Tag current image for rollback before replacing it
         run: |
@@ -67,12 +142,12 @@ jobs:
             fi
           "
 
-      - name: SSH and restart Docker containers
+      - name: SSH and restart Docker containers (all services)
         run: |
           ssh gsp@188.245.254.248 '
             set -e
             cd /home/gsp/projects/gsp-recruitment
-            docker compose up -d --build backend
+            docker compose up -d --build
             echo "=== Health Check (up to 60s) ==="
             # A fresh image boots 4 uvicorn workers from a cold dependency
             # layer; a fixed 5s wait flaked on heavier rebuilds. Poll instead.
@@ -115,7 +190,7 @@ jobs:
 
       - name: Health check success notification
         if: success()
-        run: echo "✅ Deployment successful! Backend healthy, frontend auto-deployed by Cloudflare."
+        run: echo "✅ Deployment successful! All services (postgres, backend, redis, worker) started; frontend synced; Caddyfile applied (or skipped -- see logs above)."
 
       - name: Health check failure notification
         if: failure()

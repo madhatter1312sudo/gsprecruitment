@@ -1,13 +1,16 @@
-# GSP Recruitment — Caddyfile context
-# Served by the system Caddy instance (/etc/caddy/Caddyfile) at:
+# GSP Recruitment — Caddyfile context (pointer doc)
 #
-#   gsprecruitment.nl {
-#       handle /api/* { reverse_proxy localhost:8000 }
-#       handle /health { reverse_proxy localhost:8000 }
-#       handle /openapi.json { reverse_proxy localhost:8000 }
-#       handle {
-#           root * /home/og/projects/gsp-recruitment/website
-#           file_server
-#           try_files {path} /index.html
-#       }
-#   }
+# This file used to be the literal (informal) description of what the
+# system Caddy instance (/etc/caddy/Caddyfile) serves. As of Fase 0.4 the
+# real, deployed Caddyfile lives at ../infra/Caddyfile and is pushed to the
+# VPS by .github/workflows/deploy.yml -- see infra/README.md for how that
+# deploy step works, including its safety checks and rollback.
+#
+# Edit ../infra/Caddyfile, not this file, to change production routing.
+#
+# Note this file previously named the served path as
+# /home/og/projects/gsp-recruitment/website (note: `og`, not `gsp`), which
+# does not match the /home/gsp/projects/gsp-recruitment deploy dir used
+# elsewhere in this repo's tooling. That discrepancy is carried forward
+# unverified into infra/Caddyfile -- see infra/README.md "Known risk"
+# section before relying on it.
