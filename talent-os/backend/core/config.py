@@ -25,17 +25,15 @@ class Settings(BaseSettings):
             f"@{self.postgres_host}:{self.postgres_port}/{self.postgres_db}"
         )
 
-    redis_host: str = "localhost"
-    redis_port: int = 6379
-    redis_db: int = 0
-
-    @property
-    def redis_url(self) -> str:
-        return f"redis://{self.redis_host}:{self.redis_port}/{self.redis_db}"
+    # Used by talent-os/backend/worker.py (ARQ) via the root docker-compose
+    # `redis` service. Default matches that service's compose DNS name.
+    redis_url: str = "redis://redis:6379/0"
 
     @property
     def celery_broker_url(self) -> str:
-        return f"redis://{self.redis_host}:{self.redis_port}/{self.redis_db}"
+        # tasks/celery_app.py is dead code (not run anywhere) -- kept only
+        # so it still imports cleanly; not used by worker.py.
+        return self.redis_url
 
     openrouter_api_key: str = ""
     openrouter_base_url: str = "https://openrouter.ai/api/v1"
