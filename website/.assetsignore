@@ -1,0 +1,4 @@
+# Cloudflare Workers Static Assets: files listed here are never served,
+# even though they stay tracked in the repo for local/deploy tooling.
+.host
+.gitignore
