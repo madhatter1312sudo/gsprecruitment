@@ -537,20 +537,20 @@ const GSP_WHATSAPP = '31617913965';
       }
 
       grid.innerHTML = filtered.map(job => `
-        <div class="job-card" data-id="${job.id}" data-slug="${job.slug || job.id}">
-          <h3>${job.title}</h3>
+        <div class="job-card" data-id="${GSP.esc(job.id)}" data-slug="${GSP.esc(job.slug || job.id)}">
+          <h3>${GSP.esc(job.title)}</h3>
           <div class="job-tags">
-            <span class="job-tag gold">${job.department}</span>
-            <span class="job-tag">${job.seniority}</span>
-            <span class="job-tag">${job.location_type || 'On-site'}</span>
+            <span class="job-tag gold">${GSP.esc(job.department)}</span>
+            <span class="job-tag">${GSP.esc(job.seniority)}</span>
+            <span class="job-tag">${GSP.esc(job.location_type || 'On-site')}</span>
           </div>
-          <p>${job.description || ''}</p>
+          <p>${GSP.esc(job.description || '')}</p>
           <div class="job-meta">
             <span><i class="fas fa-euro-sign"></i> €${(job.salary_min / 1000).toFixed(0)}k – €${(job.salary_max / 1000).toFixed(0)}k</span>
-            <span><i class="fas fa-map-marker-alt"></i> ${job.location_type || 'Netherlands'}</span>
+            <span><i class="fas fa-map-marker-alt"></i> ${GSP.esc(job.location_type || 'Netherlands')}</span>
           </div>
           <div class="job-links">
-            <a href="vacature.html?id=${job.slug || job.id}" class="job-view-link" onclick="event.stopPropagation()"><span class="lang-en">View details →</span><span class="lang-nl">Bekijk details →</span></a>
+            <a href="vacature.html?id=${encodeURIComponent(job.slug || job.id)}" class="job-view-link" onclick="event.stopPropagation()"><span class="lang-en">View details →</span><span class="lang-nl">Bekijk details →</span></a>
           </div>
         </div>
       `).join('');
@@ -569,24 +569,24 @@ const GSP_WHATSAPP = '31617913965';
       if (!body) return;
 
       body.innerHTML = `
-        <h2 style="margin-bottom:8px">${job.title}</h2>
+        <h2 style="margin-bottom:8px">${GSP.esc(job.title)}</h2>
         <div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap">
-          ${[job.department, job.seniority, job.location_type].map(t => `<span class="job-tag gold" style="font-size:0.8rem;padding:6px 14px">${t}</span>`).join('')}
+          ${[job.department, job.seniority, job.location_type].map(t => `<span class="job-tag gold" style="font-size:0.8rem;padding:6px 14px">${GSP.esc(t)}</span>`).join('')}
         </div>
         <div style="background:var(--bg-alt);padding:16px;border-radius:var(--radius-sm);margin-bottom:16px">
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
             <div><strong>Salary:</strong> €${(job.salary_min/1000).toFixed(0)}k – €${(job.salary_max/1000).toFixed(0)}k</div>
-            <div><strong>Location:</strong> ${job.location_type || 'Netherlands'}</div>
+            <div><strong>Location:</strong> ${GSP.esc(job.location_type || 'Netherlands')}</div>
           </div>
         </div>
         <h3 style="font-size:1rem;margin-bottom:8px">Description</h3>
-        <p style="font-size:0.92rem;margin-bottom:16px;color:var(--text-secondary)">${job.description || 'No description available.'}</p>
+        <p style="font-size:0.92rem;margin-bottom:16px;color:var(--text-secondary)">${GSP.esc(job.description || 'No description available.')}</p>
         <h3 style="font-size:1rem;margin-bottom:8px">Requirements</h3>
-        <p style="font-size:0.92rem;margin-bottom:24px;color:var(--text-secondary)">${job.requirements || 'No requirements specified.'}</p>
+        <p style="font-size:0.92rem;margin-bottom:24px;color:var(--text-secondary)">${GSP.esc(job.requirements || 'No requirements specified.')}</p>
         <button class="btn btn-gold" style="width:100%;justify-content:center" id="applyFromJobBtn">
           <i class="fas fa-paper-plane"></i> Apply Now
         </button>
-        <a href="vacature.html?id=${job.slug || job.id}" class="btn btn-ghost" style="width:100%;justify-content:center;margin-top:8px">
+        <a href="vacature.html?id=${encodeURIComponent(job.slug || job.id)}" class="btn btn-ghost" style="width:100%;justify-content:center;margin-top:8px">
           <span class="lang-en">View full page →</span><span class="lang-nl">Bekijk volledige pagina →</span>
         </a>
       `;
@@ -639,13 +639,13 @@ const GSP_WHATSAPP = '31617913965';
         grid.innerHTML = jobs.map(job => `
           <div class="vac-card">
             <div class="vac-tags">
-              <span class="vac-chip">${job.location_type || job.location || 'Netherlands'}</span>
-              ${job.seniority ? `<span class="vac-chip">${job.seniority}</span>` : ''}
+              <span class="vac-chip">${GSP.esc(job.location_type || job.location || 'Netherlands')}</span>
+              ${job.seniority ? `<span class="vac-chip">${GSP.esc(job.seniority)}</span>` : ''}
             </div>
-            <h3>${job.title}</h3>
-            <p class="vac-desc">${job.department || ''}</p>
+            <h3>${GSP.esc(job.title)}</h3>
+            <p class="vac-desc">${GSP.esc(job.department || '')}</p>
             ${(job.salary_min && job.salary_max) ? `<div class="vac-salary">€${Number(job.salary_min).toLocaleString('nl-NL')} – €${Number(job.salary_max).toLocaleString('nl-NL')}</div>` : ''}
-            <a href="vacature.html?id=${job.slug || job.id}" class="vac-link"><span class="lang-en">View vacancy →</span><span class="lang-nl">Bekijk vacature →</span></a>
+            <a href="vacature.html?id=${encodeURIComponent(job.slug || job.id)}" class="vac-link"><span class="lang-en">View vacancy →</span><span class="lang-nl">Bekijk vacature →</span></a>
           </div>
         `).join('');
         section.style.display = '';
@@ -901,8 +901,8 @@ const GSP_WHATSAPP = '31617913965';
         <div class="quiz-progress">${dots}</div>
         <div class="quiz-question">${questionText}</div>
         <div class="quiz-options">
-          ${q.options.map((opt, i) =>
-            `<button class="quiz-option" data-score="${opt.score}">${opt.text[lang] || opt.text.en}</button>`
+          ${q.options.map((opt, i) => // xss-static-check: safe -- QUIZ is a hardcoded local array, not API/user data
+            `<button class="quiz-option" data-score="${opt.score}">${opt.text[lang] || opt.text.en}</button>` // xss-static-check: safe -- QUIZ is a hardcoded local array, not API/user data
           ).join('')}
         </div>
       `;

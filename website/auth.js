@@ -343,13 +343,19 @@ const Auth = {
       info: 'fa-circle-info'
     };
 
+    const iconClass = icons[type] || icons.success; // fixed local map, type is our own status keyword
     const toast = document.createElement('div');
     toast.className = `toast toast-${type}`;
     toast.setAttribute('role', 'alert');
     toast.innerHTML = `
-      <span class="toast-icon"><i class="fa-regular ${icons[type] || icons.success}"></i></span>
-      <span>${message}</span>
+      <span class="toast-icon"><i class="fa-regular ${iconClass}"></i></span>
+      <span></span>
     `;
+    // Message text is set via textContent, not interpolated into the
+    // innerHTML above — auth.js loads standalone on some pages (e.g.
+    // reset-password.html) without gsp-util.js, so this can't rely on
+    // GSP.esc being defined.
+    toast.querySelector('span:last-child').textContent = message;
     container.appendChild(toast);
 
     // Trigger entrance animation

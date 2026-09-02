@@ -497,6 +497,7 @@
     </main>
   </div>
 
+  <script src="../gsp-util.js"></script>
   <script src="../auth.js"></script>
   <script>
     /* ================================================================
@@ -621,9 +622,9 @@
             return `<div class="activity-item">
               <div class="activity-icon" style="background:rgba(34,197,94,0.1);color:#4ade80;"><i class="fa-regular fa-user-plus"></i></div>
               <div class="activity-content">
-                <div class="activity-text lang-en">${pe.full_name || 'Candidate'} added to ${pe.job_title || 'pipeline'}</div>
-                <div class="activity-text lang-nl">${pe.full_name || 'Kandidaat'} toegevoegd aan ${pe.job_title || 'pipeline'}</div>
-                <div class="activity-time">${time}</div>
+                <div class="activity-text lang-en">${GSP.esc(pe.full_name || 'Candidate')} added to ${GSP.esc(pe.job_title || 'pipeline')}</div>
+                <div class="activity-text lang-nl">${GSP.esc(pe.full_name || 'Kandidaat')} toegevoegd aan ${GSP.esc(pe.job_title || 'pipeline')}</div>
+                <div class="activity-time">${GSP.esc(time)}</div>
               </div>
             </div>`;
           }).join('');
@@ -657,17 +658,17 @@
           return `<div class="job-card">
             <div style="display:flex;justify-content:space-between;align-items:flex-start;">
               <div>
-                <h4 style="font-size:var(--font-size-lg);font-weight:600;color:var(--white);">${j.title || 'Untitled'}</h4>
-                <p style="font-size:var(--font-size-sm);color:var(--navy-200);margin:4px 0;">${salary ? salary + ' · ' : ''}${location}${j.seniority ? ' · ' + j.seniority : ''}</p>
+                <h4 style="font-size:var(--font-size-lg);font-weight:600;color:var(--white);">${GSP.esc(j.title || 'Untitled')}</h4>
+                <p style="font-size:var(--font-size-sm);color:var(--navy-200);margin:4px 0;">${salary ? salary + ' · ' : ''}${GSP.esc(location)}${j.seniority ? ' · ' + GSP.esc(j.seniority) : ''}</p>
                 <div style="display:flex;gap:var(--space-sm);margin-top:var(--space-sm);">
-                  <span class="badge ${statusClass} lang-en">${j.status || 'draft'}</span>
-                  <span class="badge ${statusClass} lang-nl">${j.status === 'open' ? 'Actief' : j.status === 'draft' ? 'Concept' : j.status}</span>
-                  ${j.department ? `<span class="badge badge-blue">${j.department}</span>` : ''}
+                  <span class="badge ${statusClass} lang-en">${GSP.esc(j.status || 'draft')}</span>
+                  <span class="badge ${statusClass} lang-nl">${j.status === 'open' ? 'Actief' : j.status === 'draft' ? 'Concept' : GSP.esc(j.status)}</span>
+                  ${j.department ? `<span class="badge badge-blue">${GSP.esc(j.department)}</span>` : ''}
                 </div>
               </div>
               <div style="display:flex;gap:var(--space-sm);">
-                <button class="btn btn-sm btn-outline" onclick="editJob(${j.id})"><i class="fa-regular fa-pen-to-square"></i></button>
-                <button class="btn btn-sm btn-ghost" style="color:#f87171;" onclick="deleteJob(${j.id})"><i class="fa-regular fa-trash-can"></i></button>
+                <button class="btn btn-sm btn-outline" onclick="editJob(${Number(j.id) || 0})"><i class="fa-regular fa-pen-to-square"></i></button>
+                <button class="btn btn-sm btn-ghost" style="color:#f87171;" onclick="deleteJob(${Number(j.id) || 0})"><i class="fa-regular fa-trash-can"></i></button>
               </div>
             </div>
           </div>`;
@@ -730,12 +731,12 @@
           <form id="jobModalForm">
             <div class="form-group">
               <label class="lang-en">Job Title *</label><label class="lang-nl">Functietitel *</label>
-              <input type="text" name="title" required placeholder="e.g. Senior Embedded Software Engineer" value="${job?.title || ''}">
+              <input type="text" name="title" required placeholder="e.g. Senior Embedded Software Engineer" value="${GSP.esc(job?.title || '')}">
             </div>
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:var(--space-md);">
               <div class="form-group">
                 <label class="lang-en">Department</label><label class="lang-nl">Afdeling</label>
-                <input type="text" name="department" placeholder="e.g. R&D" value="${job?.department || ''}">
+                <input type="text" name="department" placeholder="e.g. R&D" value="${GSP.esc(job?.department || '')}">
               </div>
               <div class="form-group">
                 <label class="lang-en">Seniority</label><label class="lang-nl">Niveau</label>
@@ -748,11 +749,11 @@
             <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:var(--space-md);">
               <div class="form-group">
                 <label class="lang-en">Min Salary (€)</label><label class="lang-nl">Min Salaris (€)</label>
-                <input type="number" name="salary_min" placeholder="50000" value="${job?.salary_min || ''}">
+                <input type="number" name="salary_min" placeholder="50000" value="${GSP.esc(job?.salary_min ?? '')}">
               </div>
               <div class="form-group">
                 <label class="lang-en">Max Salary (€)</label><label class="lang-nl">Max Salaris (€)</label>
-                <input type="number" name="salary_max" placeholder="80000" value="${job?.salary_max || ''}">
+                <input type="number" name="salary_max" placeholder="80000" value="${GSP.esc(job?.salary_max ?? '')}">
               </div>
               <div class="form-group">
                 <label class="lang-en">Location Type</label><label class="lang-nl">Werkplek</label>
@@ -764,15 +765,15 @@
             </div>
             <div class="form-group">
               <label class="lang-en">Description</label><label class="lang-nl">Beschrijving</label>
-              <textarea name="description" rows="4" placeholder="Describe the role and responsibilities…" style="width:100%;resize:vertical;">${job?.description || ''}</textarea>
+              <textarea name="description" rows="4" placeholder="Describe the role and responsibilities…" style="width:100%;resize:vertical;">${GSP.esc(job?.description || '')}</textarea>
             </div>
             <div class="form-group">
               <label class="lang-en">Requirements</label><label class="lang-nl">Vereisten</label>
-              <textarea name="requirements" rows="3" placeholder="Required skills and experience…" style="width:100%;resize:vertical;">${job?.requirements || ''}</textarea>
+              <textarea name="requirements" rows="3" placeholder="Required skills and experience…" style="width:100%;resize:vertical;">${GSP.esc(job?.requirements || '')}</textarea>
             </div>
             <div class="form-group">
               <label class="lang-en">Nice to Have</label><label class="lang-nl">Pré</label>
-              <textarea name="nice_to_have" rows="2" placeholder="Bonus skills…" style="width:100%;resize:vertical;">${job?.nice_to_have || ''}</textarea>
+              <textarea name="nice_to_have" rows="2" placeholder="Bonus skills…" style="width:100%;resize:vertical;">${GSP.esc(job?.nice_to_have || '')}</textarea>
             </div>
             <div class="form-group">
               <label class="lang-en">Urgency</label><label class="lang-nl">Urgentie</label>
@@ -867,7 +868,7 @@
             chartEls[1].innerHTML = `<div style="padding:var(--space-md);">
               ${stages.map(([stage, count]) =>
                 `<div style="display:flex;justify-content:space-between;padding:4px 0;color:var(--navy-200);font-size:var(--font-size-sm);">
-                  <span>${stage}</span><span style="font-weight:600;color:var(--gold-500);">${count}</span>
+                  <span>${GSP.esc(stage)}</span><span style="font-weight:600;color:var(--gold-500);">${GSP.esc(count)}</span>
                 </div>`
               ).join('')}
             </div>`;
@@ -938,10 +939,10 @@
           const statusBadge = m.is_verified ? 'badge-green' : 'badge-gray';
           const statusLabel = m.is_verified ? 'Active' : 'Pending';
           return `<tr>
-            <td style="font-weight:600;color:var(--white);">${m.full_name || ''}</td>
-            <td style="color:var(--navy-200);">${m.email || ''}</td>
-            <td><span class="badge ${roleBadge}">${roleLabel}</span></td>
-            <td><span class="badge ${statusBadge}">${statusLabel}</span></td>
+            <td style="font-weight:600;color:var(--white);">${GSP.esc(m.full_name || '')}</td>
+            <td style="color:var(--navy-200);">${GSP.esc(m.email || '')}</td>
+            <td><span class="badge ${roleBadge}">${GSP.esc(roleLabel)}</span></td>
+            <td><span class="badge ${statusBadge}">${GSP.esc(statusLabel)}</span></td>
             <td><button class="btn btn-sm btn-ghost"><i class="fa-regular fa-ellipsis-vertical"></i></button></td>
           </tr>`;
         }).join('');

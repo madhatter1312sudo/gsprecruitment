@@ -114,7 +114,8 @@
   </div>
 </section>
 <!-- ─── JSON-LD CONTAINER ─────────────────────────────── -->
-<div id="jobDetailJsonLd"></div>
+<script type="application/ld+json" id="jobDetailJsonLd"></script>
+<script src="gsp-util.js"></script>
 <script>
 (async () => {
   const params = new URLSearchParams(window.location.search);
@@ -144,21 +145,23 @@
     document.getElementById('ogDescription').setAttribute('content', jobDescription);
     document.getElementById('jobTitle').textContent = job.title;
     const metaHtml = [];
-    if (job.company) metaHtml.push(`<div class="meta-item"><strong><span class="lang-en">Company</span><span class="lang-nl">Bedrijf</span></strong>${job.company}</div>`);
-    if (job.location) metaHtml.push(`<div class="meta-item"><strong><span class="lang-en">Location</span><span class="lang-nl">Locatie</span></strong>${job.location}</div>`);
-    if (job.seniority) metaHtml.push(`<div class="meta-item"><strong><span class="lang-en">Level</span><span class="lang-nl">Niveau</span></strong>${job.seniority}</div>`);
-    if (job.department) metaHtml.push(`<div class="meta-item"><strong><span class="lang-en">Field</span><span class="lang-nl">Vakgebied</span></strong>${job.department}</div>`);
-    if (job.salary_range) metaHtml.push(`<div class="meta-item"><strong><span class="lang-en">Salary</span><span class="lang-nl">Salaris</span></strong>${job.salary_range}</div>`);
-    if (job.employment_type) metaHtml.push(`<div class="meta-item"><strong><span class="lang-en">Type</span><span class="lang-nl">Type</span></strong>${job.employment_type}</div>`);
+    if (job.company) metaHtml.push(`<div class="meta-item"><strong><span class="lang-en">Company</span><span class="lang-nl">Bedrijf</span></strong>${GSP.esc(job.company)}</div>`);
+    if (job.location) metaHtml.push(`<div class="meta-item"><strong><span class="lang-en">Location</span><span class="lang-nl">Locatie</span></strong>${GSP.esc(job.location)}</div>`);
+    if (job.seniority) metaHtml.push(`<div class="meta-item"><strong><span class="lang-en">Level</span><span class="lang-nl">Niveau</span></strong>${GSP.esc(job.seniority)}</div>`);
+    if (job.department) metaHtml.push(`<div class="meta-item"><strong><span class="lang-en">Field</span><span class="lang-nl">Vakgebied</span></strong>${GSP.esc(job.department)}</div>`);
+    if (job.salary_range) metaHtml.push(`<div class="meta-item"><strong><span class="lang-en">Salary</span><span class="lang-nl">Salaris</span></strong>${GSP.esc(job.salary_range)}</div>`);
+    if (job.employment_type) metaHtml.push(`<div class="meta-item"><strong><span class="lang-en">Type</span><span class="lang-nl">Type</span></strong>${GSP.esc(job.employment_type)}</div>`);
     document.getElementById('jobMeta').innerHTML = metaHtml.join('');
     const bodyHtml = [];
-    if (job.description) bodyHtml.push(`<h2 class="lang-en">About the role</h2><h2 class="lang-nl">Over de rol</h2><p>${job.description}</p>`);
-    if (job.requirements) bodyHtml.push(`<h2 class="lang-en">What we're looking for</h2><h2 class="lang-nl">Wat we zoeken</h2><p>${job.requirements}</p>`);
-    if (job.responsibilities) bodyHtml.push(`<h2 class="lang-en">Responsibilities</h2><h2 class="lang-nl">Verantwoordelijkheden</h2><p>${job.responsibilities}</p>`);
+    if (job.description) bodyHtml.push(`<h2 class="lang-en">About the role</h2><h2 class="lang-nl">Over de rol</h2><p>${GSP.esc(job.description)}</p>`);
+    if (job.requirements) bodyHtml.push(`<h2 class="lang-en">What we're looking for</h2><h2 class="lang-nl">Wat we zoeken</h2><p>${GSP.esc(job.requirements)}</p>`);
+    if (job.responsibilities) bodyHtml.push(`<h2 class="lang-en">Responsibilities</h2><h2 class="lang-nl">Verantwoordelijkheden</h2><p>${GSP.esc(job.responsibilities)}</p>`);
     document.getElementById('jobBody').innerHTML = bodyHtml.join('');
-    // Inject JSON-LD for Google
+    // Inject JSON-LD for Google. jobDetailJsonLd is a <script type="application/ld+json">
+    // (not a div): textContent is never HTML-parsed, so job.* values here
+    // cannot break out into markup even though they are not esc()'d.
     const ld = document.getElementById('jobDetailJsonLd');
-    ld.innerHTML = JSON.stringify({
+    ld.textContent = JSON.stringify({
       "@context": "https://schema.org",
       "@type": "JobPosting",
       "title": job.title,
