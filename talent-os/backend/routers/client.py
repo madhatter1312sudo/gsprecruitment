@@ -62,6 +62,41 @@ async def _get_client_by_user(user_id: int) -> Optional[dict]:
     )
 
 
+# Candidate data dump fix (WS-C.2): candidates carry personal data (email,
+# phone, social/portfolio URLs, raw CV text) that clients must never receive
+# in bulk. `_require_candidate_access` is the single gate for the client
+# portal's candidate endpoints — relax it in exactly this one place.
+#
+# TODO(WS-E.2): once `candidates.approved_by_admin_at` (or equivalent) exists,
+# gate non-admin clients on "candidate has been approved for client-facing
+# search" here instead of blocking every non-admin outright.
+def _require_candidate_access(current_user: dict) -> None:
+    if current_user["role"] != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=(
+                "Candidate search/detail is temporarily admin-only "
+                "(WS-C.2). Client access returns in WS-E.2 with an "
+                "explicit per-candidate approval gate."
+            ),
+        )
+
+
+# Anonymised projection for the client-facing candidate endpoints: no email,
+# phone, linkedin/github/portfolio URLs, cv_text, or any other direct
+# identifier/contact channel. Field names match the `candidates` table.
+def _project_candidate_public(row: dict) -> dict:
+    """Defense in depth: even if a query selects extra columns, strip down
+    to the anonymised field set before it ever reaches a response body."""
+    projected = {k: row.get(k) for k in (
+        "id", "full_name", "current_title", "current_company",
+        "location", "years_experience",
+    )}
+    # NULL array columns must be coerced to [] on read (commit 6ded1db).
+    projected["skills"] = row.get("skills") or []
+    return projected
+
+
 # ── Dashboard ───────────────────────────────────────────────────────────
 
 @router.get("/dashboard", response_model=ClientDashboard)
@@ -158,11 +193,18 @@ async def create_client_job(
     if not client:
         raise HTTPException(status_code=400, detail="Client profile not found. Contact support.")
 
+    # Unauthorized-publish fix (WS-C.2 follow-up): status is not settable
+    # from ClientJobCreate at all, and is hardcoded to 'draft' here rather
+    # than left to whatever the job_orders column default happens to be
+    # (which is not defined in this repo and may be 'open') -- otherwise a
+    # client could publish client-authored HTML straight to the public job
+    # board via POST without ever touching the status allow-list in
+    # update_client_job.
     job = await fetch_one(
         """INSERT INTO job_orders
            (client_id, title, department, seniority, location_type,
-            salary_min, salary_max, salary_currency, description, requirements, nice_to_have, urgency)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+            salary_min, salary_max, salary_currency, description, requirements, nice_to_have, urgency, status)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'draft')
            RETURNING *""",
         client["id"], data.title, data.department, data.seniority,
         data.location_type, data.salary_min, data.salary_max,
@@ -218,8 +260,27 @@ async def update_client_job(
         "salary_min", "salary_max", "salary_currency",
         "description", "requirements", "nice_to_have", "status", "urgency",
     }
+    # Stored-XSS / unauthorized-publish fix (WS-C.2): a client may move their
+    # own job between draft/paused/closed, but publishing to the public job
+    # board ('open') is admin-only — client-authored HTML must pass through
+    # admin review before it is rendered on the public site. Admin routes
+    # (routers/admin.py) are untouched and keep full status control.
+    CLIENT_ALLOWED_STATUSES = {"draft", "paused", "closed"}
 
     update_dict = updates.model_dump(exclude_none=True)
+    if (
+        "status" in update_dict
+        and current_user["role"] != "admin"
+        and update_dict["status"] not in CLIENT_ALLOWED_STATUSES
+    ):
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                "Clients may only set status to one of "
+                f"{sorted(CLIENT_ALLOWED_STATUSES)}. Publishing ('open') "
+                "requires admin review."
+            ),
+        )
     for key, val in update_dict.items():
         if key not in allowed:
             continue
@@ -280,6 +341,8 @@ async def search_candidates(
     current_user: dict = Depends(require_role("client", "admin")),
 ):
     """Search candidates with filters."""
+    _require_candidate_access(current_user)
+
     conditions = ["c.deleted_at IS NULL"]
     params = []
     idx = 1
@@ -325,20 +388,17 @@ async def search_candidates(
 
     params_ext = params + [limit, offset]
     rows = await fetch_all(
-        f"""SELECT c.*, sg.gaps AS skill_gaps, sg.strengths
+        f"""SELECT c.id, c.full_name, c.current_title, c.current_company,
+                   c.location, c.skills, c.years_experience
             FROM candidates c
-            LEFT JOIN LATERAL (
-                SELECT gaps, strengths FROM skill_gaps
-                WHERE candidate_id = c.id
-                ORDER BY created_at DESC LIMIT 1
-            ) sg ON TRUE
             WHERE {where}
             ORDER BY c.created_at DESC
             LIMIT ${idx} OFFSET ${idx + 1}""",
         *params_ext,
     )
 
-    return {"items": rows, "total": total, "limit": limit, "offset": offset}
+    items = [_project_candidate_public(dict(r)) for r in rows]
+    return {"items": items, "total": total, "limit": limit, "offset": offset}
 
 
 @router.get("/candidates/{candidate_id}")
@@ -346,23 +406,36 @@ async def view_candidate_profile(
     candidate_id: int,
     current_user: dict = Depends(require_role("client", "admin")),
 ):
-    """View a candidate's full profile."""
+    """View a candidate's anonymised profile.
+
+    Admin: unrestricted (until WS-E.2 tightens this further). Non-admin
+    client: implemented now, even though _require_candidate_access blocks
+    every non-admin today — once WS-E.2 lands, a client may only view a
+    candidate who is in their own pipeline (job_orders/pipeline_entries).
+    """
+    _require_candidate_access(current_user)
+
     candidate = await fetch_one(
-        "SELECT * FROM candidates WHERE id = $1 AND deleted_at IS NULL",
+        """SELECT id, full_name, current_title, current_company,
+                  location, skills, years_experience
+           FROM candidates WHERE id = $1 AND deleted_at IS NULL""",
         candidate_id,
     )
     if not candidate:
         raise HTTPException(status_code=404, detail="Candidate not found")
 
-    # Get skill gaps if any
-    skill_gaps = await fetch_one(
-        "SELECT * FROM skill_gaps WHERE candidate_id = $1 ORDER BY created_at DESC LIMIT 1",
-        candidate_id,
-    )
-    if skill_gaps:
-        candidate["skill_gaps"] = skill_gaps
+    if current_user["role"] != "admin":
+        client = await _get_client_by_user(current_user["id"])
+        in_pipeline = client and await fetch_one(
+            "SELECT id FROM pipeline_entries WHERE client_id = $1 AND candidate_id = $2",
+            client["id"], candidate_id,
+        )
+        if not in_pipeline:
+            raise HTTPException(
+                status_code=404, detail="Candidate not found",
+            )
 
-    return candidate
+    return _project_candidate_public(dict(candidate))
 
 
 # ── Pipeline ────────────────────────────────────────────────────────────
@@ -597,11 +670,14 @@ async def invite_team_member(
     temp_password = secrets.token_urlsafe(12)
     password_hash = hash_password(temp_password)
 
+    # Privilege-escalation fix (WS-C.2): role is hardcoded to 'client' here
+    # regardless of what the request body claims — TeamInvite.role is now a
+    # Literal["client"] too, but the INSERT does not trust it either way.
     user = await fetch_one(
         """INSERT INTO users (email, password_hash, full_name, role, is_verified)
-           VALUES ($1, $2, $3, $4, FALSE)
+           VALUES ($1, $2, $3, 'client', FALSE)
            RETURNING id, email, full_name, role""",
-        data.email.lower().strip(), password_hash, data.full_name, data.role,
+        data.email.lower().strip(), password_hash, data.full_name,
     )
     if not user:
         raise HTTPException(status_code=500, detail="Failed to create user")
@@ -612,11 +688,19 @@ async def invite_team_member(
         user["id"], client["id"],
     )
 
+    # NOTE (WS-C.2): the plaintext temporary_password used to be returned in
+    # this response body, which is a credential leak to anything that can
+    # read API responses/logs. We still generate it server-side so the
+    # invited account is usable today, but we no longer hand it back over
+    # the wire. Trade-off: there is currently no way for the invitee to
+    # learn this password — WS-E.3 replaces this whole flow with an
+    # email-delivered set-password link instead of a server-generated one.
     return {
-        "message": "Team member invited successfully",
+        "message": "Team member invited successfully. A temporary password "
+                    "was generated server-side; WS-E.3 will deliver a "
+                    "set-password link instead.",
         "user_id": user["id"],
         "email": user["email"],
-        "temporary_password": temp_password,
     }
 
 

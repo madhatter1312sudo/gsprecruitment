@@ -75,10 +75,23 @@ async def update_job(job_id: int, updates: dict):
 # Public jobs endpoint (no API key required - for the public job board)
 public_jobs_router = APIRouter(prefix="/api/public/jobs", tags=["public-jobs"])
 
+# Explicit public-safe column list (WS-C.2): `SELECT *` was leaking internal
+# columns (client_id, fee_value, filled_at, deleted_at, ...) to the anonymous
+# public job board. Only fields the public site/app actually render belong
+# here — see website/vacatures.html, website/vacature.html, and app/ for the
+# fields the frontends read. Field names are unchanged, nothing is renamed.
+PUBLIC_JOB_COLUMNS = (
+    "id, title, department, seniority, location_type, "
+    "salary_min, salary_max, salary_currency, "
+    "description, requirements, nice_to_have, status, urgency, created_at"
+)
+
+
 @public_jobs_router.get("")
 async def list_public_jobs(request: Request):
     """List open job orders for the public job board."""
     rows = await fetch_all(
-        "SELECT * FROM job_orders WHERE status = 'open' ORDER BY created_at DESC LIMIT 50",
+        f"SELECT {PUBLIC_JOB_COLUMNS} FROM job_orders "
+        "WHERE status = 'open' ORDER BY created_at DESC LIMIT 50",
     )
     return rows
