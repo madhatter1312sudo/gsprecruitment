@@ -1,0 +1,65 @@
+name: Backup Freshness
+
+on:
+  schedule:
+    - cron: "0 8 * * *" # 08:00 UTC daily -- well after the 03:15 Europe/Amsterdam backup run
+  workflow_dispatch:
+
+# NOTE: the VPS host/user (188.245.254.248 / gsp) is duplicated here and
+# in deploy.yml/deploy.sh. Tracked as follow-up WS-E.6 to hoist these into
+# repo/environment variables instead of copy-pasting the literal.
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.VPS_SSH_PRIVATE_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -H 188.245.254.248 >> ~/.ssh/known_hosts
+
+      - name: Check backup.last on the VPS
+        id: check
+        run: |
+          set +e
+          output=$(ssh -o ConnectTimeout=20 gsp@188.245.254.248 bash -s <<'SSH_GSP_BACKUP_CHECK_7f2a91'
+          bash /home/gsp/projects/gsp-recruitment/talent-os/scripts/backup-check.sh
+          SSH_GSP_BACKUP_CHECK_7f2a91
+          )
+          code=$?
+          echo "$output"
+          {
+            echo "output<<GITHUB_OUTPUT_EOF_3c8d5e"
+            echo "$output"
+            echo "GITHUB_OUTPUT_EOF_3c8d5e"
+          } >> "$GITHUB_OUTPUT"
+          if [ $code -ne 0 ]; then
+            echo "stale=1" >> "$GITHUB_OUTPUT"
+          fi
+          exit 0
+
+      - name: Send Telegram alert if backup is stale or VPS unreachable
+        if: steps.check.outputs.stale == '1'
+        env:
+          CHECK_OUTPUT: ${{ steps.check.outputs.output }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          if [ -z "$TELEGRAM_BOT_TOKEN" ] || [ -z "$TELEGRAM_CHAT_ID" ]; then
+            echo "::error::TELEGRAM_BOT_TOKEN and/or TELEGRAM_CHAT_ID secrets are not set -- cannot send stale-backup alert. Add them under Settings > Secrets and variables > Actions (same secrets uptime.yml uses)."
+            exit 1
+          fi
+
+          message="GSP backup waarschuwing: laatste database-backup is verouderd, ontbreekt, of VPS onbereikbaar.
+          ${CHECK_OUTPUT}"
+
+          curl -sS -o /dev/null --max-time 20 \
+            -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+            -d chat_id="${TELEGRAM_CHAT_ID}" \
+            --data-urlencode text="$message" 2>/dev/null
+
+          exit 1
