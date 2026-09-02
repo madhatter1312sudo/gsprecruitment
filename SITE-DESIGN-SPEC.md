@@ -259,6 +259,10 @@ The visual system described in §1.2–§1.3 (Newsreader/Plex fonts, flat 3px ra
 └──────────────────────────┘
 ```
 
+### 3.5 Service lines
+
+`werkgevers.html#diensten` presents five generic service lines as plain descriptions, in the `.service-ladder-grid` (a `.prop`/`.prop-icon` card grid, 3+2 balanced so no card sits alone on a row at desktop or tablet widths — see `.service-ladder-grid` in `styles.css`): **werving & selectie** (permanent hire — client is the employer, we handle search and screening), **interim** (temporary specialist, same split), **uitzenden** (staffing — engineer employed by a backoffice partner, works under the client's day-to-day direction, flexible term), **detacheren** (fixed-term secondment — same employment split as uitzenden, but for a pre-agreed, more structural term), and **zzp-bemiddeling** (freelance placement — we introduce an independent professional, the client contracts them directly; the assignment must be suitable for independent work under the Wet DBA). `kandidaten.html` mirrors this from the engineer's side ("Hoe je bij ons aan de slag kunt"), and `werkwijze.html` step 2 ("Contractvorm kiezen") states the form is agreed before the search starts. None of the copy names a partner, states a tariff, factor or margin, or promises IND sponsorship, a processing time, or the 30%-ruling — the owner adds those once a partner offer is signed (see `MASTERPLAN-2026.md` WS-A.3).
+
 ---
 
 ## 4. Registration & Auth Modal

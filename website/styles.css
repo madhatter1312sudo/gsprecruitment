@@ -1583,6 +1583,38 @@ html[data-lang="en"] .lang-nl { display: none; }
 .choice-card:hover .choice-go { gap: 12px; }
 .choice-card .choice-go i { color: var(--gold); transition: var(--transition); }
 
+/* ── Service ladder (werkgevers.html: vast / interim / uitzenden /
+   detacheren / zzp-bemiddeling) — reuses the .prop/.prop-icon card and
+   line-icon pattern, in a balanced 3+2 layout so no card sits alone on a
+   row at desktop or tablet widths. ──────────────────────── */
+.service-ladder-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 22px; margin-top: 8px; }
+.service-ladder-grid .prop { display: flex; flex-direction: column; grid-column: span 2; }
+.service-ladder-grid .prop:nth-child(4), .service-ladder-grid .prop:nth-child(5) { grid-column: span 3; }
+.service-ladder-grid .prop .service-ladder-split { font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 20px; }
+/* var(--gold) (#FAC800) measures 1.58:1 on these white/off-white .prop
+   cards — well under the 4.5:1 AA floor for this small link text. Reuse
+   the same darker gold-ochre token as .section-label (#8A6800, 4.72:1 on
+   --off-white / 5.17:1 on white) instead of the bright hero gold. */
+.service-ladder-grid .prop .choice-go { margin-top: auto; display: inline-flex; align-items: center; gap: 8px; font-weight: 600; color: #8A6800; font-size: 0.9rem; }
+.service-ladder-grid .prop:hover .choice-go,
+.service-ladder-grid .prop .choice-go:focus-visible { gap: 12px; text-decoration: underline; }
+.service-ladder-grid .prop .choice-go i { color: #8A6800; transition: var(--transition); }
+@media (max-width: 1024px) {
+  /* Explicit nth-child overrides (not just the plain .prop reset) so they
+     match the specificity of the base nth-child(4)/(5) rule above — a
+     lower-specificity reset here would lose to it and leave a stray
+     wide card, which is exactly the bug this comment is warning about. */
+  .service-ladder-grid { grid-template-columns: repeat(2, 1fr); }
+  .service-ladder-grid .prop,
+  .service-ladder-grid .prop:nth-child(4) { grid-column: span 1; }
+  .service-ladder-grid .prop:nth-child(5) { grid-column: 1 / -1; }
+}
+@media (max-width: 640px) {
+  .service-ladder-grid { grid-template-columns: 1fr; }
+  .service-ladder-grid .prop:nth-child(4),
+  .service-ladder-grid .prop:nth-child(5) { grid-column: auto; }
+}
+
 /* ── Candidate signup split (kandidaten.html top) ───────── */
 .signup-split {
   display: grid;
@@ -1693,6 +1725,15 @@ html[data-lang="en"] .lang-nl { display: none; }
 .trust-strip { display: flex; flex-wrap: wrap; gap: 10px 26px; margin-top: 36px; }
 .trust-strip .ts-item { display: inline-flex; align-items: center; gap: 8px; font-size: 0.92rem; font-weight: 500; color: var(--navy-200, #7FA0C9); }
 .trust-strip .ts-item i { color: var(--gold-dark); font-size: 0.95rem; }
+/* Light-background variant: navy-200/gold-dark above are tuned for the dark
+   .page-hero and measure well under 4.5:1 on a light section (2.47:1 on
+   --off-white for navy-200 text). var(--text-secondary) (#4A6F9F) hits
+   4.71:1 on --off-white / 5.16:1 on white — use this modifier on any
+   .trust-strip placed on a light or --bg-alt background instead of
+   changing the dark-hero rule above. */
+.trust-strip--light .ts-item,
+.trust-strip--light .ts-item i { color: var(--text-secondary); }
+.services-more-link:hover, .services-more-link:focus-visible { text-decoration: underline; }
 
 /* ── Role/need paths ("Waar ben je naar op zoek?") ──────── */
 .path-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; margin-top: 8px; }
