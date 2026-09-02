@@ -269,7 +269,17 @@ class WebhookPayload(BaseModel):
 
 # ── Health ──────────────────────────────────────────────────────────────
 
+class PublicHealthResponse(BaseModel):
+    """GET /health -- public, unauthenticated. Deliberately minimal: no row
+    counts, no vendor/integration status (see WS-C.3a; those moved to the
+    admin-only GET /api/v1/admin/health)."""
+    status: str
+    version: str = "1.0.0"
+    database: str = "unknown"
+
+
 class HealthResponse(BaseModel):
+    """GET /api/v1/admin/health -- admin-JWT only."""
     status: str
     version: str = "1.0.0"
     database: str = "unknown"

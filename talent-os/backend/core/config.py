@@ -42,6 +42,13 @@ class Settings(BaseSettings):
     openrouter_chat_model: str = "deepseek/deepseek-chat"
 
     apollo_api_key: str = ""
+    # Master off-switch for the Apollo sourcing jobs (services/scheduler.py):
+    # defaults False so a fresh/staging deploy never silently starts
+    # scraping. Must be explicitly set true via env/.env to register the
+    # jobs at all; system_settings.apollo_sync_enabled (DB-editable by an
+    # admin, defaults to enabled when absent) is then checked on top of
+    # this at each run.
+    apollo_sync_enabled: bool = False
 
     smtp_host: str = "smtp.zoho.com"
     smtp_port: int = 587
