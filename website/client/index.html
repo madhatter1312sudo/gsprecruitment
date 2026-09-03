@@ -52,6 +52,7 @@
     .kanban-card:hover { border-color: rgba(250,200,0,0.2); }
     .kanban-card h5 { font-size: var(--font-size-sm); font-weight: 600; color: var(--white); margin-bottom: 2px; }
     .kanban-card p { font-size: var(--font-size-xs); color: var(--navy-200); }
+    .kanban-empty { font-size: var(--font-size-xs); color: var(--navy-200); text-align: center; padding: var(--space-lg) var(--space-sm); border: 1px dashed rgba(74,111,159,0.2); border-radius: var(--radius-md); }
 
     /* ---- Candidate search ---- */
     .candidate-result { display: flex; align-items: center; gap: var(--space-lg); padding: var(--space-lg); background: linear-gradient(145deg,rgba(21,43,74,0.4),rgba(15,29,53,0.6)); border: 1px solid rgba(74,111,159,0.12); border-radius: var(--radius-lg); margin-bottom: var(--space-md); transition: all var(--transition-fast); }
@@ -127,10 +128,10 @@
         <!-- ==================== DASHBOARD ==================== -->
         <section class="portal-section active" id="section-dashboard">
           <div class="stats-grid">
-            <div class="stat-card"><div class="stat-icon"><i class="fa-regular fa-briefcase"></i></div><div class="stat-value">8</div><div class="stat-label lang-en">Active Jobs</div><div class="stat-label lang-nl">Actieve Vacatures</div></div>
-            <div class="stat-card"><div class="stat-icon"><i class="fa-regular fa-users"></i></div><div class="stat-value">24</div><div class="stat-label lang-en">Total Candidates</div><div class="stat-label lang-nl">Totaal Kandidaten</div></div>
-            <div class="stat-card"><div class="stat-icon"><i class="fa-regular fa-file-lines"></i></div><div class="stat-value">47</div><div class="stat-label lang-en">Applications</div><div class="stat-label lang-nl">Sollicitaties</div></div>
-            <div class="stat-card"><div class="stat-icon"><i class="fa-regular fa-calendar-check"></i></div><div class="stat-value">6</div><div class="stat-label lang-en">Interviews Scheduled</div><div class="stat-label lang-nl">Gesprekken Gepland</div></div>
+            <div class="stat-card"><div class="stat-icon"><i class="fa-regular fa-briefcase"></i></div><div class="stat-value">0</div><div class="stat-label lang-en">Active Jobs</div><div class="stat-label lang-nl">Actieve Vacatures</div></div>
+            <div class="stat-card"><div class="stat-icon"><i class="fa-regular fa-users"></i></div><div class="stat-value">0</div><div class="stat-label lang-en">Total Candidates</div><div class="stat-label lang-nl">Totaal Kandidaten</div></div>
+            <div class="stat-card"><div class="stat-icon"><i class="fa-regular fa-file-lines"></i></div><div class="stat-value">0</div><div class="stat-label lang-en">Applications</div><div class="stat-label lang-nl">Sollicitaties</div></div>
+            <div class="stat-card"><div class="stat-icon"><i class="fa-regular fa-calendar-check"></i></div><div class="stat-value">0</div><div class="stat-label lang-en">Interviews Scheduled</div><div class="stat-label lang-nl">Gesprekken Gepland</div></div>
           </div>
 
           <div class="dashboard-grid">
@@ -142,23 +143,21 @@
                   <span class="badge badge-gold lang-nl">Actief</span>
                 </div>
                 <div class="kanban-board">
-                  <div class="kanban-column">
-                    <h4><span class="lang-en">New</span><span class="lang-nl">Nieuw</span> <span>8</span></h4>
-                    <div class="kanban-card"><h5>J. Bakker</h5><p>Embedded Engineer</p><span class="badge badge-blue" style="font-size:0.6rem;">5d ago</span></div>
-                    <div class="kanban-card"><h5>L. Meijer</h5><p>C++ Developer</p><span class="badge badge-blue" style="font-size:0.6rem;">2d ago</span></div>
+                  <div class="kanban-column" data-stage="new">
+                    <h4><span class="lang-en">New</span><span class="lang-nl">Nieuw</span> <span>0</span></h4>
+                    <div class="kanban-empty"><span class="lang-en">No candidates yet</span><span class="lang-nl">Nog geen kandidaten</span></div>
                   </div>
-                  <div class="kanban-column">
-                    <h4><span class="lang-en">Screening</span><span class="lang-nl">Screening</span> <span>5</span></h4>
-                    <div class="kanban-card"><h5>M. Jansen</h5><p>Embedded Engineer</p><span class="badge badge-gold" style="font-size:0.6rem;">Screening</span></div>
-                    <div class="kanban-card"><h5>P. de Wit</h5><p>Mechatronics</p></div>
+                  <div class="kanban-column" data-stage="screening">
+                    <h4><span class="lang-en">Screening</span><span class="lang-nl">Screening</span> <span>0</span></h4>
+                    <div class="kanban-empty"><span class="lang-en">No candidates yet</span><span class="lang-nl">Nog geen kandidaten</span></div>
                   </div>
-                  <div class="kanban-column">
-                    <h4><span class="lang-en">Interview</span><span class="lang-nl">Gesprek</span> <span>3</span></h4>
-                    <div class="kanban-card"><h5>S. Visser</h5><p>C++ Engineer</p><span class="badge badge-purple" style="font-size:0.6rem;">Interview Fri</span></div>
+                  <div class="kanban-column" data-stage="interview">
+                    <h4><span class="lang-en">Interview</span><span class="lang-nl">Gesprek</span> <span>0</span></h4>
+                    <div class="kanban-empty"><span class="lang-en">No candidates yet</span><span class="lang-nl">Nog geen kandidaten</span></div>
                   </div>
-                  <div class="kanban-column">
-                    <h4><span class="lang-en">Offer</span><span class="lang-nl">Aanbod</span> <span>2</span></h4>
-                    <div class="kanban-card"><h5>K. Vermeer</h5><p>Embedded Lead</p><span class="badge badge-green" style="font-size:0.6rem;">Offer sent</span></div>
+                  <div class="kanban-column" data-stage="offer">
+                    <h4><span class="lang-en">Offer</span><span class="lang-nl">Aanbod</span> <span>0</span></h4>
+                    <div class="kanban-empty"><span class="lang-en">No candidates yet</span><span class="lang-nl">Nog geen kandidaten</span></div>
                   </div>
                 </div>
               </div>
@@ -169,31 +168,10 @@
                   <span class="lang-en">Recent Activity</span>
                   <span class="lang-nl">Recente Activiteit</span>
                 </h3>
-                <div class="activity-item">
-                  <div class="activity-icon" style="background:rgba(34,197,94,0.1);color:#4ade80;"><i class="fa-regular fa-user-plus"></i></div>
-                  <div class="activity-content">
-                    <div class="activity-text lang-en">New candidate match for Embedded Engineer</div>
-                    <div class="activity-text lang-nl">Nieuwe kandidaat match voor Embedded Engineer</div>
-                    <div class="activity-time lang-en">1 hour ago</div>
-                    <div class="activity-time lang-nl">1 uur geleden</div>
-                  </div>
-                </div>
-                <div class="activity-item">
-                  <div class="activity-icon" style="background:rgba(250,200,0,0.1);color:var(--gold-500);"><i class="fa-regular fa-file-lines"></i></div>
-                  <div class="activity-content">
-                    <div class="activity-text lang-en">New application received for C++ role</div>
-                    <div class="activity-text lang-nl">Nieuwe sollicitatie ontvangen voor C++ rol</div>
-                    <div class="activity-time lang-en">3 hours ago</div>
-                    <div class="activity-time lang-nl">3 uur geleden</div>
-                  </div>
-                </div>
-                <div class="activity-item">
-                  <div class="activity-icon" style="background:rgba(59,130,246,0.1);color:#60a5fa;"><i class="fa-regular fa-calendar"></i></div>
-                  <div class="activity-content">
-                    <div class="activity-text lang-en">Interview scheduled with S. Visser</div>
-                    <div class="activity-text lang-nl">Gesprek gepland met S. Visser</div>
-                    <div class="activity-time lang-en">Yesterday</div>
-                    <div class="activity-time lang-nl">Gisteren</div>
+                <div id="clientActivity">
+                  <div style="text-align:center;color:var(--navy-200);font-size:var(--font-size-sm);padding:var(--space-lg) 0;">
+                    <span class="lang-en">No activity yet</span>
+                    <span class="lang-nl">Nog geen activiteit</span>
                   </div>
                 </div>
               </div>
@@ -297,80 +275,21 @@
             </select>
           </div>
 
-          <div class="candidate-result">
-            <div class="avatar avatar-navy">MJ</div>
-            <div style="flex:1;min-width:0;">
-              <div style="display:flex;justify-content:space-between;align-items:center;">
-                <h4 style="font-size:var(--font-size-sm);font-weight:600;color:var(--white);">M. Jansen</h4>
-                <span class="badge badge-gold" style="font-size:0.6rem;">95% match</span>
-              </div>
-              <p style="font-size:var(--font-size-xs);color:var(--navy-200);margin:2px 0;">Senior Embedded Engineer · 8 yrs · C/C++, RTOS, ARM</p>
-              <div style="display:flex;gap:4px;margin-top:4px;">
-                <span class="tag tag-gold">Embedded</span>
-                <span class="tag tag-blue">Available in 1 month</span>
-              </div>
+          <div id="candidateResults">
+            <div style="text-align:center;color:var(--navy-200);font-size:var(--font-size-sm);padding:var(--space-2xl) 0;">
+              <span class="lang-en">Search to see matching candidates</span>
+              <span class="lang-nl">Zoek om passende kandidaten te zien</span>
             </div>
-            <div style="display:flex;gap:var(--space-sm);">
-              <button class="btn btn-sm btn-outline"><i class="fa-regular fa-bookmark"></i></button>
-              <button class="btn btn-sm btn-primary lang-en">Contact</button>
-              <button class="btn btn-sm btn-primary lang-nl">Contact</button>
-            </div>
-          </div>
-
-          <div class="candidate-result">
-            <div class="avatar avatar-navy">PV</div>
-            <div style="flex:1;min-width:0;">
-              <div style="display:flex;justify-content:space-between;align-items:center;">
-                <h4 style="font-size:var(--font-size-sm);font-weight:600;color:var(--white);">P. de Vries</h4>
-                <span class="badge badge-gold" style="font-size:0.6rem;">92% match</span>
-              </div>
-              <p style="font-size:var(--font-size-xs);color:var(--navy-200);margin:2px 0;">C++ Software Engineer · 6 yrs · Modern C++, Qt, ROS</p>
-              <div style="display:flex;gap:4px;margin-top:4px;">
-                <span class="tag tag-gold">C++</span>
-                <span class="tag tag-blue">Available now</span>
-              </div>
-            </div>
-            <div style="display:flex;gap:var(--space-sm);">
-              <button class="btn btn-sm btn-outline"><i class="fa-regular fa-bookmark"></i></button>
-              <button class="btn btn-sm btn-primary">Contact</button>
-            </div>
-          </div>
-
-          <div class="candidate-result">
-            <div class="avatar avatar-navy">AK</div>
-            <div style="flex:1;min-width:0;">
-              <div style="display:flex;justify-content:space-between;align-items:center;">
-                <h4 style="font-size:var(--font-size-sm);font-weight:600;color:var(--white);">A. Kowalski</h4>
-                <span class="badge badge-gold" style="font-size:0.6rem;">88% match</span>
-              </div>
-              <p style="font-size:var(--font-size-xs);color:var(--navy-200);margin:2px 0;">Mechatronics Architect · 12 yrs · Motion control</p>
-              <div style="display:flex;gap:4px;margin-top:4px;">
-                <span class="tag tag-gold">Mechatronics</span>
-                <span class="tag tag-green">Passive</span>
-              </div>
-            </div>
-            <div style="display:flex;gap:var(--space-sm);">
-              <button class="btn btn-sm btn-outline"><i class="fa-regular fa-bookmark"></i></button>
-              <button class="btn btn-sm btn-primary">Contact</button>
-            </div>
-          </div>
-
-          <div class="pagination" style="margin-top:var(--space-xl);">
-            <button disabled><i class="fa-regular fa-chevron-left"></i></button>
-            <button class="active">1</button>
-            <button>2</button>
-            <button>3</button>
-            <button><i class="fa-regular fa-chevron-right"></i></button>
           </div>
         </section>
 
         <!-- ==================== ANALYTICS ==================== -->
         <section class="portal-section" id="section-analytics">
           <div class="stats-grid" style="margin-bottom:var(--space-xl);">
-            <div class="stat-card"><div class="stat-value">28 days</div><div class="stat-label lang-en">Avg Time-to-Hire</div><div class="stat-label lang-nl">Gem. Time-to-Hire</div></div>
-            <div class="stat-card"><div class="stat-value">64%</div><div class="stat-label lang-en">Interview Rate</div><div class="stat-label lang-nl">Gesprek Rate</div></div>
-            <div class="stat-card"><div class="stat-value">3.2:1</div><div class="stat-label lang-en">Applicant per Job</div><div class="stat-label lang-nl">Sollicitaties per Vacature</div></div>
-            <div class="stat-card"><div class="stat-value">85%</div><div class="stat-label lang-en">Offer Acceptance</div><div class="stat-label lang-nl">Aanbod Acceptatie</div></div>
+            <div class="stat-card"><div class="stat-value">N/A</div><div class="stat-label lang-en">Avg Time-to-Hire</div><div class="stat-label lang-nl">Gem. Time-to-Hire</div></div>
+            <div class="stat-card"><div class="stat-value">N/A</div><div class="stat-label lang-en">Offer Rate</div><div class="stat-label lang-nl">Aanbod Rate</div></div>
+            <div class="stat-card"><div class="stat-value">N/A</div><div class="stat-label lang-en">Applicant per Job</div><div class="stat-label lang-nl">Sollicitaties per Vacature</div></div>
+            <div class="stat-card"><div class="stat-value">N/A</div><div class="stat-label lang-en">Cost per Hire</div><div class="stat-label lang-nl">Kosten per Plaatsing</div></div>
           </div>
           <div class="dashboard-grid-wide">
             <div class="card">
@@ -484,7 +403,7 @@
                   <span class="lang-en">This will permanently deactivate your account.</span>
                   <span class="lang-nl">Dit zal uw account permanent deactiveren.</span>
                 </p>
-                <button class="btn btn-sm btn-outline" style="border-color:#ef4444;color:#f87171;" onclick="Auth.toast('Contact Gijs for account deactivation','warning')">
+                <button class="btn btn-sm btn-outline" style="border-color:#ef4444;color:#f87171;" onclick="Auth.toast('Contact info@gsprecruitment.nl for account deactivation','warning')">
                   <span class="lang-en">Deactivate Account</span>
                   <span class="lang-nl">Account Deactiveren</span>
                 </button>
@@ -589,32 +508,31 @@
           else stages['new'].push(pe);
         });
 
-        // Update kanban column counts
-        document.querySelectorAll('.kanban-column h4 span').forEach((span, idx) => {
-          const keys = Object.keys(stages);
-          const count = stages[keys[idx]]?.length || 0;
-          span.textContent = count;
-        });
-
-        // Update kanban cards (first few per column)
-        document.querySelectorAll('.kanban-column').forEach((col, idx) => {
-          const keys = Object.keys(stages);
-          const stageName = keys[idx];
+        // Rebuild kanban columns from real pipeline data (counts + cards)
+        document.querySelectorAll('.kanban-column').forEach((col) => {
+          const stageName = col.dataset.stage;
           const items = stages[stageName] || [];
-          const cards = col.querySelectorAll('.kanban-card');
-          cards.forEach((card, ci) => {
-            const item = items[ci];
-            if (item) {
-              const nameEl = card.querySelector('h5');
-              const roleEl = card.querySelector('p');
-              if (nameEl) nameEl.textContent = item.full_name || item.name || 'Candidate';
-              if (roleEl) roleEl.textContent = item.current_title || item.job_title || '';
-            }
-          });
+          const countEl = col.querySelector('h4 span');
+          if (countEl) countEl.textContent = items.length;
+          const cardsHtml = items.map(item => {
+            const nameNl = GSP.esc(item.full_name || item.name || 'Kandidaat');
+            const nameEn = GSP.esc(item.full_name || item.name || 'Candidate');
+            const role = GSP.esc(item.current_title || item.job_title || '');
+            return `<div class="kanban-card">
+              <h5 class="lang-en">${nameEn}</h5><h5 class="lang-nl">${nameNl}</h5>
+              <p>${role}</p>
+            </div>`;
+          }).join('');
+          col.querySelectorAll('.kanban-card, .kanban-empty').forEach(el => el.remove());
+          if (cardsHtml) {
+            col.insertAdjacentHTML('beforeend', cardsHtml);
+          } else {
+            col.insertAdjacentHTML('beforeend', '<div class="kanban-empty"><span class="lang-en">No candidates yet</span><span class="lang-nl">Nog geen kandidaten</span></div>');
+          }
         });
 
         // Recent activity
-        const activityContainer = document.querySelector('#section-dashboard .card .activity-item')?.parentElement;
+        const activityContainer = document.getElementById('clientActivity');
         if (activityContainer && pipelineData.items?.length > 0) {
           const recent = pipelineData.items.slice(0, 3);
           activityContainer.innerHTML = recent.map(pe => {
@@ -888,35 +806,40 @@
       const searchInputs = document.querySelectorAll('#section-candidates .search-bar input');
       const searchInput = Array.from(searchInputs).find((el) => el.offsetParent !== null);
       const query = searchInput ? searchInput.value.trim() : '';
+      const resultsEl = document.getElementById('candidateResults');
       try {
         const res = await Auth.fetch(`/v1/client/candidates?limit=20${query ? '&specialisation=' + encodeURIComponent(query) : ''}`);
-        if (!res) return;
+        if (!res || !resultsEl) return;
         const data = await res.json();
-        const container = document.querySelector('#section-candidates');
-        const results = container.querySelectorAll('.candidate-result');
         if (!data.items || data.items.length === 0) {
-          results.forEach(r => r.style.display = 'none');
-          container.querySelector('.pagination')?.insertAdjacentHTML('beforebegin',
-            '<p style="color:var(--navy-200);text-align:center;padding:var(--space-lg);">No candidates found.</p>');
+          resultsEl.innerHTML = `<div style="text-align:center;color:var(--navy-200);font-size:var(--font-size-sm);padding:var(--space-2xl) 0;">
+            <span class="lang-en">No candidates found.</span>
+            <span class="lang-nl">Geen kandidaten gevonden.</span>
+          </div>`;
           return;
         }
-        results.forEach((r, i) => {
-          const c = data.items[i];
-          if (c) {
-            r.style.display = 'flex';
-            const avatar = r.querySelector('.avatar');
-            const name = r.querySelector('h4');
-            const desc = r.querySelector('p');
-            const tags = r.querySelectorAll('.tag');
-            if (avatar) avatar.textContent = (c.full_name || '').split(' ').map(w => w[0]).join('').slice(0,2).toUpperCase() || '?';
-            if (name) name.textContent = c.full_name || 'Unknown';
-            if (desc) desc.textContent = c.current_title || c.skills?.join(', ') || '';
-          } else {
-            r.style.display = 'none';
-          }
-        });
+        resultsEl.innerHTML = data.items.map(c => {
+          const initials = (c.full_name || '').split(' ').map(w => w[0]).join('').slice(0,2).toUpperCase() || '?';
+          const name = GSP.esc(c.full_name || 'Onbekend');
+          const desc = GSP.esc(c.current_title || (Array.isArray(c.skills) ? c.skills.join(', ') : '') || '');
+          return `<div class="candidate-result">
+            <div class="avatar avatar-navy">${GSP.esc(initials)}</div>
+            <div style="flex:1;min-width:0;">
+              <div style="display:flex;justify-content:space-between;align-items:center;">
+                <h4 style="font-size:var(--font-size-sm);font-weight:600;color:var(--white);">${name}</h4>
+              </div>
+              <p style="font-size:var(--font-size-xs);color:var(--navy-200);margin:2px 0;">${desc}</p>
+            </div>
+            <div style="display:flex;gap:var(--space-sm);">
+              <button class="btn btn-sm btn-outline"><i class="fa-regular fa-bookmark"></i></button>
+              <button class="btn btn-sm btn-primary lang-en">Contact</button>
+              <button class="btn btn-sm btn-primary lang-nl">Contact</button>
+            </div>
+          </div>`;
+        }).join('');
       } catch (err) {
         console.error('Candidate search error:', err);
+        if (resultsEl) Auth.renderLoadError(resultsEl, () => document.querySelector('#section-candidates .btn-primary')?.click());
       }
     });
 
