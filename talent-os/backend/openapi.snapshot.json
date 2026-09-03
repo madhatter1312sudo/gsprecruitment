@@ -4192,7 +4192,7 @@
     },
     "/api/auth/refresh": {
       "post": {
-        "description": "Issue a new access token using an existing valid token.\n\nRejects tokens carrying an `impersonator` claim -- an admin\nimpersonation token must stay short-lived and never be silently\nextended into a fresh, long-lived session (see routers/admin.py\nimpersonate_user).",
+        "description": "Issue a new access token using an existing valid token.\n\nRejects tokens carrying an `impersonator` claim -- an admin\nimpersonation token must stay short-lived and never be silently\nextended into a fresh, long-lived session (see routers/admin.py\nimpersonate_user).\n\nSecurity-audit follow-up on WS-E.4: this endpoint decodes the token\nitself (get_current_user is not in its dependency chain), so it must\nrun the same iat-vs-password_changed_at check get_current_user does\n-- otherwise a token stolen before a password reset could be\n\"laundered\" into a fresh one here even though it would be rejected\neverywhere else.",
         "operationId": "refresh_token_api_auth_refresh_post",
         "requestBody": {
           "content": {

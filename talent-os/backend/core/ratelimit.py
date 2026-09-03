@@ -43,6 +43,25 @@ Key function precedence (see get_client_ip / rate_limit_key below):
      and we fall through to the raw socket address instead.
   3. `request.client.host` — the raw socket peer address (slowapi's
      `get_remote_address`) as the final fallback.
+
+Security-audit note on branch 2 in production: the deployed uvicorn
+processes run behind Caddy with `--proxy-headers
+--forwarded-allow-ips=*` (see scripts/deploy.sh / the systemd unit), so
+Starlette/uvicorn itself already rewrites `request.client.host` to the
+left-most X-Forwarded-For hop before this module ever sees the request.
+In that configuration branch 2's own X-Forwarded-For lookup is
+effectively unreachable/redundant for the production path -- branch 1
+(`CF-Connecting-IP`) still does real work, and branch 2 remains here as
+the correct fallback for any deployment that does NOT set
+`--forwarded-allow-ips` (e.g. running uvicorn directly, or a future
+non-Caddy setup) and therefore still sees Caddy/whatever reverse proxy as
+`request.client.host` unrewritten. Trusting `CF-Connecting-IP` at all
+still depends on the edge actually being Cloudflare-only for the ports
+uvicorn/Caddy listen on -- see the firewall item in
+docs/M0-EIGENAAR-CHECKLIST.md; a request that reaches origin directly
+(bypassing Cloudflare) can set an arbitrary `CF-Connecting-IP` header
+itself, so that header is only trustworthy when non-Cloudflare traffic to
+443 is actually blocked at the network level.
 """
 import ipaddress
 import os

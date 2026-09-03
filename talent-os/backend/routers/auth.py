@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import RedirectResponse
 from core.database import fetch_one, fetch_all, execute
 from core.security import hash_password, verify_password, create_access_token, decode_token, hash_token
-from core.deps import get_current_user, get_optional_user, require_role
+from core.deps import get_current_user, get_optional_user, require_role, _token_predates_password_change
 from core.config import settings
 from models.schemas import (
     UserRegister, UserLogin, TokenResponse, UserResponse, UserUpdate,
@@ -269,6 +269,13 @@ async def refresh_token(request: Request, data: dict):
     impersonation token must stay short-lived and never be silently
     extended into a fresh, long-lived session (see routers/admin.py
     impersonate_user).
+
+    Security-audit follow-up on WS-E.4: this endpoint decodes the token
+    itself (get_current_user is not in its dependency chain), so it must
+    run the same iat-vs-password_changed_at check get_current_user does
+    -- otherwise a token stolen before a password reset could be
+    "laundered" into a fresh one here even though it would be rejected
+    everywhere else.
     """
     token = data.get("refresh_token") or data.get("access_token")
     if not token:
@@ -290,11 +297,18 @@ async def refresh_token(request: Request, data: dict):
         raise HTTPException(status_code=401, detail="Invalid token payload")
 
     user = await fetch_one(
-        "SELECT id, email, full_name, role, is_verified FROM users WHERE id = $1 AND deleted_at IS NULL",
+        "SELECT id, email, full_name, role, is_verified, password_changed_at "
+        "FROM users WHERE id = $1 AND deleted_at IS NULL",
         user_id,
     )
     if not user:
         raise HTTPException(status_code=401, detail="User not found")
+
+    if _token_predates_password_change(payload, user):
+        raise HTTPException(
+            status_code=401,
+            detail="Token invalidated by a password change — please sign in again",
+        )
 
     return _build_token_response(user)
 

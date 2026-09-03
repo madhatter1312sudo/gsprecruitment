@@ -289,6 +289,33 @@ def test_token_predates_password_change_none_when_never_changed():
     assert _token_predates_password_change(payload, user) is False
 
 
+def test_token_predates_password_change_tolerates_same_second_sub_second_gap():
+    """Security-audit follow-up: 'iat' is whole seconds (JWT NumericDate)
+    but password_changed_at is a Postgres TIMESTAMPTZ with microsecond
+    precision. A token issued 300ms after the password change, in the
+    SAME wall-clock second, must not be rejected -- int(iat) truncates
+    down to that second, which naively compared looks "older" than the
+    sub-second changed_at timestamp."""
+    now = datetime.now(timezone.utc).replace(microsecond=0)
+    changed_at = now + timedelta(milliseconds=300)
+    iat = int(now.timestamp())  # same second as changed_at, truncated down
+    payload = {"iat": iat}
+    user = {"password_changed_at": changed_at}
+    assert _token_predates_password_change(payload, user) is False
+
+
+def test_token_predates_password_change_still_rejects_prior_second():
+    """Regression guard for the tolerance fix above: a token from the
+    second *before* the change must still be rejected -- the 1-second
+    tolerance must not silently widen into a longer grace window."""
+    now = datetime.now(timezone.utc).replace(microsecond=0)
+    changed_at = now
+    iat = int((now - timedelta(seconds=1)).timestamp())
+    payload = {"iat": iat}
+    user = {"password_changed_at": changed_at}
+    assert _token_predates_password_change(payload, user) is True
+
+
 def test_get_current_user_checks_password_changed_at_source():
     import inspect
     import core.deps as deps
@@ -296,6 +323,75 @@ def test_get_current_user_checks_password_changed_at_source():
     src = inspect.getsource(deps.get_current_user)
     assert "_token_predates_password_change" in src
     assert "password_changed_at" in inspect.getsource(deps)
+
+
+def test_refresh_token_checks_password_changed_at_source():
+    """Regression guard for the security-audit HIGH finding: refresh_token
+    decodes the token itself (get_current_user is not in its dependency
+    chain) and must run the same iat-vs-password_changed_at check."""
+    import inspect
+
+    src = inspect.getsource(auth_router.refresh_token)
+    assert "_token_predates_password_change" in src
+    assert "password_changed_at" in src
+
+
+def test_refresh_token_rejects_token_issued_before_password_change():
+    """End-to-end (against a stubbed DB, bypassing the slowapi rate-limit
+    decorator via __wrapped__ same as any other direct-call test here):
+    a token whose iat predates users.password_changed_at must be
+    rejected with 401, not silently laundered into a fresh token."""
+    now = datetime.now(timezone.utc)
+    old_iat = int((now - timedelta(hours=2)).timestamp())
+    token = create_access_token(data={"sub": 1, "role": "candidate", "iat": old_iat})
+
+    async def fake_fetch_one(sql, *args):
+        assert "password_changed_at" in sql
+        return {
+            "id": 1, "email": "a@example.com", "full_name": "A",
+            "role": "candidate", "is_verified": True,
+            "password_changed_at": now - timedelta(hours=1),  # changed AFTER the token was issued
+        }
+
+    async def _run():
+        import routers.auth as _auth
+
+        orig_fetch_one = _auth.fetch_one
+        _auth.fetch_one = fake_fetch_one
+        try:
+            with pytest.raises(HTTPException) as exc_info:
+                await auth_router.refresh_token.__wrapped__(None, {"access_token": token})
+            assert exc_info.value.status_code == 401
+        finally:
+            _auth.fetch_one = orig_fetch_one
+
+    asyncio.run(_run())
+
+
+def test_refresh_token_accepts_token_issued_after_password_change():
+    now = datetime.now(timezone.utc)
+    fresh_iat = int(now.timestamp())
+    token = create_access_token(data={"sub": 1, "role": "candidate", "iat": fresh_iat})
+
+    async def fake_fetch_one(sql, *args):
+        return {
+            "id": 1, "email": "a@example.com", "full_name": "A",
+            "role": "candidate", "is_verified": True,
+            "password_changed_at": now - timedelta(hours=1),  # changed well before the token
+        }
+
+    async def _run():
+        import routers.auth as _auth
+
+        orig_fetch_one = _auth.fetch_one
+        _auth.fetch_one = fake_fetch_one
+        try:
+            result = await auth_router.refresh_token.__wrapped__(None, {"access_token": token})
+            assert "access_token" in result
+        finally:
+            _auth.fetch_one = orig_fetch_one
+
+    asyncio.run(_run())
 
 
 # ── 4. Migration 020 ──────────────────────────────────────────────────────

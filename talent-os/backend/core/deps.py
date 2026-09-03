@@ -19,7 +19,18 @@ def _token_predates_password_change(payload: dict, user: dict) -> bool:
     or by any caller that doesn't stamp one) is NOT rejected here -- see
     core/security.create_access_token's docstring: it remains valid until
     its own 'exp' expiry. Same if the account has never had
-    password_changed_at set (NULL -- nothing to compare against)."""
+    password_changed_at set (NULL -- nothing to compare against).
+
+    Security-audit follow-up: JWT 'iat' is whole seconds (the JWT spec's
+    NumericDate), but password_changed_at is a Postgres TIMESTAMPTZ with
+    microsecond precision -- comparing them raw meant a login in the same
+    second as a password change (e.g. set-password immediately followed
+    by login) could have its brand-new token rejected because its
+    truncated iat looked "older" than the sub-second changed_at. Truncate
+    changed_at to whole seconds too before comparing (1-second tolerance,
+    matching iat's own resolution) -- a token minted any time in the same
+    second as the change is treated as no older than it.
+    """
     iat = payload.get("iat")
     changed_at = user.get("password_changed_at")
     if iat is None or changed_at is None:
@@ -30,6 +41,7 @@ def _token_predates_password_change(payload: dict, user: dict) -> bool:
         iat_dt = iat
     if changed_at.tzinfo is None:
         changed_at = changed_at.replace(tzinfo=timezone.utc)
+    changed_at = changed_at.replace(microsecond=0)
     return iat_dt < changed_at
 
 
