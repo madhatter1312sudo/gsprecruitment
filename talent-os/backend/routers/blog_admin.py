@@ -15,6 +15,7 @@ from pydantic import BaseModel
 
 from core.database import fetch_one, fetch_all, fetch_val, execute
 from core.deps import require_role
+from services.sanitize import sanitize_blog_html
 
 logger = logging.getLogger("talent_os.blog_admin")
 
@@ -109,7 +110,7 @@ async def create_blog_post(
 
     await execute(
         "INSERT INTO audit_log (action, actor_id, target_type, target_id, changes) "
-        "VALUES ($1, $2, $3, $4, $5)",
+        "VALUES ($1, $2, $3, $4, $5::jsonb)",
         "blog_post_created", current_user["id"], "blog_post", row["id"],
         json.dumps({"slug": data.slug}),
     )
@@ -156,7 +157,7 @@ async def update_blog_post(
 
     await execute(
         "INSERT INTO audit_log (action, actor_id, target_type, target_id, changes) "
-        "VALUES ($1, $2, $3, $4, $5)",
+        "VALUES ($1, $2, $3, $4, $5::jsonb)",
         "blog_post_updated", current_user["id"], "blog_post", post_id, json.dumps(update_dict),
     )
     return row
@@ -170,18 +171,31 @@ async def publish_blog_post(
     current_user: dict = Depends(require_role("admin")),
 ):
     """Publish a blog post — the only path that makes a post visible on the
-    public site. Always requires an explicit human action."""
+    public site. Always requires an explicit human action.
+
+    Sanitizes body_nl/body_en to the allow-listed tag set (services/sanitize.py)
+    at publish time, whatever went through create/update — drafts can be
+    edited freely, but only sanitized HTML ever reaches the public site."""
+    existing = await fetch_one("SELECT body_nl, body_en FROM blog_posts WHERE id = $1", post_id)
+    if not existing:
+        raise HTTPException(status_code=404, detail="Blog post not found")
+
+    clean_body_nl = sanitize_blog_html(existing["body_nl"])
+    clean_body_en = sanitize_blog_html(existing["body_en"])
+
     row = await fetch_one(
-        """UPDATE blog_posts SET status = 'published', published_at = NOW(), updated_at = NOW()
+        """UPDATE blog_posts
+           SET status = 'published', published_at = NOW(), updated_at = NOW(),
+               body_nl = $2, body_en = $3
            WHERE id = $1 RETURNING *""",
-        post_id,
+        post_id, clean_body_nl, clean_body_en,
     )
     if not row:
         raise HTTPException(status_code=404, detail="Blog post not found")
 
     await execute(
         "INSERT INTO audit_log (action, actor_id, target_type, target_id, changes) "
-        "VALUES ($1, $2, $3, $4, $5)",
+        "VALUES ($1, $2, $3, $4, $5::jsonb)",
         "blog_post_published", current_user["id"], "blog_post", post_id,
         json.dumps({"slug": row["slug"]}),
     )
@@ -204,7 +218,7 @@ async def archive_blog_post(
 
     await execute(
         "INSERT INTO audit_log (action, actor_id, target_type, target_id, changes) "
-        "VALUES ($1, $2, $3, $4, $5)",
+        "VALUES ($1, $2, $3, $4, $5::jsonb)",
         "blog_post_archived", current_user["id"], "blog_post", post_id,
         json.dumps({"slug": row["slug"]}),
     )

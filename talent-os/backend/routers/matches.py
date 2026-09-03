@@ -166,7 +166,7 @@ async def candidates_for_job(job_id: int, limit: int = Query(30, ge=1, le=100)):
             "full_name": r["full_name"],
             "current_title": r["current_title"],
             "current_company": r["current_company"],
-            "skills": r["skills"],
+            "skills": r["skills"] or [],
             "location": r["location"],
             "years_experience": float(r["years_experience"]) if r["years_experience"] is not None else None,
             "cv_excerpt": (r["cv_text"] or "")[:500],

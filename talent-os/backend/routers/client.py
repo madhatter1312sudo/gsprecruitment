@@ -16,6 +16,7 @@ from services.email_service import email_service
 from typing import Optional, List
 from pydantic import BaseModel
 import asyncio
+import json
 import logging
 import secrets
 
@@ -232,6 +233,13 @@ async def create_client_job(
         data.salary_currency, data.description, data.requirements,
         data.nice_to_have, data.urgency,
     )
+
+    await execute(
+        "INSERT INTO audit_log (action, actor_id, target_type, target_id, changes) "
+        "VALUES ($1, $2, $3, $4, $5::jsonb)",
+        "client_job_create", current_user["id"], "job", job["id"],
+        json.dumps({"client_id": client["id"], "title": data.title}),
+    )
     return job
 
 
@@ -317,6 +325,13 @@ async def update_client_job(
         f"UPDATE job_orders SET {', '.join(set_parts)} WHERE id = ${idx} RETURNING *",
         *values,
     )
+
+    await execute(
+        "INSERT INTO audit_log (action, actor_id, target_type, target_id, changes) "
+        "VALUES ($1, $2, $3, $4, $5::jsonb)",
+        "client_job_update", current_user["id"], "job", job_id,
+        json.dumps(update_dict),
+    )
     return row
 
 
@@ -340,6 +355,13 @@ async def delete_client_job(
     await execute(
         "UPDATE job_orders SET deleted_at = NOW(), status = 'deleted' WHERE id = $1",
         job_id,
+    )
+
+    await execute(
+        "INSERT INTO audit_log (action, actor_id, target_type, target_id, changes) "
+        "VALUES ($1, $2, $3, $4, $5::jsonb)",
+        "client_job_delete", current_user["id"], "job", job_id,
+        json.dumps({"deleted": True}),
     )
     return {"message": "Job deleted successfully"}
 
@@ -504,6 +526,13 @@ async def add_to_pipeline(
            RETURNING *""",
         client["id"], data.candidate_id, data.job_id, data.stage, data.notes,
     )
+
+    await execute(
+        "INSERT INTO audit_log (action, actor_id, target_type, target_id, changes) "
+        "VALUES ($1, $2, $3, $4, $5::jsonb)",
+        "client_pipeline_add", current_user["id"], "pipeline_entry", entry["id"],
+        json.dumps({"candidate_id": data.candidate_id, "job_id": data.job_id, "stage": data.stage}),
+    )
     return entry
 
 
@@ -646,7 +675,13 @@ async def get_client_messages(
         client["id"], limit, offset,
     )
 
-    return MessageListResponse(messages=rows, unread_count=unread)
+    # is_read is derived, not a DB column -- outreach_messages has no
+    # is_read field, only opened_at (see models.schemas.MessageResponse).
+    messages = [
+        MessageResponse(**{**dict(r), "is_read": r["opened_at"] is not None})
+        for r in rows
+    ]
+    return MessageListResponse(messages=messages, unread_count=unread)
 
 
 # ── Team ────────────────────────────────────────────────────────────────
@@ -689,6 +724,12 @@ async def invite_team_member(
         await execute(
             "INSERT INTO user_clients (user_id, client_id) VALUES ($1, $2) ON CONFLICT DO NOTHING",
             existing_user["id"], client["id"],
+        )
+        await execute(
+            "INSERT INTO audit_log (action, actor_id, target_type, target_id, changes) "
+            "VALUES ($1, $2, $3, $4, $5::jsonb)",
+            "client_team_invite", current_user["id"], "user", existing_user["id"],
+            json.dumps({"client_id": client["id"], "existing_user": True}),
         )
         return {"message": "User added to team", "user_id": existing_user["id"]}
 
@@ -759,8 +800,22 @@ info@gsprecruitment.nl
 """,
     )
     if not email_sent:
-        logger.warning(f"Failed to send team-invite set-password e-mail to {user['email']}")
+        logger.warning("Failed to send team-invite set-password e-mail to user_id=%s", user["id"])
 
+    await execute(
+        "INSERT INTO audit_log (action, actor_id, target_type, target_id, changes) "
+        "VALUES ($1, $2, $3, $4, $5::jsonb)",
+        "client_team_invite", current_user["id"], "user", user["id"],
+        json.dumps({"client_id": client["id"], "existing_user": False}),
+    )
+
+    # NOTE (WS-C.2): the plaintext temporary_password used to be returned in
+    # this response body, which is a credential leak to anything that can
+    # read API responses/logs. We still generate it server-side so the
+    # invited account is usable today, but we no longer hand it back over
+    # the wire. Trade-off: there is currently no way for the invitee to
+    # learn this password — WS-E.3 replaces this whole flow with an
+    # email-delivered set-password link instead of a server-generated one.
     return {
         "message": "Team member invited successfully. A set-password link "
                     "was e-mailed to them; the account activates once they "

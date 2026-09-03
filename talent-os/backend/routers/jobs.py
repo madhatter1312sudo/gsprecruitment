@@ -4,6 +4,7 @@ Talent OS — Job Orders router (asyncpg, auth-protected).
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from core.database import fetch_all, fetch_one, execute
 from core.security import verify_api_key
+from models.schemas import JobOrderCreate, JobOrderUpdate
 from typing import Optional, List
 
 router = APIRouter(prefix="/api/jobs", tags=["jobs"], dependencies=[Depends(verify_api_key)])
@@ -34,37 +35,38 @@ async def get_job(job_id: int):
 
 
 @router.post("", status_code=201)
-async def create_job(data: dict):
+async def create_job(data: JobOrderCreate):
     """Create a new job order. New jobs are never demo jobs -- is_demo is
     only ever true for migrations/012's 6 seed vacancies, set directly by
     migrations/016_job_orders_columns.py's backfill, never via this API."""
     row = await fetch_one(
         """INSERT INTO job_orders
            (client_id, title, department, seniority, location_type, city,
-            salary_min, salary_max, description, requirements, urgency,
-            company_display, employment_type, sponsorship_possible)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+            salary_min, salary_max, salary_currency, description, requirements,
+            nice_to_have, urgency, company_display, employment_type,
+            sponsorship_possible)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
            RETURNING *""",
-        data.get("client_id"), data.get("title"), data.get("department"),
-        data.get("seniority"), data.get("location_type"), data.get("city"),
-        data.get("salary_min"), data.get("salary_max"),
-        data.get("description"), data.get("requirements"), data.get("urgency", "normal"),
-        data.get("company_display"), data.get("employment_type"),
-        data.get("sponsorship_possible", False),
+        data.client_id, data.title, data.department, data.seniority,
+        data.location_type, data.city, data.salary_min, data.salary_max,
+        data.salary_currency, data.description, data.requirements,
+        data.nice_to_have, data.urgency, data.company_display,
+        data.employment_type, data.sponsorship_possible,
     )
     return row
 
 
 @router.patch("/{job_id}")
-async def update_job(job_id: int, updates: dict):
+async def update_job(job_id: int, updates: JobOrderUpdate):
     """Partial update of a job order."""
-    allowed = {"status", "title", "department", "seniority", "salary_min",
-               "salary_max", "description", "requirements", "urgency",
+    allowed = {"status", "title", "department", "seniority", "location_type",
+               "salary_min", "salary_max", "salary_currency", "description",
+               "requirements", "nice_to_have", "urgency",
                "city", "company_display", "employment_type", "sponsorship_possible"}
     set_parts = []
     values = []
     idx = 1
-    for key, val in updates.items():
+    for key, val in updates.model_dump(exclude_unset=True).items():
         if key not in allowed:
             continue
         set_parts.append(f"{key} = ${idx}")
