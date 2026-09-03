@@ -215,7 +215,9 @@ async def _delete_cv_files(user_ids: list, cv_rows: list) -> tuple:
 def _redact_value(value, needle_lower: str, replacement: str):
     """Recursively walk a JSON-decoded audit_log.changes value, replacing
     any string containing needle_lower (case-insensitive) with replacement.
-    Returns (new_value, changed)."""
+    Returns (new_value, changed). Operates on already-decoded Python
+    objects (dict/list/str/...) -- see _redact_audit_log_email for the
+    json.loads() done before calling this on a jsonb column value."""
     if isinstance(value, str):
         if needle_lower in value.lower():
             return replacement, True
@@ -242,14 +244,30 @@ async def _redact_audit_log_email(email: str, replacement: str) -> int:
     (outreach_draft_approved/rejected's target_email, prospect_create's
     payload dump, ...) -- WS-E.7 requires those replaced with a hash, not
     left as plaintext after a person is erased. Rewritten via
-    json.dumps(), never a raw dict (commit 72b4bcd)."""
+    json.dumps(), never a raw dict (commit 72b4bcd).
+
+    asyncpg has no jsonb codec registered on this connection, so
+    audit_log.changes (a jsonb column) comes back here as a plain JSON
+    string, not a dict/list. Decode it first -- otherwise _redact_value
+    treats the whole row as one opaque string and, when it matches,
+    replaces the entire changes payload with `replacement` instead of
+    only the e-mail inside it, wiping out every other key (actor,
+    target_type, ...). A row that somehow already comes back decoded
+    (e.g. a future jsonb codec, or a dict passed in directly by a test)
+    is passed through unchanged."""
     rows = await fetch_all(
         "SELECT id, changes FROM audit_log WHERE changes IS NOT NULL AND changes::text ILIKE $1",
         f"%{email}%",
     )
     redacted = 0
     for row in rows:
-        new_changes, changed = _redact_value(row["changes"], email.lower(), replacement)
+        changes = row["changes"]
+        if isinstance(changes, str):
+            try:
+                changes = json.loads(changes)
+            except (ValueError, TypeError):
+                pass  # not valid JSON -- fall back to plain-string redaction below
+        new_changes, changed = _redact_value(changes, email.lower(), replacement)
         if changed:
             await execute(
                 "UPDATE audit_log SET changes = $2::jsonb WHERE id = $1",
