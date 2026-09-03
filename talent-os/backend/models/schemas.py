@@ -352,6 +352,15 @@ class CandidatePortalProfile(BaseModel):
     education: Optional[str] = None
     cv_text: Optional[str] = None
     cv_file_path: Optional[str] = None
+    # WS-C.17: read from the linked `candidates` row (C.16 FK /
+    # get_or_create_candidate_id), not candidate_profiles -- these four
+    # live on candidates alongside lawful_basis. None/None/None/None when
+    # no candidates row exists yet or no talentpool consent has ever been
+    # recorded.
+    consent_talentpool_at: Optional[datetime] = None
+    consent_talentpool_until: Optional[datetime] = None
+    consent_scope: Optional[str] = None
+    consent_source: Optional[str] = None
     created_at: datetime
     updated_at: Optional[datetime] = None
 

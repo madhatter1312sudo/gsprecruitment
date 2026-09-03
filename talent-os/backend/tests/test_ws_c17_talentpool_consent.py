@@ -145,6 +145,92 @@ def test_talentpool_consent_update_rejects_invalid_scope():
         TalentpoolConsentUpdate(consent=True, scope="not_a_real_scope")
 
 
+# ── Candidate portal: GET /api/v1/candidate/profile carries consent ──────
+# follow-up: the profile GET (candidate_profiles + users) now also merges
+# in the four consent_talentpool_* columns from the linked `candidates`
+# row (_attach_talentpool_consent), so the portal checkbox can reflect
+# current state on load instead of always starting unchecked.
+
+class _ProfileDB:
+    def __init__(self, profile_row, candidate_id, consent_row):
+        self.profile_row = profile_row
+        self.candidate_id = candidate_id
+        self.consent_row = consent_row
+
+    async def fetch_one(self, sql, *args):
+        if "FROM candidate_profiles cp" in sql:
+            return dict(self.profile_row)
+        if sql.strip().startswith("SELECT consent_talentpool_at"):
+            assert args == (self.candidate_id,)
+            return dict(self.consent_row) if self.consent_row else None
+        return None
+
+    async def execute(self, sql, *args):
+        return "OK"
+
+
+@pytest.fixture()
+def patch_profile_router(monkeypatch):
+    def _patch(db: _ProfileDB):
+        import routers.candidate as candidate_router
+        monkeypatch.setattr(candidate_router, "fetch_one", db.fetch_one)
+        monkeypatch.setattr(candidate_router, "execute", db.execute)
+
+        async def _fake_candidate_id(user_id):
+            return db.candidate_id
+        monkeypatch.setattr(candidate_router, "_get_candidate_id", _fake_candidate_id)
+        return candidate_router
+    return _patch
+
+
+def _profile_row(**overrides):
+    base = {
+        "id": 1, "user_id": 7, "email": "jane@example.com", "full_name": "Jane Doe",
+        "phone": None, "linkedin_url": None, "github_url": None, "portfolio_url": None,
+        "current_company": None, "current_title": None, "location": None,
+        "willing_to_relocate": False, "salary_expectation_min": None, "salary_expectation_max": None,
+        "notice_period_days": None, "years_experience": None, "skills": [], "languages": [],
+        "education": None, "cv_text": None, "cv_file_path": None,
+        "created_at": datetime.now(timezone.utc), "updated_at": None,
+    }
+    base.update(overrides)
+    return base
+
+
+def test_profile_get_reflects_active_talentpool_consent(patch_profile_router):
+    until = datetime.now(timezone.utc) + timedelta(days=30)
+    db = _ProfileDB(
+        profile_row=_profile_row(), candidate_id=42,
+        consent_row={
+            "consent_talentpool_at": datetime.now(timezone.utc) - timedelta(days=1),
+            "consent_talentpool_until": until, "consent_scope": "matching_and_contact",
+            "consent_source": "portal",
+        },
+    )
+    router = patch_profile_router(db)
+    result = asyncio.run(router.get_candidate_profile(current_user=_user()))
+    assert result["consent_talentpool_until"] == until
+    assert result["consent_scope"] == "matching_and_contact"
+    assert result["consent_source"] == "portal"
+
+
+def test_profile_get_has_no_consent_when_no_candidates_row_exists(patch_profile_router):
+    db = _ProfileDB(profile_row=_profile_row(), candidate_id=None, consent_row=None)
+    router = patch_profile_router(db)
+    result = asyncio.run(router.get_candidate_profile(current_user=_user()))
+    assert result["consent_talentpool_at"] is None
+    assert result["consent_talentpool_until"] is None
+    assert result["consent_scope"] is None
+    assert result["consent_source"] is None
+
+
+def test_profile_get_has_no_consent_when_never_recorded(patch_profile_router):
+    db = _ProfileDB(profile_row=_profile_row(), candidate_id=42, consent_row=None)
+    router = patch_profile_router(db)
+    result = asyncio.run(router.get_candidate_profile(current_user=_user()))
+    assert result["consent_talentpool_until"] is None
+
+
 # ── Public: POST /api/public/talentpool-optin + /talentpool-confirm ──────
 
 class _PublicDB:

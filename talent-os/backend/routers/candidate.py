@@ -49,9 +49,33 @@ async def _get_candidate_id(user_id: int) -> Optional[int]:
 
 # ── Profile ─────────────────────────────────────────────────────────────
 
+async def _attach_talentpool_consent(profile: dict, user_id: int) -> dict:
+    """WS-C.17: the four consent_talentpool_* columns live on `candidates`,
+    not candidate_profiles -- read them via the same C.16 FK/e-mail-fallback
+    resolution as every other cross-reference in this router
+    (_get_candidate_id -> get_or_create_candidate_id). None/None/None/None
+    when no candidates row exists yet or no consent has ever been recorded
+    (never auto-creates one just for a read)."""
+    profile["consent_talentpool_at"] = None
+    profile["consent_talentpool_until"] = None
+    profile["consent_scope"] = None
+    profile["consent_source"] = None
+    candidate_id = await _get_candidate_id(user_id)
+    if candidate_id:
+        consent = await fetch_one(
+            "SELECT consent_talentpool_at, consent_talentpool_until, consent_scope, consent_source "
+            "FROM candidates WHERE id = $1",
+            candidate_id,
+        )
+        if consent:
+            profile.update(consent)
+    return profile
+
+
 @router.get("/profile", response_model=CandidatePortalProfile)
 async def get_candidate_profile(current_user: dict = Depends(get_verified_user)):
-    """Get full candidate profile (user + candidate_profiles)."""
+    """Get full candidate profile (user + candidate_profiles + the
+    candidates-row talentpool consent fields, WS-C.17)."""
     if current_user["role"] != "candidate":
         raise HTTPException(status_code=403, detail="Only candidates can access their profile")
 
@@ -76,7 +100,7 @@ async def get_candidate_profile(current_user: dict = Depends(get_verified_user))
             current_user["id"],
         )
 
-    return profile
+    return await _attach_talentpool_consent(profile, current_user["id"])
 
 
 @router.put("/profile", response_model=CandidatePortalProfile)

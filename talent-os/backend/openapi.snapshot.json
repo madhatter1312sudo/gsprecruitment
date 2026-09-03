@@ -719,6 +719,52 @@
       "CandidatePortalProfile": {
         "description": "Full candidate profile combining users + candidate_profiles.",
         "properties": {
+          "consent_scope": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Consent Scope"
+          },
+          "consent_source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Consent Source"
+          },
+          "consent_talentpool_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Consent Talentpool At"
+          },
+          "consent_talentpool_until": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Consent Talentpool Until"
+          },
           "created_at": {
             "format": "date-time",
             "title": "Created At",
@@ -9035,7 +9081,7 @@
     },
     "/api/v1/candidate/profile": {
       "get": {
-        "description": "Get full candidate profile (user + candidate_profiles).",
+        "description": "Get full candidate profile (user + candidate_profiles + the\ncandidates-row talentpool consent fields, WS-C.17).",
         "operationId": "get_candidate_profile_api_v1_candidate_profile_get",
         "responses": {
           "200": {

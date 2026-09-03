@@ -233,6 +233,12 @@
             cvName.textContent = profile.cv_file_path.split('/').pop();
           }
         }
+
+        // Talentpool consent (WS-C.17) -- checked + expiry shown only
+        // while consent_talentpool_until is still in the future; an
+        // expired or never-set date leaves the box unchecked, same as
+        // outreach.py's _draft_refusal treats it.
+        applyTalentpoolConsentState(profile);
       } catch (err) {
         console.error('Profile load error:', err);
       }
@@ -262,13 +268,25 @@
     });
 
     /* ---- Talentpool consent (WS-C.17) ----
-       No GET counterpart exists yet (candidates.consent_* isn't part of
-       CandidatePortalProfile) -- the checkbox starts unchecked each visit;
-       submitting always tells the candidate the resulting state via the
-       POST response instead. */
+       GET /v1/candidate/profile now includes consent_talentpool_at/_until/
+       _scope/_source (read via the candidates row) -- applyTalentpoolConsentState()
+       reflects them on load, and again after a save, so the checkbox and
+       expiry text always match what's actually on file. */
     const tpCheck = document.getElementById('talentpoolConsentCheck');
     const tpSaveBtn = document.getElementById('talentpoolConsentSaveBtn');
     const tpStatus = document.getElementById('talentpoolConsentStatus');
+
+    function applyTalentpoolConsentState(profile) {
+      if (!tpCheck || !tpStatus) return;
+      const isNl = document.documentElement.getAttribute('data-lang') === 'nl';
+      const until = profile.consent_talentpool_until ? new Date(profile.consent_talentpool_until) : null;
+      const active = !!(until && until.getTime() > Date.now());
+      tpCheck.checked = active;
+      tpStatus.textContent = active
+        ? (isNl ? `Actief tot ${until.toLocaleDateString('nl-NL')}.` : `Active until ${until.toLocaleDateString('en-GB')}.`)
+        : '';
+    }
+
     if (tpCheck && tpSaveBtn) {
       tpSaveBtn.addEventListener('click', async () => {
         const isNl = document.documentElement.getAttribute('data-lang') === 'nl';
@@ -282,11 +300,9 @@
           });
           if (res && res.ok) {
             const row = await res.json();
-            if (tpStatus) {
-              tpStatus.textContent = row.consent_talentpool_until
-                ? (isNl ? `Actief tot ${new Date(row.consent_talentpool_until).toLocaleDateString('nl-NL')}.`
-                        : `Active until ${new Date(row.consent_talentpool_until).toLocaleDateString('en-GB')}.`)
-                : (isNl ? 'Talentpool-toestemming ingetrokken.' : 'Talent pool consent withdrawn.');
+            applyTalentpoolConsentState(row);
+            if (!row.consent_talentpool_until && tpStatus) {
+              tpStatus.textContent = isNl ? 'Talentpool-toestemming ingetrokken.' : 'Talent pool consent withdrawn.';
             }
             Auth.toast(isNl ? 'Opgeslagen!' : 'Saved!');
           } else {
