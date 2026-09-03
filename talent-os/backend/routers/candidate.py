@@ -5,7 +5,7 @@ saved jobs, messages, salary benchmarks, dashboard.
 """
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, Form, status
 from core.database import fetch_one, fetch_all, execute, fetch_val
-from core.deps import get_current_user, require_role
+from core.deps import get_verified_user, require_role
 from models.schemas import (
     CandidatePortalProfile, CandidateProfileUpdate, CandidateMatchItem,
     ApplicationCreate, SavedJobCreate, CandidateDashboard,
@@ -83,7 +83,7 @@ async def _get_candidate_id(user_id: int) -> Optional[int]:
 # ── Profile ─────────────────────────────────────────────────────────────
 
 @router.get("/profile", response_model=CandidatePortalProfile)
-async def get_candidate_profile(current_user: dict = Depends(get_current_user)):
+async def get_candidate_profile(current_user: dict = Depends(get_verified_user)):
     """Get full candidate profile (user + candidate_profiles)."""
     if current_user["role"] != "candidate":
         raise HTTPException(status_code=403, detail="Only candidates can access their profile")
@@ -115,7 +115,7 @@ async def get_candidate_profile(current_user: dict = Depends(get_current_user)):
 @router.put("/profile", response_model=CandidatePortalProfile)
 async def update_candidate_profile(
     updates: CandidateProfileUpdate,
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(get_verified_user),
 ):
     """Update candidate profile fields."""
     if current_user["role"] != "candidate":
@@ -178,7 +178,7 @@ async def update_candidate_profile(
 @router.post("/cv")
 async def upload_cv(
     file: UploadFile = File(...),
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(get_verified_user),
 ):
     """Upload a CV file and update the candidate profile."""
     if current_user["role"] != "candidate":
@@ -256,7 +256,7 @@ async def upload_cv(
 
 
 @router.get("/cv")
-async def download_own_cv(current_user: dict = Depends(get_current_user)):
+async def download_own_cv(current_user: dict = Depends(get_verified_user)):
     """Download the candidate's own uploaded CV (auth-gated; CVs are never served publicly)."""
     if current_user["role"] != "candidate":
         raise HTTPException(status_code=403, detail="Only candidates can download their CV")
@@ -292,7 +292,7 @@ async def download_own_cv(current_user: dict = Depends(get_current_user)):
 async def get_candidate_matches(
     limit: int = Query(20, ge=1, le=100),
     offset: int = Query(0, ge=0),
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(get_verified_user),
 ):
     """Get match list for the candidate with pagination."""
     if current_user["role"] != "candidate":
@@ -327,7 +327,7 @@ async def get_candidate_matches(
 async def get_applications(
     limit: int = Query(20, ge=1, le=100),
     offset: int = Query(0, ge=0),
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(get_verified_user),
 ):
     """Get application (match) history for the candidate."""
     if current_user["role"] != "candidate":
@@ -358,7 +358,7 @@ async def get_applications(
 @router.post("/applications", status_code=201)
 async def apply_to_job(
     data: ApplicationCreate,
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(get_verified_user),
 ):
     """Apply to a job (creates a match record with status='applied')."""
     if current_user["role"] != "candidate":
@@ -401,7 +401,7 @@ async def apply_to_job(
 async def get_saved_jobs(
     limit: int = Query(20, ge=1, le=100),
     offset: int = Query(0, ge=0),
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(get_verified_user),
 ):
     """Get saved/favorited jobs for the candidate."""
     if current_user["role"] != "candidate":
@@ -433,7 +433,7 @@ async def get_saved_jobs(
 @router.post("/saved-jobs", status_code=201)
 async def save_job(
     data: SavedJobCreate,
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(get_verified_user),
 ):
     """Save a job to the candidate's favorites."""
     if current_user["role"] != "candidate":
@@ -469,7 +469,7 @@ async def save_job(
 @router.delete("/saved-jobs/{job_id}")
 async def unsave_job(
     job_id: int,
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(get_verified_user),
 ):
     """Remove a job from saved favorites."""
     if current_user["role"] != "candidate":
@@ -495,7 +495,7 @@ async def unsave_job(
 async def get_candidate_messages(
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(get_verified_user),
 ):
     """Get messages from GSP (sent to the candidate)."""
     if current_user["role"] != "candidate":
@@ -531,7 +531,7 @@ async def get_salary_benchmark(
     role_title: Optional[str] = Query(None),
     location: Optional[str] = Query(None),
     seniority: Optional[str] = Query(None),
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(get_verified_user),
 ):
     """Get salary benchmark data for the candidate."""
     conditions = []
@@ -562,7 +562,7 @@ async def get_salary_benchmark(
 # ── Dashboard ───────────────────────────────────────────────────────────
 
 @router.get("/dashboard", response_model=CandidateDashboard)
-async def get_candidate_dashboard(current_user: dict = Depends(get_current_user)):
+async def get_candidate_dashboard(current_user: dict = Depends(get_verified_user)):
     """Get dashboard stats: match count, profile views, unread messages, saved jobs."""
     if current_user["role"] != "candidate":
         raise HTTPException(status_code=403, detail="Only candidates can view their dashboard")
