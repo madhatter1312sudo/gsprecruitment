@@ -861,6 +861,67 @@ class PipelineStageHistoryItem(BaseModel):
     model_config = {"from_attributes": True}
 
 
+# ── WS-C.6: Activities (unified activity/task log) ───────────────────────
+
+ACTIVITY_SUBJECT_TYPES = ("candidate", "client", "job", "prospect", "placement", "lead")
+ACTIVITY_TYPES = ("note", "call", "email", "meeting", "task", "status_change")
+
+
+class ActivityCreate(BaseModel):
+    subject_type: str = Field(..., pattern=r"^(candidate|client|job|prospect|placement|lead)$")
+    subject_id: int
+    type: str = Field(..., pattern=r"^(note|call|email|meeting|task|status_change)$")
+    body: Optional[str] = None
+    due_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+    # Code-review follow-up: an admin-created row defaults to internal
+    # (recruiter-only) and may opt in to client-visible with
+    # internal=false. Client-portal rows never go through this model --
+    # see ClientActivityCreate, which has no internal field at all and
+    # is always forced to internal=false server-side.
+    internal: bool = True
+
+
+class ActivityUpdate(BaseModel):
+    """Only the fields the admin/client can revise after the fact --
+    subject_type/subject_id/type are the row's identity and are not
+    editable (create a new activity instead of re-pointing one)."""
+    body: Optional[str] = None
+    due_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+    internal: Optional[bool] = None
+
+
+class ActivityResponse(BaseModel):
+    id: int
+    subject_type: str
+    subject_id: int
+    type: str
+    body: Optional[str] = None
+    due_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+    internal: bool = True
+    created_by: Optional[int] = None
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+
+    model_config = {"from_attributes": True}
+
+
+# Client-portal create: subject_type is restricted server-side (job | candidate,
+# scoped to the caller's own client via user_clients -- routers/activities.py),
+# never trusted from the body the way the admin create is. Deliberately has
+# no `internal` field -- a client-portal-authored activity is always
+# internal=false, forced by the router, never a client-supplied value.
+class ClientActivityCreate(BaseModel):
+    subject_type: str = Field(..., pattern=r"^(job|candidate)$")
+    subject_id: int
+    type: str = Field(..., pattern=r"^(note|call|email|meeting|task|status_change)$")
+    body: Optional[str] = None
+    due_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+
+
 # ── WS-C.10: Leads (unified contact_submissions + quiz_submissions) ──────
 
 class LeadReadUpdate(BaseModel):
