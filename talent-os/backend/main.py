@@ -130,6 +130,7 @@ from routers.client_contacts import router as client_contacts_admin_router
 from routers.client_contacts import client_router as client_contacts_portal_router
 from routers.activities import router as activities_admin_router
 from routers.activities import client_router as activities_portal_router
+from routers.clients_admin import router as clients_admin_router
 
 app.include_router(health_router)
 app.include_router(auth_router)
@@ -157,6 +158,7 @@ app.include_router(client_contacts_admin_router)
 app.include_router(client_contacts_portal_router)
 app.include_router(activities_admin_router)
 app.include_router(activities_portal_router)
+app.include_router(clients_admin_router)
 
 
 # ── Admin-gated API docs ───────────────────────────────────────────────
