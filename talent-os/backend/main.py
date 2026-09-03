@@ -42,6 +42,20 @@ async def lifespan(app: FastAPI):
     logger.info(f"OpenRouter: {'configured' if settings.openrouter_api_key else 'NOT configured'}")
     logger.info(f"Apollo.io: {'configured' if settings.apollo_api_key else 'NOT configured'}")
     logger.info("ALL AI/LLM calls go through OpenRouter. NO models on VPS.")
+    if settings.apollo_api_key and not settings.apollo_sync_enabled:
+        # WS-E.8: a set APOLLO_API_KEY with the sync switch left off is not
+        # itself a problem (services/harvest.py's _apollo_sync_enabled()
+        # and start_scheduler() both refuse to call the API either way) --
+        # but it's easy to forget the key is still sitting there, and the
+        # owner's pending decision on the Apollo router/key removal
+        # (VERWERKINGSREGISTER.md §2.6) means this warning should stay
+        # visible on every boot until that decision is made.
+        logger.warning(
+            "APOLLO_API_KEY is set but apollo_sync_enabled=false — Apollo sync stays off "
+            "(services/harvest.py, services/scheduler.py), but the key is live and unused. "
+            "Owner decision pending (VERWERKINGSREGISTER.md §2.6, §5.7): wipe the Apollo pool "
+            "or remove the key/router."
+        )
 
     try:
         await start_scheduler()
@@ -103,6 +117,8 @@ from routers.gdpr import admin_router as gdpr_admin_router
 from routers.gdpr import suppression_router
 from routers.outreach import router as outreach_router
 from routers.blog_admin import router as blog_admin_router
+from routers.retention_admin import router as retention_admin_router
+from routers.retention_admin import apollo_pool_router
 from routers.mobile import router as mobile_router
 from routers.prospects import router as prospects_router
 
@@ -123,6 +139,8 @@ app.include_router(gdpr_admin_router)
 app.include_router(suppression_router)
 app.include_router(outreach_router)
 app.include_router(blog_admin_router)
+app.include_router(retention_admin_router)
+app.include_router(apollo_pool_router)
 app.include_router(mobile_router)
 app.include_router(prospects_router)
 

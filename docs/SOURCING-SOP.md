@@ -157,9 +157,9 @@ Eén bewaartabel, identiek in code (purge-job) en op `privacy.html`:
 | Referral | zoals gesourcet (3 maanden na `date_found` zonder reactie); herkomst = referrer | zie §1.3 |
 | Leads/quiz | 12 maanden | |
 | Geplaatste kandidaat (contract- en factuurdata) | 7 jaar | fiscale bewaarplicht |
-| Logs | 30 dagen | |
+| Logs | 30 dagen (doel) | vandaag: max 5×20 MB per container, rotatie, geen vaste tijd (Docker json-file `max-size`/`max-file`, WS-E.6) |
 
-**Bij het verstrijken van de termijn**: de apscheduler purge-job verwijdert of anonimiseert de persoon automatisch volgens dezelfde `erase_person`-logica als een handmatig AVG-verzoek (alle tabellen, inclusief CV-bestand op R2/legacy-pad). Talentpool-personen met `consent_talentpool_until` in de toekomst worden door de purge-job overgeslagen; bij het verstrijken van die datum zonder verlenging volgt automatische verwijdering. **Deze purge-job bestaat pas na WS-E.8; tot dan wordt niets automatisch verwijderd en loopt wissing handmatig per verzoek.** De 14.687 Apollo-rijen vallen niet onder deze tabel — die worden gewist of krijgen per persoon een echte publieke `source_url`, een losstaand eenmalig traject (WS-E.8).
+**Bij het verstrijken van de termijn**: de apscheduler purge-job (`run_retention_purge()`, dagelijks 04:00 Europe/Amsterdam) verwijdert of anonimiseert de persoon automatisch volgens dezelfde `erase_person`-logica als een handmatig AVG-verzoek (alle tabellen, inclusief CV-bestand op R2/legacy-pad), of verwijdert de rij hard waar dat is aangemerkt (VERWERKINGSREGISTER.md §1.4). Talentpool-personen met `consent_talentpool_until` in de toekomst worden door de purge-job overgeslagen; bij het verstrijken van die datum zonder verlenging volgt automatische verwijdering. **Deze purge-job bestaat sinds WS-E.8, maar staat standaard uit (`RETENTION_PURGE_ENABLED=false`) totdat de eigenaar hem inschakelt; tot dan telt de dagelijkse run alleen per categorie en schrijft niets weg.** Bron van waarheid voor deze tabel: `talent-os/backend/core/retention.py` (VERWERKINGSREGISTER.md §1.4). De 14.687 Apollo-rijen vallen niet onder deze tabel — die worden gewist of krijgen per persoon een echte publieke `source_url`, een losstaand eenmalig traject (WS-E.8, `POST /api/v1/admin/apollo-pool/purge`).
 
 ---
 

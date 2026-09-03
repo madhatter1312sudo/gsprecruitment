@@ -291,6 +291,28 @@
         "title": "AdminUserUpdate",
         "type": "object"
       },
+      "ApolloPoolPurgeRequest": {
+        "properties": {
+          "confirm": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confirm"
+          },
+          "dry_run": {
+            "default": true,
+            "title": "Dry Run",
+            "type": "boolean"
+          }
+        },
+        "title": "ApolloPoolPurgeRequest",
+        "type": "object"
+      },
       "ApplicationCreate": {
         "properties": {
           "job_id": {
@@ -3263,6 +3285,28 @@
         "title": "ResetPasswordRequest",
         "type": "object"
       },
+      "RetentionRunRequest": {
+        "properties": {
+          "confirm": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confirm"
+          },
+          "dry_run": {
+            "default": true,
+            "title": "Dry Run",
+            "type": "boolean"
+          }
+        },
+        "title": "RetentionRunRequest",
+        "type": "object"
+      },
       "SalaryBenchmarkResponse": {
         "properties": {
           "currency": {
@@ -5343,6 +5387,51 @@
         ]
       }
     },
+    "/api/v1/admin/apollo-pool/purge": {
+      "post": {
+        "description": "The Apollo-pool wipe/keep decision itself belongs to the owner\n(VERWERKINGSREGISTER.md \u00a72.6) \u2014 this endpoint is the tooling, never\nrun automatically, and dry_run=true by default.\n\nChoice of anonymise vs. hard-delete, per row:\n  - Has an e-mail address: anonymise via the same erase_person()\n    routine as a manual Art. 17 request (routers/gdpr.py) \u2014 this\n    preserves any matches/pipeline_entries FK history (candidates.id\n    survives, PII doesn't) and adds the person to suppression_list so\n    a future Apollo re-sync (should the owner ever re-enable it)\n    can't re-source the same person. Preferred whenever it's possible,\n    since it keeps the suppression guarantee.\n  - No e-mail address at all: hard DELETE. suppression_list is keyed\n    on email_hash, so a row with no e-mail can't be suppressed either\n    way, and (per WS-E.7's erase_person) these bulk-harvested rows\n    never had a portal account or an application tied to them \u2014\n    nothing else references the row, so there is nothing an\n    anonymise-in-place step would preserve that a DELETE doesn't\n    already achieve equally safely.",
+        "operationId": "purge_apollo_pool_api_v1_admin_apollo_pool_purge_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApolloPoolPurgeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Purge Apollo Pool",
+        "tags": [
+          "retention-admin"
+        ]
+      }
+    },
     "/api/v1/admin/audit-log": {
       "get": {
         "description": "Get audit log entries with optional filters.",
@@ -6798,6 +6887,76 @@
         "summary": "Update Prospect",
         "tags": [
           "prospects"
+        ]
+      }
+    },
+    "/api/v1/admin/retention/run": {
+      "post": {
+        "description": "dry_run=true (default): counts per category, no DB writes at all.\ndry_run=false: requires confirm=\"PURGE\" and actually anonymises/deletes\nper core/retention.py's table, writing one audit_log row per purged\ncategory (services/scheduler.py run_retention_purge).",
+        "operationId": "run_retention_api_v1_admin_retention_run_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RetentionRunRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Run Retention",
+        "tags": [
+          "retention-admin"
+        ]
+      }
+    },
+    "/api/v1/admin/retention/table": {
+      "get": {
+        "description": "The bewaartabel as both structured rows and the exact Markdown the\nregister/SOP carry (docs/VERWERKINGSREGISTER.md \u00a71.4, docs/SOURCING-SOP.md\n\u00a76) \u2014 for admins verifying the two stay in sync, not just tests.",
+        "operationId": "get_retention_table_api_v1_admin_retention_table_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Retention Table",
+        "tags": [
+          "retention-admin"
         ]
       }
     },

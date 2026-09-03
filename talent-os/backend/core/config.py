@@ -60,6 +60,16 @@ class Settings(BaseSettings):
     # this at each run.
     apollo_sync_enabled: bool = False
 
+    # WS-E.8: master off-switch for the retention purge job
+    # (services/scheduler.py run_retention_purge, core/retention.py).
+    # Defaults False so a fresh/staging deploy never silently starts
+    # anonymising or deleting rows -- the daily job runs in dry-run
+    # (counts-only, no DB writes) until this is explicitly set true via
+    # env/.env. The admin endpoint (POST /api/v1/admin/retention/run) is
+    # independent of this flag -- its own dry_run body field (default
+    # true) and the confirm="PURGE" requirement gate a real run there.
+    retention_purge_enabled: bool = False
+
     smtp_host: str = "smtp.zoho.com"
     smtp_port: int = 587
     smtp_user: str = ""

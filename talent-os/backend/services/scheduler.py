@@ -10,6 +10,7 @@ flag is treated as enabled ('true'). Jobs never send anything: outreach
 drafting only ever writes rows to outreach_drafts with status='draft'.
 A human must approve a draft via routers/outreach.py before it is sent.
 """
+import json
 import logging
 from datetime import datetime, timedelta, timezone
 from typing import Optional
@@ -20,6 +21,7 @@ from apscheduler.triggers.cron import CronTrigger
 
 from core.config import settings
 from core.database import fetch_all, fetch_one, fetch_val, execute
+from core import retention
 from services.apollo_client import ApolloClient
 from services import outreach_ai
 from services import harvest as harvest_service
@@ -335,6 +337,149 @@ async def draft_blog_post() -> dict:
     return {"status": "success", "slug": slug, "topic": topic}
 
 
+# ── Job 6: daily 04:00 — retention purge (WS-E.8) ───────────────────────
+#
+# core/retention.py is the single source of truth for the table (rows,
+# anchor columns, actions). This module only orchestrates: for each row
+# that is schema_ready and has a category handler below, count matching
+# rows and, when actually purging, act on them via the same
+# erase_person()-style logic (anonymise) or a plain DELETE (hard_delete)
+# the table calls for. A row that is not schema_ready or has no handler
+# (retain/infra_only categories) is reported but never queried or touched
+# — see core/retention.py's docstring for why each of those isn't
+# actionable yet.
+#
+# HARD RULE (WS-E.8 task): this job must never delete/anonymise anything
+# in dry_run=True mode — that mode issues reads only (fetch_all/fetch_one),
+# never execute(). The daily cron always calls it with
+# dry_run=not settings.retention_purge_enabled, so a fresh/staging deploy
+# (RETENTION_PURGE_ENABLED unset/false) only ever logs counts.
+
+async def _count_sourced_no_response(lawful_basis: str) -> list:
+    return await fetch_all(
+        "SELECT id, email FROM candidates WHERE lawful_basis = $1 "
+        "AND status = 'sourced' AND date_found IS NOT NULL "
+        "AND date_found <= (CURRENT_DATE - INTERVAL '3 months') "
+        "AND consent_withdrawn_at IS NULL AND deleted_at IS NULL AND email IS NOT NULL",
+        lawful_basis,
+    )
+
+
+async def _purge_sourced_no_response(lawful_basis: str, reason: str) -> int:
+    from routers.gdpr import erase_person
+
+    rows = await _count_sourced_no_response(lawful_basis)
+    for row in rows:
+        if row["email"]:
+            await erase_person(row["email"], actor_id=None, reason=reason)
+    return len(rows)
+
+
+async def _count_prospect_no_response() -> list:
+    return await fetch_all(
+        "SELECT id FROM client_prospects WHERE status = 'new' "
+        "AND created_at <= (NOW() - INTERVAL '12 months') AND opt_out_at IS NULL",
+    )
+
+
+async def _purge_prospect_no_response() -> int:
+    rows = await _count_prospect_no_response()
+    ids = [r["id"] for r in rows]
+    if ids:
+        await execute("DELETE FROM client_prospects WHERE id = ANY($1::int[])", ids)
+    return len(rows)
+
+
+async def _count_leads_quiz() -> int:
+    quiz = await fetch_all("SELECT id FROM quiz_submissions WHERE created_at <= (NOW() - INTERVAL '12 months')")
+    contact = await fetch_all("SELECT id FROM contact_submissions WHERE created_at <= (NOW() - INTERVAL '12 months')")
+    return len(quiz) + len(contact)
+
+
+async def _purge_leads_quiz() -> int:
+    quiz = await fetch_all("SELECT id FROM quiz_submissions WHERE created_at <= (NOW() - INTERVAL '12 months')")
+    contact = await fetch_all("SELECT id FROM contact_submissions WHERE created_at <= (NOW() - INTERVAL '12 months')")
+    if quiz:
+        await execute("DELETE FROM quiz_submissions WHERE id = ANY($1::int[])", [r["id"] for r in quiz])
+    if contact:
+        await execute("DELETE FROM contact_submissions WHERE id = ANY($1::int[])", [r["id"] for r in contact])
+    return len(quiz) + len(contact)
+
+
+async def _category_result(row: "retention.RetentionRow", dry_run: bool) -> dict:
+    """Count (dry_run) or count-then-act (not dry_run) for one retention
+    table row. Never queries a column that doesn't exist yet
+    (schema_ready=False short-circuits before any DB call) and never
+    calls execute() when dry_run=True."""
+    if row.action in ("retain", "infra_only"):
+        return {"key": row.key, "status": "not_applicable", "count": None}
+    if not row.schema_ready:
+        return {"key": row.key, "status": "schema_not_ready", "count": None}
+
+    try:
+        if row.key == "sourced_no_response":
+            if dry_run:
+                count = len(await _count_sourced_no_response("gerechtvaardigd_belang"))
+            else:
+                count = await _purge_sourced_no_response(
+                    "gerechtvaardigd_belang", f"retention_purge:{row.key}",
+                )
+        elif row.key == "referral":
+            if dry_run:
+                count = len(await _count_sourced_no_response("toestemming_referral"))
+            else:
+                count = await _purge_sourced_no_response(
+                    "toestemming_referral", f"retention_purge:{row.key}",
+                )
+        elif row.key == "prospect_no_response":
+            count = len(await _count_prospect_no_response()) if dry_run else await _purge_prospect_no_response()
+        elif row.key == "leads_quiz":
+            count = await _count_leads_quiz() if dry_run else await _purge_leads_quiz()
+        else:
+            return {"key": row.key, "status": "no_handler", "count": None}
+    except Exception:
+        logger.exception("run_retention_purge: category %s failed", row.key)
+        return {"key": row.key, "status": "error", "count": None}
+
+    return {"key": row.key, "status": "counted" if dry_run else "purged", "count": count}
+
+
+async def run_retention_purge(dry_run: bool = True) -> dict:
+    """WS-E.8. Walks core/retention.RETENTION_TABLE and, per category,
+    either counts matching rows (dry_run=True — no writes at all, ever)
+    or purges them (dry_run=False — anonymise via erase_person()-style
+    logic or hard-delete, per the row's `action`) and writes one
+    audit_log row per *purged* category with counts only — never an
+    e-mail address or name (json.dumps, never a raw dict — commit
+    72b4bcd)."""
+    results = []
+    for row in retention.RETENTION_TABLE:
+        result = await _category_result(row, dry_run)
+        results.append(result)
+        if not dry_run and result["status"] == "purged":
+            await execute(
+                "INSERT INTO audit_log (action, actor_id, target_type, target_id, changes) "
+                "VALUES ($1, NULL, $2, NULL, $3::jsonb)",
+                "retention_purge", "retention_category",
+                json.dumps({"category": row.key, "count": result["count"], "action": row.action}),
+            )
+
+    logger.info(
+        "run_retention_purge: dry_run=%s results=%s",
+        dry_run, {r["key"]: (r["status"], r["count"]) for r in results},
+    )
+    return {"dry_run": dry_run, "categories": results}
+
+
+async def retention_purge_job() -> dict:
+    """Cron entry point — always defers to the RETENTION_PURGE_ENABLED env
+    flag (core/config.py), never runs a real purge just because the daily
+    trigger fired. The admin endpoint (routers/retention_admin.py) is the
+    only way to force a real run regardless of this flag, and even there
+    only with confirm='PURGE'."""
+    return await run_retention_purge(dry_run=not settings.retention_purge_enabled)
+
+
 # ── Scheduler lifecycle ──────────────────────────────────────────────────
 
 async def start_scheduler() -> None:
@@ -393,11 +538,15 @@ async def start_scheduler() -> None:
         draft_blog_post, CronTrigger(day_of_week="mon", hour=5, minute=0),
         id="draft_blog_post", replace_existing=True,
     )
+    scheduler.add_job(
+        retention_purge_job, CronTrigger(hour=4, minute=0),
+        id="retention_purge", replace_existing=True,
+    )
 
     scheduler.start()
     logger.info(
         "scheduler: started with %s daily jobs + 1 weekly job (Europe/Amsterdam)",
-        2 + apollo_jobs_registered,
+        3 + apollo_jobs_registered,
     )
 
 
@@ -426,6 +575,7 @@ JOBS_BY_NAME = {
     "matching": matching,
     "drafting": draft_outreach,
     "blog": draft_blog_post,
+    "retention_purge": retention_purge_job,
     # Manual-trigger only — deliberately NOT added to start_scheduler()'s
     # cron jobs below. One-shot Apollo bulk-harvest (services/harvest.py)
     # and its outreach-draft catch-up, both run via routers/outreach.py's

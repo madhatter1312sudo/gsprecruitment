@@ -42,6 +42,9 @@
 .page-content p, .page-content li { color: var(--text-secondary); font-size: 1rem; line-height: 1.8; }
 .page-content ul { list-style: disc; padding-left: 24px; margin: 16px 0; }
 .page-content li { margin-bottom: 8px; }
+.retention-table { width: 100%; border-collapse: collapse; margin: 16px 0 24px; font-size: 0.92rem; }
+.retention-table th, .retention-table td { text-align: left; padding: 10px 12px; border: 1px solid var(--border, #ddd); vertical-align: top; }
+.retention-table th { font-weight: 600; }
 </style>
 </head>
 <body>
@@ -142,25 +145,25 @@
         <p>We never sell your personal data to third parties.</p>
 
         <h2>6. Data retention</h2>
-        <p>We retain your personal data only as long as necessary for the purpose it was collected for. The table below is the same retention schedule used in our internal processing register.</p>
+        <p>We retain your data for as long as necessary for the purposes in this policy, per the category below (retention runs from the date named in each row). An automated job deletes or anonymises data once a period expires; you can request earlier deletion at any time (§7).</p>
         <div class="salary-table-wrapper">
-        <table class="salary-table">
-          <thead><tr><th>Category</th><th>Retention period</th></tr></thead>
+        <table class="retention-table" id="retention-table-en">
+          <thead><tr><th>Category</th><th>Retention period</th><th>Source/note</th></tr></thead>
           <tbody>
-            <tr><td>Rejected applicant</td><td>4 weeks after rejection</td></tr>
-            <tr><td>Talent pool with explicit consent</td><td>12 months, renewable</td></tr>
-            <tr><td>Sourced person without a response</td><td>3 months after the date we found them, if they don't respond</td></tr>
-            <tr><td>Prospect (client contact) without a response</td><td>12 months</td></tr>
-            <tr><td>Prospect who does respond (relationship)</td><td>As long as active, plus 12 months after last contact</td></tr>
-            <tr><td>Active portal account without an application</td><td>As long as the account is active; 24 months of inactivity → deleted</td></tr>
-            <tr><td>Referral</td><td>Same as sourced (3 months after the date found, without a response); source = the referrer</td></tr>
-            <tr><td>Leads / quiz submissions</td><td>12 months</td></tr>
-            <tr><td>Placed candidate (contract and invoicing data)</td><td>7 years (statutory fiscal retention)</td></tr>
-            <tr><td>Logs</td><td>30 days (target); rotation without a fixed period today</td></tr>
+            <tr><td>Rejected applicant</td><td>4 weeks after rejection date</td><td>source: AP/Recruitee</td></tr>
+            <tr><td>Talent pool with explicit consent</td><td>12 months, renewable</td><td>WS-C.17</td></tr>
+            <tr><td>Sourced person, no response</td><td>3 months after the date found, if no response</td><td>assumption, stricter than the 2 years previously stated here</td></tr>
+            <tr><td>Prospect, no response</td><td>12 months</td><td></td></tr>
+            <tr><td>Prospect who responds (relationship)</td><td>as long as active + 12 months after last contact</td><td>assumption</td></tr>
+            <tr><td>Active portal account without application</td><td>as long as active; 24 months inactive → deleted</td><td>assumption</td></tr>
+            <tr><td>Referral</td><td>as sourced (3 months after the date found, if no response); source = referrer</td><td>see §3 above</td></tr>
+            <tr><td>Leads/quiz</td><td>12 months</td><td></td></tr>
+            <tr><td>Placed candidate (contract/invoice data)</td><td>7 years</td><td>statutory tax retention</td></tr>
+            <tr><td>Logs</td><td>30 days (target)</td><td>today: max 5×20 MB per container, rotation, no fixed time (Docker json-file max-size/max-file)</td></tr>
           </tbody>
         </table>
         </div>
-        <p>Once a period expires, we delete or anonymise the record. You can request earlier deletion at any time; see section 7.</p>
+        <p>This table is identical to the Dutch version and to our internal processing register.</p>
 
         <h2>7. Your rights (GDPR)</h2>
         <p>Under the GDPR, you have the following rights:</p>
@@ -237,25 +240,25 @@
         <p>Wij verkopen uw persoonsgegevens nooit aan derden.</p>
 
         <h2>6. Bewaartermijn</h2>
-        <p>Wij bewaren uw persoonsgegevens niet langer dan nodig voor het doel waarvoor ze zijn verzameld. Onderstaande tabel is dezelfde bewaartabel als in ons interne verwerkingsregister.</p>
+        <p>Wij bewaren uw gegevens zolang als nodig is voor de doeleinden beschreven in dit beleid, per categorie zoals hieronder. Een geautomatiseerde taak verwijdert of anonimiseert gegevens bij het verstrijken van de termijn; u kunt op elk moment eerder om verwijdering vragen (§7).</p>
         <div class="salary-table-wrapper">
-        <table class="salary-table">
-          <thead><tr><th>Categorie</th><th>Bewaartermijn</th></tr></thead>
+        <table class="retention-table" id="retention-table-nl">
+          <thead><tr><th>Categorie</th><th>Bewaartermijn</th><th>Bron/opmerking</th></tr></thead>
           <tbody>
-            <tr><td>Afgewezen sollicitant</td><td>4 weken na afwijzing</td></tr>
-            <tr><td>Talentpool met expliciete toestemming</td><td>12 maanden, verlengbaar</td></tr>
-            <tr><td>Gesourcete persoon zonder reactie</td><td>3 maanden na de datum van vinden, zonder reactie</td></tr>
-            <tr><td>Prospect (klantcontact) zonder reactie</td><td>12 maanden</td></tr>
-            <tr><td>Prospect die wel reageert (relatie)</td><td>Zolang actief, plus 12 maanden na laatste contact</td></tr>
-            <tr><td>Actief portalaccount zonder sollicitatie</td><td>Zolang het account actief is; 24 maanden inactiviteit → verwijderd</td></tr>
-            <tr><td>Referral</td><td>Zoals gesourcet (3 maanden na de datum van vinden, zonder reactie); herkomst = referrer</td></tr>
-            <tr><td>Leads / quizinzendingen</td><td>12 maanden</td></tr>
-            <tr><td>Geplaatste kandidaat (contract- en factuurdata)</td><td>7 jaar (wettelijke fiscale bewaarplicht)</td></tr>
-            <tr><td>Logs</td><td>30 dagen (doel); vandaag rotatie zonder vaste termijn</td></tr>
+            <tr><td>Afgewezen sollicitant</td><td>4 weken na `rejected_at`</td><td>bron: AP/Recruitee</td></tr>
+            <tr><td>Talentpool met expliciete toestemming</td><td>12 maanden, verlengbaar</td><td>WS-C.17</td></tr>
+            <tr><td>Gesourcete persoon zonder reactie</td><td>3 maanden na `date_found` zonder reactie</td><td>aanname, strenger dan de 2 jaar in privacy.html</td></tr>
+            <tr><td>Prospect zonder reactie</td><td>12 maanden</td><td></td></tr>
+            <tr><td>Prospect die wel reageert (relatie)</td><td>zolang actief + 12 maanden na laatste contact</td><td>aanname</td></tr>
+            <tr><td>Actief portalaccount zonder sollicitatie</td><td>zolang account actief; 24 maanden inactiviteit → verwijderen</td><td>aanname</td></tr>
+            <tr><td>Referral</td><td>zoals gesourcet (3 maanden na `date_found` zonder reactie); herkomst = referrer</td><td>zie §1.3</td></tr>
+            <tr><td>Leads/quiz</td><td>12 maanden</td><td></td></tr>
+            <tr><td>Geplaatste kandidaat (contract- en factuurdata)</td><td>7 jaar</td><td>fiscale bewaarplicht</td></tr>
+            <tr><td>Logs</td><td>30 dagen (doel)</td><td>vandaag: max 5×20 MB per container, rotatie, geen vaste tijd (Docker json-file `max-size`/`max-file`, WS-E.6)</td></tr>
           </tbody>
         </table>
         </div>
-        <p>Na het verstrijken van een termijn verwijderen of anonimiseren wij het dossier. U kunt op elk moment eerdere verwijdering aanvragen; zie sectie 7.</p>
+        <p>Deze tabel is identiek aan het Verwerkingsregister (§1.4) en de Sourcing SOP (§6); bron van waarheid is <code>talent-os/backend/core/retention.py</code>.</p>
 
         <h2>7. Uw rechten (AVG/GDPR)</h2>
         <ul>
