@@ -289,6 +289,15 @@ async def unlock_user(
 
 # ── Job Management ──────────────────────────────────────────────────────
 
+def _escape_like(term: str) -> str:
+    """Escape a user-supplied ILIKE search term so literal % / _ / \\ in the
+    input can't be used as wildcards. Paired with `ESCAPE '\\'` in the SQL --
+    same helper/pattern as routers/clients_admin.py's _escape_like()
+    (security-auditor LOW finding: list_all_jobs's `search` param built its
+    ILIKE pattern from the raw, unescaped input)."""
+    return term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
 @router.get("/jobs")
 async def list_all_jobs(
     status: Optional[str] = Query(None),
@@ -320,8 +329,8 @@ async def list_all_jobs(
         params.append(client_id)
         idx += 1
     if search:
-        conditions.append(f"(j.title ILIKE ${idx} OR c.company_name ILIKE ${idx})")
-        params.append(f"%{search}%")
+        conditions.append(f"(j.title ILIKE ${idx} ESCAPE '\\' OR c.company_name ILIKE ${idx} ESCAPE '\\')")
+        params.append(f"%{_escape_like(search)}%")
         idx += 1
 
     where = " AND ".join(conditions)

@@ -38,6 +38,18 @@ def test_admin_job_create_requires_title():
         AdminJobCreate(client_id=1, title="")
 
 
+# security-auditor LOW finding: status used to be a bare `str`, letting any
+# value through (typos included) straight into job_orders.status.
+def test_admin_job_create_accepts_each_allowed_status():
+    for status in ("draft", "open", "closed"):
+        assert AdminJobCreate(client_id=1, title="x", status=status).status == status
+
+
+def test_admin_job_create_rejects_bad_status():
+    with pytest.raises(ValidationError):
+        AdminJobCreate(client_id=1, title="x", status="pending")
+
+
 # ── Router: create/delete/list, monkeypatched DB ──────────────────────────
 
 class _FakeDB:
@@ -195,3 +207,29 @@ def test_list_all_jobs_search_filters_by_title_or_company(monkeypatch):
     count_calls = [args for sql, args in db.statements if sql.strip().startswith("SELECT COUNT(*)")]
     assert count_calls
     assert any("%embedded%" in str(a) for a in count_calls[0])
+
+
+def test_list_all_jobs_escapes_like_wildcards_in_search(monkeypatch):
+    """A literal % or _ in the search term must not act as an ILIKE
+    wildcard (security-auditor LOW finding -- same _escape_like()/
+    ESCAPE '\\' pattern as routers/clients_admin.py)."""
+    import routers.admin as admin
+
+    db = _FakeDB()
+    monkeypatch.setattr(admin, "fetch_one", db.fetch_one)
+    monkeypatch.setattr(admin, "fetch_all", db.fetch_all)
+    monkeypatch.setattr(admin, "fetch_val", db.fetch_val)
+    monkeypatch.setattr(admin, "execute", db.execute)
+
+    asyncio.run(admin.list_all_jobs(
+        status=None, client_id=None, search="50%_off", include_demo=False,
+        limit=50, offset=0, page=None, current_user={"id": 5, "role": "admin"},
+    ))
+
+    count_calls = [args for sql, args in db.statements if sql.strip().startswith("SELECT COUNT(*)")]
+    assert count_calls
+    bound_search = next(a for a in count_calls[0] if isinstance(a, str) and "50" in a)
+    assert bound_search == "%50\\%\\_off%"
+
+    where_sql = next(sql for sql, args in db.statements if sql.strip().startswith("SELECT COUNT(*)"))
+    assert "ESCAPE '\\'" in where_sql

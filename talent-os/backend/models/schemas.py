@@ -589,7 +589,11 @@ class AdminJobCreate(BaseModel):
     requirements: Optional[str] = None
     employment_type: Optional[Literal["vast", "detachering", "interim"]] = None
     sponsorship_possible: bool = False
-    status: str = "draft"
+    # security-auditor LOW finding: was a bare `str`, letting the caller
+    # set job_orders.status to any string at all (typos included) with no
+    # validation -- constrained to the same three values update_any_job's
+    # AdminJobUpdate.status effectively supports downstream.
+    status: Literal["draft", "open", "closed"] = "draft"
 
 
 class AdminAnalytics(BaseModel):

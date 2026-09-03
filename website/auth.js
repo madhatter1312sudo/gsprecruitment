@@ -98,10 +98,19 @@ const Auth = {
     return true;
   },
 
-  /* ---- Clear auth data ---- */
+  /* ---- Clear auth data ----
+     Also clears any parked admin impersonation session (ADMIN_TOKEN_KEY/
+     ADMIN_USER_KEY): logout, the 401 handler in fetch(), and an expired-
+     token check in requireAuth() all funnel through this, so a parked
+     admin token must never survive past any of those (security-auditor
+     HIGH finding) -- leaving it behind would let whoever next opens this
+     browser profile call restoreAdmin() and land back in the admin
+     session even though the user who was impersonating is long gone. */
   clearAuth() {
     localStorage.removeItem(this.TOKEN_KEY);
     localStorage.removeItem(this.USER_KEY);
+    localStorage.removeItem(this.ADMIN_TOKEN_KEY);
+    localStorage.removeItem(this.ADMIN_USER_KEY);
   },
 
   /* ---- Impersonation (WS-B.2) ----
@@ -123,8 +132,21 @@ const Auth = {
     return this.setAuth(token, user);
   },
 
+  /* A parked admin token alone isn't proof the *active* session is an
+     impersonation -- it could be stale (left behind by an older bug, or
+     restored oddly) while the current token is just an ordinary login.
+     Require both: something parked under ADMIN_TOKEN_KEY, AND the active
+     token's own JWT payload carrying the `impersonator` claim
+     routers/admin.py's POST /users/{id}/impersonate sets (security-auditor
+     MEDIUM finding). parseJwt() only decodes the payload for this UI gate
+     -- it does not verify the signature, so this must never be used for
+     anything the backend doesn't independently re-check. */
   isImpersonating() {
-    return !!localStorage.getItem(this.ADMIN_TOKEN_KEY);
+    if (!localStorage.getItem(this.ADMIN_TOKEN_KEY)) return false;
+    const token = this.getToken();
+    if (!token) return false;
+    const payload = this.parseJwt(token);
+    return !!(payload && payload.impersonator);
   },
 
   /* ---- Restore the parked admin session and return to /admin/ ---- */
@@ -340,6 +362,15 @@ const Auth = {
     // tokens -- no tokens are stored yet, the caller must complete the
     // second step via Auth.verifyMfa()/Auth.verifyMfaRecovery().
     if (data.mfa_required) return { mfaRequired: true, mfaToken: data.mfa_token };
+    // A fresh, real login is never a continuation of some earlier
+    // impersonation -- clear any parked admin session first so a stale
+    // gsp_admin_token/gsp_admin_user pair from before can't attach itself
+    // to this new session (security-auditor HIGH finding). Not done
+    // inside setAuth() itself: startImpersonation() parks the admin
+    // session and then calls setAuth() for the impersonated one, and
+    // that parking must survive.
+    localStorage.removeItem(this.ADMIN_TOKEN_KEY);
+    localStorage.removeItem(this.ADMIN_USER_KEY);
     const saved = this.setAuth(data.access_token, data.user);
     if (!saved) return { error: 'Cookie consent required.' };
     return { user: data.user };

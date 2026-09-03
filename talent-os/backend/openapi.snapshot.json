@@ -332,6 +332,11 @@
           },
           "status": {
             "default": "draft",
+            "enum": [
+              "draft",
+              "open",
+              "closed"
+            ],
             "title": "Status",
             "type": "string"
           },
