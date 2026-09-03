@@ -14,12 +14,23 @@ jobs:
         run: |
           set +e
 
+          # Every probe below retries exactly once, 20s later, before it's
+          # allowed to trigger an alert -- a single transient blip (a
+          # deploy mid-restart, a momentary network hiccup) shouldn't page
+          # anyone; only a failure that's still there 20s later should.
+
           # Plain "does this return 200" check.
           check() {
             local name="$1"
             local url="$2"
             code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 20 \
               -H "User-Agent: gsp-ops" "$url")
+            if [ "$code" != "200" ]; then
+              echo "${name}: ${url} -> HTTP ${code} (retrying once after 20s)"
+              sleep 20
+              code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 20 \
+                -H "User-Agent: gsp-ops" "$url")
+            fi
             echo "${name}: ${url} -> HTTP ${code}"
             if [ "$code" != "200" ]; then
               echo "${name}=${code}" >> "$GITHUB_OUTPUT"
@@ -34,6 +45,12 @@ jobs:
             local url="$2"
             code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 20 \
               -H "User-Agent: gsp-ops" "$url")
+            if [ "$code" != "401" ]; then
+              echo "${name}: ${url} -> HTTP ${code} (want 401, retrying once after 20s)"
+              sleep 20
+              code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 20 \
+                -H "User-Agent: gsp-ops" "$url")
+            fi
             echo "${name}: ${url} -> HTTP ${code} (want 401)"
             if [ "$code" != "401" ]; then
               echo "${name}=${code}" >> "$GITHUB_OUTPUT"
@@ -47,9 +64,19 @@ jobs:
           check_csp() {
             local name="$1"
             local url="$2"
-            response=$(curl -s -D - -o /dev/null --max-time 20 \
-              -H "User-Agent: gsp-ops" "$url")
-            code=$(echo "$response" | head -1 | awk '{print $2}')
+            local attempt
+            for attempt in 1 2; do
+              response=$(curl -s -D - -o /dev/null --max-time 20 \
+                -H "User-Agent: gsp-ops" "$url")
+              code=$(echo "$response" | head -1 | awk '{print $2}')
+              if [ "$code" = "200" ] && echo "$response" | grep -qi '^content-security-policy:'; then
+                break
+              fi
+              if [ "$attempt" = "1" ]; then
+                echo "${name}: ${url} -> HTTP ${code} (retrying once after 20s)"
+                sleep 20
+              fi
+            done
             echo "${name}: ${url} -> HTTP ${code}"
             if [ "$code" != "200" ]; then
               echo "${name}=${code}" >> "$GITHUB_OUTPUT"

@@ -28,13 +28,35 @@ flat, exact-pinned `pip freeze`-style file.
 
 ## Vulnerability scanning
 
-CI runs `pip-audit -r talent-os/backend/requirements.txt` on every push/PR
-(`.github/workflows/ci.yml`, job `pip-audit`) and fails the build on a known
-vulnerability. A finding that is a false positive or genuinely unfixable
-right now goes in `talent-os/backend/.pip-audit-ignore` (one advisory ID per
-line, with a comment explaining why) — see that file's header for the exact
-format. Don't add an ignore entry without a comment saying why it's safe to
-skip and when to revisit it.
+CI runs `pip-audit` against BOTH `requirements.txt` and `requirements.lock`
+on every push/PR (`.github/workflows/ci.yml`, job `pip-audit`) and fails the
+build on a known vulnerability in either — the ranges catch a vuln
+discovered after the lock was last generated; the lock catches one in the
+exact version currently shipping. A finding that is a false positive or
+genuinely unfixable right now goes in `talent-os/backend/.pip-audit-ignore`
+(one advisory ID per line, with a comment explaining why) — see that file's
+header for the exact format; the same ignore list applies to both runs.
+Don't add an ignore entry without a comment saying why it's safe to skip
+and when to revisit it.
+
+## Lock/requirements drift check (CI)
+
+`.github/workflows/ci.yml`'s `lock-consistency` job fails the build when
+`requirements.lock` no longer matches what `requirements.txt` currently
+asks for — e.g. `requirements.txt` was bumped/widened but the lock wasn't
+regenerated, so the Dockerfile would keep shipping a version that no
+longer satisfies the human-edited source. It does, in a clean venv:
+
+```bash
+pip install --no-deps -r requirements.lock   # exactly what the Dockerfile does
+pip check                                    # that closed set isn't internally broken
+pip install --dry-run --no-deps -r requirements.txt   # every direct dep must already
+                                                        # be satisfied -- any "Would
+                                                        # install" line means drift
+```
+
+If this job fails, the fix is almost always "regenerate the lock" (see
+above), not editing the workflow.
 
 ## 2026-09 dependency cleanup (WS-E.9)
 

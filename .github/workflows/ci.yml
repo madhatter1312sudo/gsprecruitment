@@ -127,13 +127,19 @@ jobs:
       - name: Install pip-audit
         run: pip install -r talent-os/backend/requirements-dev.txt
 
-      # Audits requirements.txt (the human-edited version-range source),
-      # not requirements.lock -- auditing the lock would only ever catch a
-      # vuln at the moment it was last regenerated; auditing the ranges
-      # catches one that gets discovered later against a version this repo
-      # would still happily resolve to today. Known/accepted findings go in
-      # talent-os/backend/.pip-audit-ignore (documented there, empty by
-      # default) rather than being silently ignored inline.
+      # Audits BOTH files, for two different questions:
+      #   - requirements.txt (the human-edited version-range source): a
+      #     vuln discovered *after* the lock was last generated, in a
+      #     version this repo's ranges would still happily resolve to
+      #     today, shows up here first.
+      #   - requirements.lock (what the Dockerfile actually installs):
+      #     catches a vuln in the exact pinned version currently shipping,
+      #     even if a wider-but-still-in-range version would have avoided
+      #     it -- this is the one that answers "is production affected
+      #     right now".
+      # Known/accepted findings go in talent-os/backend/.pip-audit-ignore
+      # (documented there, empty by default) rather than being silently
+      # ignored inline; the same ignore list applies to both runs.
       - name: pip-audit
         working-directory: talent-os/backend
         run: |
@@ -145,7 +151,48 @@ jobs:
               ignore_args+=(--ignore-vuln "$id")
             done < .pip-audit-ignore
           fi
+          echo "== requirements.txt (version ranges) =="
           pip-audit -r requirements.txt "${ignore_args[@]}"
+          echo "== requirements.lock (what ships) =="
+          pip-audit -r requirements.lock "${ignore_args[@]}"
+
+  lock-consistency:
+    name: Lockfile matches requirements.txt
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          # Pinned identically to the backend job / deploy.yml / Dockerfile.
+          python-version: "3.12"
+
+      # Fails when requirements.lock (the Dockerfile's install source) has
+      # drifted from what requirements.txt (the human-edited source) now
+      # asks for -- e.g. someone widened/bumped a range in requirements.txt
+      # without regenerating the lock (docs/BACKEND-DEPS.md), or a
+      # transitive pin in the lock no longer satisfies it. A clean venv is
+      # installed from the lock with --no-deps (exactly what the
+      # Dockerfile does), `pip check` confirms nothing in that closed set
+      # is internally broken, then a --no-deps --dry-run install of
+      # requirements.txt against that same venv must report every direct
+      # dependency as "already satisfied" -- any "Would install" line
+      # means the lock no longer covers what requirements.txt declares.
+      - name: Lock installs cleanly and satisfies requirements.txt
+        working-directory: talent-os/backend
+        run: |
+          set -e
+          python3 -m venv /tmp/lock-check-venv
+          /tmp/lock-check-venv/bin/pip install --quiet --upgrade pip
+          /tmp/lock-check-venv/bin/pip install --no-deps -r requirements.lock
+          /tmp/lock-check-venv/bin/pip check
+          dry_run_output=$(/tmp/lock-check-venv/bin/pip install --dry-run --no-deps -r requirements.txt 2>&1)
+          echo "$dry_run_output"
+          if echo "$dry_run_output" | grep -q "Would install"; then
+            echo "::error::requirements.lock no longer satisfies requirements.txt -- regenerate the lock (see docs/BACKEND-DEPS.md)"
+            exit 1
+          fi
+          echo "OK: requirements.lock satisfies requirements.txt"
 
   gitleaks:
     name: Secret scan (gitleaks)
@@ -165,6 +212,10 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITLEAKS_ENABLE_SUMMARY: "true"
+          # Explicit path, not relying on gitleaks-action's auto-detected
+          # `gitleaks.toml` name -- this repo's file is the dotfile
+          # .gitleaks.toml (see that file for the allowlist it adds).
+          GITLEAKS_CONFIG: .gitleaks.toml
 
   web:
     name: Website (static checks + CSP)

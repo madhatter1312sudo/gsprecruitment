@@ -105,6 +105,7 @@ in de GitHub-repo).
    - `Backend (Python)` (job `backend`)
    - `Mobile (Expo/TypeScript)` (job `mobile`)
    - `Backend dependency audit (pip-audit)` (job `pip-audit`)
+   - `Lockfile matches requirements.txt` (job `lock-consistency`)
    - `Secret scan (gitleaks)` (job `gitleaks`)
    - `Website (static checks + CSP)` (job `web`)
 
