@@ -206,7 +206,14 @@ class CandidateResponse(CandidateCreate):
     quality_score: Optional[float] = None
     cv_file_path: Optional[str] = None
     created_at: datetime
-    updated_at: datetime
+    # NOT required: no INSERT into candidates (create_candidate, the
+    # webhook, portal registration, harvest.py, scheduler.py) ever sets
+    # this column explicitly, so any row inserted before the column
+    # picked up a DEFAULT NOW() (see migrations/027_candidates_updated_at_default.py)
+    # reads back NULL here -- a required datetime raised
+    # ResponseValidationError on GET /api/candidates and GET
+    # /api/candidates/{id} for every such row.
+    updated_at: Optional[datetime] = None
 
     model_config = {"from_attributes": True}
 

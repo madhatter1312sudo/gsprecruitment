@@ -1410,9 +1410,16 @@
             "type": "array"
           },
           "updated_at": {
-            "format": "date-time",
-            "title": "Updated At",
-            "type": "string"
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
           },
           "willing_to_relocate": {
             "default": false,
@@ -1434,8 +1441,7 @@
         "required": [
           "full_name",
           "id",
-          "created_at",
-          "updated_at"
+          "created_at"
         ],
         "title": "CandidateResponse",
         "type": "object"
