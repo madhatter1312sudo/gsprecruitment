@@ -781,7 +781,6 @@ class PipelineStageHistoryItem(BaseModel):
     model_config = {"from_attributes": True}
 
 
-<<<<<<< HEAD
 # ── WS-C.7: Placements (minimal) + immigratiestatus. PROVISIONAL. ────────
 # Pricing/margin factors here are owner decisions not yet finalised, and
 # nothing built on top of these models is published to the public site or
@@ -904,7 +903,6 @@ class PlacementResponse(BaseModel):
     one_off_costs: List[OneOffCost] = []
     status: str
     notes: Optional[str] = None
-=======
 # ── WS-C.6: Activities (unified activity/task log) ───────────────────────
 
 ACTIVITY_SUBJECT_TYPES = ("candidate", "client", "job", "prospect", "placement", "lead")
@@ -945,7 +943,6 @@ class ActivityResponse(BaseModel):
     due_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
     internal: bool = True
->>>>>>> origin/main
     created_by: Optional[int] = None
     created_at: datetime
     updated_at: Optional[datetime] = None
@@ -953,8 +950,6 @@ class ActivityResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
-<<<<<<< HEAD
-=======
 # Client-portal create: subject_type is restricted server-side (job | candidate,
 # scoped to the caller's own client via user_clients -- routers/activities.py),
 # never trusted from the body the way the admin create is. Deliberately has
@@ -969,7 +964,6 @@ class ClientActivityCreate(BaseModel):
     completed_at: Optional[datetime] = None
 
 
->>>>>>> origin/main
 # ── WS-C.10: Leads (unified contact_submissions + quiz_submissions) ──────
 
 class LeadReadUpdate(BaseModel):

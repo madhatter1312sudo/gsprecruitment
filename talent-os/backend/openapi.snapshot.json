@@ -3725,22 +3725,6 @@
             "title": "Client Id",
             "type": "integer"
           },
-          "created_at": {
-            "format": "date-time",
-            "title": "Created At",
-            "type": "string"
-          },
-          "created_by": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Created By"
-          },
           "end_date": {
             "anyOf": [
               {
@@ -3893,18 +3877,6 @@
           "status": {
             "title": "Status",
             "type": "string"
-          },
-          "updated_at": {
-            "anyOf": [
-              {
-                "format": "date-time",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Updated At"
           }
         },
         "required": [
@@ -3913,8 +3885,7 @@
           "job_id",
           "client_id",
           "placement_type",
-          "status",
-          "created_at"
+          "status"
         ],
         "title": "PlacementResponse",
         "type": "object"
