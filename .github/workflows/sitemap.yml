@@ -16,9 +16,8 @@ on:
     branches: [main]
     paths:
       - "website/**"
+      - "!website/sitemap.xml"
       - "scripts/generate_sitemap.py"
-    paths-ignore:
-      - "website/sitemap.xml"
 
 concurrency:
   group: sitemap
