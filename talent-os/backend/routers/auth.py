@@ -382,7 +382,7 @@ info@gsprecruitment.nl
 """,
     )
     if not email_sent:
-        logger.warning(f"Failed to send password reset email to {email}")
+        logger.warning(f"Failed to send password reset email for user_id={user['id']}")
 
     return {"message": "If that email exists, a reset link has been sent"}
 

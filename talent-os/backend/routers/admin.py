@@ -41,7 +41,7 @@ async def get_admin_dashboard(current_user: dict = Depends(require_role("admin")
     stats = AdminDashboard()
     total_users, active_jobs, registered_candidates, active_clients, placements_this_week = await asyncio.gather(
         fetch_val("SELECT COUNT(*) FROM users WHERE deleted_at IS NULL"),
-        fetch_val("SELECT COUNT(*) FROM job_orders WHERE status = 'open' AND deleted_at IS NULL"),
+        fetch_val("SELECT COUNT(*) FROM job_orders WHERE status = 'open' AND deleted_at IS NULL AND is_demo = false"),
         fetch_val("SELECT COUNT(*) FROM users WHERE role = 'candidate' AND deleted_at IS NULL"),
         fetch_val("SELECT COUNT(*) FROM clients WHERE deleted_at IS NULL"),
         fetch_val(
@@ -255,15 +255,19 @@ async def impersonate_user(
 async def list_all_jobs(
     status: Optional[str] = Query(None),
     client_id: Optional[int] = Query(None),
+    include_demo: bool = Query(False, description="Include is_demo=true seed/placeholder jobs (default excludes them)."),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
     current_user: dict = Depends(require_role("admin")),
 ):
-    """List all jobs cross-client."""
+    """List all jobs cross-client. Excludes is_demo jobs (migrations/012's
+    6 seed vacancies) unless include_demo=true is explicitly passed."""
     conditions = ["j.deleted_at IS NULL"]
     params = []
     idx = 1
 
+    if not include_demo:
+        conditions.append("j.is_demo = false")
     if status:
         conditions.append(f"j.status = ${idx}")
         params.append(status)
@@ -303,6 +307,8 @@ async def update_any_job(
     allowed = {
         "status", "title", "department", "seniority", "description",
         "requirements", "fee_percentage", "urgency",
+        # WS-C.15 / WS-A.5 (migrations/016_job_orders_columns.py)
+        "city", "company_display", "employment_type", "sponsorship_possible",
     }
 
     update_dict = updates.model_dump(exclude_none=True)
@@ -552,8 +558,8 @@ async def get_platform_analytics(current_user: dict = Depends(require_role("admi
                FROM users WHERE deleted_at IS NULL AND created_at >= NOW() - INTERVAL '12 months'
                GROUP BY month ORDER BY month""",
         ),
-        fetch_val("SELECT COUNT(*) FROM job_orders WHERE deleted_at IS NULL"),
-        fetch_val("SELECT COUNT(*) FROM job_orders WHERE filled_at IS NOT NULL AND deleted_at IS NULL"),
+        fetch_val("SELECT COUNT(*) FROM job_orders WHERE deleted_at IS NULL AND is_demo = false"),
+        fetch_val("SELECT COUNT(*) FROM job_orders WHERE filled_at IS NOT NULL AND deleted_at IS NULL AND is_demo = false"),
         fetch_val("SELECT COUNT(*) FROM clients WHERE deleted_at IS NULL"),
         fetch_val(
             """SELECT COUNT(*) FROM (

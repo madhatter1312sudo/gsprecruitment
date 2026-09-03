@@ -36,7 +36,9 @@ async def get_health_detail() -> HealthResponse:
     open_jobs = None
     if db_status == "connected":
         candidates_count = await fetch_val("SELECT COUNT(*) FROM candidates")
-        open_jobs = await fetch_val("SELECT COUNT(*) FROM job_orders WHERE status = 'open'")
+        open_jobs = await fetch_val(
+            "SELECT COUNT(*) FROM job_orders WHERE status = 'open' AND is_demo = false"
+        )
 
     openrouter_status = "configured" if settings.openrouter_api_key else "not configured"
     apollo_status = "configured" if settings.apollo_api_key else "not configured"

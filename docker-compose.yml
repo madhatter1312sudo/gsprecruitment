@@ -22,6 +22,21 @@
 # (talent-os/backend/migrations/000_baseline.py) plus the rest of
 # migrations/ now cover what init_db.sql used to be assumed to do -- see
 # the "Run database migrations" step in .github/workflows/deploy.yml.
+#
+# WS-E.6 (2026-09-03): postgres credentials (POSTGRES_DB/USER/PASSWORD) now
+# also come from ./talent-os/postgres.env (gitignored; see
+# talent-os/postgres.env.example), listed after ./talent-os/.env so it can
+# be rotated/audited on its own. talent-os/.env keeps carrying the same
+# vars too -- nothing is removed from it -- so this is additive, not a
+# behaviour change; docker compose merges env_file entries in order with
+# later files winning on overlap. Deploy tooling (.github/workflows/
+# deploy.yml, scripts/deploy.sh, start.sh) creates postgres.env from the
+# existing .env the first time it runs after this change, so `docker
+# compose up` never breaks on a host that doesn't have it yet.
+#
+# Also added: JSON-file log rotation (max 5 x 20 MB per container) on
+# postgres and backend, so container logs can no longer grow unbounded on
+# the VPS disk. See docs/VERWERKINGSREGISTER.md §1.4.
 
 services:
   # ── PostgreSQL ──────────────────────────────────────────────────────────
@@ -35,6 +50,12 @@ services:
           memory: 4G
     env_file:
       - ./talent-os/.env
+      - ./talent-os/postgres.env
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
     volumes:
       - pgdata:/var/lib/postgresql/data
     ports:
@@ -66,6 +87,12 @@ services:
           memory: 2G
     env_file:
       - ./talent-os/.env
+      - ./talent-os/postgres.env
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
     depends_on:
       postgres:
         condition: service_healthy
