@@ -4205,7 +4205,7 @@
     },
     "/api/auth/login": {
       "post": {
-        "description": "Authenticate a user and return a JWT token (or, for an admin with\nMFA enabled, an mfa_required challenge -- WS-E.12, see core/mfa.py).",
+        "description": "Authenticate a user and return a JWT token (or, for an admin with\nMFA enabled, an mfa_required challenge -- WS-E.12, see core/mfa.py).\n\nLocked-out and wrong-password both return the exact same generic 401\n-- a locked account must never be distinguishable from a bad password\n(which itself must never be distinguishable from \"no such account\",\nsee _get_user_by_email's callers) -- the only extra signal is a\nRetry-After header, and only while actually locked.",
         "operationId": "login_api_auth_login_post",
         "requestBody": {
           "content": {
@@ -4541,7 +4541,7 @@
     },
     "/api/auth/refresh": {
       "post": {
-        "description": "Issue a new access token using an existing valid token.\n\nRejects tokens carrying an `impersonator` claim -- an admin\nimpersonation token must stay short-lived and never be silently\nextended into a fresh, long-lived session (see routers/admin.py\nimpersonate_user).",
+        "description": "Issue a new access token using an existing valid token.\n\nRejects tokens carrying an `impersonator` claim -- an admin\nimpersonation token must stay short-lived and never be silently\nextended into a fresh, long-lived session (see routers/admin.py\nimpersonate_user).\n\nSecurity-audit follow-up on WS-E.4: this endpoint decodes the token\nitself (get_current_user is not in its dependency chain), so it must\nrun the same iat-vs-password_changed_at check get_current_user does\n-- otherwise a token stolen before a password reset could be\n\"laundered\" into a fresh one here even though it would be rejected\neverywhere else.",
         "operationId": "refresh_token_api_auth_refresh_post",
         "requestBody": {
           "content": {
@@ -7620,6 +7620,52 @@
           }
         ],
         "summary": "Impersonate User",
+        "tags": [
+          "admin-portal"
+        ]
+      }
+    },
+    "/api/v1/admin/users/{user_id}/unlock": {
+      "post": {
+        "description": "WS-E.4: clear an account's login lockout (failed_login_count /\nlocked_until) early -- e.g. a legitimate user got rate-limited by\ntheir own retries. Does not touch password_hash or\npassword_changed_at, so any JWT already issued to this user stays\nvalid (unlocking is not a password reset).",
+        "operationId": "unlock_user_api_v1_admin_users__user_id__unlock_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "title": "User Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Unlock User",
         "tags": [
           "admin-portal"
         ]

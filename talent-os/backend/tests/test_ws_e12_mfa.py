@@ -190,6 +190,10 @@ def test_login_returns_mfa_required_for_admin_with_mfa_enabled(monkeypatch):
             "role": "admin",
             "password_hash": hash_password("correct horse battery staple"),
             "is_verified": True,
+            "locked_until": None,
+            "failed_login_count": 0,
+            "last_failed_login_at": None,
+            "password_changed_at": None,
             "totp_enabled_at": "2026-01-01T00:00:00+00:00",
         }
 
@@ -218,6 +222,10 @@ def test_login_issues_normal_tokens_for_admin_without_mfa(monkeypatch):
             "role": "admin",
             "password_hash": hash_password("correct horse battery staple"),
             "is_verified": True,
+            "locked_until": None,
+            "failed_login_count": 0,
+            "last_failed_login_at": None,
+            "password_changed_at": None,
             "totp_enabled_at": None,
         }
 

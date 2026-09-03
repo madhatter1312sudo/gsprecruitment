@@ -5,8 +5,45 @@ from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials
 from core.security import bearer_scheme, decode_token
 from core.database import fetch_one
+from datetime import datetime, timezone
 from core.config import settings
 from typing import Optional
+
+
+def _token_predates_password_change(payload: dict, user: dict) -> bool:
+    """WS-E.4: True if this token's 'iat' is older than the account's
+    users.password_changed_at -- i.e. it was issued before the most
+    recent password change/reset/set-password and must be rejected (a
+    token stolen before a reset must not keep working after it).
+
+    A token with no 'iat' claim at all (issued before this check existed,
+    or by any caller that doesn't stamp one) is NOT rejected here -- see
+    core/security.create_access_token's docstring: it remains valid until
+    its own 'exp' expiry. Same if the account has never had
+    password_changed_at set (NULL -- nothing to compare against).
+
+    Security-audit follow-up: JWT 'iat' is whole seconds (the JWT spec's
+    NumericDate), but password_changed_at is a Postgres TIMESTAMPTZ with
+    microsecond precision -- comparing them raw meant a login in the same
+    second as a password change (e.g. set-password immediately followed
+    by login) could have its brand-new token rejected because its
+    truncated iat looked "older" than the sub-second changed_at. Truncate
+    changed_at to whole seconds too before comparing (1-second tolerance,
+    matching iat's own resolution) -- a token minted any time in the same
+    second as the change is treated as no older than it.
+    """
+    iat = payload.get("iat")
+    changed_at = user.get("password_changed_at")
+    if iat is None or changed_at is None:
+        return False
+    if isinstance(iat, (int, float)):
+        iat_dt = datetime.fromtimestamp(iat, tz=timezone.utc)
+    else:
+        iat_dt = iat
+    if changed_at.tzinfo is None:
+        changed_at = changed_at.replace(tzinfo=timezone.utc)
+    changed_at = changed_at.replace(microsecond=0)
+    return iat_dt < changed_at
 
 
 async def get_current_user(
@@ -59,7 +96,7 @@ async def get_current_user(
 
     user = await fetch_one(
         "SELECT id, email, full_name, role, is_verified, email_verified_at, "
-        "approved_by_admin_at, created_at, updated_at, totp_enabled_at "
+        "approved_by_admin_at, password_changed_at, created_at, updated_at, totp_enabled_at "
         "FROM users WHERE id = $1 AND deleted_at IS NULL",
         user_id,
     )
@@ -67,6 +104,13 @@ async def get_current_user(
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="User not found or deactivated",
+        )
+
+    if _token_predates_password_change(payload, user):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token invalidated by a password change — please sign in again",
+            headers={"WWW-Authenticate": "Bearer"},
         )
 
     return user
