@@ -4,6 +4,7 @@ Talent OS — Job Orders router (asyncpg, auth-protected).
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from core.database import fetch_all, fetch_one, execute
 from core.security import verify_api_key
+from models.schemas import JobOrderCreate, JobOrderUpdate
 from typing import Optional, List
 
 router = APIRouter(prefix="/api/jobs", tags=["jobs"], dependencies=[Depends(verify_api_key)])
@@ -34,31 +35,33 @@ async def get_job(job_id: int):
 
 
 @router.post("", status_code=201)
-async def create_job(data: dict):
+async def create_job(data: JobOrderCreate):
     """Create a new job order."""
     row = await fetch_one(
         """INSERT INTO job_orders
            (client_id, title, department, seniority, location_type,
-            salary_min, salary_max, description, requirements, urgency)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+            salary_min, salary_max, salary_currency, description, requirements,
+            nice_to_have, urgency)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
            RETURNING *""",
-        data.get("client_id"), data.get("title"), data.get("department"),
-        data.get("seniority"), data.get("location_type"),
-        data.get("salary_min"), data.get("salary_max"),
-        data.get("description"), data.get("requirements"), data.get("urgency", "normal"),
+        data.client_id, data.title, data.department, data.seniority,
+        data.location_type, data.salary_min, data.salary_max,
+        data.salary_currency, data.description, data.requirements,
+        data.nice_to_have, data.urgency,
     )
     return row
 
 
 @router.patch("/{job_id}")
-async def update_job(job_id: int, updates: dict):
+async def update_job(job_id: int, updates: JobOrderUpdate):
     """Partial update of a job order."""
-    allowed = {"status", "title", "department", "seniority", "salary_min",
-               "salary_max", "description", "requirements", "urgency"}
+    allowed = {"status", "title", "department", "seniority", "location_type",
+               "salary_min", "salary_max", "salary_currency", "description",
+               "requirements", "nice_to_have", "urgency"}
     set_parts = []
     values = []
     idx = 1
-    for key, val in updates.items():
+    for key, val in updates.model_dump(exclude_none=True).items():
         if key not in allowed:
             continue
         set_parts.append(f"{key} = ${idx}")

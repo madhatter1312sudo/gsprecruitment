@@ -143,6 +143,19 @@ class CandidateResponse(CandidateCreate):
     model_config = {"from_attributes": True}
 
 
+class CandidateAdminUpdate(BaseModel):
+    """PATCH /api/candidates/{id} (X-API-Key, internal/agent use) -- the
+    same allow-listed fields the router used to accept as a raw dict."""
+    status: Optional[str] = None
+    screening_score: Optional[int] = None
+    screening_notes: Optional[str] = None
+    quality_score: Optional[float] = None
+    screened_by_agent: Optional[str] = None
+    strength_score: Optional[float] = Field(None, ge=1.0, le=10.0)
+    switch_readiness: Optional[str] = Field(None, pattern=r"^(LOW|MEDIUM|HIGH|ACTIVE)$")
+    tags: Optional[List[str]] = None
+
+
 class CandidatePortalProfile(BaseModel):
     """Full candidate profile combining users + candidate_profiles."""
     id: int
@@ -248,11 +261,14 @@ class MatchCreate(BaseModel):
 
 
 class MatchResponse(BaseModel):
+    # match_breakdown intentionally omitted: no code path ever writes it
+    # (grepped routers/matches.py, services/matcher.py) so it would only
+    # ever serialize as null. The `matches.match_breakdown` DB column is
+    # left in place (no migration needed to drop an always-null column).
     id: int
     job_id: int
     candidate_id: int
     match_score: Optional[float] = None
-    match_breakdown: Optional[dict] = None
     status: str = "pending"
     created_at: datetime
 
@@ -501,13 +517,23 @@ class PaginatedResponse(BaseModel):
 
 
 class MessageResponse(BaseModel):
+    # Fields match the actual `outreach_messages` table (migrations/000_baseline.py)
+    # -- there is no separate `messages` table, and no sender_id/recipient_id
+    # columns exist. is_read is derived (opened_at IS NOT NULL), not stored;
+    # routers must set it explicitly per row, it is never a raw DB column.
     id: int
-    sender_id: Optional[int] = None
-    recipient_id: Optional[int] = None
+    candidate_id: Optional[int] = None
+    campaign_id: Optional[int] = None
+    recipient_email: Optional[str] = None
     subject: Optional[str] = None
     body: Optional[str] = None
+    channel: Optional[str] = None
+    status: Optional[str] = None
     is_read: bool = False
+    sent_at: Optional[datetime] = None
     created_at: datetime
+
+    model_config = {"from_attributes": True}
 
 
 class MessageListResponse(BaseModel):

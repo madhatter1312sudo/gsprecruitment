@@ -521,7 +521,13 @@ async def get_candidate_messages(
         ),
     )
 
-    return MessageListResponse(messages=rows, unread_count=unread or 0)
+    # is_read is derived, not a DB column -- outreach_messages has no
+    # is_read field, only opened_at (see models.schemas.MessageResponse).
+    messages = [
+        MessageResponse(**{**dict(r), "is_read": r["opened_at"] is not None})
+        for r in rows
+    ]
+    return MessageListResponse(messages=messages, unread_count=unread or 0)
 
 
 # ── Salary Benchmark ────────────────────────────────────────────────────

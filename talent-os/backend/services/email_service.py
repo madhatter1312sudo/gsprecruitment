@@ -10,6 +10,7 @@ from email.mime.text import MIMEText
 from typing import Optional
 from google.oauth2.credentials import Credentials
 from google.auth.transport.requests import Request as GoogleRequest
+from starlette.concurrency import run_in_threadpool
 import httpx
 from core.config import settings
 
@@ -54,7 +55,10 @@ class EmailService:
         to_name: Optional[str] = None,
     ) -> bool:
         """Send an email via Gmail API."""
-        creds = self._get_credentials()
+        # _get_credentials() does blocking network I/O (creds.refresh()) --
+        # run it off the event loop so one slow/hanging Google OAuth refresh
+        # doesn't stall every other request being served by this worker.
+        creds = await run_in_threadpool(self._get_credentials)
         if not creds:
             logger.error("Cannot send email: no valid Google credentials")
             return False
