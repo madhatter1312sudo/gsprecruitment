@@ -19,6 +19,12 @@ python-jose[cryptography]>=3.3.0,<4.0.0
 slowapi>=0.1.9,<1.0.0
 email-validator>=2.0.0,<3.0.0
 
+# MFA (WS-E.12, admin TOTP): pyotp for TOTP generation/verification,
+# qrcode for its QR matrix builder only (core/mfa.py renders the matrix
+# as an inline SVG itself -- no PIL/image backend used or installed).
+pyotp==2.9.0
+qrcode==7.4.2
+
 # File uploads
 python-multipart>=0.0.9,<1.0.0
 

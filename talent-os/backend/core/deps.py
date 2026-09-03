@@ -5,6 +5,7 @@ from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials
 from core.security import bearer_scheme, decode_token
 from core.database import fetch_one
+from core.config import settings
 from typing import Optional
 
 
@@ -31,6 +32,18 @@ async def get_current_user(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
+    # WS-E.12: a token issued mid-MFA-challenge (scope="mfa_pending", see
+    # core/mfa.py issue_mfa_pending_token) is not a real session token --
+    # it can only be exchanged at POST /api/auth/mfa/verify or /recovery.
+    # Reject it here so it can never reach any other authenticated route,
+    # admin or otherwise.
+    if payload.get("scope") == "mfa_pending":
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="MFA verification required before this token can be used",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
     try:
         user_id = int(payload.get("sub"))
     except (TypeError, ValueError):
@@ -46,7 +59,7 @@ async def get_current_user(
 
     user = await fetch_one(
         "SELECT id, email, full_name, role, is_verified, email_verified_at, "
-        "approved_by_admin_at, created_at, updated_at "
+        "approved_by_admin_at, created_at, updated_at, totp_enabled_at "
         "FROM users WHERE id = $1 AND deleted_at IS NULL",
         user_id,
     )
@@ -128,8 +141,36 @@ def require_role(*allowed_roles: str):
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=f"Role '{current_user['role']}' not allowed. Requires one of: {', '.join(allowed_roles)}",
             )
+        _enforce_admin_mfa_requirement(current_user)
         return current_user
     return role_checker
+
+
+def _enforce_admin_mfa_requirement(current_user: dict) -> None:
+    """WS-E.12: when MFA_REQUIRED_FOR_ADMIN=true and the grace period
+    (MFA_GRACE_UNTIL) has passed, an admin who has not enabled MFA
+    (totp_enabled_at IS NULL) is rejected from every admin-gated route
+    with 403 mfa_setup_required. Deliberately does nothing for non-admin
+    roles, and does nothing at all while the flag is off (the default) --
+    so a fresh deploy or the very first admin account is never locked
+    out by this landing. GET/POST /api/auth/mfa/status and the
+    /api/auth/mfa/* setup/enable endpoints stay reachable regardless
+    (they're not behind require_role("admin") with this check -- see
+    routers/mfa.py, which requires a full session token but not MFA
+    itself to be already enabled)."""
+    if current_user.get("role") != "admin":
+        return
+    if not settings.mfa_required_for_admin:
+        return
+    if current_user.get("totp_enabled_at"):
+        return
+    from core.mfa import admin_mfa_grace_expired
+    if not admin_mfa_grace_expired():
+        return
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="mfa_setup_required",
+    )
 
 
 def require_verified_role(*allowed_roles: str):

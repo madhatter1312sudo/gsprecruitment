@@ -185,6 +185,16 @@
     <div class="page-body">
       <div class="container-xl">
 
+        <!-- WS-E.12: persistent MFA banner, shown whenever the signed-in
+             admin has not enabled two-factor authentication yet. Hidden
+             by default; Admin.renderMfaBanner() (js/admin.js) toggles it
+             via the hidden attribute after GET /api/auth/mfa/status. -->
+        <div class="alert alert-warning d-flex align-items-center mb-3" id="mfaBanner" hidden role="alert">
+          <i class="fa-solid fa-shield-halved me-2"></i>
+          <div class="flex-fill">Zet tweestapsverificatie aan om je account beter te beveiligen.</div>
+          <button type="button" class="btn btn-sm btn-warning ms-2" id="mfaBannerSetupBtn">Nu instellen</button>
+        </div>
+
         <!-- ==================== DASHBOARD ==================== -->
         <section class="portal-section active" id="section-dashboard">
           <div class="row row-deck row-cards mb-4">
@@ -629,6 +639,58 @@
                     <button class="btn btn-primary" id="saveSettingsBtn" onclick="Admin.saveSettings()">
                       <i class="fa-regular fa-floppy-disk"></i> Save Settings
                     </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="col-lg-6">
+              <div class="card mb-3">
+                <div class="card-header"><h3 class="card-title"><i class="fa-solid fa-shield-halved text-primary me-2"></i>Tweestapsverificatie (MFA)</h3></div>
+                <div class="card-body">
+                  <p class="text-secondary mb-3">Beveilig je admin-account met een authenticator-app (TOTP), naast je wachtwoord.</p>
+
+                  <!-- Status: MFA off -->
+                  <div id="mfaStateOff">
+                    <p class="mb-3" id="mfaOffText">Tweestapsverificatie staat uit.</p>
+                    <button type="button" class="btn btn-primary" id="mfaStartSetupBtn">
+                      <i class="fa-solid fa-qrcode"></i> Instellen
+                    </button>
+                  </div>
+
+                  <!-- Setup step 1: scan QR, enter first code -->
+                  <div id="mfaSetupPanel" hidden>
+                    <p class="mb-2">Scan deze QR-code met je authenticator-app (bijv. Google Authenticator, 1Password):</p>
+                    <div id="mfaQrHolder" class="mb-3" style="max-width:220px;"></div>
+                    <p class="text-secondary small mb-3">Kan je niet scannen? Voer deze code handmatig in: <code id="mfaManualSecret"></code></p>
+                    <div class="mb-3" style="max-width:220px;">
+                      <label class="form-label" for="mfaEnableCode">Code uit je app</label>
+                      <input type="text" inputmode="numeric" autocomplete="one-time-code" class="form-control" id="mfaEnableCode" placeholder="123456" maxlength="8">
+                    </div>
+                    <button type="button" class="btn btn-primary" id="mfaConfirmEnableBtn">Bevestigen en inschakelen</button>
+                    <button type="button" class="btn btn-link" id="mfaCancelSetupBtn">Annuleren</button>
+                    <div class="text-danger small mt-2" id="mfaSetupError" hidden></div>
+                  </div>
+
+                  <!-- Setup step 2: recovery codes, shown once -->
+                  <div id="mfaRecoveryPanel" hidden>
+                    <p class="mb-2">Tweestapsverificatie is ingeschakeld. Bewaar deze herstelcodes op een veilige plek &mdash; elke code werkt eenmalig als je geen toegang hebt tot je authenticator-app. Deze codes worden maar één keer getoond.</p>
+                    <pre class="bg-secondary-lt p-3 rounded" id="mfaRecoveryCodes" style="font-size:0.9rem;"></pre>
+                    <button type="button" class="btn btn-outline-primary" id="mfaCopyRecoveryBtn">
+                      <i class="fa-regular fa-copy"></i> Kopieer codes
+                    </button>
+                    <button type="button" class="btn btn-primary ms-2" id="mfaRecoveryDoneBtn">Klaar</button>
+                  </div>
+
+                  <!-- Status: MFA on -->
+                  <div id="mfaStateOn" hidden>
+                    <p class="mb-3 text-success"><i class="fa-solid fa-circle-check"></i> Tweestapsverificatie staat aan.</p>
+                    <div class="mb-3" style="max-width:220px;">
+                      <label class="form-label" for="mfaDisableCode">Code uit je app om uit te schakelen</label>
+                      <input type="text" inputmode="numeric" autocomplete="one-time-code" class="form-control" id="mfaDisableCode" placeholder="123456" maxlength="8">
+                    </div>
+                    <button type="button" class="btn btn-outline-danger" id="mfaDisableBtn">Uitschakelen</button>
+                    <div class="text-danger small mt-2" id="mfaDisableError" hidden></div>
                   </div>
                 </div>
               </div>

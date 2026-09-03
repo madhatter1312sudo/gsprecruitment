@@ -75,6 +75,49 @@ class RefreshRequest(BaseModel):
     refresh_token: Optional[str] = None
 
 
+# ── MFA (WS-E.12, admin TOTP) ────────────────────────────────────────────
+
+class MfaRequiredResponse(BaseModel):
+    """Returned by POST /api/auth/login in place of TokenResponse when the
+    account has MFA enabled -- see routers/auth.py login() and
+    core/mfa.py issue_mfa_pending_token."""
+    mfa_required: bool = True
+    mfa_token: str
+
+
+class MfaSetupResponse(BaseModel):
+    otpauth_uri: str
+    qr_svg: str
+    secret: str
+
+
+class MfaEnableRequest(BaseModel):
+    code: str = Field(..., min_length=6, max_length=8)
+
+
+class MfaEnableResponse(BaseModel):
+    message: str
+    recovery_codes: List[str]
+
+
+class MfaVerifyRequest(BaseModel):
+    mfa_token: str
+    code: str = Field(..., min_length=6, max_length=8)
+
+
+class MfaRecoveryRequest(BaseModel):
+    mfa_token: str
+    recovery_code: str = Field(..., min_length=6, max_length=16)
+
+
+class MfaDisableRequest(BaseModel):
+    code: str = Field(..., min_length=6, max_length=8)
+
+
+class MfaStatusResponse(BaseModel):
+    mfa_enabled: bool
+
+
 # ── Candidate ───────────────────────────────────────────────────────────
 
 def _normalize_http_url(v: Optional[str]) -> Optional[str]:

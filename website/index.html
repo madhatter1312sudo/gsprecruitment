@@ -472,6 +472,17 @@
         <button type="button" class="btn btn-ghost btn-sm"><i class="fab fa-google"></i> <span class="lang-en">Sign in with Google</span><span class="lang-nl">Inloggen met Google</span></button>
       </div>
     </form>
+    <!-- WS-E.12: second login step for an admin account with MFA enabled.
+         Hidden until Auth.login() returns mfaRequired -- see script.js. -->
+    <form id="mfaLoginForm" class="modal-form" style="display:none">
+      <p class="lang-en">Enter the 6-digit code from your authenticator app.</p>
+      <p class="lang-nl">Vul de 6-cijferige code van je authenticator-app in.</p>
+      <input type="text" id="mfaLoginCode" inputmode="numeric" autocomplete="one-time-code" placeholder="123456" data-lang-en="6-digit code" data-lang-nl="6-cijferige code" maxlength="8" required>
+      <button type="submit" class="btn btn-primary"><i class="fas fa-shield-halved"></i> <span class="lang-en">Verify</span><span class="lang-nl">Verifiëren</span></button>
+      <div class="modal-divider"><span class="lang-en">or</span><span class="lang-nl">of</span></div>
+      <button type="button" id="mfaUseRecoveryLink" class="btn btn-ghost btn-sm"><span class="lang-en">Use a recovery code instead</span><span class="lang-nl">Gebruik een herstelcode</span></button>
+      <input type="text" id="mfaRecoveryCodeInput" placeholder="Recovery code" data-lang-en="Recovery code" data-lang-nl="Herstelcode" style="display:none">
+    </form>
     <form id="registerForm" class="modal-form" style="display:none">
       <input type="text" id="regName" placeholder="Full name" data-lang-en="Full name" data-lang-nl="Volledige naam" required>
       <input type="email" id="regEmail" placeholder="Email address" data-lang-en="Email address" data-lang-nl="E-mailadres" required>
