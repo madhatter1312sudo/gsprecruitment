@@ -8,8 +8,12 @@ ACTION="${1:?action}"
 ROOT="${2:?repo path}"
 ENVFILE="$ROOT/talent-os/.env"
 
-envkey() { # envkey KEY -> value from .env (used only for paths, never echoed)
-    grep -E "^$1=" "$ENVFILE" 2>/dev/null | tail -1 | cut -d= -f2- || true
+envkey() { # envkey KEY -> value from .env (paths only, never echoed); strips quotes and trailing comments like backup.sh
+    local v
+    v="$(grep -E "^$1=" "$ENVFILE" 2>/dev/null | tail -1 | cut -d= -f2- || true)"
+    v="${v%%#*}"; v="${v%"${v##*[![:space:]]}"}"
+    v="${v#\"}"; v="${v%\"}"; v="${v#\'}"; v="${v%\'}"
+    printf '%s' "$v"
 }
 setkey() { # setkey KEY VALUE (idempotent: replace or append)
     sed -i "/^$1=/d" "$ENVFILE"
@@ -71,7 +75,17 @@ setup-backup)
     setkey BACKUP_PASSPHRASE_FILE "$PF"
     grep -q '^BACKUP_KEEP=' "$ENVFILE" || setkey BACKUP_KEEP 14
     echo "== install cron"
-    bash talent-os/scripts/install-backup-cron.sh
+    if sudo -n true 2>/dev/null; then
+        bash talent-os/scripts/install-backup-cron.sh
+    else
+        # install-backup-cron.sh needs sudo (dirs under /var, logrotate).
+        # Without it: same schedule and marker, log under HOME, no logrotate.
+        LOG="$HOME/.gsp/backup.log"
+        MARKER="# gsp-backup (managed by install-backup-cron.sh)"
+        LINE="15 3 * * * $ROOT/talent-os/scripts/backup.sh >> $LOG 2>&1 $MARKER"
+        { echo "CRON_TZ=Europe/Amsterdam"; crontab -l 2>/dev/null | grep -v 'gsp-backup (managed by' | grep -v '^CRON_TZ='; echo "$LINE"; } | crontab -
+        echo "cron installed without sudo (log: $LOG, no logrotate)"
+    fi
     crontab -l | grep -i gsp
     echo "== first backup (local only until BACKUP_RCLONE_REMOTE is set)"
     bash talent-os/scripts/backup.sh
