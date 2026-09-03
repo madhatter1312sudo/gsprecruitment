@@ -21,6 +21,7 @@ from slowapi.middleware import SlowAPIMiddleware
 from core.config import settings
 from core.database import close_pool
 from core.deps import require_role
+from core.monitoring import init_sentry
 from core.ratelimit import limiter
 from services.scheduler import start_scheduler, shutdown_scheduler
 
@@ -31,6 +32,11 @@ logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
 )
 logger = logging.getLogger("talent_os")
+
+# Sentry (WS-E.9) -- no-op unless SENTRY_DSN is set; must run before the
+# FastAPI app below is constructed so its Starlette/FastAPI integration can
+# instrument it. See core/monitoring.py.
+init_sentry(settings.sentry_dsn, settings.sentry_environment)
 
 
 # ── Lifespan ───────────────────────────────────────────────────────────

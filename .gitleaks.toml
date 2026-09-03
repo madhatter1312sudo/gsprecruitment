@@ -1,0 +1,22 @@
+# gitleaks config (WS-E.9, .github/workflows/ci.yml job `gitleaks`).
+#
+# Extends gitleaks' built-in rule set (extend.useDefault) rather than
+# replacing it, and adds a path allowlist for third-party/generated JS that
+# gitleaks otherwise flags on -- minified variable names and vendored
+# library internals produce a steady stream of false-positive "generic
+# API key" hits that have nothing to do with this repo's own secrets.
+#
+# Passed explicitly via GITLEAKS_CONFIG in the gitleaks job (rather than
+# relying on gitleaks-action's auto-detected `gitleaks.toml` name, since
+# this file is the dotfile `.gitleaks.toml`).
+
+title = "GSP Recruitment gitleaks config"
+
+[extend]
+useDefault = true
+
+[allowlist]
+paths = [
+  '''website/.*/vendor/.*''',
+  '''.*\.min\.js''',
+]

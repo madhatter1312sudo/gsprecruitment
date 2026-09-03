@@ -4,8 +4,11 @@
 FROM python:3.12-slim AS builder
 
 WORKDIR /app
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# Installs from the pinned lockfile (WS-E.9), not requirements.txt --
+# requirements.txt stays the human-edited version-range source; see
+# docs/BACKEND-DEPS.md for how requirements.lock is regenerated.
+COPY requirements.lock .
+RUN pip install --no-cache-dir -r requirements.lock
 
 # ── Runtime ──────────────────────────────────────────────────────────────
 FROM python:3.12-slim

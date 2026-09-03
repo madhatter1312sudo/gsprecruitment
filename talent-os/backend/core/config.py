@@ -97,6 +97,15 @@ class Settings(BaseSettings):
 
     log_level: str = "INFO"
 
+    # ── Sentry error monitoring (WS-E.9) ────────────────────────────────
+    # Empty by default -- sentry_sdk.init() is never called when this is
+    # unset (see main.py), so a fresh/staging deploy stays fully inert.
+    sentry_dsn: str = ""
+    # Free-text tag on every event (e.g. "production", "staging"). Not a
+    # secret; kept as its own var rather than reusing dev_mode so it can
+    # name environments dev_mode doesn't distinguish.
+    sentry_environment: str = "production"
+
     webhook_secret: str = "CHANGE_ME_TO_A_UNIQUE_WEBHOOK_SECRET"
     api_key: str = "CHANGE_ME"  # For internal API authentication
 

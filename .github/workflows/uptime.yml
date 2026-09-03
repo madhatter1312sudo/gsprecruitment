@@ -14,24 +14,90 @@ jobs:
         run: |
           set +e
 
+          # Every probe below retries exactly once, 20s later, before it's
+          # allowed to trigger an alert -- a single transient blip (a
+          # deploy mid-restart, a momentary network hiccup) shouldn't page
+          # anyone; only a failure that's still there 20s later should.
+
+          # Plain "does this return 200" check.
           check() {
             local name="$1"
             local url="$2"
             code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 20 \
               -H "User-Agent: gsp-ops" "$url")
+            if [ "$code" != "200" ]; then
+              echo "${name}: ${url} -> HTTP ${code} (retrying once after 20s)"
+              sleep 20
+              code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 20 \
+                -H "User-Agent: gsp-ops" "$url")
+            fi
             echo "${name}: ${url} -> HTTP ${code}"
             if [ "$code" != "200" ]; then
               echo "${name}=${code}" >> "$GITHUB_OUTPUT"
             fi
           }
 
+          # An unauthenticated request to an admin route must be REJECTED
+          # (401), not error out (5xx) or be silently open (200) -- a 401
+          # is healthy here, anything else is the failure.
+          check_requires_auth() {
+            local name="$1"
+            local url="$2"
+            code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 20 \
+              -H "User-Agent: gsp-ops" "$url")
+            if [ "$code" != "401" ]; then
+              echo "${name}: ${url} -> HTTP ${code} (want 401, retrying once after 20s)"
+              sleep 20
+              code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 20 \
+                -H "User-Agent: gsp-ops" "$url")
+            fi
+            echo "${name}: ${url} -> HTTP ${code} (want 401)"
+            if [ "$code" != "401" ]; then
+              echo "${name}=${code}" >> "$GITHUB_OUTPUT"
+            fi
+          }
+
+          # 200 AND the enforced (non-report-only) Content-Security-Policy
+          # header must be present -- WAF/nginx/Cloudflare config drift
+          # that silently drops the header wouldn't otherwise show up as
+          # downtime.
+          check_csp() {
+            local name="$1"
+            local url="$2"
+            local attempt
+            for attempt in 1 2; do
+              response=$(curl -s -D - -o /dev/null --max-time 20 \
+                -H "User-Agent: gsp-ops" "$url")
+              code=$(echo "$response" | head -1 | awk '{print $2}')
+              if [ "$code" = "200" ] && echo "$response" | grep -qi '^content-security-policy:'; then
+                break
+              fi
+              if [ "$attempt" = "1" ]; then
+                echo "${name}: ${url} -> HTTP ${code} (retrying once after 20s)"
+                sleep 20
+              fi
+            done
+            echo "${name}: ${url} -> HTTP ${code}"
+            if [ "$code" != "200" ]; then
+              echo "${name}=${code}" >> "$GITHUB_OUTPUT"
+              return
+            fi
+            if ! echo "$response" | grep -qi '^content-security-policy:'; then
+              echo "${name}: missing Content-Security-Policy header"
+              echo "${name}=missing-csp-header" >> "$GITHUB_OUTPUT"
+            fi
+          }
+
+          check health "https://api.gsprecruitment.nl/health"
           check api "https://api.gsprecruitment.nl/api/public/jobs"
           check site "https://gsprecruitment.nl"
+          check_requires_auth admin_auth "https://api.gsprecruitment.nl/api/v1/admin/dashboard"
+          check_csp werkgevers_csp "https://gsprecruitment.nl/werkgevers"
 
           exit 0
 
       - name: Send Telegram alert if something is down
-        if: steps.probe.outputs.api != '' || steps.probe.outputs.site != ''
+        if: steps.probe.outputs.health != '' || steps.probe.outputs.api != '' || steps.probe.outputs.site != '' || steps.probe.outputs.admin_auth != '' || steps.probe.outputs.werkgevers_csp != ''
         run: |
           if [ -z "${{ secrets.TELEGRAM_BOT_TOKEN }}" ] || [ -z "${{ secrets.TELEGRAM_CHAT_ID }}" ]; then
             echo "::error::TELEGRAM_BOT_TOKEN and/or TELEGRAM_CHAT_ID secrets are not set -- cannot send downtime alert. Add them under Settings > Secrets and variables > Actions."
@@ -40,12 +106,24 @@ jobs:
 
           message="GSP uptime waarschuwing:"
 
+          if [ -n "${{ steps.probe.outputs.health }}" ]; then
+            message="${message}$(printf '\n')- api.gsprecruitment.nl/health is niet bereikbaar (HTTP ${{ steps.probe.outputs.health }})"
+          fi
+
           if [ -n "${{ steps.probe.outputs.api }}" ]; then
             message="${message}$(printf '\n')- api.gsprecruitment.nl/api/public/jobs is niet bereikbaar (HTTP ${{ steps.probe.outputs.api }})"
           fi
 
           if [ -n "${{ steps.probe.outputs.site }}" ]; then
             message="${message}$(printf '\n')- gsprecruitment.nl is niet bereikbaar (HTTP ${{ steps.probe.outputs.site }})"
+          fi
+
+          if [ -n "${{ steps.probe.outputs.admin_auth }}" ]; then
+            message="${message}$(printf '\n')- api.gsprecruitment.nl/api/v1/admin/dashboard gaf geen 401 zonder auth (HTTP ${{ steps.probe.outputs.admin_auth }}) -- mogelijk auth-lek of API down"
+          fi
+
+          if [ -n "${{ steps.probe.outputs.werkgevers_csp }}" ]; then
+            message="${message}$(printf '\n')- gsprecruitment.nl/werkgevers: ${{ steps.probe.outputs.werkgevers_csp }}"
           fi
 
           curl -sS --max-time 20 \

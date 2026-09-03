@@ -92,3 +92,39 @@ met `--proxy-headers --forwarded-allow-ips=*` achter Caddy, dus
 de trusted-proxy-tak in `get_client_ip` is voor die praktijk-situatie dan
 grotendeels overbodig (maar blijft de juiste fallback voor elke opstelling
 zonder die uvicorn-vlag).
+
+## Branch protection op `main` (WS-E.9)
+
+GitHub-instelling, geen code-change — moet handmatig door de eigenaar
+worden aangezet (Settings → Branches → Add branch protection rule → main
+in de GitHub-repo).
+
+1. **Require status checks to pass before merging** aanzetten, en deze
+   exacte job-namen uit `.github/workflows/ci.yml` toevoegen als required
+   checks:
+   - `Backend (Python)` (job `backend`)
+   - `Mobile (Expo/TypeScript)` (job `mobile`)
+   - `Backend dependency audit (pip-audit)` (job `pip-audit`)
+   - `Lockfile matches requirements.txt` (job `lock-consistency`)
+   - `Secret scan (gitleaks)` (job `gitleaks`)
+   - `Website (static checks + CSP)` (job `web`)
+
+   (De namen moeten letterlijk overeenkomen met het `name:` veld van elke
+   job in `ci.yml` — als een job daar ooit hernoemd wordt, moet deze lijst
+   in dezelfde PR mee-updaten, anders "verdwijnt" de check stilletjes uit
+   de required-lijst zonder dat GitHub dat meldt.)
+
+2. **Require branches to be up to date before merging** aanzetten — een PR
+   moet main's laatste commit al gemerged/gerebaset hebben voordat hij
+   gemerged mag worden, zodat een check nooit tegen een verouderde
+   combinatie van bestanden groen slaat.
+
+3. Optioneel maar aan te raden: **Require a pull request before merging**
+   (voorkomt een directe push naar `main`, ook door de eigenaar zelf) en
+   **Do not allow bypassing the above settings** (anders geldt de regel
+   niet voor repo-admins, wat de eigenaar zelf is).
+
+`deploy.yml` draait apart op elke push naar `main` en is zelf geen
+required check hier — die job faalt/rolt terug op zijn eigen
+health-check (zie boven in dit bestand), branch protection dekt de
+*merge*-poort, niet de deploy zelf.
