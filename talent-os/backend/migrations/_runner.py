@@ -24,7 +24,15 @@ async def run_migration(version: str, sql: str):
     host = os.getenv("POSTGRES_HOST", "localhost")
     port = int(os.getenv("POSTGRES_PORT", "5432"))
     db = os.getenv("POSTGRES_DB", "recruitment_db")
-    user = os.getenv("POSTGRES_USER", "talentos_admin")
+    # Matches core/config.py's Settings.postgres_user default and
+    # talent-os/.env.example (WS-C.1) -- this used to default to
+    # "talentos_admin" here while the app itself (core/config.py) and the
+    # env template both default to "talentos_write", a literal divergence
+    # that only mattered if POSTGRES_USER was ever left unset when a
+    # migration ran directly. Production always sets POSTGRES_USER
+    # explicitly (talent-os/.env via env_file), so this default is a
+    # fallback only -- changing it does not change what production runs.
+    user = os.getenv("POSTGRES_USER", "talentos_write")
     password = os.getenv("POSTGRES_PASSWORD", "")
 
     conn = await asyncpg.connect(host=host, port=port, database=db, user=user, password=password)

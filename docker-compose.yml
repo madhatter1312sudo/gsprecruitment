@@ -8,6 +8,20 @@
 # are not currently running anywhere. See talent-os/docker-compose.yml
 # for the full-stack reference config (postgres+redis+backend+celery+
 # nginx) if that feature ever gets built out -- it is NOT deployed.
+#
+# WS-C.1 (2026-09-02): the postgres service used to bind-mount
+# ./talent-os/scripts/init_db.sql into /docker-entrypoint-initdb.d/ -- that
+# file was never in git (.gitignore ignores *.sql) and postgres only ever
+# runs *initdb.d scripts once, against a brand-new empty data volume. The
+# production volume was initialized long before this change and has never
+# re-read that mount since, so removing it does not touch production's
+# running database. It's removed here because on a genuinely fresh volume
+# (a new host, a wiped pgdata) a bind-mount of a nonexistent host file
+# makes Docker create an empty directory at that path instead, which
+# breaks the official postgres image's entrypoint. The baseline schema
+# (talent-os/backend/migrations/000_baseline.py) plus the rest of
+# migrations/ now cover what init_db.sql used to be assumed to do -- see
+# the "Run database migrations" step in .github/workflows/deploy.yml.
 
 services:
   # ── PostgreSQL ──────────────────────────────────────────────────────────
@@ -23,11 +37,16 @@ services:
       - ./talent-os/.env
     volumes:
       - pgdata:/var/lib/postgresql/data
-      - ./talent-os/scripts/init_db.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
     ports:
       - "127.0.0.1:5432:5432"
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U talentos_admin -d recruitment_db"]
+      # -U reads POSTGRES_USER from env_file (same var the postgres image
+      # itself uses to create the role, and the same one core/config.py's
+      # Settings.postgres_user / migrations/_runner.py read) instead of a
+      # literal that could silently drift from it (WS-C.1 — this used to
+      # hardcode "talentos_admin" while .env.example / core/config.py
+      # default to "talentos_write").
+      test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d recruitment_db"]
       interval: 10s
       timeout: 5s
       retries: 5
