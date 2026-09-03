@@ -28,7 +28,22 @@ rsync -avz -e "ssh -i $SSH_KEY -o StrictHostKeyChecking=accept-new" \
   "$(dirname "$0")/../docker-compose.yml" \
   "${VPS_USER}@${VPS_HOST}:${VPS_PATH}/docker-compose.yml"
 
-# 3. SSH and restart containers
+# 3. Ensure postgres.env exists (WS-E.6: postgres credentials now live in
+#    talent-os/postgres.env, separate from talent-os/.env). Idempotent --
+#    a no-op after the first run, and never prints a secret value.
+echo "🔐 Checking talent-os/postgres.env..."
+ssh -i "$SSH_KEY" "${VPS_USER}@${VPS_HOST}" "
+  cd ${VPS_PATH}/talent-os && \
+  if [ ! -f postgres.env ]; then
+    echo 'postgres.env missing -- generating it from .env (first run only)' && \
+    grep -E '^(POSTGRES_DB|POSTGRES_USER|POSTGRES_PASSWORD)=' .env > postgres.env && \
+    chmod 600 postgres.env
+  else
+    echo 'postgres.env already present -- leaving it as-is'
+  fi
+"
+
+# 4. SSH and restart containers
 echo "🔄 Restarting Docker containers..."
 ssh -i "$SSH_KEY" "${VPS_USER}@${VPS_HOST}" "
   cd ${VPS_PATH} && \

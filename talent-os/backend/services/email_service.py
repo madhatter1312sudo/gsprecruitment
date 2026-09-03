@@ -81,7 +81,7 @@ class EmailService:
                     json={"raw": raw},
                 )
                 if response.status_code == 200:
-                    logger.info(f"Email sent to {to_email}: {subject}")
+                    logger.info(f"Email sent (subject={subject!r})")
                     return True
                 else:
                     logger.error(f"Gmail API error: {response.status_code} {response.text}")
