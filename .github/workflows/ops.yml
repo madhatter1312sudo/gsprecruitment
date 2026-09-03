@@ -28,9 +28,11 @@ on:
           - backup-now
           - backup-check
 
-# Same group as deploy.yml so an ops run never overlaps a deploy.
+# Own group: sharing deploy.yml's group let a queued deploy cancel a pending
+# ops run (GitHub keeps one pending run per group). Ops actions are short
+# and read-mostly, so overlapping a deploy is acceptable.
 concurrency:
-  group: deploy-production
+  group: vps-ops
   cancel-in-progress: false
 
 env:
