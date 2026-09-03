@@ -114,7 +114,7 @@
     </div>
   </div>
 
-  <div class="portal-layout">
+  <div class="portal-layout" id="portalLayout">
     <!-- Sidebar -->
     <aside class="sidebar" id="sidebar">
       <div class="sidebar-logo">
@@ -466,8 +466,24 @@
        section, not the whole portal, so it isn't blocked here -- a client
        can see jobs/team/analytics while awaiting approval; the candidate
        search section itself surfaces its own 403 message from the API. */
+    function showUnverifiedOverlay() {
+      const overlay = document.getElementById('unverifiedOverlay');
+      const layout = document.getElementById('portalLayout');
+      overlay.style.display = 'flex';
+      layout?.setAttribute('aria-hidden', 'true');
+      Auth.trapFocus(overlay);
+    }
+
+    function hideUnverifiedOverlay() {
+      const overlay = document.getElementById('unverifiedOverlay');
+      const layout = document.getElementById('portalLayout');
+      Auth.releaseFocusTrap(overlay);
+      overlay.style.display = 'none';
+      layout?.removeAttribute('aria-hidden');
+    }
+
     if (user && !user.is_verified) {
-      document.getElementById('unverifiedOverlay').style.display = 'flex';
+      showUnverifiedOverlay();
       document.getElementById('unverifiedLogoutBtn')?.addEventListener('click', () => Auth.logout());
       document.getElementById('resendVerifyBtn')?.addEventListener('click', async (e) => {
         const btn = e.currentTarget;

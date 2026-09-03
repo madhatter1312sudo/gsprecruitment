@@ -537,7 +537,7 @@
     </div>
   </div>
 
-  <div class="portal-layout">
+  <div class="portal-layout" id="portalLayout">
     <!-- Sidebar -->
     <aside class="sidebar" id="sidebar">
       <div class="sidebar-logo">
@@ -1076,8 +1076,24 @@
        returns 403 on every /v1/candidate/* endpoint until confirmed). Show
        the overlay and stop here rather than firing API calls that will
        just 403. */
+    function showUnverifiedOverlay() {
+      const overlay = document.getElementById('unverifiedOverlay');
+      const layout = document.getElementById('portalLayout');
+      overlay.style.display = 'flex';
+      layout?.setAttribute('aria-hidden', 'true');
+      Auth.trapFocus(overlay);
+    }
+
+    function hideUnverifiedOverlay() {
+      const overlay = document.getElementById('unverifiedOverlay');
+      const layout = document.getElementById('portalLayout');
+      Auth.releaseFocusTrap(overlay);
+      overlay.style.display = 'none';
+      layout?.removeAttribute('aria-hidden');
+    }
+
     if (user && !user.is_verified) {
-      document.getElementById('unverifiedOverlay').style.display = 'flex';
+      showUnverifiedOverlay();
       document.getElementById('unverifiedLogoutBtn')?.addEventListener('click', () => Auth.logout());
       document.getElementById('resendVerifyBtn')?.addEventListener('click', async (e) => {
         const btn = e.currentTarget;

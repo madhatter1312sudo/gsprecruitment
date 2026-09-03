@@ -476,13 +476,16 @@ const GSP_WHATSAPP = '31617913965';
     let searchTimeout = null;
 
     function showLoading() {
-      grid.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:60px 20px"><div class="spinner" style="margin:0 auto 16px"></div><p style="color:var(--text-muted)">Loading vacancies...</p></div>';
+      const lang = localStorage.getItem('gsp_lang') || 'nl';
+      const text = lang === 'nl' ? 'Vacatures laden...' : 'Loading vacancies...';
+      grid.innerHTML = `<div style="grid-column:1/-1;text-align:center;padding:60px 20px"><div class="spinner" style="margin:0 auto 16px"></div><p style="color:var(--text-muted)">${text}</p></div>`;
     }
 
     function showError(msg) {
       const lang = localStorage.getItem('gsp_lang') || 'nl';
-      const text = msg || (lang === 'nl' ? 'Could not load vacancies. Please try again later.' : 'Could not load vacancies. Please try again later.');
-      grid.innerHTML = `<div style="grid-column:1/-1;text-align:center;padding:60px 20px"><i class="fas fa-exclamation-triangle" style="font-size:2rem;color:var(--gold);margin-bottom:12px"></i><p>${text}</p><button class="btn btn-ghost btn-sm" onclick="location.reload()" style="margin-top:16px"><i class="fas fa-redo"></i> Retry</button></div>`;
+      const text = msg || (lang === 'nl' ? 'Kon vacatures niet laden. Probeer het later opnieuw.' : 'Could not load vacancies. Please try again later.');
+      const retryLabel = lang === 'nl' ? 'Opnieuw proberen' : 'Retry';
+      grid.innerHTML = `<div style="grid-column:1/-1;text-align:center;padding:60px 20px"><i class="fas fa-exclamation-triangle" style="font-size:2rem;color:var(--gold);margin-bottom:12px"></i><p>${text}</p><button class="btn btn-ghost btn-sm" onclick="location.reload()" style="margin-top:16px"><i class="fas fa-redo"></i> ${retryLabel}</button></div>`;
     }
 
     async function fetchJobs() {
@@ -502,7 +505,7 @@ const GSP_WHATSAPP = '31617913965';
         }
       } catch (e) {
         console.warn('[Jobs] API fetch failed:', e);
-        showError('Network error. Please check your connection.');
+        showError();
         return;
       }
       renderJobs();
@@ -781,10 +784,10 @@ const GSP_WHATSAPP = '31617913965';
   // ── Tech Match Quiz ────────────────────────────────────
   const QUIZ = [
     { q: { en: 'Which area is closest to your work?', nl: 'Welk vakgebied past het best bij jou?' }, options: [
-      { text: { en: 'Web & application development', nl: 'Web- & applicatieontwikkeling' }, score: 22 },
-      { text: { en: 'Cloud, infrastructure & DevOps', nl: 'Cloud, infrastructuur & DevOps' }, score: 22 },
-      { text: { en: 'Data, AI & machine learning', nl: 'Data, AI & machine learning' }, score: 22 },
-      { text: { en: 'Security & privacy', nl: 'Security & privacy' }, score: 22 }
+      { text: { en: 'Embedded software (C/C++)', nl: 'Embedded software (C/C++)' }, score: 22 },
+      { text: { en: 'Mechatronics & motion control software', nl: 'Mechatronica en besturingssoftware' }, score: 22 },
+      { text: { en: 'OT cybersecurity', nl: 'OT-cybersecurity' }, score: 22 },
+      { text: { en: 'Something else', nl: 'Anders' }, score: 0, route: 'contact.html' }
     ]},
     { q: { en: 'How many years of experience do you have?', nl: 'Hoeveel jaar ervaring heb je?' }, options: [
       { text: { en: '0–2 years (Junior)', nl: '0–2 jaar (Junior)' }, score: 5 },
@@ -841,13 +844,17 @@ const GSP_WHATSAPP = '31617913965';
         <div class="quiz-question">${questionText}</div>
         <div class="quiz-options">
           ${q.options.map((opt, i) => // xss-static-check: safe -- QUIZ is a hardcoded local array, not API/user data
-            `<button class="quiz-option" data-score="${opt.score}">${opt.text[lang] || opt.text.en}</button>` // xss-static-check: safe -- QUIZ is a hardcoded local array, not API/user data
+            `<button class="quiz-option" data-score="${opt.score}"${opt.route ? ` data-route="${opt.route}"` : ''}>${opt.text[lang] || opt.text.en}</button>` // xss-static-check: safe -- QUIZ is a hardcoded local array, not API/user data
           ).join('')}
         </div>
       `;
 
       container.querySelectorAll('.quiz-option').forEach(btn => {
         btn.addEventListener('click', () => {
+          if (btn.dataset.route) {
+            window.location.href = btn.dataset.route;
+            return;
+          }
           score += parseInt(btn.dataset.score);
           currentQ++;
           setTimeout(renderQuestion, 200);
