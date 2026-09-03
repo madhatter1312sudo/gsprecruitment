@@ -11,9 +11,10 @@ from core.security import create_access_token
 from models.schemas import (
     AdminDashboard, AdminUserUpdate, AdminJobUpdate, AdminAnalytics,
     AuditLogEntry, ContentItem, ContentUpdate, SystemSettings, SystemSettingsUpdate,
-    HealthResponse,
+    HealthResponse, PipelineStageUpdate, LeadReadUpdate, LEAD_INTEREST_TYPES,
 )
 from routers.health import get_health_detail
+from routers.client import _record_stage_change
 from typing import Optional, List
 from datetime import timedelta
 import asyncio
@@ -775,6 +776,159 @@ async def approve_client(
     await execute(
         "INSERT INTO audit_log (action, actor_id, target_type, target_id, changes) VALUES ($1, $2, $3, $4, $5::jsonb)",
         "client_approve", current_user["id"], "user", user_id, json.dumps({"approved_email": target["email"]}),
+    )
+
+    return row
+
+
+# ── Pipeline Stage History (WS-C.5) ──────────────────────────────────────
+# Admin equivalent of routers/client.py's stage-update/history endpoints,
+# unscoped by client (an admin may act on any client's pipeline).
+
+@router.patch("/pipeline/{entry_id}/stage")
+async def admin_update_pipeline_stage(
+    entry_id: int,
+    data: PipelineStageUpdate,
+    current_user: dict = Depends(require_role("admin")),
+):
+    entry = await fetch_one("SELECT id, stage FROM pipeline_entries WHERE id = $1", entry_id)
+    if not entry:
+        raise HTTPException(status_code=404, detail="Pipeline entry not found")
+
+    from_stage = entry["stage"]
+    updated = await fetch_one(
+        "UPDATE pipeline_entries SET stage = $1, updated_at = NOW() WHERE id = $2 RETURNING *",
+        data.stage, entry_id,
+    )
+
+    if from_stage != data.stage:
+        await _record_stage_change(entry_id, from_stage, data.stage, current_user["id"])
+        await execute(
+            "INSERT INTO audit_log (action, actor_id, target_type, target_id, changes) "
+            "VALUES ($1, $2, $3, $4, $5::jsonb)",
+            "admin_pipeline_stage_change", current_user["id"], "pipeline_entry", entry_id,
+            json.dumps({"from_stage": from_stage, "to_stage": data.stage}),
+        )
+
+    return updated
+
+
+@router.get("/pipeline/{entry_id}/history")
+async def admin_get_pipeline_stage_history(
+    entry_id: int,
+    current_user: dict = Depends(require_role("admin")),
+):
+    entry = await fetch_one("SELECT id FROM pipeline_entries WHERE id = $1", entry_id)
+    if not entry:
+        raise HTTPException(status_code=404, detail="Pipeline entry not found")
+
+    rows = await fetch_all(
+        "SELECT * FROM pipeline_stage_history WHERE pipeline_entry_id = $1 ORDER BY changed_at",
+        entry_id,
+    )
+    return {"items": rows, "total": len(rows)}
+
+
+# ── Leads (WS-C.10) ───────────────────────────────────────────────────────
+# Unified view over contact_submissions (the site contact/lead form) and
+# quiz_submissions (the public skill quiz) -- two physically separate
+# tables (migrations/002_portal_tables.py, migrations/012_mobile_growth.py)
+# with no shared id space, so "source" + the table's own id together
+# identify a row; PATCH takes both back. quiz_submissions has no
+# name/interest_type columns at all (it's the skill-quiz table, not a lead
+# form) -- NULL literals in its SELECT keep the unified query's column
+# count/types aligned with contact_submissions.
+#
+# Only these two literal table names are ever interpolated into SQL below
+# (never request input) -- ``source not in _LEAD_SOURCES`` gates every use.
+_LEAD_SOURCES = ("contact_submissions", "quiz_submissions")
+
+
+@router.get("/leads")
+async def list_leads(
+    type: Optional[str] = Query(None, alias="type"),
+    unread: Optional[bool] = Query(None),
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    current_user: dict = Depends(require_role("admin")),
+):
+    """Unified leads list across contact_submissions + quiz_submissions.
+    `type` filters by interest_type (contact_submissions only -- quiz_submissions
+    rows never match a type filter, since they have no interest_type column).
+    `unread` filters by is_read on whichever table each row is from."""
+    if type is not None and type not in LEAD_INTEREST_TYPES:
+        raise HTTPException(status_code=400, detail=f"Invalid type. Must be one of: {', '.join(LEAD_INTEREST_TYPES)}")
+
+    contact_conditions = []
+    contact_params: list = []
+    idx = 1
+    if type is not None:
+        contact_conditions.append(f"interest_type = ${idx}")
+        contact_params.append(type)
+        idx += 1
+    if unread is not None:
+        contact_conditions.append(f"is_read = ${idx}")
+        contact_params.append(not unread)
+        idx += 1
+    contact_where = f"WHERE {' AND '.join(contact_conditions)}" if contact_conditions else ""
+
+    contact_rows = await fetch_all(
+        f"""SELECT id, 'contact_submissions'::text AS source, name, email,
+                   interest_type, is_read, created_at
+            FROM contact_submissions {contact_where}
+            ORDER BY created_at DESC""",
+        *contact_params,
+    )
+
+    quiz_rows = []
+    if type is None:
+        # quiz_submissions has no interest_type -- a type filter never
+        # matches any quiz row, so skip the query entirely in that case.
+        quiz_conditions = []
+        quiz_params: list = []
+        idx = 1
+        if unread is not None:
+            quiz_conditions.append(f"is_read = ${idx}")
+            quiz_params.append(not unread)
+            idx += 1
+        quiz_where = f"WHERE {' AND '.join(quiz_conditions)}" if quiz_conditions else ""
+        quiz_rows = await fetch_all(
+            f"""SELECT id, 'quiz_submissions'::text AS source, NULL::text AS name, email,
+                       NULL::text AS interest_type, is_read, created_at
+                FROM quiz_submissions {quiz_where}
+                ORDER BY created_at DESC""",
+            *quiz_params,
+        )
+
+    items = sorted(contact_rows + quiz_rows, key=lambda r: r["created_at"], reverse=True)
+    total = len(items)
+    page = items[offset:offset + limit]
+
+    return {"items": page, "total": total, "limit": limit, "offset": offset}
+
+
+@router.patch("/leads/{source}/{lead_id}")
+async def update_lead_read_state(
+    source: str,
+    lead_id: int,
+    data: LeadReadUpdate,
+    current_user: dict = Depends(require_role("admin")),
+):
+    if source not in _LEAD_SOURCES:
+        raise HTTPException(status_code=404, detail="Unknown lead source")
+
+    row = await fetch_one(
+        f"UPDATE {source} SET is_read = $1 WHERE id = $2 RETURNING id, is_read",
+        data.is_read, lead_id,
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail="Lead not found")
+
+    await execute(
+        "INSERT INTO audit_log (action, actor_id, target_type, target_id, changes) "
+        "VALUES ($1, $2, $3, $4, $5::jsonb)",
+        "lead_read_state_update", current_user["id"], source, lead_id,
+        json.dumps({"is_read": data.is_read}),
     )
 
     return row

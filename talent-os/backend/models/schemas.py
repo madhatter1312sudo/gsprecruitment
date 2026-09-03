@@ -607,13 +607,33 @@ class SiteContentResponse(BaseModel):
     items: List[dict]
 
 
+LEAD_INTEREST_TYPES = ("werving_selectie", "detachering_internationaal", "kandidaat", "overig")
+
+
 class LeadSubmit(BaseModel):
     name: str = Field(..., min_length=1)
     email: EmailStr
     company: Optional[str] = None
     phone: Optional[str] = None
     message: str = Field(..., min_length=1)
-    interest_type: Optional[str] = None
+    # validate_default=True: the normalising validator below must run even
+    # when the caller omits interest_type entirely (default None), not
+    # only when an explicit bad value is sent -- pydantic v2 skips
+    # validators on unsupplied defaults otherwise.
+    interest_type: Optional[str] = Field(None, validate_default=True)
+
+    @field_validator("interest_type")
+    @classmethod
+    def _interest_type_or_overig(cls, v):
+        """WS-C.10: contact_submissions.interest_type is CHECK'd to
+        LEAD_INTEREST_TYPES (migrations/026_leads_interest_type.py) -- the
+        migration maps existing NULL/unknown rows to 'overig' at the DB
+        level, and this validator does the same at the API boundary so a
+        caller sending an empty string or an unrecognised value never
+        reaches the INSERT with something the CHECK would reject."""
+        if v is None or v.strip() == "" or v not in LEAD_INTEREST_TYPES:
+            return "overig"
+        return v
 
 
 # ── Generic Pagination ─────────────────────────────────────────────────
@@ -671,3 +691,65 @@ class QuizAnswerItem(BaseModel):
 class QuizSubmitRequest(BaseModel):
     email: Optional[EmailStr] = None
     answers: List[QuizAnswerItem] = Field(..., min_length=1)
+
+
+# ── WS-C.4: Client Contacts ──────────────────────────────────────────────
+
+class ClientContactCreate(BaseModel):
+    full_name: str = Field(..., min_length=1, max_length=255)
+    email: Optional[EmailStr] = None
+    phone: Optional[str] = Field(None, max_length=50)
+    role: Optional[str] = Field(None, pattern=r"^(hiring_manager|finance|tekenbevoegd|overig)$")
+    is_primary: bool = False
+    # Same GDPR lawful-basis set as client_prospects (WS-E.7,
+    # migrations/018_gdpr_provenance_optout.py) -- a client_contacts row is
+    # a business contact, not a consumer, so it isn't mandatory the way
+    # candidates.lawful_basis is, but it's validated when supplied.
+    lawful_basis: Optional[str] = Field(None, pattern=r"^(zakelijk_functioneel_adres|opt_in|bestaande_relatie)$")
+
+
+class ClientContactUpdate(BaseModel):
+    full_name: Optional[str] = Field(None, min_length=1, max_length=255)
+    email: Optional[EmailStr] = None
+    phone: Optional[str] = Field(None, max_length=50)
+    role: Optional[str] = Field(None, pattern=r"^(hiring_manager|finance|tekenbevoegd|overig)$")
+    is_primary: Optional[bool] = None
+    lawful_basis: Optional[str] = Field(None, pattern=r"^(zakelijk_functioneel_adres|opt_in|bestaande_relatie)$")
+
+
+class ClientContactResponse(BaseModel):
+    id: int
+    client_id: int
+    full_name: str
+    email: Optional[str] = None
+    phone: Optional[str] = None
+    role: Optional[str] = None
+    is_primary: bool = False
+    lawful_basis: Optional[str] = None
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+
+    model_config = {"from_attributes": True}
+
+
+# ── WS-C.5: Pipeline Stage History ───────────────────────────────────────
+
+class PipelineStageUpdate(BaseModel):
+    stage: str = Field(..., min_length=1, max_length=50)
+
+
+class PipelineStageHistoryItem(BaseModel):
+    id: int
+    pipeline_entry_id: int
+    from_stage: Optional[str] = None
+    to_stage: str
+    changed_by: Optional[int] = None
+    changed_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+# ── WS-C.10: Leads (unified contact_submissions + quiz_submissions) ──────
+
+class LeadReadUpdate(BaseModel):
+    is_read: bool

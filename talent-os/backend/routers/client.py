@@ -10,7 +10,7 @@ from core.security import hash_password, hash_token
 from models.schemas import (
     ClientDashboard, ClientJobCreate, ClientJobUpdate, JobOrderResponse,
     CandidateSearchParams, PipelineAdd, ClientAnalytics, TeamInvite,
-    MessageListResponse, MessageResponse,
+    MessageListResponse, MessageResponse, PipelineStageUpdate,
 )
 from services.email_service import email_service
 from typing import Optional, List
@@ -64,6 +64,20 @@ async def _get_client_by_user(user_id: int) -> Optional[dict]:
            JOIN user_clients uc ON uc.client_id = c.id
            WHERE uc.user_id = $1""",
         user_id,
+    )
+
+
+async def _record_stage_change(
+    pipeline_entry_id: int, from_stage: Optional[str], to_stage: str, changed_by: Optional[int],
+) -> None:
+    """WS-C.5: append-only log of every pipeline_entries.stage transition
+    (migrations/025_pipeline_stage_history.py). Shared by both the client
+    portal's and the admin panel's stage-update endpoints (routers/admin.py
+    imports this rather than duplicating the INSERT)."""
+    await execute(
+        "INSERT INTO pipeline_stage_history (pipeline_entry_id, from_stage, to_stage, changed_by) "
+        "VALUES ($1, $2, $3, $4)",
+        pipeline_entry_id, from_stage, to_stage, changed_by,
     )
 
 
@@ -527,6 +541,11 @@ async def add_to_pipeline(
         client["id"], data.candidate_id, data.job_id, data.stage, data.notes,
     )
 
+    # WS-C.5: the entry's starting stage is itself a history row
+    # (from_stage=NULL), so a full pipeline_stage_history query for an
+    # entry always has at least one row.
+    await _record_stage_change(entry["id"], None, data.stage, current_user["id"])
+
     await execute(
         "INSERT INTO audit_log (action, actor_id, target_type, target_id, changes) "
         "VALUES ($1, $2, $3, $4, $5::jsonb)",
@@ -581,6 +600,71 @@ async def get_pipeline(
     )
 
     return {"items": rows, "total": total, "limit": limit, "offset": offset}
+
+
+@router.patch("/pipeline/{entry_id}/stage")
+async def update_pipeline_stage(
+    entry_id: int,
+    data: PipelineStageUpdate,
+    current_user: dict = Depends(require_verified_role("client", "admin")),
+):
+    """Move a pipeline entry to a new stage. Scoped to the client's own
+    pipeline -- an entry belonging to another client 404s, same pattern as
+    every other client-portal lookup in this router."""
+    _require_candidate_access(current_user)
+
+    client = await _get_client_by_user(current_user["id"])
+    if not client:
+        raise HTTPException(status_code=400, detail="Client profile not found")
+
+    entry = await fetch_one(
+        "SELECT id, stage FROM pipeline_entries WHERE id = $1 AND client_id = $2",
+        entry_id, client["id"],
+    )
+    if not entry:
+        raise HTTPException(status_code=404, detail="Pipeline entry not found")
+
+    from_stage = entry["stage"]
+    updated = await fetch_one(
+        "UPDATE pipeline_entries SET stage = $1, updated_at = NOW() WHERE id = $2 RETURNING *",
+        data.stage, entry_id,
+    )
+
+    if from_stage != data.stage:
+        await _record_stage_change(entry_id, from_stage, data.stage, current_user["id"])
+        await execute(
+            "INSERT INTO audit_log (action, actor_id, target_type, target_id, changes) "
+            "VALUES ($1, $2, $3, $4, $5::jsonb)",
+            "client_pipeline_stage_change", current_user["id"], "pipeline_entry", entry_id,
+            json.dumps({"from_stage": from_stage, "to_stage": data.stage}),
+        )
+
+    return updated
+
+
+@router.get("/pipeline/{entry_id}/history")
+async def get_pipeline_stage_history(
+    entry_id: int,
+    current_user: dict = Depends(require_verified_role("client", "admin")),
+):
+    """Stage-change history for one pipeline entry -- scoped to the
+    client's own entries only."""
+    client = await _get_client_by_user(current_user["id"])
+    if not client:
+        raise HTTPException(status_code=400, detail="Client profile not found")
+
+    entry = await fetch_one(
+        "SELECT id FROM pipeline_entries WHERE id = $1 AND client_id = $2",
+        entry_id, client["id"],
+    )
+    if not entry:
+        raise HTTPException(status_code=404, detail="Pipeline entry not found")
+
+    rows = await fetch_all(
+        "SELECT * FROM pipeline_stage_history WHERE pipeline_entry_id = $1 ORDER BY changed_at",
+        entry_id,
+    )
+    return {"items": rows, "total": len(rows)}
 
 
 # ── Analytics ───────────────────────────────────────────────────────────

@@ -7,6 +7,7 @@ from core.database import fetch_all, fetch_one, execute
 from core.config import settings
 from core.deps import get_optional_user
 from models.schemas import SiteContentResponse, LeadSubmit, SalaryBenchmarkResponse, QuizSubmitRequest
+from services.telegram import notify_lead
 from typing import Optional, List
 import json
 import random
@@ -240,6 +241,12 @@ async def submit_lead(request: Request, data: LeadSubmit):
     )
     if not lead:
         raise HTTPException(status_code=500, detail="Failed to submit lead")
+
+    # WS-C.10: best-effort ops notification -- no-ops without
+    # TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID, and never carries the
+    # submitter's name or e-mail (services/telegram.py docstring). Must
+    # never fail the submission itself.
+    await notify_lead(data.interest_type, lead["created_at"])
 
     return {
         "message": "Thank you! We'll get back to you shortly.",
