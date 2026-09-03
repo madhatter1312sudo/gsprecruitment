@@ -41,7 +41,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           # WS-E.9: pinned identically to deploy.yml and the Dockerfile
           # (python:3.12-slim) so CI tests the same interpreter version
@@ -117,7 +117,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           # Pinned identically to the backend job / deploy.yml / Dockerfile.
           python-version: "3.12"
@@ -162,7 +162,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           # Pinned identically to the backend job / deploy.yml / Dockerfile.
           python-version: "3.12"
@@ -227,7 +227,7 @@ jobs:
         with:
           node-version: "20"
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
