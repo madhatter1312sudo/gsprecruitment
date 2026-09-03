@@ -82,6 +82,37 @@
   </style>
 </head>
 <body>
+  <!-- WS-E.2: shown instead of the portal when the account's e-mail is not
+       yet confirmed, or (client accounts) confirmed but not yet approved
+       by GSP Recruitment -- Auth.requireAuth() only checks the JWT is
+       valid, not is_verified/approved_by_admin_at, so this overlay is the
+       frontend half of the gate the backend already enforces
+       (core/deps.py get_verified_user + routers/client.py
+       _require_candidate_access, both 403). -->
+  <div id="unverifiedOverlay" style="display:none;position:fixed;inset:0;z-index:9999;background:var(--bg,#0E1B2E);align-items:center;justify-content:center;padding:24px;">
+    <div style="max-width:440px;text-align:center;background:var(--surface,rgba(21,43,74,0.6));border:1px solid rgba(74,111,159,0.16);border-radius:var(--radius-xl,16px);padding:40px 32px;">
+      <div style="font-size:2rem;color:var(--gold,#C9A24B);margin-bottom:12px;"><i class="fa-regular fa-envelope-circle-check"></i></div>
+      <h2 style="margin-bottom:8px;">
+        <span class="lang-en">Confirm your e-mail</span>
+        <span class="lang-nl">Bevestig je e-mailadres</span>
+      </h2>
+      <p style="color:var(--navy-200,var(--text-muted));margin-bottom:20px;">
+        <span class="lang-en">We sent a confirmation link to your inbox. Click it to unlock your dashboard.</span>
+        <span class="lang-nl">We hebben een bevestigingslink naar je inbox gestuurd. Klik erop om je dashboard te ontgrendelen.</span>
+      </p>
+      <div id="resendVerifyMsg" style="display:none;margin-bottom:12px;font-size:0.9rem;"></div>
+      <button class="btn btn-primary" id="resendVerifyBtn" style="width:100%;justify-content:center;">
+        <i class="fa-regular fa-paper-plane"></i>
+        <span class="lang-en">Resend confirmation e-mail</span>
+        <span class="lang-nl">Bevestigingsmail opnieuw versturen</span>
+      </button>
+      <button class="btn btn-ghost btn-sm" id="unverifiedLogoutBtn" style="width:100%;justify-content:center;margin-top:10px;">
+        <span class="lang-en">Sign out</span>
+        <span class="lang-nl">Uitloggen</span>
+      </button>
+    </div>
+  </div>
+
   <div class="portal-layout">
     <!-- Sidebar -->
     <aside class="sidebar" id="sidebar">
@@ -506,6 +537,44 @@
 
     const user = Auth.requireAuth(['client']);
     if (!user) {}
+
+    /* ---- WS-E.2: e-mail verification gate ----
+       Auth.requireAuth() only checks the JWT is valid; is_verified is a
+       separate, backend-enforced gate (core/deps.py get_verified_user
+       returns 403 on every /v1/client/* endpoint until confirmed). The
+       further approved_by_admin_at gate (routers/client.py
+       _require_candidate_access) only affects the candidate-search
+       section, not the whole portal, so it isn't blocked here -- a client
+       can see jobs/team/analytics while awaiting approval; the candidate
+       search section itself surfaces its own 403 message from the API. */
+    if (user && !user.is_verified) {
+      document.getElementById('unverifiedOverlay').style.display = 'flex';
+      document.getElementById('unverifiedLogoutBtn')?.addEventListener('click', () => Auth.logout());
+      document.getElementById('resendVerifyBtn')?.addEventListener('click', async (e) => {
+        const btn = e.currentTarget;
+        const msg = document.getElementById('resendVerifyMsg');
+        btn.disabled = true;
+        try {
+          const res = await fetch(`${Auth.API}/auth/resend-verification`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email: user.email }),
+          });
+          if (res.ok && msg) {
+            msg.textContent = 'Check your inbox for the new link. / Controleer je inbox voor de nieuwe link.';
+            msg.style.display = 'block';
+          }
+        } catch (err) {
+          if (msg) {
+            msg.textContent = 'Network error — please try again. / Netwerkfout — probeer het opnieuw.';
+            msg.style.display = 'block';
+          }
+        } finally {
+          btn.disabled = false;
+        }
+      });
+      throw new Error('unverified'); // stop the rest of this script block (dashboard fetches, listeners)
+    }
 
     const sectionTitles = {
       dashboard: { en: 'Dashboard', nl: 'Dashboard' },

@@ -709,3 +709,43 @@ async def update_system_settings(
     )
 
     return {"message": "Settings updated", "keys_updated": updated}
+
+
+# ── Client Approval (WS-E.2) ─────────────────────────────────────────────
+# routers/client.py's _require_candidate_access gate: a client user must be
+# e-mail-verified (WS-E.2) *and* explicitly approved here before any
+# candidate-search/detail endpoint lets them through.
+
+@router.post("/clients/{user_id}/approve")
+async def approve_client(
+    user_id: int,
+    current_user: dict = Depends(require_role("admin")),
+):
+    """Approve a client user for candidate search/detail access."""
+    target = await fetch_one(
+        "SELECT id, email, role FROM users WHERE id = $1 AND deleted_at IS NULL",
+        user_id,
+    )
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found")
+    if target["role"] != "client":
+        raise HTTPException(
+            status_code=400,
+            detail="Only client-role users can be approved for candidate access",
+        )
+
+    row = await fetch_one(
+        """UPDATE users
+           SET approved_by_admin_at = NOW(), approved_by_admin_id = $1, updated_at = NOW()
+           WHERE id = $2
+           RETURNING id, email, full_name, role, approved_by_admin_at, approved_by_admin_id""",
+        current_user["id"], user_id,
+    )
+
+    # Audit log
+    await execute(
+        "INSERT INTO audit_log (action, actor_id, target_type, target_id, changes) VALUES ($1, $2, $3, $4, $5::jsonb)",
+        "client_approve", current_user["id"], "user", user_id, json.dumps({"approved_email": target["email"]}),
+    )
+
+    return row

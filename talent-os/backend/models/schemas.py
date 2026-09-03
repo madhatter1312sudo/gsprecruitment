@@ -59,6 +59,18 @@ class VerifyEmailRequest(BaseModel):
     token: str
 
 
+class ResendVerificationRequest(BaseModel):
+    email: EmailStr
+
+
+class SetPasswordRequest(BaseModel):
+    """WS-E.3 team-invite flow: consumes the same one-time token mechanism
+    as e-mail verification (verification_token_hash), sets the invitee's
+    chosen password, and marks the e-mail verified in the same step."""
+    token: str
+    new_password: str = Field(..., min_length=8, max_length=128)
+
+
 class RefreshRequest(BaseModel):
     refresh_token: Optional[str] = None
 

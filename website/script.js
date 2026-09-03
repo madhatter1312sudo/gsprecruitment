@@ -442,7 +442,12 @@ const GSP_WHATSAPP = '31617913965';
           if (errEl) { errEl.textContent = result.error; errEl.style.display = 'block'; }
           Auth.toast(result.error, 'error');
         } else {
-          Auth.toast('Account created successfully!', 'success');
+          // WS-E.2: the account is created unverified and a confirmation
+          // e-mail is sent server-side (routers/auth.py register()) — the
+          // dashboard itself now shows a "confirm your e-mail" overlay
+          // (candidate/index.html, client/index.html) until that link is
+          // clicked, so say so here rather than implying full access.
+          Auth.toast('Account created! Check your inbox to confirm your e-mail.', 'success');
           closeAuthModal();
           window.location.href = Auth.getDashboardUrl(result.user);
         }
@@ -1306,15 +1311,20 @@ const GSP_WHATSAPP = '31617913965';
   }
 
   // ── Google Sign-In Callback ─────────────────────────────
-  // The backend redirects here as https://gsprecruitment.nl/?google_auth=<jwt>
-  // (or ?google_auth_error=<code>) after the user completes Google's consent
-  // screen. Pick up the token, strip it from the URL immediately (before any
-  // other network request can leak it via a Referer header), then fetch the
-  // user's profile to finish signing them in the same way a normal
-  // email/password login does.
+  // The backend redirects here as https://gsprecruitment.nl/#google_auth=<jwt>
+  // (URL FRAGMENT, not query string -- WS-E.3: a query string is sent to
+  // the server in the request line and in the next request's Referer
+  // header, which was leaking the access token to logs/CDN/WAF. A
+  // fragment is never sent to the server at all) or
+  // ?google_auth_error=<code> (still a query param -- it's just a short
+  // error code, nothing secret) after the user completes Google's consent
+  // screen. Pick up the token, strip it from the URL immediately, then
+  // fetch the user's profile to finish signing them in the same way a
+  // normal email/password login does.
   function handleGoogleAuthCallback() {
     const params = new URLSearchParams(window.location.search);
-    const token = params.get('google_auth');
+    const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ''));
+    const token = hashParams.get('google_auth');
     const error = params.get('google_auth_error');
 
     if (!token && !error) return;
