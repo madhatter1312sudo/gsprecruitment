@@ -4,7 +4,7 @@ Talent OS — Candidate CRUD router (asyncpg, auth-protected).
 from fastapi import APIRouter, Depends, HTTPException, Query
 from core.database import fetch_all, fetch_one, execute
 from core.security import verify_api_key
-from models.schemas import CandidateCreate, CandidateResponse
+from models.schemas import CandidateCreate, CandidateResponse, CandidateSourceCreate
 from typing import Optional, List
 
 router = APIRouter(prefix="/api/candidates", tags=["candidates"], dependencies=[Depends(verify_api_key)])
@@ -40,16 +40,19 @@ async def get_candidate(candidate_id: int):
 
 
 @router.post("", response_model=CandidateResponse, status_code=201)
-async def create_candidate(candidate: CandidateCreate):
-    """Create a new candidate record."""
+async def create_candidate(candidate: CandidateSourceCreate):
+    """Create a new candidate record. WS-E.7: source_url (public http(s)
+    URL) and lawful_basis are required — SOP §2 "geen bron-URL = geen
+    contact"."""
     row = await fetch_one(
         """INSERT INTO candidates
            (full_name, email, phone, linkedin_url, github_url, portfolio_url,
             current_company, current_title, location, willing_to_relocate,
             salary_expectation_min, salary_expectation_max, notice_period_days,
             years_experience, skills, languages, education, cv_text,
-            source, sourced_by_agent, strength_score, switch_readiness, tags)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23)
+            source, sourced_by_agent, strength_score, switch_readiness, tags,
+            source_url, lawful_basis, date_found)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26)
            RETURNING *""",
         candidate.full_name, candidate.email, candidate.phone,
         candidate.linkedin_url, candidate.github_url, candidate.portfolio_url,
@@ -60,6 +63,7 @@ async def create_candidate(candidate: CandidateCreate):
         candidate.education, candidate.cv_text, candidate.source,
         candidate.sourced_by_agent, candidate.strength_score,
         candidate.switch_readiness, candidate.tags,
+        candidate.source_url, candidate.lawful_basis, candidate.date_found,
     )
     return row
 

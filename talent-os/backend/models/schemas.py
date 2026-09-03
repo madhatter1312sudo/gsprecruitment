@@ -1,7 +1,7 @@
 """Talent OS — Pydantic schemas for request/response models."""
 from pydantic import BaseModel, EmailStr, Field, field_validator
 from typing import Optional, List, Any, Literal
-from datetime import datetime
+from datetime import datetime, date
 
 
 # ── Auth / Users ─────────────────────────────────────────────────────────
@@ -101,6 +101,19 @@ class CandidateCreate(BaseModel):
     education: Optional[str] = None
     cv_text: Optional[str] = None
     source: str = "apollo"
+    # WS-E.7 provenance/lawful_basis (SOP §2, VERWERKINGSREGISTER §1.1).
+    # Optional here (and therefore on CandidateResponse, which subclasses
+    # this) because the existing Apollo pool has neither a real http(s)
+    # source_url (it stores 'apollo:<id>' — see harvest.py) nor a
+    # lawful_basis, and every read of that pool goes through this same
+    # model. The mandatory version used at the sourcing insert path is
+    # CandidateSourceCreate below — do not add an http-only validator or a
+    # Field(...) default here, it would break every existing GET/list call.
+    source_url: Optional[str] = None
+    lawful_basis: Optional[str] = Field(
+        None, pattern=r"^(gerechtvaardigd_belang|opt_in_talentpool|toestemming_referral|portal_registratie)$"
+    )
+    date_found: Optional[date] = None
     sourced_by_agent: Optional[str] = None
     strength_score: Optional[float] = Field(None, ge=1.0, le=10.0)
     switch_readiness: Optional[str] = Field(None, pattern=r"^(LOW|MEDIUM|HIGH|ACTIVE)$")
@@ -141,6 +154,32 @@ class CandidateResponse(CandidateCreate):
     updated_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class CandidateSourceCreate(CandidateCreate):
+    """POST /api/candidates (X-API-Key sourcing path) only — WS-E.7,
+    SOP §2 "geen bron-URL = geen contact". Unlike CandidateCreate,
+    source_url and lawful_basis are mandatory here: this endpoint is for
+    manually-sourced people (LinkedIn/GitHub/meetup/referral per the SOP),
+    not for portal self-registration (routers/candidate.py sets
+    lawful_basis='portal_registratie' + the portal URL itself, without
+    going through this model) or opt-in talentpool (WS-C.17, same
+    exemption, SOP §1.5). date_found defaults to today if not supplied —
+    it is the anchor for the "3 months after date_found" retention clock
+    (SOP §6)."""
+    source_url: str = Field(..., min_length=1)
+    lawful_basis: str = Field(
+        ..., pattern=r"^(gerechtvaardigd_belang|opt_in_talentpool|toestemming_referral|portal_registratie)$"
+    )
+    date_found: date = Field(default_factory=date.today)
+
+    @field_validator("source_url")
+    @classmethod
+    def _source_url_must_be_http(cls, v):
+        s = (v or "").strip()
+        if not (s.lower().startswith("http://") or s.lower().startswith("https://")):
+            raise ValueError("source_url must be a public http:// or https:// URL (SOP §2)")
+        return s
 
 
 class CandidatePortalProfile(BaseModel):

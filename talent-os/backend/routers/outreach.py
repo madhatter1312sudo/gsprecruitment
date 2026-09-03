@@ -6,6 +6,7 @@ but a human ALWAYS reviews/edits and explicitly approves before anything is
 sent. There is no auto-send path anywhere in this router.
 """
 import logging
+import re
 from typing import Optional
 
 import json
@@ -14,12 +15,121 @@ from pydantic import BaseModel
 
 from core.database import fetch_one, fetch_all, fetch_val, execute
 from core.deps import require_role
+from core import privacy
 from services.email_service import email_service
 from services import scheduler as scheduler_service
 
 logger = logging.getLogger("talent_os.outreach")
 
 router = APIRouter(prefix="/api/v1/admin/outreach", tags=["outreach"])
+
+
+# ── WS-E.7 draft-compliance checks (docs/SOURCING-SOP.md §3.2/§3.3, §7.1) ──
+#
+# Pure text checks first (no DB — testable in isolation), then a DB-backed
+# refusal function approve_draft() calls. Nothing here sends anything;
+# outreach stays draft-only, this only decides whether approve_draft() is
+# allowed to proceed to the existing send.
+
+_STOP_NL_RE = re.compile(r'antwoorden met\s*"?stop"?', re.IGNORECASE)
+_STOP_EN_RE = re.compile(r'replying\s*"?stop"?', re.IGNORECASE)
+
+
+def _has_optout_line(body: str) -> bool:
+    """SOP §3.3 — every first message must contain the STOP opt-out
+    sentence (NL: '...antwoorden met "STOP"' / EN: '...replying "STOP"')."""
+    text = body or ""
+    return bool(_STOP_NL_RE.search(text) or _STOP_EN_RE.search(text))
+
+
+# The fixed Art. 14 text block (SOP §3.2) must carry: a functional sender
+# address, the source description, the retention period ("3 maanden na" /
+# "3 months after"), the right to object (Art. 21), the suppression-list
+# sentence, and the complaint right to the Autoriteit Persoonsgegevens /
+# Dutch DPA. Checked as markers rather than the full fixed string so minor
+# whitespace/formatting differences in an LLM- or human-edited draft don't
+# false-positive a refusal.
+_ART14_MARKERS_NL = ("art. 21", "autoriteit persoonsgegevens", "blokkeerlijst", "3 maanden na")
+_ART14_MARKERS_EN = ("art. 21", "data protection authority", "suppression list", "3 months after")
+
+
+def _has_art14_block(body: str, language: Optional[str]) -> bool:
+    text = (body or "").lower()
+    markers = _ART14_MARKERS_EN if (language or "nl").lower().startswith("en") else _ART14_MARKERS_NL
+    return all(marker in text for marker in markers)
+
+
+# (status_code, code) — code is the stable machine-readable detail['code']
+# reported back to callers and quoted in the PR report.
+REFUSAL_MISSING_OPTOUT = (422, "missing_optout_line")
+REFUSAL_MISSING_ART14 = (422, "missing_art14_block")
+REFUSAL_RECIPIENT_OPTED_OUT = (409, "recipient_opted_out")
+REFUSAL_RECIPIENT_SUPPRESSED = (409, "recipient_suppressed")
+REFUSAL_PROSPECT_NO_LAWFUL_BASIS = (409, "prospect_missing_lawful_basis")
+REFUSAL_CANDIDATE_NO_SPEC_CONSENT = (409, "candidate_missing_spec_consent")
+
+
+async def _draft_refusal(draft: dict):
+    """Returns (status_code, code, detail) if the draft must be refused, or
+    None if it may proceed to approve_draft()'s existing send. DB-backed —
+    see routers/gdpr.py / core/privacy.py for the suppression-list hash."""
+    body = draft.get("body") or ""
+    language = draft.get("language")
+
+    if not _has_optout_line(body):
+        status_code, code = REFUSAL_MISSING_OPTOUT
+        return status_code, code, "Draft body is missing the required opt-out/STOP sentence (SOP §3.3)."
+
+    target_email = draft.get("target_email")
+    if target_email:
+        suppressed = await fetch_one(
+            "SELECT 1 FROM suppression_list WHERE email_hash = $1", privacy.email_hash(target_email),
+        )
+        if suppressed:
+            status_code, code = REFUSAL_RECIPIENT_SUPPRESSED
+            return status_code, code, "Recipient is on the suppression list (STOP received) — refusing to send."
+
+    if draft.get("target_type") == "candidate":
+        candidate = await fetch_one(
+            "SELECT lawful_basis, consent_withdrawn_at, consent_spec_presentation_at "
+            "FROM candidates WHERE id = $1",
+            draft.get("target_id"),
+        )
+        if candidate:
+            if candidate["consent_withdrawn_at"]:
+                status_code, code = REFUSAL_RECIPIENT_OPTED_OUT
+                return status_code, code, "Candidate has withdrawn consent (consent_withdrawn_at set) — refusing to send."
+            if candidate["lawful_basis"] in ("gerechtvaardigd_belang", "toestemming_referral"):
+                if not _has_art14_block(body, language):
+                    status_code, code = REFUSAL_MISSING_ART14
+                    return status_code, code, "Draft body is missing the Art. 14 notice block required for this lawful_basis (SOP §3.2)."
+
+    elif draft.get("target_type") == "client_prospect":
+        prospect = await fetch_one(
+            "SELECT lawful_basis FROM client_prospects WHERE id = $1", draft.get("target_id"),
+        )
+        if prospect and not prospect["lawful_basis"]:
+            status_code, code = REFUSAL_PROSPECT_NO_LAWFUL_BASIS
+            return status_code, code, "Prospect has no lawful_basis recorded (Telecommunicatiewet art. 11.7, SOP §4) — refusing to send."
+
+        # Spec-candidate / MPC presentation: a candidate being anonymously
+        # presented to a client prospect (SOP §5). outreach_drafts has no
+        # dedicated "candidate being presented" column for client_prospect
+        # rows — job_id is reused as that reference here (it is otherwise
+        # always NULL for prospect drafts, see services/harvest.py's
+        # _draft_prospect_outreach). Flagged as an open question for the
+        # owner in the PR report; a follow-up migration should give this
+        # its own column if spec-presentation drafting is built out.
+        presented_candidate_id = draft.get("job_id")
+        if presented_candidate_id is not None:
+            candidate = await fetch_one(
+                "SELECT consent_spec_presentation_at FROM candidates WHERE id = $1", presented_candidate_id,
+            )
+            if not candidate or not candidate["consent_spec_presentation_at"]:
+                status_code, code = REFUSAL_CANDIDATE_NO_SPEC_CONSENT
+                return status_code, code, "Referenced candidate has no consent_spec_presentation_at — cannot present an anonymised profile to a client (SOP §5)."
+
+    return None
 
 
 class DraftUpdate(BaseModel):
@@ -162,6 +272,11 @@ async def approve_draft(
             status_code=400,
             detail="No email — use LinkedIn URL in draft",
         )
+
+    refusal = await _draft_refusal(draft)
+    if refusal:
+        status_code, code, message = refusal
+        raise HTTPException(status_code=status_code, detail={"code": code, "message": message})
 
     sent_ok = await email_service.send_email(
         to_email=draft["target_email"],
