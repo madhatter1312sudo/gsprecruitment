@@ -38,6 +38,7 @@ import pathlib
 import json
 import re
 import socket
+import os
 import sys
 import threading
 import time
@@ -47,7 +48,11 @@ from urllib.parse import urlparse
 ROOT = Path(__file__).resolve().parent.parent
 WEBSITE = ROOT / "website"
 HEADERS_FILE = WEBSITE / "_headers"
-CHROMIUM_PATH = "/opt/pw-browsers/chromium"
+# Chromium: env CHROMIUM_PATH wins; the sandbox path is used when present;
+# otherwise None lets Playwright use its own installed browser (CI).
+CHROMIUM_PATH = os.environ.get("CHROMIUM_PATH") or (
+    "/opt/pw-browsers/chromium" if os.path.exists("/opt/pw-browsers/chromium") else None
+)
 
 ALLOWED_CDN_HOSTS = {
     "cdn.jsdelivr.net",
@@ -163,7 +168,7 @@ def main():
     network_warnings = []  # (page, url)
 
     with sync_playwright() as pw:
-        browser = pw.chromium.launch(executable_path=CHROMIUM_PATH, headless=True)
+        browser = pw.chromium.launch(executable_path=CHROMIUM_PATH or None, headless=True)
         for rel, role in pages:
             context = browser.new_context()
 
