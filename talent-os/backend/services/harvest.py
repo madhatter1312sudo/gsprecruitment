@@ -121,6 +121,33 @@ async def _flag_enabled(key: str) -> bool:
     return str(value).strip().lower() == "true"
 
 
+async def _apollo_sync_enabled() -> bool:
+    """Master gate for every Apollo-calling entry point in this module,
+    manual-trigger ones (harvest_all/enrich_matched/backfill_prospect_ids
+    via POST /api/v1/admin/outreach/run/{job_name}, routers/outreach.py)
+    included -- not just the cron jobs services/scheduler.py registers.
+
+    Two switches, both must be on:
+      1. settings.apollo_sync_enabled (core/config.py, env APOLLO_SYNC_ENABLED,
+         default False) -- the env-level master off-switch. Before WS-E.8,
+         only start_scheduler() checked this (gating whether the cron jobs
+         were even registered); the manual-trigger functions below checked
+         only the DB flag (#2), which defaults to *enabled* when unset --
+         so an admin could POST /run/harvest and it would call the live
+         Apollo API even with the env switch left at its safe default.
+      2. system_settings.apollo_sync_enabled (DB, admin-editable, missing =
+         enabled) -- the existing secondary runtime switch (_flag_enabled).
+
+    WS-E.8 also means a fresh Apollo insert (were this to run) would carry
+    lawful_basis=NULL and be refused by every outreach/matching gate WS-E.7
+    added (routers/outreach.py's _draft_refusal, docs/SOURCING-SOP.md §7.1)
+    -- this master gate additionally stops the API calls and DB inserts
+    themselves from happening at all."""
+    if not settings.apollo_sync_enabled:
+        return False
+    return await _flag_enabled("apollo_sync_enabled")
+
+
 def _clean_email(raw: Optional[str]) -> Optional[str]:
     """Apollo returns sentinel strings like 'email_not_unlocked@domain.com'
     for people that would require a paid /people/match enrichment call to
@@ -162,7 +189,7 @@ async def harvest_candidates() -> dict:
     SOURCE_LOCATIONS. NO enrichment calls — saves Apollo credits. Stops
     early per title once a page returns fewer than PER_PAGE results, and
     stops entirely once CAP_CANDIDATES total inserts is reached."""
-    if not await _flag_enabled("apollo_sync_enabled"):
+    if not await _apollo_sync_enabled():
         logger.info("harvest_candidates: disabled via system_settings, skipping")
         return {"status": "skipped", "reason": "apollo_sync_enabled=false", "api_calls": 0, "profiles_seen": 0, "inserted": 0}
 
@@ -272,7 +299,7 @@ async def harvest_candidates() -> dict:
 async def harvest_prospects() -> dict:
     """Bulk-source client (BD) prospects — hiring managers/CTOs at
     Brainport high-tech companies — from Apollo. NO enrichment calls."""
-    if not await _flag_enabled("apollo_sync_enabled"):
+    if not await _apollo_sync_enabled():
         logger.info("harvest_prospects: disabled via system_settings, skipping")
         return {"status": "skipped", "reason": "apollo_sync_enabled=false", "api_calls": 0, "profiles_seen": 0, "inserted": 0}
 
@@ -429,7 +456,7 @@ async def backfill_prospect_ids() -> dict:
     harvest_prospects()'s WHERE NOT EXISTS guard — but only if that row
     doesn't already have an intent_signal, so a re-run is safe and simply
     skips rows already backfilled. Manual trigger only."""
-    if not await _flag_enabled("apollo_sync_enabled"):
+    if not await _apollo_sync_enabled():
         logger.info("backfill_prospect_ids: disabled via system_settings, skipping")
         return {"status": "skipped", "reason": "apollo_sync_enabled=false", "api_calls": 0, "ids_backfilled": 0}
 
@@ -782,7 +809,7 @@ async def enrich_matched() -> dict:
     'cap_reached' (more pool left, re-run) or 'pool_empty' (that run's pools
     were exhausted). Manual trigger only — see services/scheduler.py
     JOBS_BY_NAME and routers/outreach.py run/{job_name}."""
-    if not await _flag_enabled("apollo_sync_enabled"):
+    if not await _apollo_sync_enabled():
         logger.info("enrich_matched: disabled via system_settings, skipping")
         return {"status": "skipped", "reason": "apollo_sync_enabled=false"}
 
