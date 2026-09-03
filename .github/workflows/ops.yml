@@ -51,8 +51,12 @@ jobs:
           chmod 600 ~/.ssh/id_ed25519
           ssh-keyscan -H "$VPS_HOST" >> ~/.ssh/known_hosts
 
-      - name: Ship helper script
-        run: scp scripts/vps-ops.sh "$VPS_USER@$VPS_HOST:/tmp/vps-ops.sh"
+      - name: Ship helper and backup scripts
+        # deploy.yml only rsyncs talent-os/backend, so the backup scripts
+        # (talent-os/scripts) are copied here; .env in talent-os/ is untouched.
+        run: |
+          scp scripts/vps-ops.sh "$VPS_USER@$VPS_HOST:/tmp/vps-ops.sh"
+          scp -r talent-os/scripts "$VPS_USER@$VPS_HOST:$VPS_PATH/talent-os/"
 
       - name: Run action
         if: inputs.action != 'schema-dump'
