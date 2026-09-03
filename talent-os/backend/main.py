@@ -103,6 +103,8 @@ from routers.client import router as client_portal_router
 from routers.admin import router as admin_portal_router
 from routers.public import router as public_router
 from routers.gdpr import router as gdpr_router
+from routers.gdpr import admin_router as gdpr_admin_router
+from routers.gdpr import suppression_router
 from routers.outreach import router as outreach_router
 from routers.blog_admin import router as blog_admin_router
 from routers.mobile import router as mobile_router
@@ -121,6 +123,8 @@ app.include_router(client_portal_router)
 app.include_router(admin_portal_router)
 app.include_router(public_router)
 app.include_router(gdpr_router)
+app.include_router(gdpr_admin_router)
+app.include_router(suppression_router)
 app.include_router(outreach_router)
 app.include_router(blog_admin_router)
 app.include_router(mobile_router)

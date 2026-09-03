@@ -34,6 +34,11 @@ except OSError as exc:
 
 MAX_CV_SIZE_BYTES = 5 * 1024 * 1024  # 5 MB
 
+# WS-E.7, SOP §1.4: self-registered candidates don't need a sourcing
+# source_url (they made first contact themselves), but every candidates
+# row records where it came from for consistency — this is that URL.
+PORTAL_REGISTRATION_SOURCE_URL = "https://gsprecruitment.nl/candidate/"
+
 
 async def _get_candidate_id(user_id: int) -> Optional[int]:
     """Resolve the candidate record id linked to this user, creating the
@@ -58,8 +63,10 @@ async def _get_candidate_id(user_id: int) -> Optional[int]:
     )
     created = await fetch_one(
         """INSERT INTO candidates (full_name, email, phone, current_title, current_company,
-                                   location, skills, years_experience, source)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'portal_registration')
+                                   location, skills, years_experience, source,
+                                   source_url, lawful_basis, date_found)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'portal_registration',
+                   $9, 'portal_registratie', CURRENT_DATE)
            ON CONFLICT DO NOTHING
            RETURNING id""",
         user["full_name"] or user["email"],
@@ -70,6 +77,11 @@ async def _get_candidate_id(user_id: int) -> Optional[int]:
         profile["location"] if profile else None,
         profile["skills"] if profile else None,
         profile["years_experience"] if profile else None,
+        # SOP §1.4: own portal registration is its own lawful basis; no
+        # sourcing source_url is required for contact, but we still record
+        # where the record came from (the portal itself) for consistency
+        # with every other candidates row.
+        PORTAL_REGISTRATION_SOURCE_URL,
     )
     if created:
         return created["id"]
