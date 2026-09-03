@@ -309,9 +309,14 @@ async def erase_person(email: str, actor_id: Optional[int] = None, reason: str =
     """Art. 17 erasure (WS-E.7). Anonymises/removes PII for `email` across
     every table in the Verwerkingsregister (docs/VERWERKINGSREGISTER.md
     §1.2) and adds its hash to suppression_list so the person is never
-    re-sourced. Used by both DELETE /api/v1/gdpr/account (self-service)
-    and POST /api/v1/admin/gdpr/erase (admin, for sourced persons with no
-    portal account).
+    re-sourced -- except when `reason` starts with
+    "retention_purge:talentpool_consent" (a lapsed talentpool consent,
+    services/scheduler.py._purge_talentpool_expired): that erasure is
+    not an opt-out, so it must not block the same person signing up
+    again via the public talentpool form later (WS-C.17 security-audit
+    follow-up). Used by DELETE /api/v1/gdpr/account (self-service),
+    POST /api/v1/admin/gdpr/erase (admin, for sourced persons with no
+    portal account), and the retention purge job.
 
     Tables touched: candidates (full PII set, including the WS-C.7
     immigratiestatus columns -- nationality, needs_work_permit,
@@ -469,12 +474,23 @@ async def erase_person(email: str, actor_id: Optional[int] = None, reason: str =
     )
     audit_redacted = await _redact_audit_log_email(email_norm, email_hash)
 
-    await execute(
-        """INSERT INTO suppression_list (email_hash, email_domain, reason, created_by)
-           VALUES ($1, $2, $3, $4)
-           ON CONFLICT (email_hash) DO NOTHING""",
-        email_hash, email_domain, "gdpr_erasure", actor_id,
-    )
+    # WS-C.17 security-audit follow-up (LOW, post-APPROVED): a lapsed
+    # talentpool consent is erased the same way as any other retention
+    # purge (services/scheduler.py._purge_talentpool_expired), but it is
+    # NOT the same thing as an opt-out/STOP or an admin/self-service
+    # erasure -- the person didn't ask to never be contacted again, their
+    # 12-month consent just ran out after the renewal reminder went
+    # unanswered. Adding them to suppression_list would silently block
+    # the exact re-signup this flow's own reminder e-mail invites, so
+    # this one reason is the sole exception to "every erasure adds a
+    # suppression entry".
+    if not reason.startswith("retention_purge:talentpool_consent"):
+        await execute(
+            """INSERT INTO suppression_list (email_hash, email_domain, reason, created_by)
+               VALUES ($1, $2, $3, $4)
+               ON CONFLICT (email_hash) DO NOTHING""",
+            email_hash, email_domain, "gdpr_erasure", actor_id,
+        )
 
     completion_status = "partial" if failed_paths else "complete"
     await execute(
