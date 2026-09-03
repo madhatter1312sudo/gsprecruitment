@@ -1,5 +1,14 @@
 # Security headers for gsprecruitment.nl (Cloudflare Workers Static Assets)
-# WS-A.9b M0 — report-only CSP; see MASTERPLAN-2026.md for the removal plan (M1).
+# WS-A.9b M1 — CSP is now enforced. All inline <script> blocks and inline
+# onclick=/onerror=/etc. attributes were moved to external files across
+# website/**/*.html, so script-src no longer needs 'unsafe-inline'.
+# style-src keeps 'unsafe-inline' for M1 (inline <style> blocks / style=
+# attributes are still in use; a follow-up masterplan item can nonce/hash
+# those if we want to tighten further).
+# The Report-Only header is kept for one more release, set to the same
+# policy, as a safety net that would have caught this cutover if the
+# violation check below had missed something in production; drop it in the
+# next release once the enforced header has run clean in prod.
 # Docs: https://developers.cloudflare.com/workers/static-assets/headers/
 
 /*
@@ -8,4 +17,5 @@
   X-Frame-Options: DENY
   Referrer-Policy: strict-origin-when-cross-origin
   Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=()
-  Content-Security-Policy-Report-Only: default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdnjs.cloudflare.com https://cdn.jsdelivr.net; font-src 'self' https://fonts.gstatic.com https://cdnjs.cloudflare.com; img-src 'self' data: https:; connect-src 'self' https://api.gsprecruitment.nl; frame-src 'none'; frame-ancestors 'none'; base-uri 'self'; form-action 'self' https://api.gsprecruitment.nl; object-src 'none'
+  Content-Security-Policy: default-src 'self'; script-src 'self' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdnjs.cloudflare.com https://cdn.jsdelivr.net; font-src 'self' https://fonts.gstatic.com https://cdnjs.cloudflare.com; img-src 'self' data: https:; connect-src 'self' https://api.gsprecruitment.nl; frame-src 'none'; frame-ancestors 'none'; base-uri 'self'; form-action 'self' https://api.gsprecruitment.nl; object-src 'none'
+  Content-Security-Policy-Report-Only: default-src 'self'; script-src 'self' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdnjs.cloudflare.com https://cdn.jsdelivr.net; font-src 'self' https://fonts.gstatic.com https://cdnjs.cloudflare.com; img-src 'self' data: https:; connect-src 'self' https://api.gsprecruitment.nl; frame-src 'none'; frame-ancestors 'none'; base-uri 'self'; form-action 'self' https://api.gsprecruitment.nl; object-src 'none'

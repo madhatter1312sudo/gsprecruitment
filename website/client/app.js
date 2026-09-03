@@ -1,0 +1,650 @@
+    /* ================================================================
+       Client Portal — Full API integration
+       ================================================================ */
+
+    const user = Auth.requireAuth(['client']);
+    if (!user) {}
+
+    /* ---- WS-E.2: e-mail verification gate ----
+       Auth.requireAuth() only checks the JWT is valid; is_verified is a
+       separate, backend-enforced gate (core/deps.py get_verified_user
+       returns 403 on every /v1/client/* endpoint until confirmed). The
+       further approved_by_admin_at gate (routers/client.py
+       _require_candidate_access) only affects the candidate-search
+       section, not the whole portal, so it isn't blocked here -- a client
+       can see jobs/team/analytics while awaiting approval; the candidate
+       search section itself surfaces its own 403 message from the API. */
+    function showUnverifiedOverlay() {
+      const overlay = document.getElementById('unverifiedOverlay');
+      const layout = document.getElementById('portalLayout');
+      overlay.style.display = 'flex';
+      layout?.setAttribute('aria-hidden', 'true');
+      Auth.trapFocus(overlay);
+    }
+
+    function hideUnverifiedOverlay() {
+      const overlay = document.getElementById('unverifiedOverlay');
+      const layout = document.getElementById('portalLayout');
+      Auth.releaseFocusTrap(overlay);
+      overlay.style.display = 'none';
+      layout?.removeAttribute('aria-hidden');
+    }
+
+    if (user && !user.is_verified) {
+      showUnverifiedOverlay();
+      document.getElementById('unverifiedLogoutBtn')?.addEventListener('click', () => Auth.logout());
+      document.getElementById('resendVerifyBtn')?.addEventListener('click', async (e) => {
+        const btn = e.currentTarget;
+        const msg = document.getElementById('resendVerifyMsg');
+        btn.disabled = true;
+        try {
+          const res = await fetch(`${Auth.API}/auth/resend-verification`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email: user.email }),
+          });
+          if (res.ok && msg) {
+            msg.textContent = 'Check your inbox for the new link. / Controleer je inbox voor de nieuwe link.';
+            msg.style.display = 'block';
+          }
+        } catch (err) {
+          if (msg) {
+            msg.textContent = 'Network error — please try again. / Netwerkfout — probeer het opnieuw.';
+            msg.style.display = 'block';
+          }
+        } finally {
+          btn.disabled = false;
+        }
+      });
+      throw new Error('unverified'); // stop the rest of this script block (dashboard fetches, listeners)
+    }
+
+    const sectionTitles = {
+      dashboard: { en: 'Dashboard', nl: 'Dashboard' },
+      jobs: { en: 'Job Management', nl: 'Vacatures' },
+      candidates: { en: 'Candidate Search', nl: 'Kandidaten Zoeken' },
+      analytics: { en: 'Analytics', nl: 'Analytics' },
+      team: { en: 'Team', nl: 'Team' },
+      settings: { en: 'Settings', nl: 'Instellingen' }
+    };
+
+    function navigateTo(section) {
+      document.querySelectorAll('.sidebar-nav-item').forEach(item => {
+        item.classList.toggle('active', item.dataset.section === section);
+      });
+      document.querySelectorAll('.portal-section').forEach(s => {
+        s.classList.toggle('active', s.id === `section-${section}`);
+      });
+      const title = sectionTitles[section] || sectionTitles.dashboard;
+      const enEl = document.querySelector('#pageTitle .lang-en');
+      const nlEl = document.querySelector('#pageTitle .lang-nl');
+      if (enEl) enEl.textContent = title.en;
+      if (nlEl) nlEl.textContent = title.nl;
+      window.location.hash = section;
+      document.getElementById('sidebar').classList.remove('open');
+      // Load section data
+      if (section === 'dashboard') loadDashboard();
+      else if (section === 'jobs') loadJobs();
+      else if (section === 'analytics') loadAnalytics();
+      else if (section === 'team') loadTeam();
+      else if (section === 'settings') loadClientProfile();
+    }
+
+    document.querySelectorAll('.sidebar-nav-item').forEach(item => {
+      item.addEventListener('click', () => navigateTo(item.dataset.section));
+    });
+
+    const hash = window.location.hash.replace('#', '');
+    if (hash && sectionTitles[hash]) navigateTo(hash);
+
+    const mobileBtn = document.getElementById('mobileMenuBtn');
+    const sidebar = document.getElementById('sidebar');
+    if (window.innerWidth <= 768) mobileBtn.style.display = '';
+    window.addEventListener('resize', () => { mobileBtn.style.display = window.innerWidth <= 768 ? '' : 'none'; });
+    mobileBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+
+    /* ---- Populate sidebar user ---- */
+    if (user) {
+      const name = user.full_name || user.name || 'Client';
+      const email = user.email || 'client@company.com';
+      const initials = name.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase();
+      document.getElementById('sidebarName').textContent = name;
+      document.getElementById('sidebarEmail').textContent = email;
+      document.getElementById('sidebarAvatar').textContent = initials;
+    }
+
+    /* ================================================================
+       API: Load Dashboard
+       ================================================================ */
+    async function loadDashboard() {
+      try {
+        const [dashRes, jobsRes, pipelineRes] = await Promise.all([
+          Auth.fetch('/v1/client/dashboard'),
+          Auth.fetch('/v1/client/jobs?limit=5'),
+          Auth.fetch('/v1/client/pipeline?limit=10'),
+        ]);
+        const dash = dashRes ? await dashRes.json() : {};
+        const jobsData = jobsRes ? await jobsRes.json() : { items: [] };
+        const pipelineData = pipelineRes ? await pipelineRes.json() : { items: [] };
+
+        // Stats
+        document.querySelectorAll('#section-dashboard .stats-grid .stat-card .stat-value')[0].textContent = dash.active_jobs ?? 0;
+        document.querySelectorAll('#section-dashboard .stats-grid .stat-card .stat-value')[1].textContent = dash.total_candidates_matched ?? 0;
+        document.querySelectorAll('#section-dashboard .stats-grid .stat-card .stat-value')[2].textContent = dash.candidates_in_pipeline ?? 0;
+        document.querySelectorAll('#section-dashboard .stats-grid .stat-card .stat-value')[3].textContent = dash.placements ?? 0;
+
+        // Pipeline kanban columns
+        const stages = { 'new': [], 'screening': [], 'interview': [], 'offer': [] };
+        (pipelineData.items || []).forEach(pe => {
+          const stage = (pe.stage || 'new').toLowerCase();
+          if (stages[stage]) stages[stage].push(pe);
+          else stages['new'].push(pe);
+        });
+
+        // Rebuild kanban columns from real pipeline data (counts + cards)
+        document.querySelectorAll('.kanban-column').forEach((col) => {
+          const stageName = col.dataset.stage;
+          const items = stages[stageName] || [];
+          const countEl = col.querySelector('h4 span');
+          if (countEl) countEl.textContent = items.length;
+          const cardsHtml = items.map(item => {
+            const nameNl = GSP.esc(item.full_name || item.name || 'Kandidaat');
+            const nameEn = GSP.esc(item.full_name || item.name || 'Candidate');
+            const role = GSP.esc(item.current_title || item.job_title || '');
+            return `<div class="kanban-card">
+              <h5 class="lang-en">${nameEn}</h5><h5 class="lang-nl">${nameNl}</h5>
+              <p>${role}</p>
+            </div>`;
+          }).join('');
+          col.querySelectorAll('.kanban-card, .kanban-empty').forEach(el => el.remove());
+          if (cardsHtml) {
+            col.insertAdjacentHTML('beforeend', cardsHtml);
+          } else {
+            col.insertAdjacentHTML('beforeend', '<div class="kanban-empty"><span class="lang-en">No candidates yet</span><span class="lang-nl">Nog geen kandidaten</span></div>');
+          }
+        });
+
+        // Recent activity
+        const activityContainer = document.getElementById('clientActivity');
+        if (activityContainer && pipelineData.items?.length > 0) {
+          const recent = pipelineData.items.slice(0, 3);
+          activityContainer.innerHTML = recent.map(pe => {
+            const time = pe.created_at ? new Date(pe.created_at).toLocaleDateString() : '';
+            return `<div class="activity-item">
+              <div class="activity-icon" style="background:rgba(34,197,94,0.1);color:#4ade80;"><i class="fa-regular fa-user-plus"></i></div>
+              <div class="activity-content">
+                <div class="activity-text lang-en">${GSP.esc(pe.full_name || 'Candidate')} added to ${GSP.esc(pe.job_title || 'pipeline')}</div>
+                <div class="activity-text lang-nl">${GSP.esc(pe.full_name || 'Kandidaat')} toegevoegd aan ${GSP.esc(pe.job_title || 'pipeline')}</div>
+                <div class="activity-time">${GSP.esc(time)}</div>
+              </div>
+            </div>`;
+          }).join('');
+        }
+      } catch (err) {
+        console.error('Dashboard load error:', err);
+      }
+    }
+
+    /* ================================================================
+       API: Load Jobs
+       ================================================================ */
+    async function loadJobs() {
+      try {
+        const res = await Auth.fetch('/v1/client/jobs?limit=50');
+        if (!res) return;
+        const data = await res.json();
+        const list = document.getElementById('jobsList');
+        if (!data.items || data.items.length === 0) {
+          list.innerHTML = '<p style="color:var(--navy-200);text-align:center;padding:var(--space-2xl);">No jobs yet. Create your first job!</p>';
+          return;
+        }
+        list.innerHTML = data.items.map(j => {
+          const statusClass = {
+            'open': 'badge-green', 'draft': 'badge-gray', 'closed': 'badge-red', 'filled': 'badge-purple'
+          }[j.status] || 'badge-blue';
+          const salary = j.salary_min && j.salary_max
+            ? `€${(j.salary_min/1000).toFixed(0)}K – €${(j.salary_max/1000).toFixed(0)}K`
+            : '';
+          const location = j.location_type || '';
+          return `<div class="job-card">
+            <div style="display:flex;justify-content:space-between;align-items:flex-start;">
+              <div>
+                <h4 style="font-size:var(--font-size-lg);font-weight:600;color:var(--white);">${GSP.esc(j.title || 'Untitled')}</h4>
+                <p style="font-size:var(--font-size-sm);color:var(--navy-200);margin:4px 0;">${salary ? salary + ' · ' : ''}${GSP.esc(location)}${j.seniority ? ' · ' + GSP.esc(j.seniority) : ''}</p>
+                <div style="display:flex;gap:var(--space-sm);margin-top:var(--space-sm);">
+                  <span class="badge ${statusClass} lang-en">${GSP.esc(j.status || 'draft')}</span>
+                  <span class="badge ${statusClass} lang-nl">${j.status === 'open' ? 'Actief' : j.status === 'draft' ? 'Concept' : GSP.esc(j.status)}</span>
+                  ${j.department ? `<span class="badge badge-blue">${GSP.esc(j.department)}</span>` : ''}
+                </div>
+              </div>
+              <div style="display:flex;gap:var(--space-sm);">
+                <button class="btn btn-sm btn-outline" data-action="edit-job" data-id="${Number(j.id) || 0}"><i class="fa-regular fa-pen-to-square"></i></button>
+                <button class="btn btn-sm btn-ghost" style="color:#f87171;" data-action="delete-job" data-id="${Number(j.id) || 0}"><i class="fa-regular fa-trash-can"></i></button>
+              </div>
+            </div>
+          </div>`;
+        }).join('');
+      } catch (err) {
+        console.error('Jobs load error:', err);
+      }
+    }
+
+    /* ---- Edit job ---- */
+    window.editJob = async function(jobId) {
+      try {
+        const res = await Auth.fetch(`/v1/client/jobs/${jobId}`);
+        if (!res || !res.ok) { Auth.toast('Failed to load job', 'error'); return; }
+        const job = await res.json();
+        window.showJobModal(job);
+      } catch (err) {
+        Auth.toast('Error loading job', 'error');
+      }
+    };
+
+    /* ---- Delete job ---- */
+    window.deleteJob = async function(jobId) {
+      if (!confirm('Delete this job?')) return;
+      try {
+        const res = await Auth.fetch(`/v1/client/jobs/${jobId}`, { method: 'DELETE' });
+        if (res && res.ok) {
+          Auth.toast('Job deleted', 'success');
+          loadJobs();
+        } else {
+          Auth.toast('Failed to delete job', 'error');
+        }
+      } catch (err) {
+        Auth.toast('Error deleting job', 'error');
+      }
+    };
+
+    /* ---- Create job modal ---- */
+    document.getElementById('createJobBtn').addEventListener('click', () => {
+      window.showJobModal();
+    });
+
+    window.showJobModal = function(job = null) {
+      const isEdit = !!job;
+      const existing = document.getElementById('jobModalOverlay');
+      if (existing) existing.remove();
+
+      const overlay = document.createElement('div');
+      overlay.id = 'jobModalOverlay';
+      overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:1000;display:flex;align-items:center;justify-content:center;padding:var(--space-lg);';
+      overlay.innerHTML = `
+        <div style="background:var(--navy-800);border:1px solid var(--navy-600);border-radius:12px;padding:var(--space-2xl);width:100%;max-width:560px;max-height:90vh;overflow-y:auto;">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:var(--space-xl);">
+            <h3 style="font-size:var(--font-size-lg);font-weight:600;color:var(--white);">
+              <span class="lang-en">${isEdit ? 'Edit Job' : 'Create Job'}</span>
+              <span class="lang-nl">${isEdit ? 'Vacature Bewerken' : 'Vacature Aanmaken'}</span>
+            </h3>
+            <button id="jobModalClose" class="btn btn-sm btn-ghost"><i class="fa-regular fa-xmark"></i></button>
+          </div>
+          <form id="jobModalForm">
+            <div class="form-group">
+              <label class="lang-en">Job Title *</label><label class="lang-nl">Functietitel *</label>
+              <input type="text" name="title" required placeholder="e.g. Senior Embedded Software Engineer" value="${GSP.esc(job?.title || '')}">
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:var(--space-md);">
+              <div class="form-group">
+                <label class="lang-en">Department</label><label class="lang-nl">Afdeling</label>
+                <input type="text" name="department" placeholder="e.g. R&D" value="${GSP.esc(job?.department || '')}">
+              </div>
+              <div class="form-group">
+                <label class="lang-en">Seniority</label><label class="lang-nl">Niveau</label>
+                <select name="seniority">
+                  <option value="">Select…</option>
+                  ${['junior','mid','senior','lead','executive'].map(s => `<option value="${s}" ${job?.seniority === s ? 'selected' : ''}>${s.charAt(0).toUpperCase()+s.slice(1)}</option>`).join('')}
+                </select>
+              </div>
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:var(--space-md);">
+              <div class="form-group">
+                <label class="lang-en">Min Salary (€)</label><label class="lang-nl">Min Salaris (€)</label>
+                <input type="number" name="salary_min" placeholder="50000" value="${GSP.esc(job?.salary_min ?? '')}">
+              </div>
+              <div class="form-group">
+                <label class="lang-en">Max Salary (€)</label><label class="lang-nl">Max Salaris (€)</label>
+                <input type="number" name="salary_max" placeholder="80000" value="${GSP.esc(job?.salary_max ?? '')}">
+              </div>
+              <div class="form-group">
+                <label class="lang-en">Location Type</label><label class="lang-nl">Werkplek</label>
+                <select name="location_type">
+                  <option value="">Select…</option>
+                  ${['remote','hybrid','onsite'].map(t => `<option value="${t}" ${job?.location_type === t ? 'selected' : ''}>${t.charAt(0).toUpperCase()+t.slice(1)}</option>`).join('')}
+                </select>
+              </div>
+            </div>
+            <div class="form-group">
+              <label class="lang-en">Description</label><label class="lang-nl">Beschrijving</label>
+              <textarea name="description" rows="4" placeholder="Describe the role and responsibilities…" style="width:100%;resize:vertical;">${GSP.esc(job?.description || '')}</textarea>
+            </div>
+            <div class="form-group">
+              <label class="lang-en">Requirements</label><label class="lang-nl">Vereisten</label>
+              <textarea name="requirements" rows="3" placeholder="Required skills and experience…" style="width:100%;resize:vertical;">${GSP.esc(job?.requirements || '')}</textarea>
+            </div>
+            <div class="form-group">
+              <label class="lang-en">Nice to Have</label><label class="lang-nl">Pré</label>
+              <textarea name="nice_to_have" rows="2" placeholder="Bonus skills…" style="width:100%;resize:vertical;">${GSP.esc(job?.nice_to_have || '')}</textarea>
+            </div>
+            <div class="form-group">
+              <label class="lang-en">Urgency</label><label class="lang-nl">Urgentie</label>
+              <select name="urgency">
+                ${['normal','high','critical'].map(u => `<option value="${u}" ${job?.urgency === u || (!job?.urgency && u === 'normal') ? 'selected' : ''}>${u.charAt(0).toUpperCase()+u.slice(1)}</option>`).join('')}
+              </select>
+            </div>
+            <div style="display:flex;gap:var(--space-md);justify-content:flex-end;margin-top:var(--space-xl);">
+              <button type="button" id="jobModalCancelBtn" class="btn btn-outline">
+                <span class="lang-en">Cancel</span><span class="lang-nl">Annuleren</span>
+              </button>
+              <button type="submit" class="btn btn-primary">
+                <i class="fa-regular fa-floppy-disk"></i>
+                <span class="lang-en">${isEdit ? 'Save Changes' : 'Create Job'}</span>
+                <span class="lang-nl">${isEdit ? 'Opslaan' : 'Aanmaken'}</span>
+              </button>
+            </div>
+          </form>
+        </div>
+      `;
+      document.body.appendChild(overlay);
+
+      overlay.querySelector('#jobModalClose').addEventListener('click', () => overlay.remove());
+      overlay.querySelector('#jobModalCancelBtn').addEventListener('click', () => overlay.remove());
+      overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+
+      overlay.querySelector('#jobModalForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const fd = new FormData(e.target);
+        const payload = {};
+        for (const [k, v] of fd.entries()) {
+          if (v !== '') payload[k] = k.includes('salary') ? parseInt(v) || null : v;
+        }
+        try {
+          const url = isEdit ? `/v1/client/jobs/${job.id}` : '/v1/client/jobs';
+          const method = isEdit ? 'PUT' : 'POST';
+          const res = await Auth.fetch(url, {
+            method,
+            body: JSON.stringify(payload),
+          });
+          if (res && (res.ok || res.status === 201)) {
+            Auth.toast(isEdit ? 'Job updated!' : 'Job created!', 'success');
+            overlay.remove();
+            loadJobs();
+          } else {
+            const err = res ? await res.json().catch(() => ({})) : {};
+            Auth.toast(err.detail || 'Failed to save job', 'error');
+          }
+        } catch (err) {
+          Auth.toast('Error saving job', 'error');
+        }
+      });
+    };
+
+    /* ================================================================
+       API: Load Analytics
+       ================================================================ */
+    async function loadAnalytics() {
+      try {
+        const [analyticsRes, jobsRes] = await Promise.all([
+          Auth.fetch('/v1/client/analytics'),
+          Auth.fetch('/v1/client/jobs?limit=50'),
+        ]);
+        const analytics = analyticsRes ? await analyticsRes.json() : {};
+        const jobsData = jobsRes ? await jobsRes.json() : { items: [] };
+
+        // Stats
+        const statValues = document.querySelectorAll('#section-analytics .stat-card .stat-value');
+        if (statValues.length >= 4) {
+          statValues[0].textContent = analytics.time_to_hire_avg_days
+            ? analytics.time_to_hire_avg_days + ' days'
+            : 'N/A';
+          statValues[1].textContent = analytics.offer_rate != null
+            ? analytics.offer_rate + '%'
+            : 'N/A';
+          const totalJobs = jobsData.total || jobsData.items?.length || 0;
+          const totalApps = jobsData.items ? jobsData.items.reduce((sum, j) => sum + (j.applicant_count || 0), 0) : 0;
+          statValues[2].textContent = totalJobs > 0
+            ? (totalApps / totalJobs).toFixed(1) + ':1'
+            : 'N/A';
+          statValues[3].textContent = analytics.cost_per_hire_avg
+            ? '€' + analytics.cost_per_hire_avg.toFixed(0)
+            : 'N/A';
+        }
+
+        // Pipeline funnel
+        const funnel = analytics.pipeline_funnel || {};
+        const stages = Object.entries(funnel);
+        if (stages.length > 0) {
+          const chartEls = document.querySelectorAll('#section-analytics .chart-placeholder');
+          if (chartEls.length >= 2) {
+            chartEls[1].innerHTML = `<div style="padding:var(--space-md);">
+              ${stages.map(([stage, count]) =>
+                `<div style="display:flex;justify-content:space-between;padding:4px 0;color:var(--navy-200);font-size:var(--font-size-sm);">
+                  <span>${GSP.esc(stage)}</span><span style="font-weight:600;color:var(--gold-500);">${GSP.esc(count)}</span>
+                </div>`
+              ).join('')}
+            </div>`;
+          }
+        }
+      } catch (err) {
+        console.error('Analytics load error:', err);
+      }
+    }
+
+    /* ================================================================
+       Candidate Search (basic)
+       ================================================================ */
+    document.querySelector('#section-candidates .btn-primary')?.addEventListener('click', async (e) => {
+      // Two EN/NL twin inputs share this search bar; only one is visible at
+      // a time (CSS toggles by active language) -- read from whichever is.
+      const searchInputs = document.querySelectorAll('#section-candidates .search-bar input');
+      const searchInput = Array.from(searchInputs).find((el) => el.offsetParent !== null);
+      const query = searchInput ? searchInput.value.trim() : '';
+      const resultsEl = document.getElementById('candidateResults');
+      try {
+        const res = await Auth.fetch(`/v1/client/candidates?limit=20${query ? '&specialisation=' + encodeURIComponent(query) : ''}`);
+        if (!res || !resultsEl) return;
+        const data = await res.json();
+        if (!data.items || data.items.length === 0) {
+          resultsEl.innerHTML = `<div style="text-align:center;color:var(--navy-200);font-size:var(--font-size-sm);padding:var(--space-2xl) 0;">
+            <span class="lang-en">No candidates found.</span>
+            <span class="lang-nl">Geen kandidaten gevonden.</span>
+          </div>`;
+          return;
+        }
+        resultsEl.innerHTML = data.items.map(c => {
+          const initials = (c.full_name || '').split(' ').map(w => w[0]).join('').slice(0,2).toUpperCase() || '?';
+          const name = GSP.esc(c.full_name || 'Onbekend');
+          const desc = GSP.esc(c.current_title || (Array.isArray(c.skills) ? c.skills.join(', ') : '') || '');
+          return `<div class="candidate-result">
+            <div class="avatar avatar-navy">${GSP.esc(initials)}</div>
+            <div style="flex:1;min-width:0;">
+              <div style="display:flex;justify-content:space-between;align-items:center;">
+                <h4 style="font-size:var(--font-size-sm);font-weight:600;color:var(--white);">${name}</h4>
+              </div>
+              <p style="font-size:var(--font-size-xs);color:var(--navy-200);margin:2px 0;">${desc}</p>
+            </div>
+            <div style="display:flex;gap:var(--space-sm);">
+              <button class="btn btn-sm btn-outline"><i class="fa-regular fa-bookmark"></i></button>
+              <button class="btn btn-sm btn-primary lang-en">Contact</button>
+              <button class="btn btn-sm btn-primary lang-nl">Contact</button>
+            </div>
+          </div>`;
+        }).join('');
+      } catch (err) {
+        console.error('Candidate search error:', err);
+        if (resultsEl) Auth.renderLoadError(resultsEl, () => document.querySelector('#section-candidates .btn-primary')?.click());
+      }
+    });
+
+    /* ================================================================
+       API: Load Team
+       ================================================================ */
+    async function loadTeam() {
+      try {
+        const res = await Auth.fetch('/v1/client/team');
+        const members = res && res.ok ? await res.json() : [];
+        const tbody = document.getElementById('teamTableBody');
+        if (!tbody) return;
+        if (!members || members.length === 0) {
+          tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--navy-200);padding:var(--space-lg);">No team members yet.</td></tr>';
+          return;
+        }
+        tbody.innerHTML = members.map(m => {
+          const roleBadge = m.role === 'admin' ? 'badge-gold' : m.role === 'client' ? 'badge-blue' : 'badge-gray';
+          const roleLabel = m.role === 'admin' ? 'Admin' : m.role === 'client' ? 'Client' : m.role;
+          const statusBadge = m.is_verified ? 'badge-green' : 'badge-gray';
+          const statusLabel = m.is_verified ? 'Active' : 'Pending';
+          return `<tr>
+            <td style="font-weight:600;color:var(--white);">${GSP.esc(m.full_name || '')}</td>
+            <td style="color:var(--navy-200);">${GSP.esc(m.email || '')}</td>
+            <td><span class="badge ${roleBadge}">${GSP.esc(roleLabel)}</span></td>
+            <td><span class="badge ${statusBadge}">${GSP.esc(statusLabel)}</span></td>
+            <td><button class="btn btn-sm btn-ghost"><i class="fa-regular fa-ellipsis-vertical"></i></button></td>
+          </tr>`;
+        }).join('');
+      } catch (err) {
+        console.error('Team load error:', err);
+      }
+    }
+
+    /* ================================================================
+       Invite Team Member Modal
+       ================================================================ */
+    window.showInviteModal = function() {
+      const existing = document.getElementById('inviteModalOverlay');
+      if (existing) existing.remove();
+
+      const overlay = document.createElement('div');
+      overlay.id = 'inviteModalOverlay';
+      overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:1000;display:flex;align-items:center;justify-content:center;padding:var(--space-lg);';
+      overlay.innerHTML = `
+        <div style="background:var(--navy-800);border:1px solid var(--navy-600);border-radius:12px;padding:var(--space-2xl);width:100%;max-width:420px;">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:var(--space-xl);">
+            <h3 style="font-size:var(--font-size-lg);font-weight:600;color:var(--white);">
+              <span class="lang-en">Invite Team Member</span>
+              <span class="lang-nl">Lid Uitnodigen</span>
+            </h3>
+            <button id="inviteModalClose" class="btn btn-sm btn-ghost"><i class="fa-regular fa-xmark"></i></button>
+          </div>
+          <form id="inviteModalForm">
+            <div class="form-group">
+              <label class="lang-en">Full Name *</label><label class="lang-nl">Volledige naam *</label>
+              <input type="text" name="full_name" required placeholder="Jan de Vries">
+            </div>
+            <div class="form-group">
+              <label>Email *</label>
+              <input type="email" name="email" required placeholder="jan@company.com">
+            </div>
+            <div style="display:flex;gap:var(--space-md);justify-content:flex-end;margin-top:var(--space-xl);">
+              <button type="button" id="inviteModalCancelBtn" class="btn btn-outline">
+                <span class="lang-en">Cancel</span><span class="lang-nl">Annuleren</span>
+              </button>
+              <button type="submit" class="btn btn-primary">
+                <i class="fa-regular fa-paper-plane"></i>
+                <span class="lang-en">Send Invite</span><span class="lang-nl">Uitnodigen</span>
+              </button>
+            </div>
+          </form>
+        </div>
+      `;
+      document.body.appendChild(overlay);
+
+      overlay.querySelector('#inviteModalClose').addEventListener('click', () => overlay.remove());
+      overlay.querySelector('#inviteModalCancelBtn').addEventListener('click', () => overlay.remove());
+      overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+
+      overlay.querySelector('#inviteModalForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const fd = new FormData(e.target);
+        const payload = { full_name: fd.get('full_name'), email: fd.get('email'), role: 'client' };
+        try {
+          const res = await Auth.fetch('/v1/client/team', { method: 'POST', body: JSON.stringify(payload) });
+          if (res && (res.ok || res.status === 201)) {
+            const data = await res.json();
+            Auth.toast('Team member invited!', 'success');
+            if (data.temporary_password) {
+              alert(`Temporary password for ${payload.email}: ${data.temporary_password}\n\nPlease share this securely with the new team member.`);
+            }
+            overlay.remove();
+            loadTeam();
+          } else {
+            const err = res ? await res.json().catch(() => ({})) : {};
+            Auth.toast(err.detail || 'Failed to invite member', 'error');
+          }
+        } catch (err) {
+          Auth.toast('Error inviting member', 'error');
+        }
+      });
+    };
+
+    /* ================================================================
+       API: Load / Save Client Profile (Settings)
+       ================================================================ */
+    async function loadClientProfile() {
+      try {
+        const res = await Auth.fetch('/v1/client/profile');
+        if (!res || !res.ok) return;
+        const profile = await res.json();
+        const nameEl = document.getElementById('settingsCompanyName');
+        const webEl = document.getElementById('settingsWebsite');
+        const indEl = document.getElementById('settingsIndustry');
+        if (nameEl) nameEl.value = profile.company_name || '';
+        if (webEl) webEl.value = profile.domain || '';
+        if (indEl && profile.industry) {
+          const opt = Array.from(indEl.options).find(o => o.value === profile.industry);
+          if (opt) indEl.value = profile.industry;
+        }
+      } catch (err) {
+        console.error('Profile load error:', err);
+      }
+    }
+
+    const settingsForm = document.getElementById('clientSettingsForm');
+    if (settingsForm) {
+      settingsForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const fd = new FormData(e.target);
+        const payload = {};
+        for (const [k, v] of fd.entries()) { if (v) payload[k] = v; }
+        try {
+          const res = await Auth.fetch('/v1/client/profile', { method: 'PATCH', body: JSON.stringify(payload) });
+          if (res && res.ok) {
+            Auth.toast('Settings saved!', 'success');
+          } else {
+            Auth.toast('Failed to save settings', 'error');
+          }
+        } catch (err) {
+          Auth.toast('Error saving settings', 'error');
+        }
+      });
+    }
+
+    /* ================================================================
+       Initial load
+       ================================================================ */
+    document.addEventListener('DOMContentLoaded', () => {
+      loadDashboard();
+      loadJobs();
+    });
+
+    document.getElementById('sidebarLogoutBtn').addEventListener('click', () => Auth.logout());
+
+    const savedLang = localStorage.getItem('gsp_lang');
+    if (savedLang === 'nl' || savedLang === 'en') document.documentElement.setAttribute('data-lang', savedLang);
+
+    /* ---- Delegated data-action handler (WS-A.9b: no inline onclick=
+       attributes -- the enforced CSP drops 'unsafe-inline' from
+       script-src, which also governs inline event-handler attributes). */
+    document.addEventListener('click', (e) => {
+      const el = e.target.closest('[data-action]');
+      if (!el) return;
+      const id = el.dataset.id;
+      switch (el.dataset.action) {
+        case 'show-invite-modal': showInviteModal(); break;
+        case 'edit-job': editJob(Number(id) || 0); break;
+        case 'delete-job': deleteJob(Number(id) || 0); break;
+        case 'toast-deactivate-client':
+          Auth.toast('Contact info@gsprecruitment.nl for account deactivation', 'warning');
+          break;
+      }
+    });
