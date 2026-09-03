@@ -1056,7 +1056,7 @@ const GSP_WHATSAPP = '31617913965';
               email,
               name: 'Quiz Lead',
               message: `Quiz score: ${pct}% - ${label}`,
-              interest_type: 'candidate'
+              interest_type: 'kandidaat'
             })
           });
           if (res.ok) {
