@@ -1,6 +1,8 @@
 # GSP Recruitment — monorepo
 
 Faceless recruitment agency (Brainport/Eindhoven, NL) placing embedded software / C++ / mechatronics / OT-cybersecurity engineers. This repo is the whole business: API, website, admin panel, mobile app, infra, and strategy docs.
+Vier disciplines: embedded software (C/C++), mechatronica en besturingssoftware, OT-cybersecurity, en de bijbehorende testrollen.
+GSP is geen IND-erkend referent; sponsorschap van kennismigranten loopt via een backoffice-partner.
 
 ## Map
 - `talent-os/backend` — FastAPI + PostgreSQL API (production: api.gsprecruitment.nl). Routers per domain, SQL migrations in `migrations/`.

@@ -1,5 +1,19 @@
 (() => {
   'use strict';
+  const lang = localStorage.getItem('gsp_lang') || 'nl';
+  // WS-A.8: the site is Dutch-first with an EN toggle everywhere else, but
+  // these four messages were English-only regardless of the visitor's
+  // chosen language. Auth.validatePassword()'s own messages are shared
+  // across every auth form site-wide (auth.js) and stay out of scope here.
+  const MSG = {
+    passwordsDontMatch: { en: 'Passwords do not match.', nl: 'Wachtwoorden komen niet overeen.' },
+    resetSuccess: { en: 'Password reset successfully. You can now sign in.', nl: 'Wachtwoord succesvol gewijzigd. Je kunt nu inloggen.' },
+    resetSuccessToast: { en: 'Password reset successfully!', nl: 'Wachtwoord succesvol gewijzigd!' },
+    linkInvalid: { en: 'This reset link is invalid or has expired.', nl: 'Deze resetlink is ongeldig of verlopen.' },
+    networkError: { en: 'Network error. Please try again.', nl: 'Netwerkfout. Probeer het opnieuw.' },
+  };
+  const t = (key) => MSG[key][lang] || MSG[key].nl;
+
   const params = new URLSearchParams(window.location.search);
   const token = params.get('token');
   const form = document.getElementById('resetPwForm');
@@ -28,7 +42,7 @@
       return;
     }
     if (newPw !== confirmPw) {
-      errEl.textContent = 'Passwords do not match.';
+      errEl.textContent = t('passwordsDontMatch');
       errEl.style.display = 'block';
       return;
     }
@@ -47,17 +61,17 @@
       });
       const data = await res.json().catch(() => ({}));
       if (res.ok) {
-        successEl.textContent = 'Password reset successfully. You can now sign in.';
+        successEl.textContent = t('resetSuccess');
         successEl.style.display = 'block';
         form.style.display = 'none';
-        Auth.toast('Password reset successfully!', 'success');
+        Auth.toast(t('resetSuccessToast'), 'success');
         setTimeout(() => { window.location.href = '/'; }, 2000);
       } else {
-        errEl.textContent = data.detail || 'This reset link is invalid or has expired.';
+        errEl.textContent = data.detail || t('linkInvalid');
         errEl.style.display = 'block';
       }
     } catch (err) {
-      errEl.textContent = 'Network error. Please try again.';
+      errEl.textContent = t('networkError');
       errEl.style.display = 'block';
     } finally {
       if (submitBtn) {
