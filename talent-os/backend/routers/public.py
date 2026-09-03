@@ -13,9 +13,7 @@ import random
 
 router = APIRouter(prefix="/api/v1/public", tags=["public"])
 
-from slowapi import Limiter
-from slowapi.util import get_remote_address
-limiter = Limiter(key_func=get_remote_address)
+from core.ratelimit import limiter
 
 
 # ── Site Content ────────────────────────────────────────────────────────
