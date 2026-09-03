@@ -137,18 +137,22 @@ def build_job_entries(offline: bool) -> list[UrlEntry]:
     today = date.today().isoformat()
     entries = []
     for job in jobs:
-        if not isinstance(job, dict):
-            continue
-        job_id = job.get("id") or job.get("slug")
-        if not job_id:
-            continue
-        lastmod = (job.get("updated_at") or job.get("created_at") or today)[:10]
-        entries.append(UrlEntry(
-            f"{BASE_URL}/vacature?id={job_id}",
-            lastmod,
-            "weekly",
-            "0.6",
-        ))
+        try:
+            if not isinstance(job, dict):
+                continue
+            job_id = job.get("id") or job.get("slug")
+            if not job_id:
+                continue
+            raw_lastmod = job.get("updated_at") or job.get("created_at") or today
+            lastmod = str(raw_lastmod)[:10]
+            entries.append(UrlEntry(
+                f"{BASE_URL}/vacature?id={job_id}",
+                lastmod,
+                "weekly",
+                "0.6",
+            ))
+        except Exception as exc:  # a single malformed job must not sink the whole sitemap
+            log_warning(f"skipping malformed job entry from {JOBS_API} ({exc}): {job!r}")
     return entries
 
 
@@ -162,18 +166,33 @@ def build_blog_entries(offline: bool) -> list[UrlEntry]:
         except (OSError, ValueError) as exc:
             log_warning(f"could not read {posts_json} ({exc}) -- skipping blog post URLs")
             return []
+
+        if not isinstance(data, dict):
+            log_warning(f"{posts_json} is not a JSON object -- skipping blog post URLs")
+            return []
+
+        posts = data.get("posts", [])
+        if not isinstance(posts, list):
+            log_warning(f"{posts_json} has a non-list 'posts' field -- skipping blog post URLs")
+            return []
+
         lastmod = lastmod_for("website/blog/posts.json")
         entries = []
-        for post in data.get("posts", []):
-            slug = post.get("id") or post.get("slug")
-            if not slug:
-                continue
-            entries.append(UrlEntry(
-                f"{BASE_URL}/blog/post?slug={slug}",
-                lastmod,
-                "monthly",
-                "0.6",
-            ))
+        for post in posts:
+            try:
+                if not isinstance(post, dict):
+                    continue
+                slug = post.get("id") or post.get("slug")
+                if not slug:
+                    continue
+                entries.append(UrlEntry(
+                    f"{BASE_URL}/blog/post?slug={slug}",
+                    lastmod,
+                    "monthly",
+                    "0.6",
+                ))
+            except Exception as exc:  # a single malformed post must not sink the whole sitemap
+                log_warning(f"skipping malformed post entry from {posts_json} ({exc}): {post!r}")
         return entries
 
     if offline:
@@ -192,18 +211,22 @@ def build_blog_entries(offline: bool) -> list[UrlEntry]:
 
     entries = []
     for post in posts:
-        if not isinstance(post, dict):
-            continue
-        slug = post.get("slug") or post.get("id")
-        if not slug:
-            continue
-        lastmod = (post.get("published_at") or post.get("updated_at") or today)[:10]
-        entries.append(UrlEntry(
-            f"{BASE_URL}/blog/post?slug={slug}",
-            lastmod,
-            "monthly",
-            "0.6",
-        ))
+        try:
+            if not isinstance(post, dict):
+                continue
+            slug = post.get("slug") or post.get("id")
+            if not slug:
+                continue
+            raw_lastmod = post.get("published_at") or post.get("updated_at") or today
+            lastmod = str(raw_lastmod)[:10]
+            entries.append(UrlEntry(
+                f"{BASE_URL}/blog/post?slug={slug}",
+                lastmod,
+                "monthly",
+                "0.6",
+            ))
+        except Exception as exc:  # a single malformed post must not sink the whole sitemap
+            log_warning(f"skipping malformed post entry from {BLOG_API} ({exc}): {post!r}")
     return entries
 
 
