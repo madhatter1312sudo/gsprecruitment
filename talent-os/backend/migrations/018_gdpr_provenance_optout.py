@@ -20,6 +20,12 @@ no-op, kept here so this migration is a complete, self-contained list of
 every column the SOP (docs/SOURCING-SOP.md §2) and the Verwerkingsregister
 (docs/VERWERKINGSREGISTER.md §1.1) require, not just the new ones.
 
+outreach_drafts.presented_candidate_id (security-auditor follow-up, L2):
+the candidate being anonymously presented to a client_prospect in a
+spec/MPC-outreach draft (SOP §5) — previously routers/outreach.py's
+_draft_refusal() overloaded job_id (always NULL on prospect drafts) for
+this; a real column replaces that overload before this migration ships.
+
 No NOT NULL constraints on source_url/lawful_basis yet — the existing
 Apollo-sourced pool (14,687 rows, no source_url) has neither, and turning
 that into a hard constraint before the Apollo-pool decision (WS-E.8,
@@ -55,6 +61,7 @@ CREATE TABLE IF NOT EXISTS suppression_list (
     created_by      INTEGER REFERENCES users(id)
 );
 CREATE INDEX IF NOT EXISTS idx_suppression_list_domain ON suppression_list(email_domain);
+ALTER TABLE outreach_drafts ADD COLUMN IF NOT EXISTS presented_candidate_id INTEGER REFERENCES candidates(id);
 """
 
 if __name__ == "__main__":

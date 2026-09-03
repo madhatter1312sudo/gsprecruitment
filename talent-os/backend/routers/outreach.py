@@ -67,6 +67,19 @@ REFUSAL_RECIPIENT_OPTED_OUT = (409, "recipient_opted_out")
 REFUSAL_RECIPIENT_SUPPRESSED = (409, "recipient_suppressed")
 REFUSAL_PROSPECT_NO_LAWFUL_BASIS = (409, "prospect_missing_lawful_basis")
 REFUSAL_CANDIDATE_NO_SPEC_CONSENT = (409, "candidate_missing_spec_consent")
+REFUSAL_CANDIDATE_NOT_FOUND = (404, "candidate_not_found")
+REFUSAL_UNKNOWN_TARGET_TYPE = (422, "unknown_target_type")
+REFUSAL_CANDIDATE_MISSING_PROVENANCE = (409, "candidate_missing_provenance")
+
+# lawful_basis values whose grounds are Art. 13, not Art. 14 (SOP §3.2):
+# the person supplied the data themselves, so the Art. 14 notice block
+# does not apply — only the STOP opt-out line (checked unconditionally
+# above) is required in their first message.
+_ART13_LAWFUL_BASES = ("portal_registratie", "opt_in_talentpool")
+
+
+def _is_http_url(value) -> bool:
+    return isinstance(value, str) and value.strip().lower().startswith(("http://", "https://"))
 
 
 async def _draft_refusal(draft: dict):
@@ -75,6 +88,7 @@ async def _draft_refusal(draft: dict):
     see routers/gdpr.py / core/privacy.py for the suppression-list hash."""
     body = draft.get("body") or ""
     language = draft.get("language")
+    target_type = draft.get("target_type")
 
     if not _has_optout_line(body):
         status_code, code = REFUSAL_MISSING_OPTOUT
@@ -89,38 +103,49 @@ async def _draft_refusal(draft: dict):
             status_code, code = REFUSAL_RECIPIENT_SUPPRESSED
             return status_code, code, "Recipient is on the suppression list (STOP received) — refusing to send."
 
-    if draft.get("target_type") == "candidate":
+    if target_type == "candidate":
         candidate = await fetch_one(
-            "SELECT lawful_basis, consent_withdrawn_at, consent_spec_presentation_at "
+            "SELECT lawful_basis, consent_withdrawn_at, consent_spec_presentation_at, source_url "
             "FROM candidates WHERE id = $1",
             draft.get("target_id"),
         )
-        if candidate:
-            if candidate["consent_withdrawn_at"]:
-                status_code, code = REFUSAL_RECIPIENT_OPTED_OUT
-                return status_code, code, "Candidate has withdrawn consent (consent_withdrawn_at set) — refusing to send."
-            if candidate["lawful_basis"] in ("gerechtvaardigd_belang", "toestemming_referral"):
-                if not _has_art14_block(body, language):
-                    status_code, code = REFUSAL_MISSING_ART14
-                    return status_code, code, "Draft body is missing the Art. 14 notice block required for this lawful_basis (SOP §3.2)."
+        if not candidate:
+            status_code, code = REFUSAL_CANDIDATE_NOT_FOUND
+            return status_code, code, "This draft's target_id has no matching candidates row — refusing to send."
 
-    elif draft.get("target_type") == "client_prospect":
+        if candidate["consent_withdrawn_at"]:
+            status_code, code = REFUSAL_RECIPIENT_OPTED_OUT
+            return status_code, code, "Candidate has withdrawn consent (consent_withdrawn_at set) — refusing to send."
+
+        lawful_basis = candidate["lawful_basis"]
+        if lawful_basis is None or not _is_http_url(candidate["source_url"]):
+            status_code, code = REFUSAL_CANDIDATE_MISSING_PROVENANCE
+            return status_code, code, (
+                "Candidate has no lawful_basis and/or no public http(s) source_url on file "
+                "(SOP §2 'geen bron-URL = geen contact') — refusing to send."
+            )
+
+        if lawful_basis not in _ART13_LAWFUL_BASES:
+            if not _has_art14_block(body, language):
+                status_code, code = REFUSAL_MISSING_ART14
+                return status_code, code, "Draft body is missing the Art. 14 notice block required for this lawful_basis (SOP §3.2)."
+
+    elif target_type == "client_prospect":
         prospect = await fetch_one(
-            "SELECT lawful_basis FROM client_prospects WHERE id = $1", draft.get("target_id"),
+            "SELECT lawful_basis, opt_out_at FROM client_prospects WHERE id = $1", draft.get("target_id"),
         )
-        if prospect and not prospect["lawful_basis"]:
-            status_code, code = REFUSAL_PROSPECT_NO_LAWFUL_BASIS
-            return status_code, code, "Prospect has no lawful_basis recorded (Telecommunicatiewet art. 11.7, SOP §4) — refusing to send."
+        if prospect:
+            if prospect["opt_out_at"]:
+                status_code, code = REFUSAL_RECIPIENT_OPTED_OUT
+                return status_code, code, "Prospect has opted out (opt_out_at set) — refusing to send."
+            if not prospect["lawful_basis"]:
+                status_code, code = REFUSAL_PROSPECT_NO_LAWFUL_BASIS
+                return status_code, code, "Prospect has no lawful_basis recorded (Telecommunicatiewet art. 11.7, SOP §4) — refusing to send."
 
         # Spec-candidate / MPC presentation: a candidate being anonymously
-        # presented to a client prospect (SOP §5). outreach_drafts has no
-        # dedicated "candidate being presented" column for client_prospect
-        # rows — job_id is reused as that reference here (it is otherwise
-        # always NULL for prospect drafts, see services/harvest.py's
-        # _draft_prospect_outreach). Flagged as an open question for the
-        # owner in the PR report; a follow-up migration should give this
-        # its own column if spec-presentation drafting is built out.
-        presented_candidate_id = draft.get("job_id")
+        # presented to a client prospect (SOP §5), tracked on its own
+        # column (migrations/018) rather than overloading job_id.
+        presented_candidate_id = draft.get("presented_candidate_id")
         if presented_candidate_id is not None:
             candidate = await fetch_one(
                 "SELECT consent_spec_presentation_at FROM candidates WHERE id = $1", presented_candidate_id,
@@ -128,6 +153,10 @@ async def _draft_refusal(draft: dict):
             if not candidate or not candidate["consent_spec_presentation_at"]:
                 status_code, code = REFUSAL_CANDIDATE_NO_SPEC_CONSENT
                 return status_code, code, "Referenced candidate has no consent_spec_presentation_at — cannot present an anonymised profile to a client (SOP §5)."
+
+    else:
+        status_code, code = REFUSAL_UNKNOWN_TARGET_TYPE
+        return status_code, code, f"Unknown target_type '{target_type}' — refusing to send until it is recognised."
 
     return None
 
@@ -147,6 +176,11 @@ class DraftCreate(BaseModel):
     target_name: str
     company: Optional[str] = None
     job_id: Optional[int] = None
+    # SOP §5 spec/MPC-outreach: the candidate being anonymously presented
+    # in a client_prospect draft. Only meaningful when target_type is
+    # 'client_prospect' -- see _draft_refusal()'s candidate_missing_spec_
+    # consent check and migrations/018 (presented_candidate_id).
+    presented_candidate_id: Optional[int] = None
     channel: str = "email"
     language: str = "nl"
     subject: str
@@ -181,11 +215,11 @@ async def create_draft(
     row = await fetch_one(
         """INSERT INTO outreach_drafts
            (target_type, target_id, target_email, target_name, company,
-            job_id, channel, language, subject, body, ai_model, status)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'draft')
+            job_id, presented_candidate_id, channel, language, subject, body, ai_model, status)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'draft')
            RETURNING *""",
         payload.target_type, payload.target_id, payload.target_email, payload.target_name,
-        payload.company, payload.job_id, payload.channel, payload.language,
+        payload.company, payload.job_id, payload.presented_candidate_id, payload.channel, payload.language,
         payload.subject, payload.body, payload.ai_model,
     )
     return row

@@ -21,7 +21,7 @@ import logging
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from core.database import fetch_one, fetch_all, fetch_val, execute
 from core.deps import require_role
@@ -53,10 +53,36 @@ class ProspectCreate(BaseModel):
     source_url: Optional[str] = None
     lawful_basis: str = Field(..., pattern=r"^(zakelijk_functioneel_adres|opt_in|bestaande_relatie)$")
 
+    @field_validator("source_url")
+    @classmethod
+    def _source_url_http_only(cls, v):
+        if v is None or v.strip() == "":
+            return v
+        s = v.strip()
+        if not (s.lower().startswith("http://") or s.lower().startswith("https://")):
+            raise ValueError("source_url must be a public http:// or https:// URL (SOP §2)")
+        return s
+
 
 class ProspectUpdate(BaseModel):
     status: Optional[str] = None
     notes: Optional[str] = None
+    # WS-E.7 follow-up (security-auditor M-review): these are set at
+    # create time normally, but a prospect logged before its lawful_basis
+    # was known (or whose source_url needs correcting) can be updated here
+    # too -- required at create time (ProspectCreate), optional here.
+    lawful_basis: Optional[str] = Field(None, pattern=r"^(zakelijk_functioneel_adres|opt_in|bestaande_relatie)$")
+    source_url: Optional[str] = None
+
+    @field_validator("source_url")
+    @classmethod
+    def _source_url_http_only(cls, v):
+        if v is None or v.strip() == "":
+            return v
+        s = v.strip()
+        if not (s.lower().startswith("http://") or s.lower().startswith("https://")):
+            raise ValueError("source_url must be a public http:// or https:// URL (SOP §2)")
+        return s
 
 
 # ── Prospects ───────────────────────────────────────────────────────────
@@ -152,7 +178,10 @@ async def update_prospect(
     values = []
     idx = 1
     # notes -> intent_signal (see module docstring: no dedicated notes column)
-    column_map = {"status": "status", "notes": "intent_signal"}
+    column_map = {
+        "status": "status", "notes": "intent_signal",
+        "lawful_basis": "lawful_basis", "source_url": "source_url",
+    }
     for key, val in update_dict.items():
         set_parts.append(f"{column_map[key]} = ${idx}")
         values.append(val)

@@ -20,7 +20,7 @@ from pydantic import ValidationError
 
 from core import privacy
 from models.schemas import CandidateCreate, CandidateSourceCreate
-from routers.prospects import ProspectCreate
+from routers.prospects import ProspectCreate, ProspectUpdate
 
 
 NL_STOP = (
@@ -50,9 +50,29 @@ def _draft(**overrides):
         "target_id": 10,
         "target_email": "candidate@example.com",
         "job_id": None,
+        "presented_candidate_id": None,
         "body": NL_ART14,
         "language": "nl",
     }
+    base.update(overrides)
+    return base
+
+
+def _candidate(**overrides):
+    """A fully-compliant candidate row for _draft_refusal()'s SELECT --
+    override just the field(s) a test cares about."""
+    base = {
+        "lawful_basis": "gerechtvaardigd_belang",
+        "consent_withdrawn_at": None,
+        "consent_spec_presentation_at": None,
+        "source_url": "https://linkedin.com/in/x",
+    }
+    base.update(overrides)
+    return base
+
+
+def _prospect(**overrides):
+    base = {"lawful_basis": "zakelijk_functioneel_adres", "opt_out_at": None}
     base.update(overrides)
     return base
 
@@ -127,11 +147,7 @@ def test_approve_refuses_missing_optout_line(patch_db):
 
 
 def test_approve_refuses_missing_art14_block_for_gerechtvaardigd_belang(patch_db):
-    outreach = patch_db(_FakeDB(candidate={
-        "lawful_basis": "gerechtvaardigd_belang",
-        "consent_withdrawn_at": None,
-        "consent_spec_presentation_at": None,
-    }))
+    outreach = patch_db(_FakeDB(candidate=_candidate()))
     draft = _draft(body=NL_STOP)  # opt-out present, Art. 14 block absent
     result = asyncio.run(outreach._draft_refusal(draft))
     assert result is not None
@@ -140,52 +156,25 @@ def test_approve_refuses_missing_art14_block_for_gerechtvaardigd_belang(patch_db
 
 
 def test_approve_allows_full_nl_block_for_gerechtvaardigd_belang(patch_db):
-    outreach = patch_db(_FakeDB(candidate={
-        "lawful_basis": "gerechtvaardigd_belang",
-        "consent_withdrawn_at": None,
-        "consent_spec_presentation_at": None,
-    }))
+    outreach = patch_db(_FakeDB(candidate=_candidate()))
     draft = _draft(body=NL_ART14)
     result = asyncio.run(outreach._draft_refusal(draft))
     assert result is None
 
 
-def test_approve_allows_portal_registratie_without_art14_block():
+def test_approve_allows_portal_registratie_without_art14_block(patch_db):
     """SOP §3.2: portal_registratie/opt_in_talentpool never carry the
-    Art. 14 block -- only the STOP line is required for them."""
-    import routers.outreach as outreach
+    Art. 14 block -- only the STOP line is required for them. They still
+    need a valid lawful_basis + http(s) source_url on file, which is why
+    candidate.py's portal-registration insert sets source_url too."""
+    outreach = patch_db(_FakeDB(candidate=_candidate(lawful_basis="portal_registratie")))
     draft = _draft(body=NL_STOP)
-    # No candidate lookup needed to hit this path: with no suppression
-    # match and target_type='candidate' but lawful_basis not in the two
-    # Art.14-requiring values, the block simply isn't required.
-
-    async def fake_fetch_one(sql, *args):
-        if "FROM suppression_list" in sql:
-            return None
-        if "FROM candidates WHERE id" in sql:
-            return {
-                "lawful_basis": "portal_registratie",
-                "consent_withdrawn_at": None,
-                "consent_spec_presentation_at": None,
-            }
-        return None
-
-    import inspect
-    orig = outreach.fetch_one
-    outreach.fetch_one = fake_fetch_one
-    try:
-        result = asyncio.run(outreach._draft_refusal(draft))
-    finally:
-        outreach.fetch_one = orig
+    result = asyncio.run(outreach._draft_refusal(draft))
     assert result is None
 
 
 def test_approve_refuses_withdrawn_consent(patch_db):
-    outreach = patch_db(_FakeDB(candidate={
-        "lawful_basis": "gerechtvaardigd_belang",
-        "consent_withdrawn_at": "2026-08-01T00:00:00Z",
-        "consent_spec_presentation_at": None,
-    }))
+    outreach = patch_db(_FakeDB(candidate=_candidate(consent_withdrawn_at="2026-08-01T00:00:00Z")))
     draft = _draft(body=NL_ART14)
     result = asyncio.run(outreach._draft_refusal(draft))
     assert result is not None
@@ -202,8 +191,44 @@ def test_approve_refuses_suppressed_recipient(patch_db):
     assert (status_code, code) == outreach.REFUSAL_RECIPIENT_SUPPRESSED
 
 
+def test_approve_refuses_missing_candidate_row(patch_db):
+    outreach = patch_db(_FakeDB(candidate=None))
+    draft = _draft(body=NL_ART14)
+    result = asyncio.run(outreach._draft_refusal(draft))
+    assert result is not None
+    status_code, code, _detail = result
+    assert (status_code, code) == outreach.REFUSAL_CANDIDATE_NOT_FOUND
+
+
+def test_approve_refuses_unknown_target_type(patch_db):
+    outreach = patch_db(_FakeDB())
+    draft = _draft(target_type="carrier_pigeon", body=NL_ART14)
+    result = asyncio.run(outreach._draft_refusal(draft))
+    assert result is not None
+    status_code, code, _detail = result
+    assert (status_code, code) == outreach.REFUSAL_UNKNOWN_TARGET_TYPE
+
+
+def test_approve_refuses_candidate_with_null_lawful_basis(patch_db):
+    outreach = patch_db(_FakeDB(candidate=_candidate(lawful_basis=None)))
+    draft = _draft(body=NL_ART14)
+    result = asyncio.run(outreach._draft_refusal(draft))
+    assert result is not None
+    status_code, code, _detail = result
+    assert (status_code, code) == outreach.REFUSAL_CANDIDATE_MISSING_PROVENANCE
+
+
+def test_approve_refuses_candidate_with_non_http_source_url(patch_db):
+    outreach = patch_db(_FakeDB(candidate=_candidate(source_url="apollo:12345")))
+    draft = _draft(body=NL_ART14)
+    result = asyncio.run(outreach._draft_refusal(draft))
+    assert result is not None
+    status_code, code, _detail = result
+    assert (status_code, code) == outreach.REFUSAL_CANDIDATE_MISSING_PROVENANCE
+
+
 def test_approve_refuses_prospect_without_lawful_basis(patch_db):
-    outreach = patch_db(_FakeDB(prospect={"lawful_basis": None}))
+    outreach = patch_db(_FakeDB(prospect=_prospect(lawful_basis=None)))
     draft = _draft(target_type="client_prospect", target_id=5, body=NL_STOP)
     result = asyncio.run(outreach._draft_refusal(draft))
     assert result is not None
@@ -211,8 +236,17 @@ def test_approve_refuses_prospect_without_lawful_basis(patch_db):
     assert (status_code, code) == outreach.REFUSAL_PROSPECT_NO_LAWFUL_BASIS
 
 
+def test_approve_refuses_prospect_who_opted_out(patch_db):
+    outreach = patch_db(_FakeDB(prospect=_prospect(opt_out_at="2026-08-01T00:00:00Z")))
+    draft = _draft(target_type="client_prospect", target_id=5, body=NL_STOP)
+    result = asyncio.run(outreach._draft_refusal(draft))
+    assert result is not None
+    status_code, code, _detail = result
+    assert (status_code, code) == outreach.REFUSAL_RECIPIENT_OPTED_OUT
+
+
 def test_approve_allows_prospect_with_lawful_basis(patch_db):
-    outreach = patch_db(_FakeDB(prospect={"lawful_basis": "zakelijk_functioneel_adres"}))
+    outreach = patch_db(_FakeDB(prospect=_prospect()))
     draft = _draft(target_type="client_prospect", target_id=5, body=NL_STOP)
     result = asyncio.run(outreach._draft_refusal(draft))
     assert result is None
@@ -220,10 +254,10 @@ def test_approve_allows_prospect_with_lawful_basis(patch_db):
 
 def test_approve_refuses_spec_candidate_without_presentation_consent(patch_db):
     outreach = patch_db(_FakeDB(
-        prospect={"lawful_basis": "opt_in"},
+        prospect=_prospect(lawful_basis="opt_in"),
         candidate={"consent_spec_presentation_at": None},
     ))
-    draft = _draft(target_type="client_prospect", target_id=5, job_id=99, body=NL_STOP)
+    draft = _draft(target_type="client_prospect", target_id=5, presented_candidate_id=99, body=NL_STOP)
     result = asyncio.run(outreach._draft_refusal(draft))
     assert result is not None
     status_code, code, _detail = result
@@ -232,10 +266,19 @@ def test_approve_refuses_spec_candidate_without_presentation_consent(patch_db):
 
 def test_approve_allows_spec_candidate_with_presentation_consent(patch_db):
     outreach = patch_db(_FakeDB(
-        prospect={"lawful_basis": "opt_in"},
+        prospect=_prospect(lawful_basis="opt_in"),
         candidate={"consent_spec_presentation_at": "2026-08-01T00:00:00Z"},
     ))
-    draft = _draft(target_type="client_prospect", target_id=5, job_id=99, body=NL_STOP)
+    draft = _draft(target_type="client_prospect", target_id=5, presented_candidate_id=99, body=NL_STOP)
+    result = asyncio.run(outreach._draft_refusal(draft))
+    assert result is None
+
+
+def test_approve_spec_candidate_check_no_longer_reads_job_id(patch_db):
+    """L2 regression guard: job_id must NOT be treated as the presented
+    candidate any more -- only presented_candidate_id counts."""
+    outreach = patch_db(_FakeDB(prospect=_prospect(lawful_basis="opt_in")))
+    draft = _draft(target_type="client_prospect", target_id=5, job_id=99, presented_candidate_id=None, body=NL_STOP)
     result = asyncio.run(outreach._draft_refusal(draft))
     assert result is None
 
@@ -297,6 +340,44 @@ def test_prospect_create_rejects_bad_lawful_basis():
 def test_prospect_create_accepts_valid_lawful_basis():
     p = ProspectCreate(company="Acme BV", lawful_basis="bestaande_relatie")
     assert p.lawful_basis == "bestaande_relatie"
+
+
+def test_prospect_create_rejects_non_http_source_url():
+    with pytest.raises(ValidationError):
+        ProspectCreate(company="Acme BV", lawful_basis="bestaande_relatie", source_url="javascript:alert(1)")
+
+
+def test_prospect_create_accepts_valid_https_source_url():
+    p = ProspectCreate(
+        company="Acme BV", lawful_basis="bestaande_relatie",
+        source_url="https://acme.example/careers",
+    )
+    assert p.source_url == "https://acme.example/careers"
+
+
+def test_prospect_create_source_url_optional():
+    p = ProspectCreate(company="Acme BV", lawful_basis="bestaande_relatie")
+    assert p.source_url is None
+
+
+def test_prospect_update_can_set_lawful_basis():
+    u = ProspectUpdate(lawful_basis="opt_in")
+    assert u.lawful_basis == "opt_in"
+
+
+def test_prospect_update_rejects_bad_lawful_basis():
+    with pytest.raises(ValidationError):
+        ProspectUpdate(lawful_basis="not_a_real_value")
+
+
+def test_prospect_update_can_set_source_url():
+    u = ProspectUpdate(source_url="https://acme.example/careers")
+    assert u.source_url == "https://acme.example/careers"
+
+
+def test_prospect_update_rejects_non_http_source_url():
+    with pytest.raises(ValidationError):
+        ProspectUpdate(source_url="javascript:alert(1)")
 
 
 # ── Suppression hashing (mirrors routers/gdpr.py add_suppression) ────────

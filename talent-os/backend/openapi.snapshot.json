@@ -79,6 +79,11 @@
       },
       "AdminEraseRequest": {
         "properties": {
+          "confirm": {
+            "default": false,
+            "title": "Confirm",
+            "type": "boolean"
+          },
           "email": {
             "format": "email",
             "title": "Email",
@@ -2152,6 +2157,17 @@
             "title": "Language",
             "type": "string"
           },
+          "presented_candidate_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Presented Candidate Id"
+          },
           "subject": {
             "title": "Subject",
             "type": "string"
@@ -3049,6 +3065,18 @@
       },
       "ProspectUpdate": {
         "properties": {
+          "lawful_basis": {
+            "anyOf": [
+              {
+                "pattern": "^(zakelijk_functioneel_adres|opt_in|bestaande_relatie)$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lawful Basis"
+          },
           "notes": {
             "anyOf": [
               {
@@ -3059,6 +3087,17 @@
               }
             ],
             "title": "Notes"
+          },
+          "source_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Url"
           },
           "status": {
             "anyOf": [
@@ -5827,7 +5866,7 @@
     },
     "/api/v1/admin/gdpr/erase": {
       "post": {
-        "description": "Art. 17 for people who were only ever sourced (LinkedIn/GitHub/\nreferral/meetup/Apollo), never registered a portal account. Same\nerase_person() routine as self-service erasure.",
+        "description": "Art. 17 for people who were only ever sourced (LinkedIn/GitHub/\nreferral/meetup/Apollo), never registered a portal account. Same\nerase_person() routine as self-service erasure.\n\nGuard: erasing an admin account (any matching users row with\nrole='admin'), or the calling admin's own account, through this\nendpoint would delete platform-admin access as a side effect of what\nlooks like a routine PII-erasure request. Refuse unless the caller\nexplicitly opts in with confirm=true.",
         "operationId": "admin_erase_person_api_v1_admin_gdpr_erase_post",
         "requestBody": {
           "content": {

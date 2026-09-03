@@ -54,7 +54,7 @@ async def export_my_data(current_user: dict = Depends(get_current_user)):
         "SELECT * FROM candidate_profiles WHERE user_id = $1", user_id,
     )
     candidate = await fetch_one(
-        "SELECT * FROM candidates WHERE email = $1 AND deleted_at IS NULL", email,
+        "SELECT * FROM candidates WHERE LOWER(email) = LOWER($1) AND deleted_at IS NULL", email,
     )
     applications = []
     saved = []
@@ -72,8 +72,12 @@ async def export_my_data(current_user: dict = Depends(get_current_user)):
             candidate["id"],
         )
 
-    outreach = await fetch_all(
+    outreach_drafts = await fetch_all(
         "SELECT subject, body, channel, status, created_at, sent_at FROM outreach_drafts WHERE LOWER(target_email) = LOWER($1)",
+        email,
+    )
+    outreach_messages = await fetch_all(
+        "SELECT subject, body, channel, status, created_at FROM outreach_messages WHERE LOWER(recipient_email) = LOWER($1)",
         email,
     )
     quiz = await fetch_all(
@@ -82,6 +86,14 @@ async def export_my_data(current_user: dict = Depends(get_current_user)):
     )
     contact = await fetch_all(
         "SELECT company, phone, message, interest_type, created_at FROM contact_submissions WHERE LOWER(email) = LOWER($1)",
+        email,
+    )
+    push_tokens = await fetch_all(
+        "SELECT platform, created_at FROM push_tokens WHERE user_id = $1", user_id,
+    )
+    prospect_contacts = await fetch_all(
+        "SELECT company_name, contact_name, contact_title, location, industry, status, created_at "
+        "FROM client_prospects WHERE LOWER(contact_email) = LOWER($1)",
         email,
     )
     prior_requests = await fetch_all(
@@ -105,9 +117,12 @@ async def export_my_data(current_user: dict = Depends(get_current_user)):
         "candidate_record": _clean(candidate),
         "applications": [_clean(r) for r in applications],
         "saved_jobs": [_clean(r) for r in saved],
-        "outreach_received": [_clean(r) for r in outreach],
+        "outreach_drafts_received": [_clean(r) for r in outreach_drafts],
+        "outreach_messages_received": [_clean(r) for r in outreach_messages],
         "quiz_submissions": [_clean(r) for r in quiz],
         "contact_submissions": [_clean(r) for r in contact],
+        "push_tokens": [_clean(r) for r in push_tokens],
+        "client_prospect_contacts": [_clean(r) for r in prospect_contacts],
         "prior_data_subject_requests": [_clean(r) for r in prior_requests],
     }
 
@@ -244,6 +259,23 @@ async def _redact_audit_log_email(email: str, replacement: str) -> int:
     return redacted
 
 
+async def _anonymize_by_id(select_sql: str, update_sql: str, email_norm: str, email_hash: str) -> int:
+    """Fetch matching row ids (select_sql, filtered to email_norm as $1,
+    must return an 'id' column) and UPDATE each individually with its own
+    id-suffixed placeholder address (update_sql takes id as $1, the
+    placeholder as $2). Per-row placeholders -- rather than one shared
+    address for every matched row -- avoid a duplicate-key violation on
+    any column that carries a uniqueness constraint (candidates.email,
+    users.email) when more than one row matches the same original
+    address, and keep every anonymised row individually distinguishable
+    even where no such constraint exists."""
+    rows = await fetch_all(select_sql, email_norm)
+    for row in rows:
+        anon = f"erased-{email_hash[:16]}-{row['id']}@erased.invalid"
+        await execute(update_sql, row["id"], anon)
+    return len(rows)
+
+
 async def erase_person(email: str, actor_id: Optional[int] = None, reason: str = "manual") -> dict:
     """Art. 17 erasure (WS-E.7). Anonymises/removes PII for `email` across
     every table in the Verwerkingsregister (docs/VERWERKINGSREGISTER.md
@@ -252,23 +284,27 @@ async def erase_person(email: str, actor_id: Optional[int] = None, reason: str =
     and POST /api/v1/admin/gdpr/erase (admin, for sourced persons with no
     portal account).
 
-    Tables touched: candidates, candidate_profiles, users, push_tokens,
-    quiz_submissions, contact_submissions, outreach_drafts,
-    outreach_messages, audit_log (e-mail fields hashed, not deleted),
+    Tables touched: candidates (full PII set), candidate_profiles (phone,
+    linkedin_url, github_url, portfolio_url, current_company,
+    current_title, location, education, salary fields, cv), users,
+    push_tokens, quiz_submissions, contact_submissions, outreach_drafts,
+    outreach_messages, client_prospects (as a contact, not just a
+    candidate — contact_name/contact_email/contact_linkedin, plus
+    opt_out_at), pipeline_entries (notes, keyed off the candidate id, not
+    e-mail), audit_log (e-mail fields hashed, not deleted),
     data_subject_requests, suppression_list.
 
-    Deliberately NOT touched: matches/saved_jobs/pipeline_entries keep
-    their candidate_id FK (ids only, no PII of their own once the linked
-    candidates row above is anonymised — placement/fiscal records need
-    the id to survive); the Apollo bulk pool decision (WS-E.8) is the
-    owner's, out of scope here.
+    Deliberately NOT touched: matches/saved_jobs keep their candidate_id
+    FK (ids only, no PII of their own once the linked candidates row
+    above is anonymised — placement/fiscal records need the id to
+    survive); the Apollo bulk pool decision (WS-E.8) is the owner's, out
+    of scope here.
     """
     email_norm = privacy.normalize_email(email)
     if not email_norm:
         raise HTTPException(status_code=400, detail="email is required")
     email_hash = privacy.email_hash(email_norm)
     email_domain = privacy.email_domain(email_norm)
-    anon_email = f"erased-{email_hash[:16]}@erased.invalid"
 
     users_rows = await fetch_all("SELECT id FROM users WHERE LOWER(email) = $1", email_norm)
     user_ids = [u["id"] for u in users_rows]
@@ -279,47 +315,81 @@ async def erase_person(email: str, actor_id: Optional[int] = None, reason: str =
         if p:
             profile_rows.append(p)
     candidate_rows = await fetch_all(
-        "SELECT cv_file_path FROM candidates WHERE LOWER(email) = $1", email_norm,
+        "SELECT id, cv_file_path FROM candidates WHERE LOWER(email) = $1", email_norm,
     )
+    candidate_ids = [c["id"] for c in candidate_rows]
 
     deleted_paths, failed_paths = await _delete_cv_files(user_ids, profile_rows + list(candidate_rows))
 
-    await execute(
+    # candidates and users both carry a unique constraint on email
+    # (uq_candidates_email, users.email UNIQUE) — per-row placeholders via
+    # _anonymize_by_id avoid a duplicate-key violation if more than one
+    # row happens to match.
+    await _anonymize_by_id(
+        "SELECT id FROM candidates WHERE LOWER(email) = $1",
         """UPDATE candidates SET
              full_name = 'Erased', email = $2, phone = NULL, linkedin_url = NULL,
              github_url = NULL, portfolio_url = NULL, cv_text = NULL, cv_file_path = NULL,
              education = NULL, deleted_at = NOW(), consent_withdrawn_at = COALESCE(consent_withdrawn_at, NOW())
-           WHERE LOWER(email) = $1""",
-        email_norm, anon_email,
+           WHERE id = $1""",
+        email_norm, email_hash,
     )
     for uid in user_ids:
         await execute(
-            "UPDATE candidate_profiles SET cv_text = NULL, cv_file_path = NULL WHERE user_id = $1", uid,
+            """UPDATE candidate_profiles SET
+                 phone = NULL, linkedin_url = NULL, github_url = NULL, portfolio_url = NULL,
+                 current_company = NULL, current_title = NULL, location = NULL, education = NULL,
+                 salary_expectation_min = NULL, salary_expectation_max = NULL, notice_period_days = NULL,
+                 cv_text = NULL, cv_file_path = NULL
+               WHERE user_id = $1""",
+            uid,
         )
         await execute("DELETE FROM push_tokens WHERE user_id = $1", uid)
-        await execute(
-            "UPDATE users SET full_name = 'Erased', email = $2, deleted_at = NOW() WHERE id = $1",
-            uid, anon_email,
-        )
+    await _anonymize_by_id(
+        "SELECT id FROM users WHERE LOWER(email) = $1",
+        "UPDATE users SET full_name = 'Erased', email = $2, deleted_at = NOW() WHERE id = $1",
+        email_norm, email_hash,
+    )
 
-    await execute(
-        "UPDATE quiz_submissions SET email = $2 WHERE LOWER(email) = $1", email_norm, anon_email,
+    # pipeline_entries.notes is free text a client wrote about a specific
+    # candidate (routers/client.py) -- keyed by candidate_id, not e-mail,
+    # so it isn't reached by any of the LOWER(email)=... updates above.
+    for cid in candidate_ids:
+        await execute("UPDATE pipeline_entries SET notes = NULL WHERE candidate_id = $1", cid)
+
+    await _anonymize_by_id(
+        "SELECT id FROM quiz_submissions WHERE LOWER(email) = $1",
+        "UPDATE quiz_submissions SET email = $2 WHERE id = $1",
+        email_norm, email_hash,
     )
-    await execute(
-        "UPDATE contact_submissions SET name = 'Erased', email = $2, phone = NULL WHERE LOWER(email) = $1",
-        email_norm, anon_email,
+    await _anonymize_by_id(
+        "SELECT id FROM contact_submissions WHERE LOWER(email) = $1",
+        "UPDATE contact_submissions SET name = 'Erased', email = $2, phone = NULL WHERE id = $1",
+        email_norm, email_hash,
     )
-    await execute(
-        "UPDATE outreach_drafts SET target_email = $2, target_name = 'Erased' WHERE LOWER(target_email) = $1",
-        email_norm, anon_email,
+    await _anonymize_by_id(
+        "SELECT id FROM outreach_drafts WHERE LOWER(target_email) = $1",
+        "UPDATE outreach_drafts SET target_email = $2, target_name = 'Erased' WHERE id = $1",
+        email_norm, email_hash,
     )
-    await execute(
-        "UPDATE outreach_messages SET recipient_email = $2 WHERE LOWER(recipient_email) = $1",
-        email_norm, anon_email,
+    await _anonymize_by_id(
+        "SELECT id FROM outreach_messages WHERE LOWER(recipient_email) = $1",
+        "UPDATE outreach_messages SET recipient_email = $2 WHERE id = $1",
+        email_norm, email_hash,
     )
-    await execute(
-        "UPDATE data_subject_requests SET request_email = $2 WHERE LOWER(request_email) = $1",
-        email_norm, anon_email,
+    # A prospect contact person can share the same address as a candidate
+    # (or simply be the subject of their own erasure request) — anonymise
+    # the contact identity and set opt_out_at, same as add_suppression().
+    await _anonymize_by_id(
+        "SELECT id FROM client_prospects WHERE LOWER(contact_email) = $1",
+        "UPDATE client_prospects SET contact_name = 'Erased', contact_email = $2, contact_linkedin = NULL, "
+        "opt_out_at = COALESCE(opt_out_at, NOW()) WHERE id = $1",
+        email_norm, email_hash,
+    )
+    await _anonymize_by_id(
+        "SELECT id FROM data_subject_requests WHERE LOWER(request_email) = $1",
+        "UPDATE data_subject_requests SET request_email = $2 WHERE id = $1",
+        email_norm, email_hash,
     )
     audit_redacted = await _redact_audit_log_email(email_norm, email_hash)
 
@@ -344,7 +414,7 @@ async def erase_person(email: str, actor_id: Optional[int] = None, reason: str =
         }),
     )
     await _log_request(
-        "erasure", anon_email,
+        "erasure", f"erased-{email_hash[:16]}@erased.invalid",
         f"Erasure ({reason}) -- email_hash={email_hash}"
         + ("" if not failed_paths else f" -- WARNING: {len(failed_paths)} CV file(s)/prefix could not be deleted, see audit_log"),
     )
@@ -386,6 +456,7 @@ async def erase_my_account(current_user: dict = Depends(get_current_user)):
 
 class AdminEraseRequest(BaseModel):
     email: EmailStr
+    confirm: bool = False
 
 
 @admin_router.post("/erase")
@@ -395,7 +466,29 @@ async def admin_erase_person(
 ):
     """Art. 17 for people who were only ever sourced (LinkedIn/GitHub/
     referral/meetup/Apollo), never registered a portal account. Same
-    erase_person() routine as self-service erasure."""
+    erase_person() routine as self-service erasure.
+
+    Guard: erasing an admin account (any matching users row with
+    role='admin'), or the calling admin's own account, through this
+    endpoint would delete platform-admin access as a side effect of what
+    looks like a routine PII-erasure request. Refuse unless the caller
+    explicitly opts in with confirm=true."""
+    email_norm = privacy.normalize_email(payload.email)
+    matching_users = await fetch_all(
+        "SELECT id, role FROM users WHERE LOWER(email) = $1", email_norm,
+    )
+    is_admin_or_self = any(
+        u["role"] == "admin" or u["id"] == current_user["id"] for u in matching_users
+    )
+    if is_admin_or_self and not payload.confirm:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "erase_admin_or_self_requires_confirm",
+                "message": "This e-mail matches an admin account or your own account. "
+                            "Resend with confirm: true to proceed.",
+            },
+        )
     return await erase_person(payload.email, actor_id=current_user["id"], reason="admin request")
 
 
@@ -426,6 +519,10 @@ async def add_suppression(
     )
     await execute(
         "UPDATE candidates SET consent_withdrawn_at = COALESCE(consent_withdrawn_at, NOW()) WHERE LOWER(email) = LOWER($1)",
+        payload.email,
+    )
+    await execute(
+        "UPDATE client_prospects SET opt_out_at = COALESCE(opt_out_at, NOW()) WHERE LOWER(contact_email) = LOWER($1)",
         payload.email,
     )
     await execute(
