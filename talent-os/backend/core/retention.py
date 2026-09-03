@@ -239,7 +239,12 @@ RETENTION_TABLE: Tuple[RetentionRow, ...] = (
             "SELECT id FROM matches WHERE status = 'placed' "
             "AND updated_at <= (NOW() - INTERVAL '7 years') "
             "-- action=retain: 7 years is a floor, not a purge trigger; this job never deletes/anonymises "
-            "this category. No dedicated invoice-date column exists yet either (schema_ready=False)."
+            "this category. No dedicated invoice-date column exists yet either (schema_ready=False). "
+            "WS-C.7 (migrations/029_placements.py) added `placements` and, on candidates, the "
+            "immigratiestatus columns (nationality, needs_work_permit, kennismigrant_status, "
+            "ruling_30pct_status, ind_case_number) -- both fall under this same 7-year floor and are "
+            "erased (not merely retained past it) by routers/gdpr.py's erase_person() alongside the "
+            "rest of a placed candidate's PII once the retention floor has passed and erasure runs."
         ),
     ),
     RetentionRow(
