@@ -3,6 +3,16 @@ from pydantic import model_validator
 from pydantic_settings import BaseSettings
 from typing import List
 
+# Local-dev-only CORS origins, appended when DEV_MODE=true. Never used in
+# production (see Settings.cors_origin_list below).
+_DEV_CORS_ORIGINS = [
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "http://localhost:8081",
+    "http://localhost:19006",
+    "exp://localhost:8081",
+]
+
 
 class Settings(BaseSettings):
     postgres_host: str = "localhost"
@@ -58,11 +68,22 @@ class Settings(BaseSettings):
     backend_host: str = "127.0.0.1"
     backend_port: int = 8000
     backend_workers: int = 4
-    cors_origins: str = "https://gsprecruitment.nl,https://www.gsprecruitment.nl,http://localhost:3000,http://127.0.0.1:3000,http://localhost:8081,http://localhost:19006,exp://localhost:8081"
+    # Production default: only the two real front-end origins. Never add
+    # localhost/exp:// dev origins here -- set DEV_MODE=true instead (below),
+    # which appends them at runtime. Override via CORS_ORIGINS if a
+    # deployment genuinely needs a different origin list.
+    cors_origins: str = "https://gsprecruitment.nl,https://www.gsprecruitment.nl"
+    # Local-dev-only switch: set true (env DEV_MODE=true) to also allow the
+    # localhost/Expo dev-server origins below. Must stay false/unset in
+    # production -- see .env.example.
+    dev_mode: bool = False
 
     @property
     def cors_origin_list(self) -> List[str]:
-        return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
+        origins = [o.strip() for o in self.cors_origins.split(",") if o.strip()]
+        if self.dev_mode:
+            origins += _DEV_CORS_ORIGINS
+        return origins
 
     log_level: str = "INFO"
 

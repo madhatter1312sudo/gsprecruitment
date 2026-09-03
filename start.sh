@@ -4,6 +4,15 @@ set -euo pipefail
 
 cd "$(dirname "$0")"
 
+# WS-E.6: postgres credentials now live in talent-os/postgres.env (env_file,
+# gitignored), separate from talent-os/.env. Idempotent -- a no-op after the
+# first run, and never prints a secret value.
+if [ ! -f talent-os/postgres.env ]; then
+  echo "postgres.env missing -- generating it from talent-os/.env (first run only)"
+  grep -E '^(POSTGRES_DB|POSTGRES_USER|POSTGRES_PASSWORD)=' talent-os/.env > talent-os/postgres.env
+  chmod 600 talent-os/postgres.env
+fi
+
 echo "🚀 GSP Recruitment — stack starten..."
 docker compose up -d
 
