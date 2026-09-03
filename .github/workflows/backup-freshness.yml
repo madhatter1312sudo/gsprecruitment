@@ -19,7 +19,7 @@ jobs:
       VPS_USER: ${{ vars.VPS_USER || 'gsp' }}
       VPS_PATH: ${{ vars.VPS_PATH || '/home/gsp/projects/gsp-recruitment' }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Setup SSH
         run: |
