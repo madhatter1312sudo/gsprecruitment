@@ -4,6 +4,14 @@ on:
   push:
     branches: [main]
 
+# One deploy at a time: two merges in quick succession otherwise race on the
+# VPS (docker compose "container name already in use" during recreate) and
+# the loser rolls production back. Queued runs wait instead of cancelling so
+# the newest main still gets deployed.
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
 jobs:
   test:
     runs-on: ubuntu-latest

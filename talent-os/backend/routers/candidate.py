@@ -23,8 +23,14 @@ logger = logging.getLogger("talent_os.candidate_portal")
 
 router = APIRouter(prefix="/api/v1/candidate", tags=["candidate-portal"])
 
-UPLOAD_DIR = "/app/uploads/cv"
-os.makedirs(UPLOAD_DIR, exist_ok=True)
+# CV files live in R2 (services/storage); this directory is only the legacy
+# local-disk fallback for pre-R2 uploads. Creating it must never break import:
+# the CI runner cannot write to /app and R2-only deployments never use it.
+UPLOAD_DIR = os.environ.get("CV_UPLOAD_DIR", "/app/uploads/cv")
+try:
+    os.makedirs(UPLOAD_DIR, exist_ok=True)
+except OSError as exc:
+    logger.warning("CV upload dir %s not writable (%s); legacy local CV storage unavailable", UPLOAD_DIR, exc)
 
 MAX_CV_SIZE_BYTES = 5 * 1024 * 1024  # 5 MB
 
@@ -219,6 +225,7 @@ async def upload_cv(
         # Legacy local-disk fallback -- production must keep working before
         # the R2 env vars are set.
         filename = f"{uuid.uuid4().hex}{ext}"
+        os.makedirs(UPLOAD_DIR, exist_ok=True)
         file_path = os.path.join(UPLOAD_DIR, filename)
         with open(file_path, "wb") as f:
             f.write(content)
