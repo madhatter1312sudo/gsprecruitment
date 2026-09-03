@@ -1347,7 +1347,7 @@ const Admin = {
     const loaders = {
       contacts: () => this.loadClientContacts(clientId),
       jobs: () => this.loadClientJobsTab(clientId),
-      activity: () => this.renderClientActivityEmpty(),
+      activity: () => this.loadClientActivityTab(clientId),
       prospects: () => this.loadClientProspectsTab(clientId),
     };
     (loaders[tab] || loaders.contacts)();
@@ -1498,7 +1498,7 @@ const Admin = {
             <tbody>${items.map(j => html`
               <tr>
                 <td style="color:var(--white);">${j.title || 'Untitled'}</td>
-                <td style="color:var(--navy-200);">${j.employment_type || '—'}</td>
+                <td style="color:var(--navy-200);">${j.employment_type ? this.dienstlijnLabel(j.employment_type) : '—'}</td>
                 <td><span class="${this.badge(j.status)}">${j.status || 'draft'}</span></td>
                 <td class="text-center">${j.application_count ?? '—'}</td>
               </tr>`)}</tbody>
@@ -1509,20 +1509,41 @@ const Admin = {
     }
   },
 
-  /* ---- Notities/Activiteit tab ----
-     No /v1/admin/activities endpoint exists on main (checked
-     talent-os/backend/routers/*.py) -- so this renders a plain empty
-     state rather than firing a request that can only 404, per the task
-     spec ("if not, render an empty state and say so"). */
-  renderClientActivityEmpty() {
+  /* ---- Notities/Activiteit tab (WS-C.6) --
+     GET /v1/admin/activities?subject_type=client&subject_id=.. landed on
+     main after this feature was first built (migrations/028_activities.py,
+     routers/activities.py) -- read-only here, matching the task spec. */
+  activityTypeLabel(type) {
+    const map = { note: 'Notitie', call: 'Telefoongesprek', email: 'E-mail', meeting: 'Afspraak', task: 'Taak', status_change: 'Statuswijziging' };
+    return map[type] || type || '—';
+  },
+
+  async loadClientActivityTab(clientId) {
     const el = document.getElementById('clientDrawerTabContent');
     if (!el) return;
-    mount(el, html`
-      <div style="color:var(--navy-300);padding:1rem 0;">
-        <i class="fa-solid fa-circle-info me-1"></i>
-        Er is nog geen activiteiten-endpoint in de API (<code>/v1/admin/activities</code>
-        bestaat nog niet). Deze tab toont daarom nog geen notities of activiteit.
-      </div>`);
+    mount(el, html`<i class="fa-solid fa-spinner fa-spin"></i>`);
+    try {
+      const res = await Auth.fetch(`/v1/admin/activities?subject_type=client&subject_id=${clientId}&limit=50`);
+      if (!res) return;
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail);
+      const items = data.items || [];
+      mount(el, items.length ? html`
+        <div class="table-responsive">
+          <table class="table table-vcenter card-table">
+            <thead><tr><th>Type</th><th>Notitie</th><th>Datum</th><th>Status</th></tr></thead>
+            <tbody>${items.map(a => html`
+              <tr>
+                <td style="color:var(--white);">${this.activityTypeLabel(a.type)}</td>
+                <td style="color:var(--navy-200);">${a.body || '—'}</td>
+                <td style="color:var(--navy-200);">${this.formatDate(a.created_at)}</td>
+                <td>${a.completed_at ? html`<span class="badge bg-secondary-lt">Afgerond</span>` : (a.due_at ? html`<span class="badge bg-blue-lt">Open</span>` : '—')}</td>
+              </tr>`)}</tbody>
+          </table>
+        </div>` : html`<div style="color:var(--navy-300);padding:1rem 0;">Nog geen notities of activiteit voor deze opdrachtgever.</div>`);
+    } catch {
+      this.setContainerLoadError(el, () => this.loadClientActivityTab(clientId));
+    }
   },
 
   /* ---- Prospects tab (existing global prospects router, best-effort
@@ -1599,6 +1620,23 @@ const Admin = {
       kandidaat: 'Kandidaat', overig: 'Overig',
     };
     return map[type] || '—';
+  },
+
+  // Dienstlijn label for a job's raw `employment_type` value -- used by the
+  // client drawer's Vacatures tab and the Rapportage breakdown so a raw
+  // enum string (or an unrecognised one) never renders straight into the
+  // UI. Unknown values fall back to the raw value itself (still escaped by
+  // html``, never raw()) rather than a silent "—", so a value this map
+  // hasn't caught up with is still visible instead of hidden.
+  dienstlijnLabel(type) {
+    const map = {
+      vast: 'Vast (werving en selectie)',
+      detachering: 'Detachering',
+      interim: 'Interim',
+      werving_selectie: 'Werving en selectie',
+      detachering_internationaal: 'Detachering (internationaal)',
+    };
+    return map[type] || type || 'onbekend';
   },
 
   renderLeads(data) {
@@ -1727,7 +1765,7 @@ const Admin = {
             <div class="card-body">
               ${byType.size ? html`<table class="table table-vcenter card-table">
                 <tbody>${Array.from(byType.entries()).map(([t, n]) => html`
-                  <tr><td style="color:var(--navy-200);">${t}</td><td class="text-end" style="color:var(--white);font-weight:600;">${n}</td></tr>`)}</tbody>
+                  <tr><td style="color:var(--navy-200);">${this.dienstlijnLabel(t)}</td><td class="text-end" style="color:var(--white);font-weight:600;">${n}</td></tr>`)}</tbody>
               </table>` : html`<div style="color:var(--navy-300);">Geen open vacatures.</div>`}
               ${jobsCapNote}
             </div>

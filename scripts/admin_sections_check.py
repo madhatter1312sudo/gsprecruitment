@@ -97,6 +97,13 @@ PROSPECTS = [
      "created_at": "2026-01-01T00:00:00Z"},
 ]
 
+ACTIVITIES_BY_CLIENT = {
+    1: [{"id": 401, "subject_type": "client", "subject_id": 1, "type": "call",
+         "body": "Belde over nieuwe vacature", "due_at": None, "completed_at": None,
+         "created_at": "2026-01-01T00:00:00Z"}],
+    2: [],
+}
+
 LEADS = [
     {"id": 1, "source": "contact_submissions", "name": "Lead One", "email": "lead1@example.com",
      "interest_type": "werving_selectie", "is_read": False, "created_at": "2026-09-01T09:00:00Z"},
@@ -181,6 +188,17 @@ def route_admin_api(route, request):
         cid = int(m.group(1))
         items = CONTACTS_BY_CLIENT.get(cid, [])
         json_response({"items": items, "total": len(items)})
+        return
+
+    # ---- Activities (WS-C.6, notities/activiteit tab) ----
+    if path == "/api/v1/admin/activities" and method == "GET":
+        subject_type = qs.get("subject_type", [None])[0]
+        subject_id = qs.get("subject_id", [None])[0]
+        if subject_type == "client" and subject_id is not None:
+            items = ACTIVITIES_BY_CLIENT.get(int(subject_id), [])
+            json_response({"items": items, "total": len(items)})
+            return
+        json_response({"items": [], "total": 0})
         return
 
     # ---- Prospects (client drawer's prospects tab) ----
@@ -305,7 +323,7 @@ def main():
 
             for tab, expect in [
                 ("jobs", "Embedded Software Engineer"),
-                ("activity", "activiteiten-endpoint"),
+                ("activity", "Belde over nieuwe vacature"),
                 ("prospects", "Prospect Contact"),
             ]:
                 page.click(f'[data-action="client-tab"][data-tab="{tab}"]')
@@ -313,6 +331,14 @@ def main():
                 text = page.eval_on_selector('#clientDrawerTabContent', "el => el.textContent") or ""
                 if expect not in text:
                     failures.append(f"clients: {tab} tab did not render expected content — got: {text[:120]!r}")
+                # Vacatures tab's Type column must show the translated
+                # dienstlijn label, never the raw employment_type enum
+                # value (design-reviewer FIX FIRST item).
+                if tab == "jobs":
+                    if "Werving en selectie" not in text:
+                        failures.append(f"clients: jobs tab missing translated dienstlijn label — got: {text[:120]!r}")
+                    if "werving_selectie" in text:
+                        failures.append("clients: raw employment_type value leaked into the jobs tab")
 
         page.click('[data-action="close-modal"]')
         page.wait_for_timeout(300)
@@ -351,8 +377,12 @@ def main():
         page.click('.nav-link[data-section="reporting"]')
         page.wait_for_timeout(700)
         content = page.eval_on_selector('#reportingContent', "el => el.textContent") or ""
-        if "werving_selectie" not in content:
-            failures.append(f"reporting: open-jobs-by-dienstlijn breakdown missing expected type — got: {content[:200]!r}")
+        # Dienstlijn column must show the translated label, never the raw
+        # employment_type enum value (design-reviewer FIX FIRST item).
+        if "Werving en selectie" not in content:
+            failures.append(f"reporting: open-jobs-by-dienstlijn breakdown missing translated label — got: {content[:200]!r}")
+        if "werving_selectie" in content:
+            failures.append("reporting: raw employment_type value leaked into the open-jobs-by-dienstlijn breakdown")
         if "Werving & selectie" not in content:
             failures.append("reporting: leads-per-category table missing expected label")
         new_errors = console_errors[errors_before:]
