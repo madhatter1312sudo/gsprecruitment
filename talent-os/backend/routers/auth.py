@@ -7,6 +7,7 @@ from fastapi.responses import RedirectResponse
 from core.database import fetch_one, fetch_all, execute
 from core.security import hash_password, verify_password, create_access_token, decode_token, hash_token
 from core.deps import get_current_user, get_optional_user, require_role, _token_predates_password_change
+from core.mfa import mfa_required_for_user, issue_mfa_pending_token
 from core.config import settings
 from models.schemas import (
     UserRegister, UserLogin, TokenResponse, UserResponse, UserUpdate,
@@ -219,10 +220,11 @@ async def _register_failed_login(user: dict) -> None:
         )
 
 
-@router.post("/login", response_model=TokenResponse)
+@router.post("/login")
 @limiter.limit("5/minute")
 async def login(request: Request, data: UserLogin):
-    """Authenticate a user and return a JWT token.
+    """Authenticate a user and return a JWT token (or, for an admin with
+    MFA enabled, an mfa_required challenge -- WS-E.12, see core/mfa.py).
 
     Locked-out and wrong-password both return the exact same generic 401
     -- a locked account must never be distinguishable from a bad password
@@ -254,6 +256,9 @@ async def login(request: Request, data: UserLogin):
             "UPDATE users SET failed_login_count = 0, locked_until = NULL, last_failed_login_at = NULL WHERE id = $1",
             user["id"],
         )
+
+    if mfa_required_for_user(user):
+        return {"mfa_required": True, "mfa_token": issue_mfa_pending_token(user["id"])}
 
     return _build_token_response(user)
 
@@ -287,6 +292,13 @@ async def refresh_token(request: Request, data: dict):
 
     if payload.get("impersonator"):
         raise HTTPException(status_code=401, detail="Impersonation tokens cannot be refreshed")
+
+    # WS-E.12: an mfa_pending challenge token must never be refreshable
+    # into a real session token -- it has to go through
+    # POST /api/auth/mfa/verify or /recovery like core/deps.py's
+    # get_current_user already enforces for every other route.
+    if payload.get("scope") == "mfa_pending":
+        raise HTTPException(status_code=401, detail="MFA verification required before this token can be used")
 
     # python-jose forces 'sub' to a string on encode (see
     # create_access_token); the users.id column is an integer, so this must

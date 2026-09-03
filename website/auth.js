@@ -252,6 +252,38 @@ const Auth = {
     if (!res) return { error: 'Network error. Please try again.' };
     const data = await res.json();
     if (!res.ok) return { error: data.detail || 'Login failed. Check your credentials.' };
+    // WS-E.12: an admin with MFA enabled gets a challenge instead of real
+    // tokens -- no tokens are stored yet, the caller must complete the
+    // second step via Auth.verifyMfa()/Auth.verifyMfaRecovery().
+    if (data.mfa_required) return { mfaRequired: true, mfaToken: data.mfa_token };
+    const saved = this.setAuth(data.access_token, data.user);
+    if (!saved) return { error: 'Cookie consent required.' };
+    return { user: data.user };
+  },
+
+  /* ---- MFA: exchange the mfa_pending challenge for real tokens ---- */
+  async verifyMfa(mfaToken, code) {
+    const res = await this.fetch('/auth/mfa/verify', {
+      method: 'POST',
+      body: JSON.stringify({ mfa_token: mfaToken, code })
+    });
+    if (!res) return { error: 'Network error. Please try again.' };
+    const data = await res.json();
+    if (!res.ok) return { error: data.detail || 'Invalid code.' };
+    const saved = this.setAuth(data.access_token, data.user);
+    if (!saved) return { error: 'Cookie consent required.' };
+    return { user: data.user };
+  },
+
+  /* ---- MFA: exchange a one-time recovery code for real tokens ---- */
+  async verifyMfaRecovery(mfaToken, recoveryCode) {
+    const res = await this.fetch('/auth/mfa/recovery', {
+      method: 'POST',
+      body: JSON.stringify({ mfa_token: mfaToken, recovery_code: recoveryCode })
+    });
+    if (!res) return { error: 'Network error. Please try again.' };
+    const data = await res.json();
+    if (!res.ok) return { error: data.detail || 'Invalid or already-used recovery code.' };
     const saved = this.setAuth(data.access_token, data.user);
     if (!saved) return { error: 'Cookie consent required.' };
     return { user: data.user };

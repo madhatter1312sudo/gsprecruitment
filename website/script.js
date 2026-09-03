@@ -320,8 +320,26 @@ const GSP_WHATSAPP = '31617913965';
     const tabs = qsa('.modal-tab');
     const loginForm = $('loginForm');
     const registerForm = $('registerForm');
+    const mfaLoginForm = $('mfaLoginForm');
     const errEl = $('authError');
     const successEl = $('authSuccess');
+    let mfaToken = null;
+    let mfaUseRecovery = false;
+
+    // WS-E.12: swap the login form for the MFA-code step; closeAuthModal()
+    // resets this back to the login tab.
+    function showMfaStep(token) {
+      mfaToken = token;
+      mfaUseRecovery = false;
+      if (loginForm) loginForm.style.display = 'none';
+      if (registerForm) registerForm.style.display = 'none';
+      if (mfaLoginForm) mfaLoginForm.style.display = 'flex';
+      if (errEl) errEl.style.display = 'none';
+      const codeInput = $('mfaLoginCode');
+      const recoveryInput = $('mfaRecoveryCodeInput');
+      if (codeInput) { codeInput.style.display = ''; codeInput.value = ''; codeInput.focus(); }
+      if (recoveryInput) { recoveryInput.style.display = 'none'; recoveryInput.value = ''; }
+    }
 
     function openModal(tab, triggerEl) {
       if (!modal) return;
@@ -337,6 +355,10 @@ const GSP_WHATSAPP = '31617913965';
     function closeAuthModal() {
       modal?.classList.remove('active');
       Auth.releaseFocusTrap(modal);
+      mfaToken = null;
+      if (mfaLoginForm) mfaLoginForm.style.display = 'none';
+      if (loginForm) loginForm.style.display = 'flex';
+      if (registerForm) registerForm.style.display = 'none';
     }
 
     // Check logged-in state using Auth module
@@ -403,6 +425,10 @@ const GSP_WHATSAPP = '31617913965';
         if (result.error) {
           if (errEl) { errEl.textContent = result.error; errEl.style.display = 'block'; }
           Auth.toast(result.error, 'error');
+        } else if (result.mfaRequired) {
+          // WS-E.12: swap to the second-step MFA form instead of closing
+          // the modal -- no tokens exist yet.
+          showMfaStep(result.mfaToken);
         } else {
           closeAuthModal();
           window.location.href = Auth.getDashboardUrl(result.user);
@@ -458,6 +484,45 @@ const GSP_WHATSAPP = '31617913965';
         if (submitBtn) {
           submitBtn.disabled = false;
           submitBtn.innerHTML = '<i class="fas fa-user-plus"></i> <span class="lang-en">Create Account</span><span class="lang-nl">Account aanmaken</span>';
+        }
+      }
+    });
+
+    // WS-E.12: MFA second step — code or recovery-code submit
+    $('mfaUseRecoveryLink')?.addEventListener('click', () => {
+      mfaUseRecovery = !mfaUseRecovery;
+      const codeInput = $('mfaLoginCode');
+      const recoveryInput = $('mfaRecoveryCodeInput');
+      if (codeInput) codeInput.style.display = mfaUseRecovery ? 'none' : '';
+      if (recoveryInput) recoveryInput.style.display = mfaUseRecovery ? '' : 'none';
+    });
+
+    mfaLoginForm?.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      if (!mfaToken) return;
+      if (errEl) errEl.style.display = 'none';
+
+      const submitBtn = mfaLoginForm.querySelector('button[type="submit"]');
+      if (submitBtn) { submitBtn.disabled = true; submitBtn.innerHTML = '<span class="spinner-sm"></span>'; }
+
+      try {
+        const result = mfaUseRecovery
+          ? await Auth.verifyMfaRecovery(mfaToken, $('mfaRecoveryCodeInput')?.value)
+          : await Auth.verifyMfa(mfaToken, $('mfaLoginCode')?.value);
+        if (result.error) {
+          if (errEl) { errEl.textContent = result.error; errEl.style.display = 'block'; }
+          Auth.toast(result.error, 'error');
+        } else {
+          closeAuthModal();
+          window.location.href = Auth.getDashboardUrl(result.user);
+        }
+      } catch (err) {
+        if (errEl) { errEl.textContent = 'An unexpected error occurred. Please try again.'; errEl.style.display = 'block'; }
+        Auth.toast('Verification failed. Please try again.', 'error');
+      } finally {
+        if (submitBtn) {
+          submitBtn.disabled = false;
+          submitBtn.innerHTML = '<i class="fas fa-shield-halved"></i> <span class="lang-en">Verify</span><span class="lang-nl">Verifiëren</span>';
         }
       }
     });

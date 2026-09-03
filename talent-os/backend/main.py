@@ -92,6 +92,7 @@ app.add_middleware(SlowAPIMiddleware)
 # ── Routers ─────────────────────────────────────────────────────────────
 from routers.health import router as health_router
 from routers.auth import router as auth_router
+from routers.mfa import router as mfa_router
 from routers.candidates import router as candidates_router
 from routers.jobs import router as jobs_router
 from routers.jobs import public_jobs_router
@@ -112,6 +113,7 @@ from routers.prospects import router as prospects_router
 
 app.include_router(health_router)
 app.include_router(auth_router)
+app.include_router(mfa_router)
 app.include_router(candidates_router)
 app.include_router(jobs_router)
 app.include_router(public_jobs_router)
