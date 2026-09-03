@@ -29,7 +29,7 @@ email-validator>=2.0.0,<3.0.0
 # MFA (WS-E.12, admin TOTP): pyotp for TOTP generation/verification,
 # qrcode for its QR matrix builder only (core/mfa.py renders the matrix
 # as an inline SVG itself -- no PIL/image backend used or installed).
-pyotp==2.9.0
+pyotp==2.10.0
 qrcode==7.4.2
 
 # File uploads
@@ -51,7 +51,7 @@ google-auth-oauthlib>=1.2.0,<2.0.0
 # SENTRY_DSN is set (core/monitoring.py) -- when it is, send_default_pii is
 # forced off and candidate/client PII is scrubbed via a before_send hook.
 # See core/config.py / .env.example.
-sentry-sdk[fastapi]==2.19.2
+sentry-sdk[fastapi]==2.68.1
 
 # Testing (CI only, not needed at runtime)
 # >=9.0.3 for PYSEC-2026-1845.
