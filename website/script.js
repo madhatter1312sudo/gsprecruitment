@@ -381,6 +381,14 @@ const GSP_WHATSAPP = '31617913965';
     modal?.addEventListener('click', (e) => { if (e.target === modal) closeAuthModal(); });
     tabs.forEach(tab => tab.addEventListener('click', () => openModal(tab.dataset.tab)));
 
+    // kandidaten.html "Already have a profile? Log in" link -- WS-A.9b:
+    // wired here instead of an inline onclick= attribute (CSP). No-op on
+    // pages that don't have this element.
+    $('signupLoginLink')?.addEventListener('click', (e) => {
+      e.preventDefault();
+      $('loginBtn')?.click();
+    });
+
     // Wire up social login buttons
     const socialBtns = qsa('.social-btns button');
     socialBtns.forEach(btn => {
@@ -550,7 +558,10 @@ const GSP_WHATSAPP = '31617913965';
       const lang = localStorage.getItem('gsp_lang') || 'nl';
       const text = msg || (lang === 'nl' ? 'Kon vacatures niet laden. Probeer het later opnieuw.' : 'Could not load vacancies. Please try again later.');
       const retryLabel = lang === 'nl' ? 'Opnieuw proberen' : 'Retry';
-      grid.innerHTML = `<div style="grid-column:1/-1;text-align:center;padding:60px 20px"><i class="fas fa-exclamation-triangle" style="font-size:2rem;color:var(--gold);margin-bottom:12px"></i><p>${text}</p><button class="btn btn-ghost btn-sm" onclick="location.reload()" style="margin-top:16px"><i class="fas fa-redo"></i> ${retryLabel}</button></div>`;
+      grid.innerHTML = `<div style="grid-column:1/-1;text-align:center;padding:60px 20px"><i class="fas fa-exclamation-triangle" style="font-size:2rem;color:var(--gold);margin-bottom:12px"></i><p>${text}</p><button class="btn btn-ghost btn-sm" data-action="reload-page" style="margin-top:16px"><i class="fas fa-redo"></i> ${retryLabel}</button></div>`;
+      // WS-A.9b: wired here instead of an inline onclick="location.reload()"
+      // attribute (CSP).
+      grid.querySelector('[data-action="reload-page"]')?.addEventListener('click', () => location.reload());
     }
 
     async function fetchJobs() {
@@ -623,13 +634,18 @@ const GSP_WHATSAPP = '31617913965';
             <span><i class="fas fa-map-marker-alt"></i> ${GSP.esc(job.location_type || 'Netherlands')}</span>
           </div>
           <div class="job-links">
-            <a href="vacature.html?id=${encodeURIComponent(job.slug || job.id)}" class="job-view-link" onclick="event.stopPropagation()"><span class="lang-en">View details →</span><span class="lang-nl">Bekijk details →</span></a>
+            <a href="vacature.html?id=${encodeURIComponent(job.slug || job.id)}" class="job-view-link"><span class="lang-en">View details →</span><span class="lang-nl">Bekijk details →</span></a>
           </div>
         </div>
       `).join('');
 
       grid.querySelectorAll('.job-card').forEach(card => {
         card.addEventListener('click', () => showJobDetail(parseInt(card.dataset.id)));
+        // Stop the nested link's click from also bubbling to the card
+        // handler above (which would open the detail modal at the same
+        // time as the link navigates). WS-A.9b: wired here instead of an
+        // inline onclick="event.stopPropagation()" attribute (CSP).
+        card.querySelector('.job-view-link')?.addEventListener('click', (e) => e.stopPropagation());
       });
     }
 

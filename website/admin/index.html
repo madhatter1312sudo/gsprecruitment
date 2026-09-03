@@ -12,12 +12,12 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Newsreader:opsz,wght@6..72,400;6..72,500;6..72,600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
   <!-- Vendored locally (website/admin/vendor/) so the panel doesn't depend on
-       cdnjs/jsdelivr staying up. onerror falls back to the CDN copy if the
-       vendored file is ever missing. -->
-  <link rel="stylesheet" href="vendor/fontawesome/css/all.min.css" onerror="this.onerror=null;this.href='https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css'">
-  <link href="vendor/tabler/css/tabler.min.css" rel="stylesheet" onerror="this.onerror=null;this.href='https://cdn.jsdelivr.net/npm/@tabler/core@1.4.0/dist/css/tabler.min.css'">
+       cdnjs/jsdelivr staying up. vendor-fallback-css.js falls back to the CDN
+       copy if the vendored file is ever missing (WS-A.9b: no inline onerror=
+       attributes -- those are blocked by the enforced CSP too). -->
+  <script src="js/vendor-fallback-css.js"></script>
   <!-- ApexCharts is not vendored (chart-only, non-blocking for layout/nav) — TODO: vendor if this becomes a reliability problem. -->
-  <script src="https://cdn.jsdelivr.net/npm/apexcharts@4.7.0"></script>
+  <script src="https://cdn.jsdelivr.net/npm/apexcharts@4.7.0" integrity="sha384-Hf0cGsweCbozkRP14s5KIue6STJYKaoipB/i1gTdbX+umKD59qA/Szk42FPMuKtB" crossorigin="anonymous"></script>
   <style>
     /* ==== Legacy design-token compatibility ====
        admin.js still writes inline style="...var(--navy-300)..." etc (~150
@@ -250,7 +250,7 @@
                   <div id="newRegistrationsList" class="text-secondary">Loading…</div>
                 </div>
                 <div class="card-footer py-2">
-                  <button class="btn btn-sm btn-ghost-secondary w-100" onclick="navigateTo('candidates')">
+                  <button class="btn btn-sm btn-ghost-secondary w-100" data-action="navigate" data-section="candidates">
                     <i class="fa-solid fa-arrow-right me-1"></i> Alle kandidaten bekijken
                   </button>
                 </div>
@@ -269,19 +269,19 @@
               <div class="card">
                 <div class="card-header"><h3 class="card-title"><i class="fa-solid fa-bolt text-primary me-2"></i>Quick Actions</h3></div>
                 <div class="card-body d-flex flex-column gap-2">
-                  <button class="btn btn-outline-secondary btn-sm text-start" onclick="navigateTo('users')">
+                  <button class="btn btn-outline-secondary btn-sm text-start" data-action="navigate" data-section="users">
                     <i class="fa-solid fa-users me-1"></i> Manage Users
                   </button>
-                  <button class="btn btn-outline-secondary btn-sm text-start" onclick="navigateTo('jobs')">
+                  <button class="btn btn-outline-secondary btn-sm text-start" data-action="navigate" data-section="jobs">
                     <i class="fa-solid fa-briefcase me-1"></i> Review Jobs
                   </button>
-                  <button class="btn btn-outline-secondary btn-sm text-start" onclick="navigateTo('outreach')">
+                  <button class="btn btn-outline-secondary btn-sm text-start" data-action="navigate" data-section="outreach">
                     <i class="fa-regular fa-paper-plane me-1"></i> Outreach Drafts
                   </button>
-                  <button class="btn btn-outline-secondary btn-sm text-start" onclick="navigateTo('analytics')">
+                  <button class="btn btn-outline-secondary btn-sm text-start" data-action="navigate" data-section="analytics">
                     <i class="fa-solid fa-chart-line me-1"></i> View Analytics
                   </button>
-                  <button class="btn btn-outline-secondary btn-sm text-start" onclick="navigateTo('audit')">
+                  <button class="btn btn-outline-secondary btn-sm text-start" data-action="navigate" data-section="audit">
                     <i class="fa-solid fa-shield me-1"></i> Audit Log
                   </button>
                 </div>
@@ -379,10 +379,10 @@
                   <option value="rejected">Rejected</option>
                   <option value="failed">Failed</option>
                 </select>
-                <button class="btn btn-outline-secondary btn-sm" onclick="Admin.runOutreachJob('sourcing', this)">Run sourcing now</button>
-                <button class="btn btn-outline-secondary btn-sm" onclick="Admin.runOutreachJob('enrich', this)">Run enrich now</button>
-                <button class="btn btn-outline-secondary btn-sm" onclick="Admin.runOutreachJob('matching', this)">Run matching now</button>
-                <button class="btn btn-outline-secondary btn-sm" onclick="Admin.runOutreachJob('drafting', this)">Run drafting now</button>
+                <button class="btn btn-outline-secondary btn-sm" data-action="run-outreach-job" data-job-name="sourcing">Run sourcing now</button>
+                <button class="btn btn-outline-secondary btn-sm" data-action="run-outreach-job" data-job-name="enrich">Run enrich now</button>
+                <button class="btn btn-outline-secondary btn-sm" data-action="run-outreach-job" data-job-name="matching">Run matching now</button>
+                <button class="btn btn-outline-secondary btn-sm" data-action="run-outreach-job" data-job-name="drafting">Run drafting now</button>
               </div>
             </div>
             <div class="table-responsive">
@@ -419,8 +419,8 @@
                   <option value="published">Published</option>
                   <option value="archived">Archived</option>
                 </select>
-                <button class="btn btn-outline-secondary btn-sm" onclick="Admin.runOutreachJob('blog', this)">Draft new post (AI)</button>
-                <button class="btn btn-primary btn-sm" onclick="Admin.openBlogModal(null)">New post</button>
+                <button class="btn btn-outline-secondary btn-sm" data-action="run-outreach-job" data-job-name="blog">Draft new post (AI)</button>
+                <button class="btn btn-primary btn-sm" data-action="open-blog-modal">New post</button>
               </div>
             </div>
             <div class="table-responsive">
@@ -636,7 +636,7 @@
                   </div>
 
                   <div class="mt-4">
-                    <button class="btn btn-primary" id="saveSettingsBtn" onclick="Admin.saveSettings()">
+                    <button class="btn btn-primary" id="saveSettingsBtn" data-action="save-settings">
                       <i class="fa-regular fa-floppy-disk"></i> Save Settings
                     </button>
                   </div>
@@ -726,124 +726,7 @@
 <script src="../gsp-util.js"></script>
 <script src="../auth.js"></script>
 <script src="js/admin.js"></script>
-<script src="vendor/tabler/js/tabler.min.js" onerror="var s=document.createElement('script');s.src='https://cdn.jsdelivr.net/npm/@tabler/core@1.4.0/dist/js/tabler.min.js';document.body.appendChild(s);"></script>
-<script>
-  /* ---- Navigation ---- */
-  const sectionTitles = {
-    dashboard: 'Dashboard', users: 'User Management', jobs: 'All Jobs',
-    candidates: 'All Candidates', outreach: 'Outreach', blog: 'Blog', analytics: 'Analytics',
-    audit: 'Audit Log', cms: 'Content CMS', settings: 'Settings',
-  };
-
-  const sectionLoaders = {
-    users:      () => Admin.loadUsers(),
-    jobs:       () => Admin.loadJobs(),
-    candidates: () => Admin.loadCandidates(),
-    outreach:   () => Admin.loadOutreach(),
-    blog:       () => Admin.loadBlog(),
-    analytics:  () => Admin.loadAnalytics(),
-    audit:      () => Admin.loadAuditLog(),
-    cms:        () => Admin.loadContent(),
-    settings:   () => Admin.loadSettings(),
-  };
-
-  const loaded = new Set(['dashboard']);
-
-  function navigateTo(section) {
-    document.querySelectorAll('.nav-link[data-section]').forEach(item => {
-      item.classList.toggle('active', item.dataset.section === section);
-    });
-    document.querySelectorAll('.portal-section').forEach(s => {
-      s.classList.toggle('active', s.id === `section-${section}`);
-    });
-    document.getElementById('pageTitle').textContent = sectionTitles[section] || section;
-    window.location.hash = section;
-    const menu = document.getElementById('sidebar-menu');
-    if (menu && menu.classList.contains('show') && window.bootstrap) {
-      window.bootstrap.Collapse.getOrCreateInstance(menu).hide();
-    }
-
-    if (!loaded.has(section) && sectionLoaders[section]) {
-      loaded.add(section);
-      sectionLoaders[section]();
-    }
-  }
-
-  document.querySelectorAll('.nav-link[data-section]').forEach(item => {
-    item.addEventListener('click', (e) => { e.preventDefault(); navigateTo(item.dataset.section); });
-  });
-
-  const hash = window.location.hash.replace('#', '');
-  if (hash && sectionTitles[hash]) navigateTo(hash);
-
-  /* ---- Logout ---- */
-  document.getElementById('sidebarLogoutBtn').addEventListener('click', () => Auth.logout());
-
-  /* ---- Audit filter input ---- */
-  const auditInput = document.getElementById('auditActionFilter');
-  if (auditInput) {
-    let t;
-    auditInput.addEventListener('input', e => {
-      clearTimeout(t);
-      t = setTimeout(() => {
-        Admin._currentPage.audit = 1;
-        Admin.loadAuditLog({ action: e.target.value.trim() || undefined });
-      }, 500);
-    });
-  }
-
-  /* ---- User search live ---- */
-  const userSearch = document.getElementById('userSearch');
-  if (userSearch) {
-    let t;
-    userSearch.addEventListener('input', e => {
-      clearTimeout(t);
-      t = setTimeout(() => {
-        Admin._currentPage.users = 1;
-        Admin.loadUsers({ search: e.target.value.trim() });
-      }, 400);
-    });
-  }
-
-  /* ---- Outreach status filter ---- */
-  const outreachStatusFilter = document.getElementById('outreachStatusFilter');
-  if (outreachStatusFilter) {
-    outreachStatusFilter.addEventListener('change', e => {
-      Admin._currentPage.outreach = 1;
-      Admin.loadOutreach({ status: e.target.value || undefined });
-    });
-  }
-
-  /* ---- Blog status filter ---- */
-  const blogStatusFilter = document.getElementById('blogStatusFilter');
-  if (blogStatusFilter) {
-    blogStatusFilter.addEventListener('change', e => {
-      Admin._currentPage.blog = 1;
-      Admin.loadBlog({ status: e.target.value || undefined });
-    });
-  }
-
-  /* ---- Candidate status filter ---- */
-  const candStatusFilter = document.getElementById('candidateStatusFilter');
-  if (candStatusFilter) {
-    candStatusFilter.addEventListener('change', e => {
-      Admin._currentPage.candidates = 1;
-      Admin.loadCandidates({ status: e.target.value || undefined, kind: document.getElementById('candidateKindFilter')?.value || undefined });
-    });
-  }
-
-  /* ---- Candidate kind filter (Alle / Zelf geregistreerd / Gesourced) ---- */
-  const candKindFilter = document.getElementById('candidateKindFilter');
-  if (candKindFilter) {
-    candKindFilter.addEventListener('change', e => {
-      Admin._currentPage.candidates = 1;
-      Admin.loadCandidates({ kind: e.target.value || undefined, status: document.getElementById('candidateStatusFilter')?.value || undefined });
-    });
-  }
-
-  /* ---- Language preference ---- */
-  const savedLang = localStorage.getItem('gsp_lang');
-  if (savedLang === 'nl' || savedLang === 'en') document.documentElement.setAttribute('data-lang', savedLang);
-</script>
+<script src="js/vendor-fallback-tabler-js.js"></script>
+<script src="js/nav.js"></script>
 </body>
 </html>

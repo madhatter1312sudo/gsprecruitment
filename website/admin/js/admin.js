@@ -161,7 +161,7 @@ const Admin = {
           <div class="activity-text" style="color:var(--navy-300);">${this.esc(c.current_title || '—')}${c.location ? ' · ' + this.esc(c.location) : ''}</div>
           <div class="activity-time">${this.timeAgo(c.created_at)}</div>
         </div>
-        <button class="btn btn-sm btn-ghost-secondary" onclick="Admin.viewCandidate('self-registered', ${c.user_id ?? c.id})" style="flex-shrink:0;" title="Profiel bekijken">
+        <button class="btn btn-sm btn-ghost-secondary" data-action="view-candidate" data-kind="self-registered" data-id="${c.user_id ?? c.id}" style="flex-shrink:0;" title="Profiel bekijken">
           <i class="fa-regular fa-eye"></i>
         </button>
       </div>`).join('');
@@ -199,7 +199,7 @@ const Admin = {
           <div class="activity-text">${this.esc(u.full_name || u.email)} — <span style="color:var(--gold-400);">${this.esc(u.role)}</span></div>
           <div class="activity-time">${this.timeAgo(u.created_at)}</div>
         </div>
-        <button class="btn btn-sm btn-primary" onclick="Admin.verifyUser(${u.id}, this)" style="flex-shrink:0;">Verify</button>
+        <button class="btn btn-sm btn-primary" data-action="verify-user" data-id="${u.id}" style="flex-shrink:0;">Verify</button>
       </div>`).join('');
   },
 
@@ -268,12 +268,12 @@ const Admin = {
         <td style="font-size:var(--font-size-xs);color:var(--navy-300);">${this.timeAgo(u.created_at)}</td>
         <td>
           <div class="action-menu-wrap" style="position:relative;">
-            <button class="btn btn-sm btn-ghost-secondary" onclick="Admin.toggleUserMenu(${u.id}, event)">
+            <button class="btn btn-sm btn-ghost-secondary" data-action="toggle-user-menu" data-id="${u.id}">
               <i class="fa-solid fa-ellipsis-vertical"></i>
             </button>
             <div class="action-menu" id="user-menu-${u.id}" style="display:none;">
-              ${!u.is_verified ? `<button onclick="Admin.verifyUser(${u.id});Admin.closeMenus()"><i class="fa-regular fa-circle-check"></i> Verify</button>` : ''}
-              <button onclick="Admin.openEditUserModal(${u.id});Admin.closeMenus()"><i class="fa-solid fa-pen"></i> Edit Role</button>
+              ${!u.is_verified ? `<button data-action="verify-user" data-id="${u.id}"><i class="fa-regular fa-circle-check"></i> Verify</button>` : ''}
+              <button data-action="edit-user" data-id="${u.id}"><i class="fa-solid fa-pen"></i> Edit Role</button>
               <button data-action="impersonate-user" data-id="${u.id}" data-email="${this.esc(u.email)}"><i class="fa-solid fa-mask"></i> Impersonate</button>
               <button data-action="delete-user" data-id="${u.id}" data-email="${this.esc(u.email)}" style="color:#f87171;"><i class="fa-solid fa-trash"></i> Delete</button>
             </div>
@@ -282,8 +282,12 @@ const Admin = {
       </tr>`).join('');
   },
 
-  toggleUserMenu(id, e) {
-    e.stopPropagation();
+  toggleUserMenu(id) {
+    // Fires from the delegated data-action click listener (bound after the
+    // document-level closeMenus() listener in bindUI()), so closeMenus() has
+    // already run for this same click by the time we get here -- no need
+    // for stopPropagation() to race a separate document click handler the
+    // way the old inline onclick= version did.
     this.closeMenus();
     const menu = document.getElementById(`user-menu-${id}`);
     if (menu) menu.style.display = 'block';
@@ -317,8 +321,8 @@ const Admin = {
         </select>
       </div>
       <div style="display:flex;gap:var(--space-md);margin-top:var(--space-lg);">
-        <button class="btn btn-primary" onclick="Admin.saveUserEdit(${userId})">Save Changes</button>
-        <button class="btn btn-ghost-secondary" onclick="Admin.closeModal()">Cancel</button>
+        <button class="btn btn-primary" data-action="save-user-edit" data-id="${userId}">Save Changes</button>
+        <button class="btn btn-ghost-secondary" data-action="close-modal">Cancel</button>
       </div>
     `);
   },
@@ -413,14 +417,14 @@ const Admin = {
         <td><span class="${this.badge(j.status)}">${this.esc(j.status || 'draft')}</span></td>
         <td>
           ${j.status === 'draft' || j.status === 'pending' ? `
-            <button class="btn btn-sm btn-primary" onclick="Admin.setJobStatus(${j.id}, 'open')" title="Approve">
+            <button class="btn btn-sm btn-primary" data-action="set-job-status" data-id="${j.id}" data-status="open" title="Approve">
               <i class="fa-regular fa-circle-check"></i> Approve
             </button>` : ''}
           ${j.status === 'open' ? `
-            <button class="btn btn-sm btn-ghost-secondary" onclick="Admin.setJobStatus(${j.id}, 'closed')" title="Close" style="color:#f87171;">
+            <button class="btn btn-sm btn-ghost-secondary" data-action="set-job-status" data-id="${j.id}" data-status="closed" title="Close" style="color:#f87171;">
               <i class="fa-solid fa-xmark"></i> Close
             </button>` : ''}
-          <button class="btn btn-sm btn-ghost-secondary" onclick="Admin.confirmDeleteJob(${j.id})" title="Delete" style="color:#f87171;">
+          <button class="btn btn-sm btn-ghost-secondary" data-action="confirm-delete-job" data-id="${j.id}" title="Delete" style="color:#f87171;">
             <i class="fa-solid fa-trash"></i>
           </button>
         </td>
@@ -529,7 +533,7 @@ const Admin = {
           <span class="${this.badge(c.status || 'active')}">${this.esc(c.status || 'active')}</span>
         </td>
         <td>
-          <button class="btn btn-sm btn-ghost-secondary" onclick="Admin.viewCandidate('${effKind === 'self-registered' ? 'self-registered' : 'sourced'}', ${itemId})" title="View profile">
+          <button class="btn btn-sm btn-ghost-secondary" data-action="view-candidate" data-kind="${effKind === 'self-registered' ? 'self-registered' : 'sourced'}" data-id="${itemId}" title="View profile">
             <i class="fa-regular fa-eye"></i>
           </button>
         </td>
@@ -551,8 +555,8 @@ const Admin = {
           <h3 style="color:var(--white);margin-bottom:var(--space-md);">Kon profiel niet laden</h3>
           <p style="color:var(--navy-300);">${this.esc(d?.detail || 'Er ging iets mis bij het ophalen van dit profiel.')}</p>
           <div style="display:flex;gap:var(--space-md);margin-top:var(--space-lg);">
-            <button class="btn btn-primary btn-sm" onclick="Admin.viewCandidate('${kind}', ${itemId})">Opnieuw proberen</button>
-            <button class="btn btn-ghost-secondary btn-sm" onclick="Admin.closeModal()">Sluiten</button>
+            <button class="btn btn-primary btn-sm" data-action="view-candidate" data-kind="${kind}" data-id="${itemId}">Opnieuw proberen</button>
+            <button class="btn btn-ghost-secondary btn-sm" data-action="close-modal">Sluiten</button>
           </div>`);
         return;
       }
@@ -563,8 +567,8 @@ const Admin = {
         <h3 style="color:var(--white);margin-bottom:var(--space-md);">Netwerkfout</h3>
         <p style="color:var(--navy-300);">Kon geen verbinding maken met de server.</p>
         <div style="display:flex;gap:var(--space-md);margin-top:var(--space-lg);">
-          <button class="btn btn-primary btn-sm" onclick="Admin.viewCandidate('${kind}', ${itemId})">Opnieuw proberen</button>
-          <button class="btn btn-ghost-secondary btn-sm" onclick="Admin.closeModal()">Sluiten</button>
+          <button class="btn btn-primary btn-sm" data-action="view-candidate" data-kind="${kind}" data-id="${itemId}">Opnieuw proberen</button>
+          <button class="btn btn-ghost-secondary btn-sm" data-action="close-modal">Sluiten</button>
         </div>`);
     }
   },
@@ -697,7 +701,7 @@ const Admin = {
         </div>
       </div>
       <div style="display:flex;gap:var(--space-md);">
-        <button class="btn btn-ghost-secondary btn-sm" onclick="Admin.closeModal()">Close</button>
+        <button class="btn btn-ghost-secondary btn-sm" data-action="close-modal">Close</button>
       </div>
     `);
   },
@@ -748,14 +752,14 @@ const Admin = {
         <td style="font-size:var(--font-size-xs);color:var(--navy-300);">${this.timeAgo(d.created_at)}</td>
         <td><span class="${this.badge(d.status)}">${this.esc(d.status)}</span></td>
         <td>
-          <button class="btn btn-sm btn-ghost-secondary" onclick="Admin.openDraftModal(${d.id})" title="Review">
+          <button class="btn btn-sm btn-ghost-secondary" data-action="open-draft-modal" data-id="${d.id}" title="Review">
             <i class="fa-regular fa-eye"></i>
           </button>
           ${d.status === 'draft' ? `
-            <button class="btn btn-sm btn-ghost-secondary" onclick="Admin.approveDraft(${d.id})" title="Approve &amp; send" style="color:#4ade80;">
+            <button class="btn btn-sm btn-ghost-secondary" data-action="approve-draft" data-id="${d.id}" title="Approve &amp; send" style="color:#4ade80;">
               <i class="fa-regular fa-paper-plane"></i>
             </button>
-            <button class="btn btn-sm btn-ghost-secondary" onclick="Admin.rejectDraft(${d.id})" title="Reject" style="color:#f87171;">
+            <button class="btn btn-sm btn-ghost-secondary" data-action="reject-draft" data-id="${d.id}" title="Reject" style="color:#f87171;">
               <i class="fa-solid fa-xmark"></i>
             </button>` : ''}
         </td>
@@ -788,10 +792,10 @@ const Admin = {
       </div>
       <div style="display:flex;gap:var(--space-md);margin-top:var(--space-lg);flex-wrap:wrap;">
         ${editable ? `
-          <button class="btn btn-ghost-secondary" onclick="Admin.saveDraft(${d.id})"><i class="fa-regular fa-floppy-disk"></i> Save</button>
-          <button class="btn btn-primary" onclick="Admin.approveDraft(${d.id})"><i class="fa-regular fa-paper-plane"></i> Approve &amp; Send</button>
-          <button class="btn btn-ghost-secondary" onclick="Admin.rejectDraft(${d.id})" style="color:#f87171;"><i class="fa-solid fa-xmark"></i> Reject</button>` : ''}
-        <button class="btn btn-ghost-secondary" onclick="Admin.closeModal()">Close</button>
+          <button class="btn btn-ghost-secondary" data-action="save-draft" data-id="${d.id}"><i class="fa-regular fa-floppy-disk"></i> Save</button>
+          <button class="btn btn-primary" data-action="approve-draft" data-id="${d.id}"><i class="fa-regular fa-paper-plane"></i> Approve &amp; Send</button>
+          <button class="btn btn-ghost-secondary" data-action="reject-draft" data-id="${d.id}" style="color:#f87171;"><i class="fa-solid fa-xmark"></i> Reject</button>` : ''}
+        <button class="btn btn-ghost-secondary" data-action="close-modal">Close</button>
       </div>
     `);
   },
@@ -906,15 +910,15 @@ const Admin = {
         <td><span class="${this.badge(p.status)}">${this.esc(p.status)}</span></td>
         <td style="font-size:var(--font-size-xs);color:var(--navy-300);">${p.published_at ? this.formatDate(p.published_at) : '—'}</td>
         <td>
-          <button class="btn btn-sm btn-ghost-secondary" onclick="Admin.openBlogModal(${p.id})" title="Edit">
+          <button class="btn btn-sm btn-ghost-secondary" data-action="open-blog-modal" data-id="${p.id}" title="Edit">
             <i class="fa-solid fa-pen"></i>
           </button>
           ${p.status === 'draft' ? `
-            <button class="btn btn-sm btn-ghost-secondary" onclick="Admin.publishBlogPost(${p.id})" title="Publish" style="color:#4ade80;">
+            <button class="btn btn-sm btn-ghost-secondary" data-action="publish-blog-post" data-id="${p.id}" title="Publish" style="color:#4ade80;">
               <i class="fa-regular fa-circle-check"></i>
             </button>` : ''}
           ${p.status === 'published' ? `
-            <button class="btn btn-sm btn-ghost-secondary" onclick="Admin.archiveBlogPost(${p.id})" title="Archive" style="color:#f87171;">
+            <button class="btn btn-sm btn-ghost-secondary" data-action="archive-blog-post" data-id="${p.id}" title="Archive" style="color:#f87171;">
               <i class="fa-solid fa-box-archive"></i>
             </button>` : ''}
         </td>
@@ -963,8 +967,8 @@ const Admin = {
         <input type="number" id="blogReadTime" value="${p?.read_time_min ?? ''}">
       </div>
       <div style="display:flex;gap:var(--space-md);margin-top:var(--space-lg);">
-        <button class="btn btn-primary" onclick="Admin.saveBlogPost(${p ? p.id : 'null'})">Save</button>
-        <button class="btn btn-ghost-secondary" onclick="Admin.closeModal()">Cancel</button>
+        <button class="btn btn-primary" data-action="save-blog-post" data-id="${p ? p.id : ''}">Save</button>
+        <button class="btn btn-ghost-secondary" data-action="close-modal">Cancel</button>
       </div>
     `);
   },
@@ -1202,8 +1206,8 @@ const Admin = {
         <textarea id="editContentValue" rows="5" style="width:100%;background:rgba(6,13,26,0.6);border:1px solid rgba(74,111,159,0.3);border-radius:var(--radius-md);color:var(--white);padding:0.75rem;font-family:var(--font-primary);font-size:var(--font-size-sm);resize:vertical;">${this.esc(value)}</textarea>
       </div>
       <div style="display:flex;gap:var(--space-md);margin-top:var(--space-lg);">
-        <button class="btn btn-primary" onclick="Admin.saveContent(${id})">Save</button>
-        <button class="btn btn-ghost-secondary" onclick="Admin.closeModal()">Cancel</button>
+        <button class="btn btn-primary" data-action="save-content" data-id="${id}">Save</button>
+        <button class="btn btn-ghost-secondary" data-action="close-modal">Cancel</button>
       </div>
     `);
   },
@@ -1230,16 +1234,32 @@ const Admin = {
     const el = document.getElementById(containerId);
     if (!el) return;
     const pages = Math.ceil(total / limit);
-    if (pages <= 1) { el.innerHTML = ''; return; }
+    el.innerHTML = '';
+    if (pages <= 1) return;
 
-    const buttons = [];
-    buttons.push(`<button ${current === 1 ? 'disabled' : ''} onclick="(${onPage.toString()})(${current - 1})"><i class="fa-solid fa-chevron-left"></i></button>`);
+    // Built as real DOM nodes with addEventListener (CSP: no inline onclick=
+    // attributes) -- also lets each button call the real `onPage` closure
+    // directly instead of serializing it into a string with .toString().
+    const makeBtn = (label, page, opts = {}) => {
+      const btn = document.createElement('button');
+      if (opts.html) btn.innerHTML = label; else btn.textContent = label;
+      if (opts.active) btn.classList.add('active');
+      if (opts.disabled) btn.disabled = true;
+      else btn.addEventListener('click', () => onPage(page));
+      return btn;
+    };
+
+    el.appendChild(makeBtn('<i class="fa-solid fa-chevron-left"></i>', current - 1, { html: true, disabled: current === 1 }));
     for (let i = 1; i <= Math.min(pages, 7); i++) {
-      buttons.push(`<button class="${i === current ? 'active' : ''}" onclick="(${onPage.toString()})(${i})">${i}</button>`);
+      el.appendChild(makeBtn(String(i), i, { active: i === current }));
     }
-    if (pages > 7) buttons.push(`<span style="color:var(--navy-300);padding:0 4px;">…${pages}</span>`);
-    buttons.push(`<button ${current === pages ? 'disabled' : ''} onclick="(${onPage.toString()})(${current + 1})"><i class="fa-solid fa-chevron-right"></i></button>`);
-    el.innerHTML = buttons.join('');
+    if (pages > 7) {
+      const span = document.createElement('span');
+      span.style.cssText = 'color:var(--navy-300);padding:0 4px;';
+      span.textContent = `…${pages}`;
+      el.appendChild(span);
+    }
+    el.appendChild(makeBtn('<i class="fa-solid fa-chevron-right"></i>', current + 1, { html: true, disabled: current === pages }));
   },
 
   /* ============================================================
@@ -1256,7 +1276,7 @@ const Admin = {
     }
     overlay.innerHTML = `
       <div style="background:var(--navy-900);border:1px solid rgba(74,111,159,0.2);border-radius:var(--radius-xl);padding:var(--space-2xl);max-width:520px;width:100%;max-height:80vh;overflow-y:auto;position:relative;">
-        <button onclick="Admin.closeModal()" style="position:absolute;top:1rem;right:1rem;background:none;border:none;color:var(--navy-200);cursor:pointer;font-size:1.2rem;">
+        <button data-action="close-modal" style="position:absolute;top:1rem;right:1rem;background:none;border:none;color:var(--navy-200);cursor:pointer;font-size:1.2rem;">
           <i class="fa-solid fa-xmark"></i>
         </button>
         ${html}
@@ -1330,6 +1350,69 @@ const Admin = {
         break;
       case 'edit-content':
         this.editContent(Number(id), el.dataset.key || '', el.dataset.value || '');
+        break;
+      case 'navigate':
+        // navigateTo() is a page-level global defined in admin/js/nav.js.
+        if (typeof navigateTo === 'function') navigateTo(el.dataset.section);
+        break;
+      case 'view-candidate':
+        this.viewCandidate(el.dataset.kind || 'self-registered', Number(id));
+        break;
+      case 'verify-user':
+        this.verifyUser(Number(id), el);
+        this.closeMenus();
+        break;
+      case 'toggle-user-menu':
+        this.toggleUserMenu(Number(id));
+        break;
+      case 'edit-user':
+        this.openEditUserModal(Number(id));
+        this.closeMenus();
+        break;
+      case 'save-user-edit':
+        this.saveUserEdit(Number(id));
+        break;
+      case 'set-job-status':
+        this.setJobStatus(Number(id), el.dataset.status);
+        break;
+      case 'confirm-delete-job':
+        this.confirmDeleteJob(Number(id));
+        break;
+      case 'open-draft-modal':
+        this.openDraftModal(Number(id));
+        break;
+      case 'approve-draft':
+        this.approveDraft(Number(id));
+        break;
+      case 'reject-draft':
+        this.rejectDraft(Number(id));
+        break;
+      case 'save-draft':
+        this.saveDraft(Number(id));
+        break;
+      case 'open-blog-modal':
+        this.openBlogModal(id ? Number(id) : null);
+        break;
+      case 'publish-blog-post':
+        this.publishBlogPost(Number(id));
+        break;
+      case 'archive-blog-post':
+        this.archiveBlogPost(Number(id));
+        break;
+      case 'save-blog-post':
+        this.saveBlogPost(id ? Number(id) : null);
+        break;
+      case 'save-content':
+        this.saveContent(Number(id));
+        break;
+      case 'run-outreach-job':
+        this.runOutreachJob(el.dataset.jobName, el);
+        break;
+      case 'save-settings':
+        this.saveSettings();
+        break;
+      case 'close-modal':
+        this.closeModal();
         break;
     }
   },
