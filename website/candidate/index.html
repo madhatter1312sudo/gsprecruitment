@@ -1140,6 +1140,7 @@
     </main>
   </div>
 
+  <script src="../gsp-util.js"></script>
   <script src="../auth.js"></script>
   <script>
     /* ================================================================
@@ -1232,12 +1233,12 @@
             return `<div class="match-card">
               <div class="match-score">Match ${score}</div>
               <div class="match-info">
-                <h4>${m.job_title || 'Job'}</h4>
-                <p class="match-company">${m.company_name || ''}${location}</p>
-                <p>${salary}${m.location_type ? ' · ' + m.location_type : ''}</p>
+                <h4>${GSP.esc(m.job_title || 'Job')}</h4>
+                <p class="match-company">${GSP.esc(m.company_name || '')}${GSP.esc(location)}</p>
+                <p>${GSP.esc(salary)}${m.location_type ? ' · ' + GSP.esc(m.location_type) : ''}</p>
               </div>
-              <button class="btn btn-sm btn-primary lang-en" onclick="window.app.matches.apply(${m.job_id})">Apply</button>
-              <button class="btn btn-sm btn-primary lang-nl" onclick="window.app.matches.apply(${m.job_id})">Solliciteer</button>
+              <button class="btn btn-sm btn-primary lang-en" onclick="window.app.matches.apply(${Number(m.job_id) || 0})">Apply</button>
+              <button class="btn btn-sm btn-primary lang-nl" onclick="window.app.matches.apply(${Number(m.job_id) || 0})">Solliciteer</button>
             </div>`;
           }).join('');
         }
@@ -1449,15 +1450,15 @@
           return `<div class="match-card">
             <div class="match-score">Match ${score}</div>
             <div class="match-info">
-              <h4>${m.job_title || 'Job'}</h4>
-              <p class="match-company">${m.company_name || ''}${location}</p>
-              <p>${salary}${m.location_type ? ' · ' + m.location_type : ''}</p>
+              <h4>${GSP.esc(m.job_title || 'Job')}</h4>
+              <p class="match-company">${GSP.esc(m.company_name || '')}${GSP.esc(location)}</p>
+              <p>${GSP.esc(salary)}${m.location_type ? ' · ' + GSP.esc(m.location_type) : ''}</p>
               <div style="margin-top:6px;display:flex;gap:4px;">
-                <span class="tag tag-green">${m.status || 'New'}</span>
+                <span class="tag tag-green">${GSP.esc(m.status || 'New')}</span>
               </div>
             </div>
-            <button class="btn btn-sm btn-primary lang-en" onclick="applyToJob(${m.job_id})">Apply Now</button>
-            <button class="btn btn-sm btn-primary lang-nl" onclick="applyToJob(${m.job_id})">Solliciteer</button>
+            <button class="btn btn-sm btn-primary lang-en" onclick="applyToJob(${Number(m.job_id) || 0})">Apply Now</button>
+            <button class="btn btn-sm btn-primary lang-nl" onclick="applyToJob(${Number(m.job_id) || 0})">Solliciteer</button>
           </div>`;
         }).join('');
       } catch (err) {
@@ -1508,10 +1509,10 @@
             'applied': 'badge-blue', 'interviewing': 'badge-gold', 'offered': 'badge-purple', 'placed': 'badge-green', 'rejected': 'badge-gray'
           }[a.status] || 'badge-blue';
           return `<tr>
-            <td style="font-weight:600;color:var(--white);">${a.job_title || '-'}</td>
-            <td>${a.company_name || '-'}</td>
-            <td style="font-size:var(--font-size-xs);color:var(--navy-200);">${date}</td>
-            <td><span class="badge ${statusBadge}">${statusMap[a.status] || a.status}</span></td>
+            <td style="font-weight:600;color:var(--white);">${GSP.esc(a.job_title || '-')}</td>
+            <td>${GSP.esc(a.company_name || '-')}</td>
+            <td style="font-size:var(--font-size-xs);color:var(--navy-200);">${GSP.esc(date)}</td>
+            <td><span class="badge ${statusBadge}">${GSP.esc(statusMap[a.status] || a.status)}</span></td>
             <td><button class="btn btn-sm btn-ghost" onclick="Auth.toast('Details coming soon')"><i class="fa-regular fa-eye"></i></button></td>
           </tr>`;
         }).join('');
@@ -1547,13 +1548,13 @@
           const isUnread = !m.opened_at && m.status !== 'draft';
           const time = m.created_at ? new Date(m.created_at).toLocaleDateString() : '';
           return `<div class="message-item ${isUnread ? 'unread' : ''}">
-            <div class="avatar avatar-navy avatar-sm">${(m.sender_name || 'GS').slice(0,2).toUpperCase()}</div>
+            <div class="avatar avatar-navy avatar-sm">${GSP.esc((m.sender_name || 'GS').slice(0,2).toUpperCase())}</div>
             <div style="flex:1;min-width:0;">
               <div style="display:flex;justify-content:space-between;align-items:center;">
-                <h4 style="font-size:var(--font-size-sm);font-weight:600;color:var(--white);">${m.sender_name || 'GSP Recruitment'}</h4>
-                <span style="font-size:var(--font-size-xs);color:var(--navy-200);">${time}</span>
+                <h4 style="font-size:var(--font-size-sm);font-weight:600;color:var(--white);">${GSP.esc(m.sender_name || 'GSP Recruitment')}</h4>
+                <span style="font-size:var(--font-size-xs);color:var(--navy-200);">${GSP.esc(time)}</span>
               </div>
-              <p style="font-size:var(--font-size-xs);color:var(--navy-200);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${m.subject || m.message_text || ''}</p>
+              <p style="font-size:var(--font-size-xs);color:var(--navy-200);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${GSP.esc(m.subject || m.message_text || '')}</p>
               ${isUnread ? '<span class="badge badge-gold" style="font-size:0.6rem;padding:0.1rem 0.4rem;">New</span>' : ''}
             </div>
           </div>`;
@@ -1580,7 +1581,7 @@
           const d = data[0];
           chartEl.innerHTML = `<div style="text-align:center;">
             <div style="font-size:var(--font-size-4xl);font-weight:800;color:var(--gold-500);">€${(d.p25/1000).toFixed(0)}K – €${(d.p75/1000).toFixed(0)}K</div>
-            <p style="color:var(--navy-200);font-size:var(--font-size-sm);">${d.role_title} — Netherlands 2026</p>
+            <p style="color:var(--navy-200);font-size:var(--font-size-sm);">${GSP.esc(d.role_title)} — Netherlands 2026</p>
           </div>`;
           // Update percentile cards
           const cards = document.querySelectorAll('#section-salary .stat-card .stat-value');

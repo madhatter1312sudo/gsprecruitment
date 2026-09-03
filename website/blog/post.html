@@ -154,6 +154,7 @@
   </div>
 </footer>
 
+<script src="../gsp-util.js"></script>
 <script>
 (async () => {
   const params = new URLSearchParams(window.location.search);
@@ -205,11 +206,13 @@
     document.getElementById('metaReadTimeEn').textContent = `${p.read_time_min || '—'} min read`;
 
     const tagsWrap = document.getElementById('tagsWrap');
-    tagsWrap.innerHTML = (p.tags || []).map(t => `<span>${t}</span>`).join('');
+    tagsWrap.innerHTML = (p.tags || []).map(t => `<span>${GSP.esc(t)}</span>`).join('');
 
-    // Body — trusted, server-rendered HTML from our own API
-    document.getElementById('bodyNl').innerHTML = p.body_nl || '';
-    document.getElementById('bodyEn').innerHTML = p.body_en || '';
+    // Body — blog authors can enter raw HTML in the admin editor, and the
+    // API does not sanitize it server-side yet (tracked as WS-C.3b), so
+    // run it through the client-side allow-list sanitizer before render.
+    document.getElementById('bodyNl').innerHTML = GSP.sanitizeHtml(p.body_nl || '');
+    document.getElementById('bodyEn').innerHTML = GSP.sanitizeHtml(p.body_en || '');
 
     heroSection.style.display = 'block';
     bodySection.style.display = 'block';

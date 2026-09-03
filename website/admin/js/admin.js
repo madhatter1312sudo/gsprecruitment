@@ -46,25 +46,15 @@ const Admin = {
     const colors = { green: 'bg-green-lt', blue: 'bg-blue-lt', gold: 'bg-yellow-lt', red: 'bg-red-lt', default: 'bg-secondary-lt' };
     return `badge ${colors[map[status?.toLowerCase()] || 'default']}`;
   },
+  // esc()/safeUrl() delegate to the shared GSP.esc/GSP.safeUrl (gsp-util.js,
+  // loaded before this file) so the public site and admin panel share one
+  // escaping implementation. Kept as Admin.esc/Admin.safeUrl for every
+  // existing call site in this file — do not remove.
   esc(s) {
-    if (s == null) return '';
-    const d = document.createElement('div');
-    d.textContent = String(s);
-    return d.innerHTML;
+    return GSP.esc(s);
   },
-  // Candidate-supplied URLs go into href attributes: esc() stops attribute
-  // breakout but not a javascript:/data: scheme, so whitelist http(s) only.
   safeUrl(s) {
-    if (!s) return '';
-    let v = String(s).trim();
-    // Sourced-pipeline rows may hold bare domains ("linkedin.com/in/x") —
-    // treat those as https rather than resolving against a dummy base.
-    if (!/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(v)) v = 'https://' + v;
-    try {
-      const u = new URL(v);
-      if (u.protocol === 'http:' || u.protocol === 'https:') return u.href;
-    } catch { /* unparseable -> drop */ }
-    return '';
+    return GSP.safeUrl(s);
   },
   setLoading(tbodyId, cols) {
     const el = document.querySelector(tbodyId);
@@ -282,8 +272,8 @@ const Admin = {
             <div class="action-menu" id="user-menu-${u.id}" style="display:none;">
               ${!u.is_verified ? `<button onclick="Admin.verifyUser(${u.id});Admin.closeMenus()"><i class="fa-regular fa-circle-check"></i> Verify</button>` : ''}
               <button onclick="Admin.openEditUserModal(${u.id});Admin.closeMenus()"><i class="fa-solid fa-pen"></i> Edit Role</button>
-              <button onclick="Admin.impersonateUser(${u.id}, '${this.esc(u.email)}');Admin.closeMenus()"><i class="fa-solid fa-mask"></i> Impersonate</button>
-              <button onclick="Admin.confirmDeleteUser(${u.id}, '${this.esc(u.email)}');Admin.closeMenus()" style="color:#f87171;"><i class="fa-solid fa-trash"></i> Delete</button>
+              <button data-action="impersonate-user" data-id="${u.id}" data-email="${this.esc(u.email)}"><i class="fa-solid fa-mask"></i> Impersonate</button>
+              <button data-action="delete-user" data-id="${u.id}" data-email="${this.esc(u.email)}" style="color:#f87171;"><i class="fa-solid fa-trash"></i> Delete</button>
             </div>
           </div>
         </td>
@@ -1195,7 +1185,7 @@ const Admin = {
           <div style="font-size:var(--font-size-xs);color:var(--navy-300);">${this.esc(item.section)} / ${this.esc(item.key)}</div>
           <div style="color:var(--navy-100);margin-top:2px;font-size:var(--font-size-sm);">${this.esc((item.value || '').slice(0, 80))}${(item.value || '').length > 80 ? '…' : ''}</div>
         </div>
-        <button class="btn btn-sm btn-ghost-secondary" onclick="Admin.editContent(${item.id}, '${this.esc(item.key)}', \`${this.esc(item.value || '')}\`)">
+        <button class="btn btn-sm btn-ghost-secondary" data-action="edit-content" data-id="${item.id}" data-key="${this.esc(item.key)}" data-value="${this.esc(item.value || '')}">
           <i class="fa-solid fa-pen"></i>
         </button>
       </div>`).join('');
@@ -1313,6 +1303,32 @@ const Admin = {
     });
 
     document.addEventListener('click', () => this.closeMenus());
+
+    // Delegated handler for buttons rendered with data-action instead of an
+    // inline onclick — keeps user-derived strings (email, content values)
+    // out of interpolated JS/attribute string literals entirely. Bound
+    // once here rather than per-row.
+    document.addEventListener('click', (e) => this.handleDataAction(e));
+  },
+
+  handleDataAction(e) {
+    const el = e.target.closest('[data-action]');
+    if (!el) return;
+    const action = el.dataset.action;
+    const id = el.dataset.id;
+    switch (action) {
+      case 'impersonate-user':
+        this.impersonateUser(Number(id), el.dataset.email || '');
+        this.closeMenus();
+        break;
+      case 'delete-user':
+        this.confirmDeleteUser(Number(id), el.dataset.email || '');
+        this.closeMenus();
+        break;
+      case 'edit-content':
+        this.editContent(Number(id), el.dataset.key || '', el.dataset.value || '');
+        break;
+    }
   },
 };
 
