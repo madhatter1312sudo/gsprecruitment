@@ -53,9 +53,17 @@ async def export_my_data(current_user: dict = Depends(get_current_user)):
     profile = await fetch_one(
         "SELECT * FROM candidate_profiles WHERE user_id = $1", user_id,
     )
-    candidate = await fetch_one(
-        "SELECT * FROM candidates WHERE LOWER(email) = LOWER($1) AND deleted_at IS NULL", email,
-    )
+    # FK first (candidate_profiles.candidate_id, WS-C.16/migrations/023);
+    # e-mail match is the fallback for a row the backfill hasn't linked.
+    candidate = None
+    if profile and profile.get("candidate_id"):
+        candidate = await fetch_one(
+            "SELECT * FROM candidates WHERE id = $1 AND deleted_at IS NULL", profile["candidate_id"],
+        )
+    if not candidate:
+        candidate = await fetch_one(
+            "SELECT * FROM candidates WHERE LOWER(email) = LOWER($1) AND deleted_at IS NULL", email,
+        )
     applications = []
     saved = []
     if candidate:
@@ -319,6 +327,27 @@ async def erase_person(email: str, actor_id: Optional[int] = None, reason: str =
     )
     candidate_ids = [c["id"] for c in candidate_rows]
 
+    # WS-C.16 (migrations/023): also pick up any candidates row this
+    # person's candidate_profiles.candidate_id points to but whose own
+    # email column has since drifted from email_norm (e.g. edited
+    # independently, or not yet touched by that backfill) -- an addition
+    # to the e-mail-based lookup above, never a replacement for it, so
+    # erasure still works purely on e-mail across both records even if
+    # the FK is unset or points somewhere the email match wouldn't reach.
+    extra_ids = []
+    if user_ids:
+        linked_rows = await fetch_all(
+            "SELECT candidate_id FROM candidate_profiles WHERE user_id = ANY($1::int[]) AND candidate_id IS NOT NULL",
+            user_ids,
+        )
+        extra_ids = [r["candidate_id"] for r in linked_rows if r["candidate_id"] not in candidate_ids]
+        if extra_ids:
+            extra_candidates = await fetch_all(
+                "SELECT id, cv_file_path FROM candidates WHERE id = ANY($1::int[])", extra_ids,
+            )
+            candidate_rows = list(candidate_rows) + list(extra_candidates)
+            candidate_ids = candidate_ids + [c["id"] for c in extra_candidates]
+
     deleted_paths, failed_paths = await _delete_cv_files(user_ids, profile_rows + list(candidate_rows))
 
     # candidates and users both carry a unique constraint on email
@@ -334,6 +363,19 @@ async def erase_person(email: str, actor_id: Optional[int] = None, reason: str =
            WHERE id = $1""",
         email_norm, email_hash,
     )
+    # WS-C.16 extra: anonymise the FK-linked candidates rows the e-mail
+    # match above wouldn't have reached (see extra_ids above) -- same
+    # per-row placeholder reasoning as _anonymize_by_id.
+    for cid in extra_ids:
+        anon = f"erased-{email_hash[:16]}-{cid}@erased.invalid"
+        await execute(
+            """UPDATE candidates SET
+                 full_name = 'Erased', email = $2, phone = NULL, linkedin_url = NULL,
+                 github_url = NULL, portfolio_url = NULL, cv_text = NULL, cv_file_path = NULL,
+                 education = NULL, deleted_at = NOW(), consent_withdrawn_at = COALESCE(consent_withdrawn_at, NOW())
+               WHERE id = $1""",
+            cid, anon,
+        )
     for uid in user_ids:
         await execute(
             """UPDATE candidate_profiles SET

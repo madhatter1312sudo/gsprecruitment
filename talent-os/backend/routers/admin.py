@@ -372,51 +372,50 @@ async def update_any_job(
 #
 # Two independent origins feed the admin candidate list:
 #   - `candidates`: the sourcing pipeline (Apollo pulls, manual entry, and
-#     also the lazily-created row `candidate.py:_get_candidate_id()` inserts
-#     the first time a self-registered user touches matches/applications
-#     /saved-jobs/messages -- source='portal_registration' for that case).
+#     also the row created (and linked) once a self-registered user
+#     verifies their e-mail -- routers/auth.py verify_email_hashed(), or
+#     lazily on first matches/applications/saved-jobs/messages touch --
+#     source='portal_registration' for that case).
 #   - `candidate_profiles` (+ `users`): every self-registered candidate gets
 #     one at POST /api/auth/register, regardless of whether a `candidates`
-#     row was ever created for them.
+#     row was ever created for them (e.g. still unverified -- WS-E.2 keeps
+#     unverified accounts from getting one at all).
 #
-# A self-registered candidate who never triggered the lazy-create only has a
-# candidate_profiles row and was previously invisible to GET /candidates,
-# which read `candidates` exclusively. The CTE below unions both origins,
-# using NOT EXISTS (by email) to skip candidate_profiles rows that already
-# have a matching candidates row so each real person appears exactly once.
-# No data is copied between tables -- this is read-only.
-_CANDIDATES_UNION_CTE = """
-WITH combined AS (
-    SELECT
-        c.id AS candidate_id,
-        u.id AS user_id,
-        CASE WHEN c.source = 'portal_registration' THEN 'self-registered' ELSE 'sourced' END AS kind,
-        c.full_name, c.email, c.phone, c.current_title, c.current_company, c.location,
-        COALESCE(c.skills, '{}') AS skills, COALESCE(c.languages, '{}') AS languages,
-        c.years_experience, c.status, c.source, c.cv_file_path,
-        u.is_verified, c.created_at, c.updated_at
-    FROM candidates c
-    LEFT JOIN users u ON LOWER(u.email) = LOWER(c.email) AND u.deleted_at IS NULL
-    WHERE c.deleted_at IS NULL
+# A self-registered candidate with no linked `candidates` row yet (still
+# unverified, or verified but not yet backfilled) is otherwise invisible to
+# GET /candidates, which reads `candidates` as its primary source. WS-C.16
+# (migrations/023) replaced the e-mail-join dedupe this used to need with
+# candidate_profiles.candidate_id -- the FK is now the single source of
+# truth for "does this profile already have a candidates row". Two plain
+# queries (below), combined here in Python rather than a single combined
+# SQL statement: candidate_profiles.candidate_id IS NULL is exactly "not
+# yet linked", so the second query needs no NOT EXISTS/email-join to avoid
+# double-counting either. Results are merged and re-sorted in Python --
+# read-only, no data copied between tables.
 
-    UNION ALL
-
-    SELECT
-        NULL::int AS candidate_id,
-        u.id AS user_id,
-        'self-registered' AS kind,
-        u.full_name, u.email, cp.phone, cp.current_title, cp.current_company, cp.location,
-        COALESCE(cp.skills, '{}') AS skills, COALESCE(cp.languages, '{}') AS languages,
-        cp.years_experience, 'new'::varchar AS status, 'self_registered'::varchar AS source, cp.cv_file_path,
-        u.is_verified, cp.created_at, cp.updated_at
-    FROM candidate_profiles cp
-    JOIN users u ON u.id = cp.user_id AND u.deleted_at IS NULL
-    WHERE u.role = 'candidate'
-      AND NOT EXISTS (
-          SELECT 1 FROM candidates c2 WHERE LOWER(c2.email) = LOWER(u.email) AND c2.deleted_at IS NULL
-      )
-)
+_MATCH_COUNTS_JOIN = """
+    LEFT JOIN (
+        SELECT candidate_id,
+               COUNT(*) AS match_count,
+               COUNT(*) FILTER (WHERE status = 'placed') AS placement_count
+        FROM matches
+        GROUP BY candidate_id
+    ) m ON m.candidate_id = c.id
 """
+
+
+def _unlinked_self_registered_applicable(status: Optional[str], source: Optional[str], kind: Optional[str]) -> bool:
+    """The candidate_profiles-only branch (no linked candidates row) is
+    always kind='self-registered', status='new', source='self_registered'
+    -- if a filter rules any of those out, that branch can contribute zero
+    rows and the query for it can be skipped entirely."""
+    if status and status != "new":
+        return False
+    if source and source != "self_registered":
+        return False
+    if kind and kind != "self-registered":
+        return False
+    return True
 
 
 @router.get("/candidates")
@@ -437,54 +436,98 @@ async def list_all_candidates(
     `id` = candidate_id if present else user_id, for addressing the detail
     endpoint at GET /candidates/{kind}/{id}.
     """
-    conditions = ["1=1"]
-    params = []
+    # ── Branch A: candidates table (sourced, plus already-linked self-registered) ──
+    a_conditions = ["c.deleted_at IS NULL"]
+    a_params = []
     idx = 1
+    kind_sql = "CASE WHEN c.source = 'portal_registration' THEN 'self-registered' ELSE 'sourced' END"
 
     if status:
-        conditions.append(f"status = ${idx}")
-        params.append(status)
+        a_conditions.append(f"c.status = ${idx}")
+        a_params.append(status)
         idx += 1
     if source:
-        conditions.append(f"source = ${idx}")
-        params.append(source)
+        a_conditions.append(f"c.source = ${idx}")
+        a_params.append(source)
         idx += 1
     if kind:
-        conditions.append(f"kind = ${idx}")
-        params.append(kind)
+        a_conditions.append(f"({kind_sql}) = ${idx}")
+        a_params.append(kind)
         idx += 1
     if search:
-        conditions.append(f"(full_name ILIKE ${idx} OR email ILIKE ${idx} OR current_title ILIKE ${idx})")
-        params.append(f"%{search}%")
+        a_conditions.append(f"(c.full_name ILIKE ${idx} OR c.email ILIKE ${idx} OR c.current_title ILIKE ${idx})")
+        a_params.append(f"%{search}%")
         idx += 1
+    a_where = " AND ".join(a_conditions)
 
-    where = " AND ".join(conditions)
+    fetch_cap = offset + limit  # enough rows from each branch to merge+slice correctly
 
-    total = await fetch_val(
-        f"{_CANDIDATES_UNION_CTE} SELECT COUNT(*) FROM combined WHERE {where}", *params,
-    ) or 0
-    params_ext = params + [limit, offset]
-    rows = await fetch_all(
-        f"""{_CANDIDATES_UNION_CTE}
-            SELECT combined.*,
-                   COALESCE(combined.candidate_id, combined.user_id) AS id,
+    a_total = await fetch_val(f"SELECT COUNT(*) FROM candidates c WHERE {a_where}", *a_params) or 0
+    a_rows = await fetch_all(
+        f"""SELECT c.id AS candidate_id,
+                   u.id AS user_id,
+                   ({kind_sql}) AS kind,
+                   c.full_name, c.email, c.phone, c.current_title, c.current_company, c.location,
+                   COALESCE(c.skills, '{{}}') AS skills, COALESCE(c.languages, '{{}}') AS languages,
+                   c.years_experience, c.status, c.source, c.cv_file_path,
+                   u.is_verified, c.created_at, c.updated_at,
                    COALESCE(m.match_count, 0) AS match_count,
                    COALESCE(m.placement_count, 0) AS placement_count
-            FROM combined
-            LEFT JOIN (
-                SELECT candidate_id,
-                       COUNT(*) AS match_count,
-                       COUNT(*) FILTER (WHERE status = 'placed') AS placement_count
-                FROM matches
-                GROUP BY candidate_id
-            ) m ON m.candidate_id = combined.candidate_id
-            WHERE {where}
-            ORDER BY combined.created_at DESC
-            LIMIT ${idx} OFFSET ${idx + 1}""",
-        *params_ext,
+            FROM candidates c
+            LEFT JOIN candidate_profiles cp ON cp.candidate_id = c.id
+            LEFT JOIN users u ON u.id = COALESCE(
+                cp.user_id,
+                (SELECT id FROM users WHERE LOWER(email) = LOWER(c.email) AND deleted_at IS NULL LIMIT 1)
+            )
+            {_MATCH_COUNTS_JOIN}
+            WHERE {a_where}
+            ORDER BY c.created_at DESC
+            LIMIT ${idx}""",
+        *a_params, fetch_cap,
     )
 
-    return {"items": rows, "total": total, "limit": limit, "offset": offset}
+    # ── Branch B: candidate_profiles rows with no linked candidates row yet ──
+    b_rows = []
+    b_total = 0
+    if _unlinked_self_registered_applicable(status, source, kind):
+        b_conditions = ["u.role = 'candidate'", "u.deleted_at IS NULL", "cp.candidate_id IS NULL"]
+        b_params = []
+        bidx = 1
+        if search:
+            b_conditions.append(f"(u.full_name ILIKE ${bidx} OR u.email ILIKE ${bidx} OR cp.current_title ILIKE ${bidx})")
+            b_params.append(f"%{search}%")
+            bidx += 1
+        b_where = " AND ".join(b_conditions)
+
+        b_total = await fetch_val(
+            f"SELECT COUNT(*) FROM candidate_profiles cp JOIN users u ON u.id = cp.user_id WHERE {b_where}",
+            *b_params,
+        ) or 0
+        b_rows = await fetch_all(
+            f"""SELECT NULL::int AS candidate_id,
+                       u.id AS user_id,
+                       'self-registered' AS kind,
+                       u.full_name, u.email, cp.phone, cp.current_title, cp.current_company, cp.location,
+                       COALESCE(cp.skills, '{{}}') AS skills, COALESCE(cp.languages, '{{}}') AS languages,
+                       cp.years_experience, 'new'::varchar AS status, 'self_registered'::varchar AS source,
+                       cp.cv_file_path, u.is_verified, cp.created_at, cp.updated_at,
+                       0 AS match_count, 0 AS placement_count
+                FROM candidate_profiles cp
+                JOIN users u ON u.id = cp.user_id
+                WHERE {b_where}
+                ORDER BY cp.created_at DESC
+                LIMIT ${bidx}""",
+            *b_params, fetch_cap,
+        )
+
+    combined = sorted(list(a_rows) + list(b_rows), key=lambda r: r["created_at"], reverse=True)
+    page = combined[offset:offset + limit]
+    items = [
+        {**dict(row), "id": row["candidate_id"] if row["candidate_id"] is not None else row["user_id"]}
+        for row in page
+    ]
+
+    return {"items": items, "total": a_total + b_total, "limit": limit, "offset": offset}
 
 
 @router.get("/candidates/{kind}/{item_id}")
@@ -522,10 +565,22 @@ async def get_candidate_detail(
         candidate["skills"] = candidate["skills"] or []
         candidate["languages"] = candidate["languages"] or []
         candidate["tags"] = candidate["tags"] or []
-        user = await fetch_one(
-            "SELECT id, is_verified FROM users WHERE LOWER(email) = LOWER($1) AND deleted_at IS NULL",
-            candidate["email"],
+        # FK first (candidate_profiles.candidate_id -> this candidate);
+        # e-mail match is only the fallback for a row this migration's
+        # backfill hasn't linked yet (see migrations/023).
+        linked_profile = await fetch_one(
+            "SELECT user_id FROM candidate_profiles WHERE candidate_id = $1", candidate["id"],
         )
+        if linked_profile:
+            user = await fetch_one(
+                "SELECT id, is_verified FROM users WHERE id = $1 AND deleted_at IS NULL",
+                linked_profile["user_id"],
+            )
+        else:
+            user = await fetch_one(
+                "SELECT id, is_verified FROM users WHERE LOWER(email) = LOWER($1) AND deleted_at IS NULL",
+                candidate["email"],
+            )
         candidate["kind"] = "self-registered" if candidate["source"] == "portal_registration" else "sourced"
         candidate["user_id"] = user["id"] if user else None
         candidate["is_verified"] = user["is_verified"] if user else None
@@ -549,12 +604,21 @@ async def get_candidate_detail(
         user["kind"] = "self-registered"
 
         # If the sourcing pipeline also created a candidates row for this
-        # person (lazy _get_candidate_id(), or a separate sourced entry that
-        # shares this email), surface it too -- read-only, no merge.
-        candidate = await fetch_one(
-            "SELECT id, status, source FROM candidates WHERE LOWER(email) = LOWER($1) AND deleted_at IS NULL",
-            user["email"],
-        )
+        # person (verify-time link, lazy _get_candidate_id(), or a separate
+        # sourced entry that shares this email), surface it too --
+        # read-only, no merge. FK first, e-mail fallback only for a row
+        # this migration's backfill hasn't linked yet (migrations/023).
+        candidate = None
+        if profile and profile.get("candidate_id"):
+            candidate = await fetch_one(
+                "SELECT id, status, source FROM candidates WHERE id = $1 AND deleted_at IS NULL",
+                profile["candidate_id"],
+            )
+        if not candidate:
+            candidate = await fetch_one(
+                "SELECT id, status, source FROM candidates WHERE LOWER(email) = LOWER($1) AND deleted_at IS NULL",
+                user["email"],
+            )
         if candidate:
             user["candidate_id"] = candidate["id"]
             user["candidate_status"] = candidate["status"]

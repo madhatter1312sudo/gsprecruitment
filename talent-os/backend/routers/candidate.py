@@ -18,6 +18,7 @@ import uuid
 import logging
 
 from services import storage
+from services.candidate_link import get_or_create_candidate_id
 
 logger = logging.getLogger("talent_os.candidate_portal")
 
@@ -34,62 +35,13 @@ except OSError as exc:
 
 MAX_CV_SIZE_BYTES = 5 * 1024 * 1024  # 5 MB
 
-# WS-E.7, SOP §1.4: self-registered candidates don't need a sourcing
-# source_url (they made first contact themselves), but every candidates
-# row records where it came from for consistency — this is that URL.
-PORTAL_REGISTRATION_SOURCE_URL = "https://gsprecruitment.nl/candidate/"
-
 
 async def _get_candidate_id(user_id: int) -> Optional[int]:
-    """Resolve the candidate record id linked to this user, creating the
-    candidates row if it doesn't exist yet (self-registered users only get a
-    candidate_profiles row at signup; the sourcing pipeline needs a candidates
-    row for matches/applications/saved-jobs to work)."""
-    row = await fetch_one(
-        "SELECT id FROM candidates WHERE email = (SELECT email FROM users WHERE id = $1)",
-        user_id,
-    )
-    if row:
-        return row["id"]
-
-    user = await fetch_one("SELECT email, full_name FROM users WHERE id = $1", user_id)
-    if not user:
-        return None
-
-    profile = await fetch_one(
-        "SELECT phone, current_title, current_company, location, skills, years_experience "
-        "FROM candidate_profiles WHERE user_id = $1",
-        user_id,
-    )
-    created = await fetch_one(
-        """INSERT INTO candidates (full_name, email, phone, current_title, current_company,
-                                   location, skills, years_experience, source,
-                                   source_url, lawful_basis, date_found)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'portal_registration',
-                   $9, 'portal_registratie', CURRENT_DATE)
-           ON CONFLICT DO NOTHING
-           RETURNING id""",
-        user["full_name"] or user["email"],
-        user["email"],
-        profile["phone"] if profile else None,
-        profile["current_title"] if profile else None,
-        profile["current_company"] if profile else None,
-        profile["location"] if profile else None,
-        profile["skills"] if profile else None,
-        profile["years_experience"] if profile else None,
-        # SOP §1.4: own portal registration is its own lawful basis; no
-        # sourcing source_url is required for contact, but we still record
-        # where the record came from (the portal itself) for consistency
-        # with every other candidates row.
-        PORTAL_REGISTRATION_SOURCE_URL,
-    )
-    if created:
-        return created["id"]
-    # Race: another request created it between our SELECT and INSERT
-    row = await fetch_one(
-        "SELECT id FROM candidates WHERE email = $1", user["email"]
-    )
-    return row["id"] if row else None
+    """Resolve the candidate record id linked to this user (WS-C.16:
+    services/candidate_link.py does the actual FK-first / e-mail-fallback
+    / create-and-link work — this is a thin alias kept so every existing
+    call site in this router doesn't need touching)."""
+    return await get_or_create_candidate_id(user_id)
 
 
 # ── Profile ─────────────────────────────────────────────────────────────

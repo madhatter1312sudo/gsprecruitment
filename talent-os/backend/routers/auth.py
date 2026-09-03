@@ -15,6 +15,7 @@ from models.schemas import (
     ResendVerificationRequest, SetPasswordRequest, ChangePasswordRequest,
 )
 from services.email_service import email_service
+from services.candidate_link import get_or_create_candidate_id
 from typing import Optional
 from urllib.parse import urlencode, quote
 import secrets
@@ -361,7 +362,7 @@ async def verify_email(data: VerifyEmailRequest):
 async def verify_email_hashed(request: Request, data: VerifyEmailRequest):
     """Verify a user's email address using their WS-E.2 (hashed) verification token."""
     user = await fetch_one(
-        """SELECT id FROM users
+        """SELECT id, role FROM users
            WHERE verification_token_hash = $1
              AND verification_sent_at > NOW() - INTERVAL '24 hours'
              AND deleted_at IS NULL""",
@@ -377,6 +378,15 @@ async def verify_email_hashed(request: Request, data: VerifyEmailRequest):
            WHERE id = $1""",
         user["id"],
     )
+    if user["role"] == "candidate":
+        # WS-C.16: the candidates row (or its link, if one already exists
+        # under this e-mail) is created here, once, right after
+        # verification -- not before (WS-E.2: an unverified account must
+        # never get a candidates row) and not left purely to the lazy
+        # per-request path in routers/candidate.py, so a freshly-verified
+        # candidate's matches/applications/saved-jobs work on their very
+        # first request too.
+        await get_or_create_candidate_id(user["id"])
     return {"message": "Email verified successfully"}
 
 
