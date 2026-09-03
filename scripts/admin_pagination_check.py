@@ -25,6 +25,7 @@ import http.server
 import json
 import re
 import socket
+import os
 import sys
 import threading
 from pathlib import Path
@@ -32,7 +33,11 @@ from urllib.parse import urlparse, parse_qs
 
 ROOT = Path(__file__).resolve().parent.parent
 WEBSITE = ROOT / "website"
-CHROMIUM_PATH = "/opt/pw-browsers/chromium"
+# Chromium: env CHROMIUM_PATH wins; the sandbox path is used when present;
+# otherwise None lets Playwright use its own installed browser (CI).
+CHROMIUM_PATH = os.environ.get("CHROMIUM_PATH") or (
+    "/opt/pw-browsers/chromium" if os.path.exists("/opt/pw-browsers/chromium") else None
+)
 PAGE_SIZE = 20
 TOTAL_ROWS = 60
 
@@ -280,7 +285,7 @@ def main():
     failures = []
 
     with sync_playwright() as pw:
-        browser = pw.chromium.launch(executable_path=CHROMIUM_PATH, headless=True)
+        browser = pw.chromium.launch(executable_path=CHROMIUM_PATH or None, headless=True)
         context = browser.new_context(viewport={"width": 1400, "height": 1000})
 
         user = {"id": 1, "role": "admin", "email": "pagination-check@example.invalid",
