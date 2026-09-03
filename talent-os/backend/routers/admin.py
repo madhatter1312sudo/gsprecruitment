@@ -558,8 +558,8 @@ async def get_platform_analytics(current_user: dict = Depends(require_role("admi
                FROM users WHERE deleted_at IS NULL AND created_at >= NOW() - INTERVAL '12 months'
                GROUP BY month ORDER BY month""",
         ),
-        fetch_val("SELECT COUNT(*) FROM job_orders WHERE deleted_at IS NULL"),
-        fetch_val("SELECT COUNT(*) FROM job_orders WHERE filled_at IS NOT NULL AND deleted_at IS NULL"),
+        fetch_val("SELECT COUNT(*) FROM job_orders WHERE deleted_at IS NULL AND is_demo = false"),
+        fetch_val("SELECT COUNT(*) FROM job_orders WHERE filled_at IS NOT NULL AND deleted_at IS NULL AND is_demo = false"),
         fetch_val("SELECT COUNT(*) FROM clients WHERE deleted_at IS NULL"),
         fetch_val(
             """SELECT COUNT(*) FROM (
