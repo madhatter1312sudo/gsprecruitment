@@ -99,14 +99,18 @@ def test_lead_submit_blank_interest_type_becomes_overig():
 
 
 # ── Code-review follow-up: legacy interest_type values website/contact.html
-#    and website/script.js actually sent (candidate|client|partner) before
-#    this PR's fix must remap to their nearest canonical value, not fall
-#    through to the generic "unrecognised -> overig" bucket ──────────────
+#    and website/script.js actually sent (candidate|client|partner, plus
+#    the WS-A.3 staffing options uitzenden|detacheren|zzp_bemiddeling)
+#    before this PR's fix must remap to their nearest canonical value, not
+#    fall through to the generic "unrecognised -> overig" bucket ─────────
 
 @pytest.mark.parametrize("legacy_value,expected", [
     ("candidate", "kandidaat"),
     ("client", "werving_selectie"),
     ("partner", "overig"),
+    ("uitzenden", "detachering_internationaal"),
+    ("detacheren", "detachering_internationaal"),
+    ("zzp_bemiddeling", "detachering_internationaal"),
 ])
 def test_lead_submit_remaps_legacy_interest_type(legacy_value, expected):
     lead = LeadSubmit(name="A", email="a@example.com", message="hi", interest_type=legacy_value)
@@ -171,17 +175,23 @@ def test_026_leads_interest_type_migration_normalises_before_check():
 
 def test_026_leads_interest_type_migration_remaps_legacy_values_before_catchall():
     """Code-review follow-up: website/contact.html sent candidate|client|
-    partner before this PR's fix -- the migration must remap those to
-    their nearest canonical value (not the generic 'overig' catch-all)
-    for existing rows, and that remap must run before the catch-all UPDATE
-    so it isn't clobbered."""
+    partner, plus the WS-A.3 staffing options uitzenden|detacheren|
+    zzp_bemiddeling, before this PR's fix -- the migration must remap all
+    six to their nearest canonical value (not the generic 'overig'
+    catch-all) for existing rows, and every remap must run before the
+    catch-all UPDATE so it isn't clobbered."""
     mod = _load_migration("026_leads_interest_type.py")
     sql = mod.MIGRATION_SQL
     candidate_idx = sql.index("UPDATE contact_submissions SET interest_type = 'kandidaat' WHERE interest_type = 'candidate'")
     client_idx = sql.index("UPDATE contact_submissions SET interest_type = 'werving_selectie' WHERE interest_type = 'client'")
+    staffing_idx = sql.index(
+        "UPDATE contact_submissions SET interest_type = 'detachering_internationaal'\n"
+        "WHERE interest_type IN ('uitzenden', 'detacheren', 'zzp_bemiddeling')"
+    )
     catchall_idx = sql.index("WHERE interest_type = 'partner'")
     assert candidate_idx < catchall_idx
     assert client_idx < catchall_idx
+    assert staffing_idx < catchall_idx
 
 
 # ── services/telegram.py: no-op without env vars, never raises ──────────

@@ -7,16 +7,19 @@ always been a free-text VARCHAR(100) -- routers/public.py's submit_lead()
 writes whatever LeadSubmit.interest_type the caller sends, unvalidated.
 This migration:
 
-  1. Normalises every existing row. Three legacy values that
+  1. Normalises every existing row. Six legacy values that
      website/contact.html's select actually sent before this migration
-     (`candidate`, `client`, `partner` -- see routers/public.py's
+     (`candidate`, `client`, `partner`, plus the WS-A.3 staffing options
+     `uitzenden`, `detacheren`, `zzp_bemiddeling` -- see routers/public.py's
      submit_lead()/models/schemas.py's old LeadSubmit, no validation) are
      remapped to their nearest canonical value first: candidate ->
-     kandidaat, client -> werving_selectie, partner -> overig. Everything
-     else (NULL, or any other stray value already in prod -- e.g. the
-     contact form's now-retired `uitzenden`/`detacheren`/`zzp_bemiddeling`
-     options) becomes 'overig'. All of this runs *before* the CHECK is
-     added, so the ALTER never aborts on legacy/free-text data.
+     kandidaat, client -> werving_selectie, partner -> overig, and
+     uitzenden/detacheren/zzp_bemiddeling -> detachering_internationaal
+     (staffing/secondment/freelance placement are all the same bucket the
+     canonical select's second option now covers). Everything else (NULL,
+     or any other stray value already in prod) becomes 'overig'. All of
+     this runs *before* the CHECK is added, so the ALTER never aborts on
+     legacy/free-text data.
   2. Sets a NOT NULL DEFAULT 'overig' and a CHECK on the four-value set
      (werving_selectie | detachering_internationaal | kandidaat | overig)
      -- models/schemas.py's LeadSubmit validator normalises the same way
@@ -49,6 +52,8 @@ VERSION = "026_leads_interest_type"
 MIGRATION_SQL = """
 UPDATE contact_submissions SET interest_type = 'kandidaat' WHERE interest_type = 'candidate';
 UPDATE contact_submissions SET interest_type = 'werving_selectie' WHERE interest_type = 'client';
+UPDATE contact_submissions SET interest_type = 'detachering_internationaal'
+WHERE interest_type IN ('uitzenden', 'detacheren', 'zzp_bemiddeling');
 UPDATE contact_submissions SET interest_type = 'overig'
 WHERE interest_type = 'partner'
    OR interest_type IS NULL

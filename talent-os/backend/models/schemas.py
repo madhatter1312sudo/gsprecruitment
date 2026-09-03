@@ -609,18 +609,25 @@ class SiteContentResponse(BaseModel):
 
 LEAD_INTEREST_TYPES = ("werving_selectie", "detachering_internationaal", "kandidaat", "overig")
 
-# WS-C.10 code-review follow-up: website/contact.html's <select> sent
-# these three values (candidate/client/partner) before this PR's fix --
-# and quiz submissions (website/script.js) hardcoded 'candidate' -- so any
-# in-flight/cached page, or a request replayed from history, can still
-# arrive with one of these for a while after the site itself is fixed.
-# Same remap as migrations/026_leads_interest_type.py's UPDATEs, kept in
-# sync deliberately: candidate -> kandidaat, client -> werving_selectie,
-# partner -> overig.
+# WS-C.10 code-review follow-ups: website/contact.html's <select> sent
+# these six values before this PR's fix -- candidate/client/partner, plus
+# uitzenden/detacheren/zzp_bemiddeling (WS-A.3, the staffing/secondment/
+# freelance-placement options) -- and quiz submissions (website/script.js)
+# hardcoded 'candidate'. Any in-flight/cached page, or a request replayed
+# from history, can still arrive with one of these for a while after the
+# site itself is fixed. Same remap as migrations/026_leads_interest_type.py's
+# UPDATEs, kept in sync deliberately: candidate -> kandidaat, client ->
+# werving_selectie, partner -> overig, and uitzenden/detacheren/
+# zzp_bemiddeling -> detachering_internationaal (all three are staffing/
+# secondment/freelance variants, the same bucket the canonical select's
+# second option now covers).
 _LEGACY_INTEREST_TYPE_MAP = {
     "candidate": "kandidaat",
     "client": "werving_selectie",
     "partner": "overig",
+    "uitzenden": "detachering_internationaal",
+    "detacheren": "detachering_internationaal",
+    "zzp_bemiddeling": "detachering_internationaal",
 }
 
 
