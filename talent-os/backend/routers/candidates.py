@@ -4,7 +4,7 @@ Talent OS — Candidate CRUD router (asyncpg, auth-protected).
 from fastapi import APIRouter, Depends, HTTPException, Query
 from core.database import fetch_all, fetch_one, execute
 from core.security import verify_api_key
-from models.schemas import CandidateCreate, CandidateResponse, CandidateSourceCreate
+from models.schemas import CandidateCreate, CandidateResponse, CandidateSourceCreate, CandidateAdminUpdate
 from typing import Optional, List
 
 router = APIRouter(prefix="/api/candidates", tags=["candidates"], dependencies=[Depends(verify_api_key)])
@@ -69,7 +69,7 @@ async def create_candidate(candidate: CandidateSourceCreate):
 
 
 @router.patch("/{candidate_id}", response_model=CandidateResponse)
-async def update_candidate(candidate_id: int, updates: dict):
+async def update_candidate(candidate_id: int, updates: CandidateAdminUpdate):
     """Partial update of a candidate record."""
     # Build dynamic SET clause safely
     allowed_fields = {
@@ -79,7 +79,7 @@ async def update_candidate(candidate_id: int, updates: dict):
     set_parts = []
     values = []
     idx = 1
-    for key, val in updates.items():
+    for key, val in updates.model_dump(exclude_unset=True).items():
         if key not in allowed_fields:
             continue
         set_parts.append(f"{key} = ${idx}")

@@ -182,6 +182,19 @@ class CandidateSourceCreate(CandidateCreate):
         return s
 
 
+class CandidateAdminUpdate(BaseModel):
+    """PATCH /api/candidates/{id} (X-API-Key, internal/agent use) -- the
+    same allow-listed fields the router used to accept as a raw dict."""
+    status: Optional[str] = None
+    screening_score: Optional[int] = None
+    screening_notes: Optional[str] = None
+    quality_score: Optional[float] = None
+    screened_by_agent: Optional[str] = None
+    strength_score: Optional[float] = Field(None, ge=1.0, le=10.0)
+    switch_readiness: Optional[str] = Field(None, pattern=r"^(LOW|MEDIUM|HIGH|ACTIVE)$")
+    tags: Optional[List[str]] = None
+
+
 class CandidatePortalProfile(BaseModel):
     """Full candidate profile combining users + candidate_profiles."""
     id: int
@@ -248,6 +261,10 @@ class JobOrderCreate(BaseModel):
     requirements: Optional[str] = None
     nice_to_have: Optional[str] = None
     urgency: str = "normal"
+    city: Optional[str] = None
+    company_display: Optional[str] = None
+    employment_type: Optional[Literal["vast", "detachering", "interim"]] = None
+    sponsorship_possible: bool = False
 
 
 class JobOrderResponse(JobOrderCreate):
@@ -272,6 +289,10 @@ class JobOrderUpdate(BaseModel):
     nice_to_have: Optional[str] = None
     status: Optional[str] = None
     urgency: Optional[str] = None
+    city: Optional[str] = None
+    company_display: Optional[str] = None
+    employment_type: Optional[Literal["vast", "detachering", "interim"]] = None
+    sponsorship_possible: Optional[bool] = None
 
 
 # ── Match ───────────────────────────────────────────────────────────────
@@ -287,11 +308,14 @@ class MatchCreate(BaseModel):
 
 
 class MatchResponse(BaseModel):
+    # match_breakdown intentionally omitted: no code path ever writes it
+    # (grepped routers/matches.py, services/matcher.py) so it would only
+    # ever serialize as null. The `matches.match_breakdown` DB column is
+    # left in place (no migration needed to drop an always-null column).
     id: int
     job_id: int
     candidate_id: int
     match_score: Optional[float] = None
-    match_breakdown: Optional[dict] = None
     status: str = "pending"
     created_at: datetime
 
@@ -473,6 +497,13 @@ class AdminJobUpdate(BaseModel):
     requirements: Optional[str] = None
     fee_percentage: Optional[float] = None
     urgency: Optional[str] = None
+    # WS-C.15 / WS-A.5 (migrations/016_job_orders_columns.py). employment_type
+    # is validated here (suspenders) on top of the DB CHECK constraint
+    # (belt) -- same pattern as quiz_questions.domain in migrations/012.
+    city: Optional[str] = None
+    company_display: Optional[str] = None
+    employment_type: Optional[Literal["vast", "detachering", "interim"]] = None
+    sponsorship_possible: Optional[bool] = None
 
 
 class AdminAnalytics(BaseModel):
@@ -540,13 +571,23 @@ class PaginatedResponse(BaseModel):
 
 
 class MessageResponse(BaseModel):
+    # Fields match the actual `outreach_messages` table (migrations/000_baseline.py)
+    # -- there is no separate `messages` table, and no sender_id/recipient_id
+    # columns exist. is_read is derived (opened_at IS NOT NULL), not stored;
+    # routers must set it explicitly per row, it is never a raw DB column.
     id: int
-    sender_id: Optional[int] = None
-    recipient_id: Optional[int] = None
+    candidate_id: Optional[int] = None
+    campaign_id: Optional[int] = None
+    recipient_email: Optional[str] = None
     subject: Optional[str] = None
     body: Optional[str] = None
+    channel: Optional[str] = None
+    status: Optional[str] = None
     is_read: bool = False
+    sent_at: Optional[datetime] = None
     created_at: datetime
+
+    model_config = {"from_attributes": True}
 
 
 class MessageListResponse(BaseModel):

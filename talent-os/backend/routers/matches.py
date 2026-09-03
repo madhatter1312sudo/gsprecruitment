@@ -76,7 +76,7 @@ async def run_matching(
         return {"message": "Matching started", "job_ids": [job_id]}
 
     jobs = await fetch_all(
-        "SELECT id FROM job_orders WHERE status = 'open' AND deleted_at IS NULL",
+        "SELECT id FROM job_orders WHERE status = 'open' AND deleted_at IS NULL AND is_demo = false",
     )
     for j in jobs:
         background_tasks.add_task(_run_matching_for_job, j["id"])
@@ -166,7 +166,7 @@ async def candidates_for_job(job_id: int, limit: int = Query(30, ge=1, le=100)):
             "full_name": r["full_name"],
             "current_title": r["current_title"],
             "current_company": r["current_company"],
-            "skills": r["skills"],
+            "skills": r["skills"] or [],
             "location": r["location"],
             "years_experience": float(r["years_experience"]) if r["years_experience"] is not None else None,
             "cv_excerpt": (r["cv_text"] or "")[:500],

@@ -5,13 +5,19 @@ on:
     - cron: "0 8 * * *" # 08:00 UTC daily -- well after the 03:15 Europe/Amsterdam backup run
   workflow_dispatch:
 
-# NOTE: the VPS host/user (188.245.254.248 / gsp) is duplicated here and
-# in deploy.yml/deploy.sh. Tracked as follow-up WS-E.6 to hoist these into
-# repo/environment variables instead of copy-pasting the literal.
+# WS-E.6: VPS_HOST/VPS_USER/VPS_PATH come from repo/org Actions variables
+# (Settings > Secrets and variables > Actions > Variables), with the current
+# production values as fallback literals until the owner creates them --
+# see deploy.yml for the same pattern. Keep the three fallback values here
+# in sync with deploy.yml and scripts/deploy.sh.
 
 jobs:
   check:
     runs-on: ubuntu-latest
+    env:
+      VPS_HOST: ${{ vars.VPS_HOST || '188.245.254.248' }}
+      VPS_USER: ${{ vars.VPS_USER || 'gsp' }}
+      VPS_PATH: ${{ vars.VPS_PATH || '/home/gsp/projects/gsp-recruitment' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -20,14 +26,14 @@ jobs:
           mkdir -p ~/.ssh
           echo "${{ secrets.VPS_SSH_PRIVATE_KEY }}" > ~/.ssh/id_ed25519
           chmod 600 ~/.ssh/id_ed25519
-          ssh-keyscan -H 188.245.254.248 >> ~/.ssh/known_hosts
+          ssh-keyscan -H "$VPS_HOST" >> ~/.ssh/known_hosts
 
       - name: Check backup.last on the VPS
         id: check
         run: |
           set +e
-          output=$(ssh -o ConnectTimeout=20 gsp@188.245.254.248 bash -s <<'SSH_GSP_BACKUP_CHECK_7f2a91'
-          bash /home/gsp/projects/gsp-recruitment/talent-os/scripts/backup-check.sh
+          output=$(ssh -o ConnectTimeout=20 "${VPS_USER}@${VPS_HOST}" bash -s <<SSH_GSP_BACKUP_CHECK_7f2a91
+          bash ${VPS_PATH}/talent-os/scripts/backup-check.sh
           SSH_GSP_BACKUP_CHECK_7f2a91
           )
           code=$?

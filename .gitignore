@@ -2,6 +2,8 @@
 .env
 **/.env
 *.env.local
+postgres.env
+**/postgres.env
 
 # Python
 __pycache__/
@@ -35,8 +37,8 @@ uploads/
 *.sql
 backups/
 
-# Docs with secrets
+# Docs with secrets (not tracked; the .md living specs below ARE tracked --
+# see CLAUDE.md's Map -- so they were removed from this list, WS-E.6, to
+# keep .gitignore aligned with `git ls-files`: SETUP_SUMMARY.md is the only
+# one of the original four that was never actually committed)
 SETUP_SUMMARY.md
-COMPETITOR-ANALYSIS.md
-ENTERPRISE-ARCHITECTURE-SPEC.md
-SITE-DESIGN-SPEC.md

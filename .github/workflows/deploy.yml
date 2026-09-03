@@ -41,6 +41,17 @@ jobs:
   deploy:
     needs: test
     runs-on: ubuntu-latest
+    # VPS_HOST/VPS_USER/VPS_PATH: repo/org "Actions variables" (Settings >
+    # Secrets and variables > Actions > Variables), NOT secrets -- the host
+    # and path aren't sensitive. The `|| '...'` literals are the current
+    # production values and only take effect until the owner creates the
+    # vars (see WS-E.6); once created, the vars win. Keep these three in
+    # sync with the same fallbacks in backup-freshness.yml and
+    # scripts/deploy.sh.
+    env:
+      VPS_HOST: ${{ vars.VPS_HOST || '188.245.254.248' }}
+      VPS_USER: ${{ vars.VPS_USER || 'gsp' }}
+      VPS_PATH: ${{ vars.VPS_PATH || '/home/gsp/projects/gsp-recruitment' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -49,18 +60,18 @@ jobs:
           mkdir -p ~/.ssh
           echo "${{ secrets.VPS_SSH_PRIVATE_KEY }}" > ~/.ssh/id_ed25519
           chmod 600 ~/.ssh/id_ed25519
-          ssh-keyscan -H 188.245.254.248 >> ~/.ssh/known_hosts
+          ssh-keyscan -H "$VPS_HOST" >> ~/.ssh/known_hosts
 
       - name: Sync backend code to VPS
         run: |
           rsync -avz --exclude='.env' --exclude='__pycache__' --exclude='*.pyc' \
             talent-os/ \
-            gsp@188.245.254.248:/home/gsp/projects/gsp-recruitment/talent-os/
+            "${VPS_USER}@${VPS_HOST}:${VPS_PATH}/talent-os/"
 
       - name: Sync docker-compose.yml
         run: |
           rsync -avz docker-compose.yml \
-            gsp@188.245.254.248:/home/gsp/projects/gsp-recruitment/docker-compose.yml
+            "${VPS_USER}@${VPS_HOST}:${VPS_PATH}/docker-compose.yml"
 
       - name: Sync website (frontend) to Cloudflare via git push
         run: |
@@ -69,16 +80,36 @@ jobs:
 
       - name: Tag current image for rollback before replacing it
         run: |
-          ssh gsp@188.245.254.248 "
+          ssh "${VPS_USER}@${VPS_HOST}" "
             if docker image inspect gsp-recruitment-backend:latest >/dev/null 2>&1; then
               docker tag gsp-recruitment-backend:latest gsp-recruitment-backend:previous
             fi
           "
 
+      # WS-E.6: postgres credentials now live in talent-os/postgres.env
+      # (env_file, gitignored) instead of only talent-os/.env. This step is
+      # idempotent and a no-op after the first run -- it never overwrites an
+      # existing postgres.env, and never prints a secret value, only whether
+      # it created the file. Without it, a VPS that predates this change
+      # would fail `docker compose up` the moment postgres.env becomes a
+      # required env_file in docker-compose.yml.
+      - name: Ensure postgres.env exists (idempotent, generated from .env on first run only)
+        run: |
+          ssh "${VPS_USER}@${VPS_HOST}" "
+            cd ${VPS_PATH}/talent-os && \
+            if [ ! -f postgres.env ]; then
+              echo 'postgres.env missing -- generating it from .env (first run only)' && \
+              grep -E '^(POSTGRES_DB|POSTGRES_USER|POSTGRES_PASSWORD)=' .env > postgres.env && \
+              chmod 600 postgres.env
+            else
+              echo 'postgres.env already present -- leaving it as-is'
+            fi
+          "
+
       - name: SSH and restart Docker containers
         run: |
-          ssh gsp@188.245.254.248 "
-            cd /home/gsp/projects/gsp-recruitment && \
+          ssh "${VPS_USER}@${VPS_HOST}" "
+            cd ${VPS_PATH} && \
             docker compose up -d --build backend && \
             sleep 5
           "
@@ -99,15 +130,15 @@ jobs:
         # (migrations/_runner.py), so running the full set on every deploy
         # is safe.
         run: |
-          ssh gsp@188.245.254.248 "
-            cd /home/gsp/projects/gsp-recruitment && \
+          ssh "${VPS_USER}@${VPS_HOST}" "
+            cd ${VPS_PATH} && \
             docker compose run --rm -T --no-deps backend sh -c 'for f in migrations/0*.py; do echo Running \$f; python \$f || exit 1; done'
           "
 
       - name: Health check
         run: |
-          ssh gsp@188.245.254.248 "
-            cd /home/gsp/projects/gsp-recruitment && \
+          ssh "${VPS_USER}@${VPS_HOST}" "
+            cd ${VPS_PATH} && \
             echo '=== Health Check ===' && \
             curl -sf http://127.0.0.1:8000/health | python3 -m json.tool
           "
@@ -116,7 +147,7 @@ jobs:
         if: success()
         continue-on-error: true  # nice-to-have; must never fail an otherwise-successful deploy
         run: |
-          ssh gsp@188.245.254.248 "
+          ssh "${VPS_USER}@${VPS_HOST}" "
             docker tag gsp-recruitment-backend:latest gsp-recruitment-backend:${{ github.sha }} && \
             docker images gsp-recruitment-backend --format '{{.Tag}}' \
               | grep -vE '^(latest|previous)\$' \
@@ -127,10 +158,10 @@ jobs:
       - name: Roll back to previous image on health check failure
         if: failure()
         run: |
-          ssh gsp@188.245.254.248 "
+          ssh "${VPS_USER}@${VPS_HOST}" "
             if docker image inspect gsp-recruitment-backend:previous >/dev/null 2>&1; then
               docker tag gsp-recruitment-backend:previous gsp-recruitment-backend:latest && \
-              cd /home/gsp/projects/gsp-recruitment && \
+              cd ${VPS_PATH} && \
               docker compose up -d backend && \
               echo 'Rolled back to previous image.'
             else

@@ -3,7 +3,8 @@ Talent OS — FastAPI async entry point.
 ALL AI/LLM calls go through OpenRouter API. NO models hosted on VPS.
 
 PostgreSQL via asyncpg connection pooling.
-Celery workers for background tasks (Apollo sync, semantic matching).
+Background tasks (Apollo sync, semantic matching) run as plain asyncio jobs
+in-process (services/scheduler.py, FastAPI BackgroundTasks) -- no Celery/Redis.
 API key authentication on all data endpoints.
 """
 import logging
@@ -59,7 +60,7 @@ async def lifespan(app: FastAPI):
 # public routes here and re-add them below gated behind an admin JWT.
 app = FastAPI(
     title="Talent OS — Hermes Recruitment Engine",
-    description="Multi-agent recruitment platform. PostgreSQL + asyncpg + Celery + Next.js.",
+    description="Multi-agent recruitment platform. PostgreSQL + asyncpg + FastAPI BackgroundTasks + Next.js.",
     version="1.0.0",
     lifespan=lifespan,
     docs_url=None,
