@@ -249,6 +249,35 @@ async def impersonate_user(
     }
 
 
+@router.post("/users/{user_id}/unlock")
+async def unlock_user(
+    user_id: int,
+    current_user: dict = Depends(require_role("admin")),
+):
+    """WS-E.4: clear an account's login lockout (failed_login_count /
+    locked_until) early -- e.g. a legitimate user got rate-limited by
+    their own retries. Does not touch password_hash or
+    password_changed_at, so any JWT already issued to this user stays
+    valid (unlocking is not a password reset)."""
+    row = await fetch_one(
+        """UPDATE users
+           SET failed_login_count = 0, locked_until = NULL
+           WHERE id = $1 AND deleted_at IS NULL
+           RETURNING id, email, failed_login_count, locked_until""",
+        user_id,
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    # Audit log
+    await execute(
+        "INSERT INTO audit_log (action, actor_id, target_type, target_id, changes) VALUES ($1, $2, $3, $4, $5::jsonb)",
+        "user_unlock", current_user["id"], "user", user_id, json.dumps({"unlocked_email": row["email"]}),
+    )
+
+    return {"message": f"User '{row['email']}' unlocked successfully"}
+
+
 # ── Job Management ──────────────────────────────────────────────────────
 
 @router.get("/jobs")

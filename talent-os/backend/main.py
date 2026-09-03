@@ -14,14 +14,14 @@ from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.docs import get_redoc_html, get_swagger_ui_html
 from fastapi.responses import JSONResponse
-from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
-from slowapi.util import get_remote_address
 
 from core.config import settings
 from core.database import close_pool
 from core.deps import require_role
+from core.ratelimit import limiter
 from services.scheduler import start_scheduler, shutdown_scheduler
 
 
@@ -68,8 +68,12 @@ app = FastAPI(
     openapi_url=None,
 )
 
-# Limiter — rate limiting across all endpoints
-limiter = Limiter(key_func=get_remote_address)
+# Limiter — one shared instance (core/ratelimit.py) across the whole app;
+# every router imports the same `limiter` object instead of building its
+# own, and its key_func (WS-E.4) prefers CF-Connecting-IP, then the first
+# X-Forwarded-For hop when the peer is a trusted proxy, else the raw
+# socket address. See core/ratelimit.py's module docstring for the
+# per-worker in-memory caveat (production runs 4 uvicorn workers).
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 

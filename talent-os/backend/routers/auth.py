@@ -17,19 +17,17 @@ from services.email_service import email_service
 from typing import Optional
 from urllib.parse import urlencode, quote
 import secrets
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 import logging
 import httpx
 from google.oauth2 import id_token as google_id_token
 from google.auth.transport import requests as google_auth_requests
 
-from slowapi import Limiter
-from slowapi.util import get_remote_address
+from core.ratelimit import limiter
 
 logger = logging.getLogger("talent_os.auth")
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
-limiter = Limiter(key_func=get_remote_address)
 
 
 # ── Helper ──────────────────────────────────────────────────────────────
@@ -178,18 +176,88 @@ async def register(request: Request, data: UserRegister):
 
 
 # ── Login ───────────────────────────────────────────────────────────────
+# WS-E.4: per-account lockout, on top of the per-IP @limiter.limit above.
+# The IP limit alone doesn't stop credential stuffing spread across many
+# source IPs at a single account; this closes that gap. Columns come from
+# migrations/020_login_lockout.py.
+
+FAILED_LOGIN_LOCKOUT_THRESHOLD = 10
+FAILED_LOGIN_WINDOW_MINUTES = 15
+LOCKOUT_DURATION_MINUTES = 15
+
+
+async def _register_failed_login(user: dict) -> None:
+    """Bump users.failed_login_count for a failed password check, and lock
+    the account for LOCKOUT_DURATION_MINUTES once it hits the threshold
+    within the FAILED_LOGIN_WINDOW_MINUTES window.
+
+    WS-E.4 deliberately adds no dedicated `last_failed_login_at` column
+    (only failed_login_count/locked_until/password_changed_at, per the
+    migration) -- the sliding window is instead tracked off the existing
+    `updated_at` column, which this same UPDATE also refreshes: if the
+    row's last update was more than FAILED_LOGIN_WINDOW_MINUTES ago the
+    counter restarts at 1, otherwise it increments. This is a deliberately
+    "minimal" approximation (per the masterplan item's own name) -- an
+    unrelated admin edit to the same user row (e.g. PUT
+    /api/v1/admin/users/{id}) also refreshes updated_at and so can nudge
+    the window, but that only ever shifts the count *reset* point, it
+    never lets more than FAILED_LOGIN_LOCKOUT_THRESHOLD failures in a row
+    slip through un-locked. A real last-failed-attempt column would be a
+    straightforward follow-up if this proves too imprecise in practice.
+    """
+    row = await fetch_one(
+        """UPDATE users
+           SET failed_login_count = CASE
+                   WHEN updated_at IS NULL OR updated_at < NOW() - INTERVAL '15 minutes'
+                       THEN 1
+                       ELSE failed_login_count + 1
+               END,
+               updated_at = NOW()
+           WHERE id = $1
+           RETURNING failed_login_count""",
+        user["id"],
+    )
+    if row and row["failed_login_count"] >= FAILED_LOGIN_LOCKOUT_THRESHOLD:
+        await execute(
+            "UPDATE users SET locked_until = NOW() + INTERVAL '15 minutes' WHERE id = $1",
+            user["id"],
+        )
+
 
 @router.post("/login", response_model=TokenResponse)
-@limiter.limit("5/minute")
+@limiter.limit("10/minute")
 async def login(request: Request, data: UserLogin):
-    """Authenticate a user and return a JWT token."""
+    """Authenticate a user and return a JWT token.
+
+    Locked-out and wrong-password both return the exact same generic 401
+    -- a locked account must never be distinguishable from a bad password
+    (which itself must never be distinguishable from "no such account",
+    see _get_user_by_email's callers) -- the only extra signal is a
+    Retry-After header, and only while actually locked.
+    """
     email = data.email.lower().strip()
     user = await _get_user_by_email(email)
 
-    if not user or not verify_password(data.password, user["password_hash"]):
+    if user and user["locked_until"] and user["locked_until"] > datetime.now(timezone.utc):
+        retry_after = max(1, int((user["locked_until"] - datetime.now(timezone.utc)).total_seconds()))
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid email or password",
+            headers={"Retry-After": str(retry_after)},
+        )
+
+    if not user or not verify_password(data.password, user["password_hash"]):
+        if user:
+            await _register_failed_login(user)
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid email or password",
+        )
+
+    if user["failed_login_count"] or user["locked_until"]:
+        await execute(
+            "UPDATE users SET failed_login_count = 0, locked_until = NULL WHERE id = $1",
+            user["id"],
         )
 
     return _build_token_response(user)
@@ -198,7 +266,7 @@ async def login(request: Request, data: UserLogin):
 # ── Refresh ─────────────────────────────────────────────────────────────
 
 @router.post("/refresh", response_model=TokenResponse)
-@limiter.limit("10/minute")
+@limiter.limit("30/minute")
 async def refresh_token(request: Request, data: dict):
     """Issue a new access token using an existing valid token.
 
@@ -268,7 +336,8 @@ async def verify_email(data: VerifyEmailRequest):
 # and additionally enforces the 24h TTL from verification_sent_at.
 
 @router.post("/verify-email")
-async def verify_email_hashed(data: VerifyEmailRequest):
+@limiter.limit("20/minute")
+async def verify_email_hashed(request: Request, data: VerifyEmailRequest):
     """Verify a user's email address using their WS-E.2 (hashed) verification token."""
     user = await fetch_one(
         """SELECT id FROM users
@@ -316,7 +385,7 @@ async def resend_verification(request: Request, data: ResendVerificationRequest)
 # ── Set Password (WS-E.3 team invite) ───────────────────────────────────
 
 @router.post("/set-password")
-@limiter.limit("5/minute")
+@limiter.limit("10/minute")
 async def set_password(request: Request, data: SetPasswordRequest):
     """Consume a one-time set-password token (team invite, WS-E.3): sets
     the invitee's own password and marks the e-mail verified in the same
@@ -336,6 +405,7 @@ async def set_password(request: Request, data: SetPasswordRequest):
         """UPDATE users
            SET password_hash = $1, is_verified = TRUE, email_verified_at = NOW(),
                verification_token_hash = NULL, verification_sent_at = NULL,
+               password_changed_at = NOW(), failed_login_count = 0, locked_until = NULL,
                updated_at = NOW()
            WHERE id = $2""",
         new_hash, user["id"],
@@ -402,7 +472,11 @@ async def reset_password(request: Request, data: ResetPasswordRequest):
 
     new_hash = hash_password(data.new_password)
     await execute(
-        "UPDATE users SET password_hash = $1, reset_token = NULL, reset_token_expires_at = NULL, updated_at = NOW() WHERE id = $2",
+        """UPDATE users
+           SET password_hash = $1, reset_token = NULL, reset_token_expires_at = NULL,
+               password_changed_at = NOW(), failed_login_count = 0, locked_until = NULL,
+               updated_at = NOW()
+           WHERE id = $2""",
         new_hash, user["id"],
     )
     return {"message": "Password reset successfully"}
@@ -460,7 +534,9 @@ async def update_me(
 # ── Change Password ─────────────────────────────────────────────────────
 
 @router.post("/change-password")
+@limiter.limit("10/minute")
 async def change_password(
+    request: Request,
     data: ChangePasswordRequest,
     current_user: dict = Depends(get_current_user),
 ):
@@ -477,7 +553,10 @@ async def change_password(
 
     new_hash = hash_password(data.new_password)
     await execute(
-        "UPDATE users SET password_hash = $1, updated_at = NOW() WHERE id = $2",
+        """UPDATE users
+           SET password_hash = $1, password_changed_at = NOW(),
+               failed_login_count = 0, locked_until = NULL, updated_at = NOW()
+           WHERE id = $2""",
         new_hash, current_user["id"],
     )
     return {"message": "Password changed successfully"}
