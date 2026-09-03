@@ -1,6 +1,6 @@
 """Talent OS — Pydantic schemas for request/response models."""
 from pydantic import BaseModel, EmailStr, Field, field_validator
-from typing import Optional, List, Any
+from typing import Optional, List, Any, Literal
 from datetime import datetime
 
 
@@ -392,7 +392,10 @@ class ClientAnalytics(BaseModel):
 class TeamInvite(BaseModel):
     email: EmailStr
     full_name: str = Field(..., min_length=1, max_length=255)
-    role: str = "client"
+    # Privilege-escalation fix (WS-C.2): a client-invited teammate can only
+    # ever be role=client. Server also hardcodes 'client' in the INSERT
+    # regardless of this value, so this is defense in depth, not the only gate.
+    role: Literal["client"] = "client"
 
 
 # ── Admin Portal Schemas ────────────────────────────────────────────────
