@@ -26,7 +26,7 @@ router = APIRouter(prefix="/api/v1/candidate", tags=["candidate-portal"])
 # CV files live in R2 (services/storage); this directory is only the legacy
 # local-disk fallback for pre-R2 uploads. Creating it must never break import:
 # the CI runner cannot write to /app and R2-only deployments never use it.
-UPLOAD_DIR = os.environ.get("CV_UPLOAD_DIR", "/app/uploads/cv")
+UPLOAD_DIR = "/app/uploads/cv"
 try:
     os.makedirs(UPLOAD_DIR, exist_ok=True)
 except OSError as exc:
