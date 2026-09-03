@@ -170,6 +170,17 @@
   // the rest of the portal, per WS-E.2/E.3.
   const mode = GSP.esc(params.get('mode') || '');
 
+  // Security-audit fix: strip the raw token out of the URL immediately,
+  // before any fetch/analytics/third-party script on this page can carry
+  // it into browser history, a Referer header, or a log line -- same
+  // reasoning as the Google-callback fragment fix (routers/auth.py
+  // google_callback / script.js handleGoogleAuthCallback). `token` and
+  // `mode` are already captured above, so the rest of this script keeps
+  // working off those local consts.
+  if (token) {
+    window.history.replaceState({}, document.title, window.location.pathname);
+  }
+
   const missing = document.getElementById('verifyMissingToken');
   const pending = document.getElementById('verifyPending');
   const resultBox = document.getElementById('verifyResult');

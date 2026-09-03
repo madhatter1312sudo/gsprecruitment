@@ -7,7 +7,7 @@ import logging
 
 from fastapi import APIRouter, Depends, HTTPException
 from core.database import fetch_all, execute
-from core.deps import get_current_user
+from core.deps import get_current_user, get_verified_user
 from models.schemas import PushTokenCreate, PushTokenDelete
 from routers.candidate import _get_candidate_id
 
@@ -51,7 +51,7 @@ async def delete_push_token(
 # ── Matches ─────────────────────────────────────────────────────────────
 
 @router.get("/me/matches")
-async def get_my_matches(current_user: dict = Depends(get_current_user)):
+async def get_my_matches(current_user: dict = Depends(get_verified_user)):
     """Matches for the current candidate, joined with job info, ordered by score."""
     if current_user["role"] != "candidate":
         raise HTTPException(status_code=403, detail="Only candidates can view their matches")
@@ -77,7 +77,7 @@ async def get_my_matches(current_user: dict = Depends(get_current_user)):
 # ── Applications (pipeline view) ────────────────────────────────────────
 
 @router.get("/me/applications")
-async def get_my_applications(current_user: dict = Depends(get_current_user)):
+async def get_my_applications(current_user: dict = Depends(get_verified_user)):
     """Candidate's application/pipeline view: job info plus current stage/status."""
     if current_user["role"] != "candidate":
         raise HTTPException(status_code=403, detail="Only candidates can view their applications")

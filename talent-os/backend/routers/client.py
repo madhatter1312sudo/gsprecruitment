@@ -468,6 +468,8 @@ async def add_to_pipeline(
     current_user: dict = Depends(require_verified_role("client", "admin")),
 ):
     """Add a candidate to the client's pipeline."""
+    _require_candidate_access(current_user)
+
     client = await _get_client_by_user(current_user["id"])
     if not client:
         raise HTTPException(status_code=400, detail="Client profile not found")
@@ -514,6 +516,8 @@ async def get_pipeline(
     current_user: dict = Depends(require_verified_role("client", "admin")),
 ):
     """Get pipeline entries for the client."""
+    _require_candidate_access(current_user)
+
     client = await _get_client_by_user(current_user["id"])
     if not client:
         return {"items": [], "total": 0, "limit": limit, "offset": offset}

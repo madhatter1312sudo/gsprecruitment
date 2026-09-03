@@ -3,7 +3,13 @@ Unit tests for WS-E.2 (e-mail verification + admin approval) and WS-E.3
 (team invite via set-password link, Google login token not in a query
 string). Pure functions/static-source checks + a migration text check,
 no DB/network needed -- same style as tests/test_ws_c2_authz.py and
-tests/test_baseline_schema.py.
+tests/test_baseline_schema.py. The pipeline-gate section near the bottom
+is the one exception: it drives the real FastAPI app through
+fastapi.testclient.TestClient, stubbing only the auth dependency (via
+app.dependency_overrides) -- _require_candidate_access runs and raises
+before either endpoint would touch the database, so no DB stub is needed
+to prove the 403 (see the security-audit follow-up this section closes:
+add_to_pipeline/get_pipeline were missing the gate entirely).
 """
 import hashlib
 import importlib.util
@@ -15,6 +21,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 import pytest
 from fastapi import HTTPException
+from fastapi.testclient import TestClient
 
 from core.security import hash_token
 import routers.auth as auth_router
@@ -226,3 +233,67 @@ def test_migration_017_is_idempotent_no_unguarded_backfill():
 
 def test_migration_017_version_matches_filename():
     assert _load_migration_017().VERSION == "017_email_verification"
+
+
+# ── Security-audit follow-up: pipeline endpoints must gate too ───────────
+# add_to_pipeline (POST /api/v1/client/pipeline) and get_pipeline
+# (GET /api/v1/client/pipeline) both read/return candidate personal data
+# (pipeline_entries joined onto candidates.full_name etc.) but were
+# missing the _require_candidate_access call that /candidates and
+# /candidates/{id} already had -- an unapproved client could reach
+# candidate data through the pipeline endpoints even though search/detail
+# correctly 403'd. Fixed by adding _require_candidate_access(current_user)
+# as the first line of both.
+
+import main as _main_module  # noqa: E402  (import after sys.path setup above)
+from core.deps import get_verified_user as _get_verified_user_dep
+
+
+@pytest.fixture
+def _test_client():
+    client = TestClient(_main_module.app)
+    yield client
+    _main_module.app.dependency_overrides.pop(_get_verified_user_dep, None)
+
+
+def _override_as_unapproved_client():
+    _main_module.app.dependency_overrides[_get_verified_user_dep] = lambda: {
+        "id": 42,
+        "email": "unapproved-client@example.com",
+        "full_name": "Unapproved Client",
+        "role": "client",
+        "is_verified": True,
+        "approved_by_admin_at": None,
+    }
+
+
+def test_add_to_pipeline_blocks_unapproved_client(_test_client):
+    _override_as_unapproved_client()
+    res = _test_client.post(
+        "/api/v1/client/pipeline",
+        json={"candidate_id": 1, "job_id": 1, "stage": "sourced"},
+    )
+    assert res.status_code == 403
+    assert "pending admin approval" in res.json()["detail"]
+
+
+def test_get_pipeline_blocks_unapproved_client(_test_client):
+    _override_as_unapproved_client()
+    res = _test_client.get("/api/v1/client/pipeline")
+    assert res.status_code == 403
+    assert "pending admin approval" in res.json()["detail"]
+
+
+def test_add_to_pipeline_calls_require_candidate_access_first():
+    """Regression guard at the source level too: the gate call must be the
+    first statement in the function body, not buried after a DB read that
+    would already have touched candidate-adjacent data."""
+    src = inspect.getsource(client_router.add_to_pipeline)
+    body_after_docstring = src.split('"""', 2)[2]
+    assert body_after_docstring.strip().startswith("_require_candidate_access(current_user)")
+
+
+def test_get_pipeline_calls_require_candidate_access_first():
+    src = inspect.getsource(client_router.get_pipeline)
+    body_after_docstring = src.split('"""', 2)[2]
+    assert body_after_docstring.strip().startswith("_require_candidate_access(current_user)")

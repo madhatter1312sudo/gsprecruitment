@@ -45,6 +45,32 @@ Idempotent: every ALTER is IF NOT EXISTS, the index is IF NOT EXISTS, and
 both backfill UPDATEs are WHERE ... IS NULL-guarded — a second run touches
 zero rows once the gaps are filled, same pattern as every other migration
 in this directory (see migrations/004_reset_token_expiry.py).
+
+NOT backfilled, on purpose (security-audit follow-up on the WS-E.2/E.3
+PR): a self-registered candidate or client who signed up under the
+pre-WS-E.2 flow with is_verified = FALSE (i.e. they never finished the
+old plaintext-token /api/auth/verify flow, or never bothered) gets none
+of the two backfills above -- their email_verified_at and
+approved_by_admin_at both stay NULL, same as any brand-new signup. There
+is no e-mail on file to have sent a WS-E.2 confirmation link to before
+this migration existed, so there is nothing to retroactively mark
+verified. Concretely: after this migration + the matching backend deploy
+land, that account hits routers/candidate.py's/routers/client.py's
+get_verified_user 403 the next time they try to use the portal, and sees
+the "bevestig je e-mail" screen (website/candidate/index.html,
+website/client/index.html) with its resend button
+(POST /api/auth/resend-verification) -- exactly the same as a fresh
+signup, not a lockout bug.
+
+Also note (same follow-up): POST /api/auth/set-password (WS-E.3's
+team-invite flow) changes password_hash but does not invalidate any JWT
+already issued to that account -- there is no password_changed_at/
+token-versioning mechanism yet to check against on every request, so an
+existing valid access token for that user keeps working after their
+password is set/changed. WS-E.4 is expected to add that revocation
+mechanism; until then this is a known, accepted gap (mirrors the
+pre-existing behaviour of POST /api/auth/reset-password and
+POST /api/auth/change-password, which have the same property today).
 """
 import asyncio
 import os
