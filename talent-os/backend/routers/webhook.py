@@ -3,6 +3,7 @@ Talent OS — Webhook router for Hermes agent submissions.
 Accepts authenticated, HMAC-signed payloads from Hermes agents.
 """
 from fastapi import APIRouter, HTTPException, Request, Depends
+from pydantic import ValidationError
 from core.database import fetch_one
 from core.config import settings
 from models.schemas import WebhookPayload
@@ -36,10 +37,33 @@ async def hermes_webhook(request: Request):
     if not verify_hermes_signature(request, body):
         raise HTTPException(status_code=401, detail="Invalid or missing HMAC signature")
 
-    payload = await request.json()
-    action = payload.get("action", "")
-    data = payload.get("data", {})
-    agent = payload.get("agent", "unknown")
+    # Validate shape/action against WebhookPayload before touching the DB --
+    # a malformed body (missing/unknown action) 422s instead of falling
+    # through to the "unknown action" no-op branch.
+    try:
+        raw = await request.json()
+    except Exception:
+        raise HTTPException(status_code=422, detail="Invalid JSON body")
+    try:
+        payload = WebhookPayload.model_validate(raw)
+    except ValidationError as e:
+        raise HTTPException(status_code=422, detail=e.errors())
+    action = payload.action
+    data = payload.data
+    agent = payload.agent or "unknown"
+
+    if action == "placement_update":
+        # There is no `placements` table yet -- reject explicitly rather
+        # than silently accepting and dropping the data (which is what the
+        # old catch-all "unknown action" branch below would otherwise do).
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "action 'placement_update' is not yet supported: the "
+                "`placements` table does not exist. This payload was not "
+                "stored anywhere."
+            ),
+        )
 
     if action == "candidate_found":
         row = await fetch_one(
@@ -89,5 +113,5 @@ async def hermes_webhook(request: Request):
         )
         return {"received": True, "action": action, "signal_id": row["id"] if row else None}
 
-    else:
-        return {"received": True, "action": action, "note": "Unknown action, data stored in payload log"}
+    # Unreachable: WebhookPayload.action is pattern-restricted to the four
+    # known actions above, and placement_update is handled (422) earlier.

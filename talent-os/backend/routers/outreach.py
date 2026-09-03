@@ -202,7 +202,7 @@ async def approve_draft(
 
         await execute(
             "INSERT INTO audit_log (action, actor_id, target_type, target_id, changes) "
-            "VALUES ($1, $2, $3, $4, $5)",
+            "VALUES ($1, $2, $3, $4, $5::jsonb)",
             "outreach_draft_approved", current_user["id"], "outreach_draft", draft_id,
             json.dumps({"target_email": draft["target_email"], "sent": True}),
         )
@@ -214,7 +214,7 @@ async def approve_draft(
         )
         await execute(
             "INSERT INTO audit_log (action, actor_id, target_type, target_id, changes) "
-            "VALUES ($1, $2, $3, $4, $5)",
+            "VALUES ($1, $2, $3, $4, $5::jsonb)",
             "outreach_draft_send_failed", current_user["id"], "outreach_draft", draft_id,
             json.dumps({"target_email": draft["target_email"], "sent": False}),
         )
@@ -236,7 +236,7 @@ async def reject_draft(
 
     await execute(
         "INSERT INTO audit_log (action, actor_id, target_type, target_id, changes) "
-        "VALUES ($1, $2, $3, $4, $5)",
+        "VALUES ($1, $2, $3, $4, $5::jsonb)",
         "outreach_draft_rejected", current_user["id"], "outreach_draft", draft_id, json.dumps({}),
     )
     return row

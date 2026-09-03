@@ -29,6 +29,26 @@ jobs:
       - name: API contract check (frontend calls vs backend routes)
         run: python3 scripts/check_api_contract.py
 
+      # Regenerates openapi.snapshot.json from the live FastAPI app
+      # (app.openapi() -- no server/DB needed) and fails if it differs from
+      # the committed one, so a route/schema change without an updated
+      # snapshot is caught here instead of silently drifting.
+      - name: OpenAPI snapshot check
+        env:
+          JWT_SECRET: ci-test-secret-not-used-in-production-32chars
+          API_KEY: ci-test-key
+          WEBHOOK_SECRET: ci-test-webhook-secret
+          POSTGRES_PASSWORD: ci-test-password
+        run: python3 scripts/generate_openapi_snapshot.py --check
+
+      - name: Run backend tests
+        env:
+          JWT_SECRET: ci-test-secret-not-used-in-production-32chars
+          API_KEY: ci-test-key
+          WEBHOOK_SECRET: ci-test-webhook-secret
+          POSTGRES_PASSWORD: ci-test-password
+        run: python3 -m pytest -q talent-os/backend
+
   mobile:
     name: Mobile (Expo/TypeScript)
     runs-on: ubuntu-latest
