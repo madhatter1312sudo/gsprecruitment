@@ -16,7 +16,9 @@ const Admin = {
   // Filters passed to the load*() call that produced the currently-rendered
   // page, keyed the same as _currentPage — a data-page click re-derives the
   // page from here instead of needing a fresh closure per render.
-  _lastParams: { users: {}, candidates: {}, audit: {}, outreach: {}, blog: {}, leads: {}, jobs: {} },
+  // `clients` isn't in _currentPage/goToPage's loaders map -- the roster
+  // fetches a single limit=200 page (see loadClients()), no data-page UI.
+  _lastParams: { users: {}, candidates: {}, audit: {}, outreach: {}, blog: {}, leads: {}, jobs: {}, clients: {} },
   _pageSize: 20,
 
   /* ---- Init ---- */
@@ -489,29 +491,18 @@ const Admin = {
 
   /* ---- "Nieuwe vacature" (WS-B.2) ----
      Lets an admin record a job on a client's behalf -- e.g. a telephone
-     assignment -- without the client needing a portal login. No
-     GET /v1/admin/clients list endpoint exists, so the client picker is
-     built the same way Opdrachtgevers (loadClients()) does: from
-     GET /v1/admin/users?role=client, fetching each user's detail to read
-     client.id/company_name. Cached in this._data.clientOptions so
-     reopening the modal doesn't re-fetch every time. */
+     assignment -- without the client needing a portal login. The client
+     picker reads GET /v1/admin/clients (routers/clients_admin.py) --
+     every client row, one call, not scoped to accounts with a portal
+     login the way /users?role=client was. Cached in
+     this._data.clientOptions so reopening the modal doesn't re-fetch. */
   async fetchClientOptions(force = false) {
     if (!force && this._data.clientOptions) return this._data.clientOptions;
     try {
-      const res = await Auth.fetch('/v1/admin/users?role=client&limit=200');
+      const res = await Auth.fetch('/v1/admin/clients?limit=200');
       if (!res?.ok) return this._data.clientOptions || [];
       const data = await res.json();
-      const users = data.items || [];
-      const details = await Promise.all(users.map(u =>
-        Auth.fetch(`/v1/admin/users/${u.id}`).then(r => (r && r.ok) ? r.json() : null).catch(() => null)
-      ));
-      const byClientId = new Map();
-      details.forEach(d => {
-        if (d && d.client && d.client.id != null && !byClientId.has(d.client.id)) {
-          byClientId.set(d.client.id, { id: d.client.id, company_name: d.client.company_name || 'Onbekend' });
-        }
-      });
-      this._data.clientOptions = Array.from(byClientId.values());
+      this._data.clientOptions = (data.items || []).map(c => ({ id: c.id, company_name: c.company_name || 'Onbekend' }));
     } catch {
       this._data.clientOptions = this._data.clientOptions || [];
     }
@@ -1384,70 +1375,42 @@ const Admin = {
   },
 
   /* ============================================================
-     OPDRACHTGEVERS (WS-B.5)
+     OPDRACHTGEVERS (WS-B.5 / WS-B.2 follow-up)
 
-     Main has no GET /v1/admin/clients list endpoint (checked
-     talent-os/backend/routers/*.py and openapi.snapshot.json — only
-     /v1/admin/clients/{client_id}/contacts and .../{user_id}/approve
-     exist under that prefix). The roster here is therefore built
-     client-side: list users with role=client, then GET each user's detail
-     (which joins the linked `clients` row + an unfiltered job_count) and
-     dedupe by client id. A second pass hits /v1/admin/jobs?client_id=..
-     &status=open for an accurate *open* count, since the join only gives
-     every job_orders row regardless of status. This is N+1 (~2x the
-     number of client accounts) — fine for the current roster size, but a
-     real GET /v1/admin/clients?... endpoint returning company_name,
-     domain, open_job_count and primary_contact in one row would remove
-     both extra round-trips.
-
-     `erkend_referent` (recognised-sponsor / IND) is not a column on
-     `clients` (talent-os/backend/migrations/000_baseline.py) — the column
-     always renders "onbekend" per the task spec rather than guessing.
+     GET /v1/admin/clients (routers/clients_admin.py) returns
+     company_name/domain/erkend_referent/open_job_count/primary_contact
+     for the whole page in one query (LEFT JOIN LATERAL, no N+1) -- this
+     used to derive the roster from /users?role=client plus one detail
+     fetch per row plus one open-jobs-count fetch per row; both are gone.
      ============================================================ */
-  async loadClients() {
+  async loadClients(params = {}) {
+    this._lastParams.clients = params;
+    const qs = new URLSearchParams();
+    if (params.search) qs.set('search', params.search);
+    qs.set('limit', 200);
+
     this.setLoading('#section-clients table tbody', 6);
     try {
-      const res = await Auth.fetch('/v1/admin/users?role=client&limit=200');
+      const res = await Auth.fetch(`/v1/admin/clients?${qs}`);
       if (!res) return;
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail);
-      const users = data.items || [];
-      if (!users.length) {
-        this._data.clients = [];
-        this.setEmpty('#section-clients table tbody', 6, 'Nog geen opdrachtgevers met een portal-account.');
-        return;
-      }
-
-      const details = await Promise.all(users.map(u =>
-        Auth.fetch(`/v1/admin/users/${u.id}`).then(r => (r && r.ok) ? r.json() : null).catch(() => null)
-      ));
-
-      const byClientId = new Map();
-      details.forEach(d => {
-        if (d && d.client && d.client.id != null && !byClientId.has(d.client.id)) {
-          byClientId.set(d.client.id, {
-            ...d.client,
-            job_count: d.job_count ?? 0,
-            open_jobs: null,
-            _accountName: d.full_name || '',
-            _accountEmail: d.email || '',
-          });
-        }
-      });
-      const clients = Array.from(byClientId.values());
-
-      await Promise.all(clients.map(async c => {
-        try {
-          const r = await Auth.fetch(`/v1/admin/jobs?client_id=${c.id}&status=open&limit=1`);
-          if (r && r.ok) { const jd = await r.json(); c.open_jobs = jd.total ?? 0; }
-        } catch { /* leave open_jobs null -> falls back to job_count in render */ }
-      }));
-
-      this._data.clients = clients;
-      this.renderClients(clients);
+      this._data.clients = data.items || [];
+      this.renderClients(this._data.clients);
     } catch (err) {
-      this.setLoadError('#section-clients table tbody', 6, () => this.loadClients());
+      this.setLoadError('#section-clients table tbody', 6, () => this.loadClients(params));
     }
+  },
+
+  erkendReferentLabel(value) {
+    const map = { ja: 'Ja', nee: 'Nee', onbekend: 'Onbekend' };
+    return map[value] || 'Onbekend';
+  },
+
+  erkendReferentBadgeClass(value) {
+    if (value === 'ja') return 'badge bg-green-lt';
+    if (value === 'nee') return 'badge bg-red-lt';
+    return 'badge bg-secondary-lt';
   },
 
   renderClients(clients) {
@@ -1458,9 +1421,9 @@ const Admin = {
       <tr data-action="open-client" data-id="${c.id}" style="cursor:pointer;">
         <td style="font-weight:600;color:var(--white);">${c.company_name || 'Onbekend'}</td>
         <td style="color:var(--navy-200);">${c.domain || '—'}</td>
-        <td class="text-center">${c.open_jobs != null ? c.open_jobs : c.job_count}</td>
-        <td style="color:var(--navy-200);">${c._accountName || c._accountEmail || '—'}</td>
-        <td><span class="badge bg-secondary-lt" title="Geen erkend-referent-veld op clients">onbekend</span></td>
+        <td class="text-center">${c.open_job_count ?? 0}</td>
+        <td style="color:var(--navy-200);">${c.primary_contact?.full_name || c.primary_contact?.email || '—'}</td>
+        <td><span class="${this.erkendReferentBadgeClass(c.erkend_referent)}">${this.erkendReferentLabel(c.erkend_referent)}</span></td>
         <td class="text-end"><i class="fa-solid fa-chevron-right text-secondary"></i></td>
       </tr>`)}`);
   },
@@ -1473,7 +1436,7 @@ const Admin = {
   openClientDrawer(clientId) {
     const client = (this._data.clients || []).find(c => c.id === clientId);
     const tabs = [
-      ['contacts', 'Contacten'], ['jobs', 'Vacatures'],
+      ['info', 'Info'], ['contacts', 'Contacten'], ['jobs', 'Vacatures'],
       ['activity', 'Notities/Activiteit'], ['prospects', 'Prospects'],
     ];
     this.openModal('clientDrawer', html`
@@ -1481,12 +1444,12 @@ const Admin = {
       <div style="color:var(--navy-300);font-size:var(--font-size-sm);margin-bottom:var(--space-lg);">${client?.domain || '—'}</div>
       <div style="display:flex;gap:4px;flex-wrap:wrap;border-bottom:1px solid rgba(74,111,159,0.2);margin-bottom:var(--space-md);padding-bottom:var(--space-sm);">
         ${tabs.map(([key, label]) => html`
-          <button class="btn btn-sm ${key === 'contacts' ? 'btn-primary' : 'btn-ghost-secondary'}"
+          <button class="btn btn-sm ${key === 'info' ? 'btn-primary' : 'btn-ghost-secondary'}"
             data-action="client-tab" data-client-id="${clientId}" data-tab="${key}">${label}</button>`)}
       </div>
       <div id="clientDrawerTabContent" style="min-height:120px;"><i class="fa-solid fa-spinner fa-spin"></i></div>
     `, { wide: true });
-    this.switchClientTab(clientId, 'contacts');
+    this.switchClientTab(clientId, 'info');
   },
 
   switchClientTab(clientId, tab) {
@@ -1495,12 +1458,81 @@ const Admin = {
       btn.classList.toggle('btn-ghost-secondary', btn.dataset.tab !== tab);
     });
     const loaders = {
+      info: () => this.loadClientInfoTab(clientId),
       contacts: () => this.loadClientContacts(clientId),
       jobs: () => this.loadClientJobsTab(clientId),
       activity: () => this.loadClientActivityTab(clientId),
       prospects: () => this.loadClientProspectsTab(clientId),
     };
-    (loaders[tab] || loaders.contacts)();
+    (loaders[tab] || loaders.info)();
+  },
+
+  /* ---- Info tab: erkend_referent + notes, PATCH /v1/admin/clients/{id} ---- */
+  async loadClientInfoTab(clientId) {
+    const el = document.getElementById('clientDrawerTabContent');
+    if (!el) return;
+    mount(el, html`<i class="fa-solid fa-spinner fa-spin"></i>`);
+    try {
+      const res = await Auth.fetch(`/v1/admin/clients/${clientId}`);
+      if (!res) return;
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail);
+      this._data.clientDetail = this._data.clientDetail || {};
+      this._data.clientDetail[clientId] = data;
+      this.renderClientInfoTab(clientId);
+    } catch {
+      this.setContainerLoadError(el, () => this.loadClientInfoTab(clientId));
+    }
+  },
+
+  renderClientInfoTab(clientId) {
+    const el = document.getElementById('clientDrawerTabContent');
+    if (!el) return;
+    const client = (this._data.clientDetail && this._data.clientDetail[clientId]) || {};
+    mount(el, html`
+      <div class="form-group">
+        <label>Erkend referent (IND)</label>
+        <select id="clientInfoErkendReferent">
+          <option value="onbekend" ${raw(client.erkend_referent === 'onbekend' || !client.erkend_referent ? 'selected' : '')}>Onbekend</option>
+          <option value="ja" ${raw(client.erkend_referent === 'ja' ? 'selected' : '')}>Ja</option>
+          <option value="nee" ${raw(client.erkend_referent === 'nee' ? 'selected' : '')}>Nee</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Notities</label>
+        <textarea id="clientInfoNotes" rows="5" style="width:100%;background:rgba(6,13,26,0.6);border:1px solid rgba(74,111,159,0.3);border-radius:var(--radius-md);color:var(--white);padding:0.75rem;font-family:var(--font-primary);font-size:var(--font-size-sm);resize:vertical;box-sizing:border-box;">${client.notes || ''}</textarea>
+      </div>
+      <div style="display:flex;gap:var(--space-md);margin-top:var(--space-lg);">
+        <button class="btn btn-primary" data-action="save-client-info" data-client-id="${clientId}">Opslaan</button>
+      </div>
+    `);
+  },
+
+  async saveClientInfo(clientId) {
+    const payload = {
+      erkend_referent: document.getElementById('clientInfoErkendReferent')?.value || 'onbekend',
+      notes: document.getElementById('clientInfoNotes')?.value ?? '',
+    };
+    try {
+      const res = await Auth.fetch(`/v1/admin/clients/${clientId}`, {
+        method: 'PATCH', body: JSON.stringify(payload),
+      });
+      if (res?.ok) {
+        Auth.toast('Opgeslagen', 'success');
+        const updated = await res.json();
+        this._data.clientDetail = this._data.clientDetail || {};
+        this._data.clientDetail[clientId] = { ...(this._data.clientDetail[clientId] || {}), ...updated };
+        // Keep the roster's badge in sync without a full reload.
+        const rosterRow = (this._data.clients || []).find(c => c.id === clientId);
+        if (rosterRow) {
+          rosterRow.erkend_referent = updated.erkend_referent;
+          this.renderClients(this._data.clients);
+        }
+      } else {
+        const d = await res?.json().catch(() => null);
+        Auth.toast(d?.detail || 'Opslaan mislukt', 'error');
+      }
+    } catch { Auth.toast('Netwerkfout', 'error'); }
   },
 
   /* ---- Contacts tab (WS-C.4 CRUD) ---- */
@@ -2194,6 +2226,9 @@ const Admin = {
         break;
       case 'client-tab':
         this.switchClientTab(Number(el.dataset.clientId), el.dataset.tab);
+        break;
+      case 'save-client-info':
+        this.saveClientInfo(Number(el.dataset.clientId));
         break;
       case 'client-contact-new':
         this.openClientContactForm(Number(el.dataset.clientId), null);

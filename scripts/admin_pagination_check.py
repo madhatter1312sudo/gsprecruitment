@@ -190,22 +190,11 @@ def route_admin_api(route, request):
     if path == "/api/v1/admin/audit-log":
         json_response(paginate(LIST_DATA["audit"], qs))
         return
-    # WS-B.2: the "Nieuwe vacature" client picker fetches
-    # /users?role=client then GET /users/{id} per row (Admin.fetchClientOptions(),
-    # same pattern as loadClients()) -- special-cased ahead of the generic
-    # /api/v1/admin/users branch below so the picker sees one client, not
-    # all 60 fake mixed-role users.
-    if path == "/api/v1/admin/users" and qs.get("role") == ["client"]:
-        json_response({"items": [{"id": 501, "email": "client@example.invalid",
-                                   "full_name": "Client Contact", "role": "client"}], "total": 1})
-        return
-    m_user = re.match(r"^/api/v1/admin/users/(\d+)$", path)
-    if m_user:
-        json_response({
-            "id": int(m_user.group(1)), "email": "client@example.invalid",
-            "full_name": "Client Contact", "role": "client",
-            "client": {"id": 1, "company_name": "Example Client BV"}, "job_count": 2,
-        })
+    # WS-B.2 follow-up: the "Nieuwe vacature" client picker fetches
+    # GET /v1/admin/clients (Admin.fetchClientOptions()), not
+    # /users?role=client any more.
+    if path == "/api/v1/admin/clients":
+        json_response({"items": [{"id": 1, "company_name": "Example Client BV"}], "total": 1, "page": 1, "limit": 200})
         return
     if path == "/api/v1/admin/users":
         json_response(paginate(LIST_DATA["users"], qs))

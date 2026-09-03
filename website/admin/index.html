@@ -378,17 +378,14 @@
           </div>
         </section>
 
-        <!-- ==================== OPDRACHTGEVERS (WS-B.5) ====================
-             No GET /v1/admin/clients list endpoint exists on main -- the
-             roster is built client-side from /v1/admin/users?role=client
-             (see Admin.loadClients() in js/admin.js for the exact fetch
-             sequence and why). Row click opens a tabbed detail drawer
-             (contacten / vacatures / notities-activiteit / prospects). -->
+        <!-- ==================== OPDRACHTGEVERS (WS-B.5 / WS-B.2 follow-up) ====================
+             Roster from GET /v1/admin/clients (routers/clients_admin.py) --
+             company_name/domain/erkend_referent/open_job_count/primary_contact
+             in one query, no N+1. Row click opens a tabbed detail drawer
+             (info / contacten / vacatures / notities-activiteit / prospects);
+             the Info tab edits erkend_referent + notes via
+             PATCH /v1/admin/clients/{id}. -->
         <section class="portal-section" id="section-clients">
-          <div class="alert alert-info d-flex align-items-center mb-3" role="alert">
-            <i class="fa-solid fa-circle-info me-2"></i>
-            <div>Erkend-referent-status wordt niet bijgehouden in de database — de kolom toont daarom altijd "onbekend".</div>
-          </div>
           <div class="card">
             <div class="table-responsive">
               <table class="table table-vcenter card-table">
