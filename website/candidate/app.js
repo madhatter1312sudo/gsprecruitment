@@ -237,6 +237,12 @@
             cvName.textContent = profile.cv_file_path.split('/').pop();
           }
         }
+
+        // Talentpool consent (WS-C.17) -- checked + expiry shown only
+        // while consent_talentpool_until is still in the future; an
+        // expired or never-set date leaves the box unchecked, same as
+        // outreach.py's _draft_refusal treats it.
+        applyTalentpoolConsentState(profile);
       } catch (err) {
         console.error('Profile load error:', err);
       }
@@ -264,6 +270,53 @@
         Auth.toast('Error saving profile', 'error');
       }
     });
+
+    /* ---- Talentpool consent (WS-C.17) ----
+       GET /v1/candidate/profile now includes consent_talentpool_at/_until/
+       _scope/_source (read via the candidates row) -- applyTalentpoolConsentState()
+       reflects them on load, and again after a save, so the checkbox and
+       expiry text always match what's actually on file. */
+    const tpCheck = document.getElementById('talentpoolConsentCheck');
+    const tpSaveBtn = document.getElementById('talentpoolConsentSaveBtn');
+    const tpStatus = document.getElementById('talentpoolConsentStatus');
+
+    function applyTalentpoolConsentState(profile) {
+      if (!tpCheck || !tpStatus) return;
+      const isNl = document.documentElement.getAttribute('data-lang') === 'nl';
+      const until = profile.consent_talentpool_until ? new Date(profile.consent_talentpool_until) : null;
+      const active = !!(until && until.getTime() > Date.now());
+      tpCheck.checked = active;
+      tpStatus.textContent = active
+        ? (isNl ? `Actief tot ${until.toLocaleDateString('nl-NL')}.` : `Active until ${until.toLocaleDateString('en-GB')}.`)
+        : '';
+    }
+
+    if (tpCheck && tpSaveBtn) {
+      tpSaveBtn.addEventListener('click', async () => {
+        const isNl = document.documentElement.getAttribute('data-lang') === 'nl';
+        try {
+          const res = await Auth.fetch('/v1/candidate/talentpool-consent', {
+            method: 'POST',
+            body: JSON.stringify({
+              consent: tpCheck.checked,
+              scope: tpCheck.checked ? 'matching_and_contact' : null,
+            }),
+          });
+          if (res && res.ok) {
+            const row = await res.json();
+            applyTalentpoolConsentState(row);
+            if (!row.consent_talentpool_until && tpStatus) {
+              tpStatus.textContent = isNl ? 'Talentpool-toestemming ingetrokken.' : 'Talent pool consent withdrawn.';
+            }
+            Auth.toast(isNl ? 'Opgeslagen!' : 'Saved!');
+          } else {
+            Auth.toast(isNl ? 'Opslaan mislukt' : 'Failed to save', 'error');
+          }
+        } catch (err) {
+          Auth.toast('Error saving talentpool consent', 'error');
+        }
+      });
+    }
 
     /* ---- CV Upload ---- */
     const pCvZone = document.getElementById('profileCvZone');

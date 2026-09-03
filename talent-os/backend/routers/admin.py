@@ -8,15 +8,17 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from core.database import fetch_one, fetch_all, execute, fetch_val
 from core.deps import get_current_user, require_role
 from core.security import create_access_token
+from core import privacy
 from models.schemas import (
     AdminDashboard, AdminUserUpdate, AdminJobUpdate, AdminJobCreate, AdminAnalytics,
     AuditLogEntry, ContentItem, ContentUpdate, SystemSettings, SystemSettingsUpdate,
     HealthResponse, PipelineStageUpdate, LeadReadUpdate, LEAD_INTEREST_TYPES,
+    AdminTalentpoolConsentUpdate,
 )
 from routers.health import get_health_detail
 from routers.client import _record_stage_change
 from typing import Optional, List
-from datetime import timedelta
+from datetime import timedelta, timezone, datetime
 import asyncio
 
 router = APIRouter(prefix="/api/v1/admin", tags=["admin-portal"])
@@ -721,6 +723,74 @@ async def get_candidate_detail(
         return user
 
     raise HTTPException(status_code=400, detail="kind must be 'sourced' or 'self-registered'")
+
+
+# ── Talentpool consent, admin-recorded (WS-C.17) ─────────────────────────
+# docs/SOURCING-SOP.md §1.5. Third of the three consent touchpoints (the
+# other two: candidate portal, routers/candidate.py; public double-opt-in,
+# routers/public.py talentpool_public_router). `evidence` is mandatory --
+# this endpoint records consent an admin has evidence for (a signed form,
+# an e-mail on file), not a live tick of the box, and that evidence goes
+# into the audit_log entry so there is always a paper trail for why.
+
+@router.patch("/candidates/{candidate_id}/talentpool-consent")
+async def admin_update_talentpool_consent(
+    candidate_id: int,
+    data: AdminTalentpoolConsentUpdate,
+    current_user: dict = Depends(require_role("admin")),
+):
+    if data.consent and not data.scope:
+        raise HTTPException(status_code=422, detail="scope is required when consent=true")
+
+    candidate = await fetch_one(
+        "SELECT id, lawful_basis FROM candidates WHERE id = $1 AND deleted_at IS NULL", candidate_id,
+    )
+    if not candidate:
+        raise HTTPException(status_code=404, detail="Candidate not found")
+
+    if data.consent:
+        now = datetime.now(timezone.utc)
+        until = now + timedelta(days=365)  # 12 months, renewable
+        set_lawful_basis = privacy.should_set_talentpool_lawful_basis(candidate["lawful_basis"])
+        row = await fetch_one(
+            """UPDATE candidates
+               SET consent_talentpool_at = $1, consent_talentpool_until = $2,
+                   consent_scope = $3, consent_source = 'admin', consent_reminder_sent_at = NULL,
+                   lawful_basis = CASE WHEN $4 THEN 'opt_in_talentpool' ELSE lawful_basis END,
+                   updated_at = NOW()
+               WHERE id = $5
+               RETURNING id, consent_talentpool_at, consent_talentpool_until, consent_scope,
+                         consent_source, lawful_basis""",
+            now, until, data.scope, set_lawful_basis, candidate_id,
+        )
+    else:
+        # M1: withdrawing a talentpool-only basis also stamps
+        # consent_withdrawn_at (stronger, permanent signal than a merely
+        # NULL consent_talentpool_until) -- a portal_registratie
+        # candidate keeps that basis untouched.
+        withdraw = candidate["lawful_basis"] == "opt_in_talentpool"
+        row = await fetch_one(
+            """UPDATE candidates
+               SET consent_talentpool_at = NULL, consent_talentpool_until = NULL,
+                   consent_scope = NULL, consent_source = NULL,
+                   consent_withdrawn_at = CASE WHEN $1 THEN COALESCE(consent_withdrawn_at, NOW()) ELSE consent_withdrawn_at END,
+                   updated_at = NOW()
+               WHERE id = $2
+               RETURNING id, consent_talentpool_at, consent_talentpool_until, consent_scope,
+                         consent_source, lawful_basis""",
+            withdraw, candidate_id,
+        )
+
+    # L2: evidence is free text an admin typed -- redact any e-mail-looking
+    # substring (same email_hash() used for suppression_list) before it
+    # lands in audit_log.changes, never the plaintext address.
+    await execute(
+        "INSERT INTO audit_log (action, actor_id, target_type, target_id, changes) VALUES ($1, $2, $3, $4, $5::jsonb)",
+        "admin_talentpool_consent_update", current_user["id"], "candidate", candidate_id,
+        json.dumps({"consent": data.consent, "scope": data.scope, "evidence": privacy.redact_emails(data.evidence)}),
+    )
+
+    return row
 
 
 # ── Analytics ───────────────────────────────────────────────────────────

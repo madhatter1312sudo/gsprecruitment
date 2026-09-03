@@ -6,15 +6,34 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response,
 from core.database import fetch_all, fetch_one, execute
 from core.config import settings
 from core.deps import get_optional_user
-from models.schemas import SiteContentResponse, LeadSubmit, SalaryBenchmarkResponse, QuizSubmitRequest
+from core.security import hash_token
+from core import privacy
+from models.schemas import (
+    SiteContentResponse, LeadSubmit, SalaryBenchmarkResponse, QuizSubmitRequest,
+    TalentpoolOptinRequest, TalentpoolConfirmRequest,
+)
 from services.telegram import notify_lead
+from services.email_service import email_service
 from typing import Optional, List
+from datetime import datetime, timedelta, timezone
 import json
+import logging
 import random
+import secrets
+
+logger = logging.getLogger("talent_os.public")
 
 router = APIRouter(prefix="/api/v1/public", tags=["public"])
 
 from core.ratelimit import limiter
+
+# ── Talentpool opt-in (WS-C.17) ─────────────────────────────────────────
+# Separate router: this and the public jobs router (routers/jobs.py
+# public_jobs_router) are the only /api/public/* (no /v1) endpoints --
+# see CLAUDE.md "Public: /api/public/jobs, /api/v1/public/blog".
+talentpool_public_router = APIRouter(prefix="/api/public", tags=["public-talentpool"])
+
+TALENTPOOL_OPTIN_TOKEN_TTL_HOURS = 24
 
 
 # ── Site Content ────────────────────────────────────────────────────────
@@ -252,4 +271,152 @@ async def submit_lead(request: Request, data: LeadSubmit):
         "message": "Thank you! We'll get back to you shortly.",
         "id": lead["id"],
         "created_at": lead["created_at"],
+    }
+
+
+# ── Talentpool opt-in / confirm (WS-C.17) ───────────────────────────────
+# docs/SOURCING-SOP.md §1.5: consent's own touchpoint is the site itself,
+# so no source_url is required or stored for candidates created this way.
+# Two-step, double-opt-in flow (mirrors WS-E.2's e-mail verification,
+# routers/auth.py) so a mistyped or someone-else's e-mail address can
+# never be enrolled from a single form submission -- consent only becomes
+# effective once POST /talentpool-confirm consumes the token. Only the
+# token's sha256 hash is ever stored (core.security.hash_token); the raw
+# token exists only in the outbound e-mail.
+
+async def _send_talentpool_confirm_email(email: str, token: str) -> None:
+    # Security-audit fix (H1): the token goes in the URL *fragment*
+    # (#token=), never a ?token= query param -- a fragment is never sent
+    # to the server in the request line and never appears in access logs
+    # or a Referer header. website/talentpool-confirm.html/.js reads it
+    # from window.location.hash to match.
+    link = f"https://gsprecruitment.nl/talentpool-confirm#token={token}"
+    body = f"""Bedankt voor je aanmelding voor de talentpool van GSP Recruitment. Bevestig via onderstaande link:
+{link}
+
+Deze link is {TALENTPOOL_OPTIN_TOKEN_TTL_HOURS} uur geldig. Heb je dit niet aangevraagd? Dan kun je dit bericht negeren.
+
+Met vriendelijke groet,
+GSP Recruitment
+info@gsprecruitment.nl
+
+---
+
+Thank you for signing up for GSP Recruitment's talent pool. Please confirm via the link below:
+{link}
+
+This link is valid for {TALENTPOOL_OPTIN_TOKEN_TTL_HOURS} hours. Didn't request this? You can ignore this message.
+
+Kind regards,
+GSP Recruitment
+info@gsprecruitment.nl
+"""
+    sent = await email_service.send_email(
+        to_email=email, subject="Bevestig je talentpool-aanmelding — GSP Recruitment", body_text=body,
+    )
+    if not sent:
+        logger.warning("Failed to send talentpool opt-in confirmation email")
+
+
+@talentpool_public_router.post("/talentpool-optin", status_code=202)
+@limiter.limit("5/minute")
+async def talentpool_optin(request: Request, data: TalentpoolOptinRequest):
+    """Step 1: e-mail + consent tick from website/kandidaten.html or the
+    blog CTA. Never touches `candidates` directly -- only issues a
+    confirmation e-mail with a one-time token. Always returns the same
+    generic message and status code regardless of consent value, whether
+    the e-mail is already known, whether it's suppressed, or whether a
+    request was just sent -- this endpoint must never be usable to
+    enumerate e-mails or probe existing candidates/suppression state
+    (same no-enumeration pattern as routers/auth.py resend_verification).
+
+    Security-audit fix (L1): skips actually sending (no row inserted, no
+    e-mail sent -- but still returns 202 with the same message) when
+    either holds:
+      - the address is on suppression_list (STOP received -- never
+        e-mail it again, on any basis);
+      - an unconfirmed request for this same e-mail was already made in
+        the last 10 minutes (double-submit / repeated-click guard --
+        avoids sending a fresh token + e-mail for every click)."""
+    email = data.email.lower().strip()
+    if data.consent:
+        suppressed = await fetch_one(
+            "SELECT 1 FROM suppression_list WHERE email_hash = $1", privacy.email_hash(email),
+        )
+        recent_pending = await fetch_one(
+            """SELECT id FROM talentpool_optin_requests
+               WHERE LOWER(email) = $1 AND confirmed_at IS NULL
+                 AND requested_at > NOW() - INTERVAL '10 minutes'""",
+            email,
+        )
+        if not suppressed and not recent_pending:
+            token = secrets.token_urlsafe(32)
+            await execute(
+                """INSERT INTO talentpool_optin_requests (email, token_hash, scope, source)
+                   VALUES ($1, $2, $3, $4)""",
+                email, hash_token(token), data.scope, data.source,
+            )
+            await _send_talentpool_confirm_email(email, token)
+
+    return {
+        "message": "If you ticked the consent box, we've sent a confirmation link to that e-mail address.",
+    }
+
+
+@talentpool_public_router.post("/talentpool-confirm")
+@limiter.limit("10/minute")
+async def talentpool_confirm(request: Request, data: TalentpoolConfirmRequest):
+    """Step 2: consumes the one-time token from the confirmation e-mail.
+    Only here does consent become effective on the candidates row --
+    creating it (source='talentpool_optin', no source_url — SOP §1.5) if
+    this e-mail has no existing candidates row, or updating it in place
+    otherwise. lawful_basis is set to 'opt_in_talentpool' only via the
+    shared privacy.should_set_talentpool_lawful_basis() rule (H3a) --
+    never silently overwriting a different lawful_basis already on file
+    (portal_registratie included -- same rule as the portal endpoint)."""
+    token_hash = hash_token(data.token)
+    pending = await fetch_one(
+        """SELECT id, email, scope, source FROM talentpool_optin_requests
+           WHERE token_hash = $1 AND confirmed_at IS NULL
+             AND requested_at > NOW() - INTERVAL '24 hours'""",
+        token_hash,
+    )
+    if not pending:
+        raise HTTPException(status_code=400, detail="Invalid or expired confirmation token")
+
+    await execute(
+        "UPDATE talentpool_optin_requests SET confirmed_at = NOW() WHERE id = $1", pending["id"],
+    )
+
+    now = datetime.now(timezone.utc)
+    until = now + timedelta(days=365)  # 12 months, renewable
+
+    existing = await fetch_one(
+        "SELECT id, lawful_basis FROM candidates WHERE LOWER(email) = $1", pending["email"],
+    )
+    if existing:
+        set_lawful_basis = privacy.should_set_talentpool_lawful_basis(existing["lawful_basis"])
+        row = await fetch_one(
+            """UPDATE candidates
+               SET consent_talentpool_at = $1, consent_talentpool_until = $2,
+                   consent_scope = $3, consent_source = $4, consent_reminder_sent_at = NULL,
+                   lawful_basis = CASE WHEN $5 THEN 'opt_in_talentpool' ELSE lawful_basis END,
+                   updated_at = NOW()
+               WHERE id = $6
+               RETURNING id, lawful_basis, consent_talentpool_at, consent_talentpool_until""",
+            now, until, pending["scope"], pending["source"], set_lawful_basis, existing["id"],
+        )
+    else:
+        row = await fetch_one(
+            """INSERT INTO candidates
+               (full_name, email, source, lawful_basis, date_found,
+                consent_talentpool_at, consent_talentpool_until, consent_scope, consent_source)
+               VALUES ($1, $2, 'talentpool_optin', 'opt_in_talentpool', CURRENT_DATE, $3, $4, $5, $6)
+               RETURNING id, lawful_basis, consent_talentpool_at, consent_talentpool_until""",
+            pending["email"], pending["email"], now, until, pending["scope"], pending["source"],
+        )
+
+    return {
+        "message": "Talentpool consent confirmed.",
+        "consent_talentpool_until": row["consent_talentpool_until"],
     }

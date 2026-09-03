@@ -1147,6 +1147,74 @@ const GSP_WHATSAPP = '31617913965';
     });
   }
 
+  // ── Talentpool opt-in (WS-C.17) ─────────────────────────
+  // website/kandidaten.html's checkbox below the "Create my profile"
+  // form. Ticking it reveals an e-mail field; submitting posts to the
+  // public double-opt-in endpoint (routers/public.py talentpool_public_
+  // router) -- consent only becomes effective once the confirmation
+  // e-mail's link is clicked (POST /api/public/talentpool-confirm), never
+  // from this call alone.
+  function initTalentpoolOptin() {
+    const check = $('talentpoolConsentCheck');
+    const row = $('talentpoolOptinRow');
+    const emailInput = $('talentpoolOptinEmail');
+    const btn = $('talentpoolOptinBtn');
+    if (!check || !row || !emailInput || !btn) return;
+
+    check.addEventListener('change', () => {
+      row.hidden = !check.checked;
+    });
+
+    btn.addEventListener('click', async () => {
+      const lang = localStorage.getItem('gsp_lang') || 'nl';
+      const errEl = $('talentpoolOptinError');
+      const successEl = $('talentpoolOptinSuccess');
+      if (errEl) errEl.style.display = 'none';
+      if (successEl) successEl.style.display = 'none';
+
+      const email = emailInput.value.trim();
+      if (!check.checked || !email || !email.includes('@')) {
+        if (errEl) {
+          errEl.textContent = lang === 'nl'
+            ? 'Vink het vakje aan en voer een geldig e-mailadres in.'
+            : 'Tick the box and enter a valid email address.';
+          errEl.style.display = 'block';
+        }
+        return;
+      }
+
+      btn.disabled = true;
+      const originalHtml = btn.innerHTML;
+      btn.innerHTML = '<span class="spinner-sm"></span>';
+
+      try {
+        const res = await fetchTimeout(`${API}/api/public/talentpool-optin`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            email, consent: true, scope: 'matching_and_contact', source: 'kandidaten_page'
+          })
+        });
+        if (res.ok) {
+          if (successEl) {
+            successEl.textContent = lang === 'nl'
+              ? 'Check je inbox om je talentpool-aanmelding te bevestigen.'
+              : 'Check your inbox to confirm your talent pool sign-up.';
+            successEl.style.display = 'block';
+          }
+          emailInput.value = '';
+        } else {
+          throw new Error(lang === 'nl' ? 'Aanmelden mislukt. Probeer opnieuw.' : 'Sign-up failed. Please try again.');
+        }
+      } catch (err) {
+        if (errEl) { errEl.textContent = err.message; errEl.style.display = 'block'; }
+      } finally {
+        btn.disabled = false;
+        btn.innerHTML = originalHtml;
+      }
+    });
+  }
+
   // ── Live Stats ─────────────────────────────────────────
   function initLiveStats() {
     // Static stats are shown by default in HTML.
@@ -1433,6 +1501,7 @@ const GSP_WHATSAPP = '31617913965';
     initSalaryCalc();
     initQuiz();
     initContactForm();
+    initTalentpoolOptin();
     initLiveStats();
     initTestimonials();
     initBackToTop();

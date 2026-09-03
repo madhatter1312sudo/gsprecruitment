@@ -7,6 +7,7 @@ sent. There is no auto-send path anywhere in this router.
 """
 import logging
 import re
+from datetime import datetime, timezone
 from typing import Optional
 
 import json
@@ -71,6 +72,7 @@ REFUSAL_CANDIDATE_NOT_FOUND = (404, "candidate_not_found")
 REFUSAL_PROSPECT_NOT_FOUND = (404, "prospect_not_found")
 REFUSAL_UNKNOWN_TARGET_TYPE = (422, "unknown_target_type")
 REFUSAL_CANDIDATE_MISSING_PROVENANCE = (409, "candidate_missing_provenance")
+REFUSAL_TALENTPOOL_CONSENT_EXPIRED = (409, "talentpool_consent_expired")
 
 # lawful_basis values whose grounds are Art. 13, not Art. 14 (SOP §3.2):
 # the person supplied the data themselves, so the Art. 14 notice block
@@ -81,6 +83,10 @@ _ART13_LAWFUL_BASES = ("portal_registratie", "opt_in_talentpool")
 
 def _is_http_url(value) -> bool:
     return isinstance(value, str) and value.strip().lower().startswith(("http://", "https://"))
+
+
+def _now_utc() -> datetime:
+    return datetime.now(timezone.utc)
 
 
 async def _draft_refusal(draft: dict):
@@ -106,7 +112,8 @@ async def _draft_refusal(draft: dict):
 
     if target_type == "candidate":
         candidate = await fetch_one(
-            "SELECT lawful_basis, consent_withdrawn_at, consent_spec_presentation_at, source_url "
+            "SELECT lawful_basis, consent_withdrawn_at, consent_spec_presentation_at, source_url, "
+            "consent_talentpool_until "
             "FROM candidates WHERE id = $1",
             draft.get("target_id"),
         )
@@ -119,12 +126,37 @@ async def _draft_refusal(draft: dict):
             return status_code, code, "Candidate has withdrawn consent (consent_withdrawn_at set) — refusing to send."
 
         lawful_basis = candidate["lawful_basis"]
-        if lawful_basis is None or not _is_http_url(candidate["source_url"]):
+        if lawful_basis is None:
             status_code, code = REFUSAL_CANDIDATE_MISSING_PROVENANCE
             return status_code, code, (
-                "Candidate has no lawful_basis and/or no public http(s) source_url on file "
+                "Candidate has no lawful_basis on file (SOP §2 'geen bron-URL = geen contact') "
+                "— refusing to send."
+            )
+
+        # WS-C.17 (SOP §1.5): opt_in_talentpool's own provenance IS the
+        # checkbox itself -- "herkomst is de eigen site (het vinkje zelf),
+        # dus source_url is niet vereist voor talentpool-contact". Every
+        # other basis still needs a public http(s) source_url on file.
+        if lawful_basis != "opt_in_talentpool" and not _is_http_url(candidate["source_url"]):
+            status_code, code = REFUSAL_CANDIDATE_MISSING_PROVENANCE
+            return status_code, code, (
+                "Candidate has no public http(s) source_url on file "
                 "(SOP §2 'geen bron-URL = geen contact') — refusing to send."
             )
+
+        # WS-C.17 (SOP §1.5): opt_in_talentpool is only a valid basis for
+        # contact while consent_talentpool_until is still in the future.
+        # Expired (or never-set, e.g. a pre-WS-C.17 row) consent on this
+        # basis refuses outright -- "verlopen ... = direct geen contact
+        # meer op deze grondslag", no exception.
+        if lawful_basis == "opt_in_talentpool":
+            consent_until = candidate["consent_talentpool_until"]
+            if consent_until is None or consent_until <= _now_utc():
+                status_code, code = REFUSAL_TALENTPOOL_CONSENT_EXPIRED
+                return status_code, code, (
+                    "Candidate's talentpool consent has expired or was never set "
+                    "(consent_talentpool_until) — refusing to send on lawful_basis=opt_in_talentpool."
+                )
 
         if lawful_basis not in _ART13_LAWFUL_BASES:
             if not _has_art14_block(body, language):
