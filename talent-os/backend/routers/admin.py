@@ -119,11 +119,19 @@ async def get_user_detail(
         )
         if profile:
             user["profile"] = profile
-        # Also get the candidates record
-        candidate = await fetch_one(
-            "SELECT id FROM candidates WHERE LOWER(email) = LOWER($1) AND deleted_at IS NULL",
-            user["email"],
-        )
+        # Also get the candidates record -- FK first (candidate_profiles.
+        # candidate_id), e-mail match only as the fallback for a row
+        # migrations/023's backfill hasn't linked yet.
+        candidate = None
+        if profile and profile.get("candidate_id"):
+            candidate = await fetch_one(
+                "SELECT id FROM candidates WHERE id = $1 AND deleted_at IS NULL", profile["candidate_id"],
+            )
+        if not candidate:
+            candidate = await fetch_one(
+                "SELECT id FROM candidates WHERE LOWER(email) = LOWER($1) AND deleted_at IS NULL",
+                user["email"],
+            )
         if candidate:
             user["candidate_id"] = candidate["id"]
             match_count = await fetch_val(

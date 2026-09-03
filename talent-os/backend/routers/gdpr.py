@@ -267,17 +267,20 @@ async def _redact_audit_log_email(email: str, replacement: str) -> int:
     return redacted
 
 
-async def _anonymize_by_id(select_sql: str, update_sql: str, email_norm: str, email_hash: str) -> int:
-    """Fetch matching row ids (select_sql, filtered to email_norm as $1,
-    must return an 'id' column) and UPDATE each individually with its own
-    id-suffixed placeholder address (update_sql takes id as $1, the
-    placeholder as $2). Per-row placeholders -- rather than one shared
-    address for every matched row -- avoid a duplicate-key violation on
-    any column that carries a uniqueness constraint (candidates.email,
-    users.email) when more than one row matches the same original
-    address, and keep every anonymised row individually distinguishable
-    even where no such constraint exists."""
-    rows = await fetch_all(select_sql, email_norm)
+async def _anonymize_by_id(select_sql: str, update_sql: str, select_param, email_hash: str) -> int:
+    """Fetch matching row ids (select_sql, filtered to select_param as $1
+    -- normally email_norm, but any value select_sql's $1 expects works,
+    e.g. WS-C.16's FK-linked-candidates lookup below passes an id list
+    for `id = ANY($1::int[])` -- must return an 'id' column) and UPDATE
+    each individually with its own id-suffixed placeholder address
+    (update_sql takes id as $1, the placeholder as $2). Per-row
+    placeholders -- rather than one shared address for every matched row
+    -- avoid a duplicate-key violation on any column that carries a
+    uniqueness constraint (candidates.email, users.email) when more than
+    one row matches the same original address, and keep every anonymised
+    row individually distinguishable even where no such constraint
+    exists."""
+    rows = await fetch_all(select_sql, select_param)
     for row in rows:
         anon = f"erased-{email_hash[:16]}-{row['id']}@erased.invalid"
         await execute(update_sql, row["id"], anon)
@@ -364,17 +367,18 @@ async def erase_person(email: str, actor_id: Optional[int] = None, reason: str =
         email_norm, email_hash,
     )
     # WS-C.16 extra: anonymise the FK-linked candidates rows the e-mail
-    # match above wouldn't have reached (see extra_ids above) -- same
-    # per-row placeholder reasoning as _anonymize_by_id.
-    for cid in extra_ids:
-        anon = f"erased-{email_hash[:16]}-{cid}@erased.invalid"
-        await execute(
+    # match above wouldn't have reached (see extra_ids above) -- reuses
+    # _anonymize_by_id with an id list instead of an e-mail as the $1
+    # filter, same per-row placeholder reasoning.
+    if extra_ids:
+        await _anonymize_by_id(
+            "SELECT id FROM candidates WHERE id = ANY($1::int[])",
             """UPDATE candidates SET
                  full_name = 'Erased', email = $2, phone = NULL, linkedin_url = NULL,
                  github_url = NULL, portfolio_url = NULL, cv_text = NULL, cv_file_path = NULL,
                  education = NULL, deleted_at = NOW(), consent_withdrawn_at = COALESCE(consent_withdrawn_at, NOW())
                WHERE id = $1""",
-            cid, anon,
+            extra_ids, email_hash,
         )
     for uid in user_ids:
         await execute(

@@ -45,10 +45,25 @@ def _load_migration(fname):
 
 # ── Migration 023 text checks ─────────────────────────────────────────────
 
-def test_migration_023_adds_candidate_id_fk_column():
+def test_migration_023_adds_candidate_id_column():
     mod = _load_migration("023_candidate_profiles_candidate_id.py")
     sql = mod.MIGRATION_SQL
-    assert "ALTER TABLE candidate_profiles ADD COLUMN IF NOT EXISTS candidate_id INTEGER REFERENCES candidates(id)" in sql
+    assert "ALTER TABLE candidate_profiles ADD COLUMN IF NOT EXISTS candidate_id INTEGER" in sql
+
+
+def test_migration_023_fk_is_named_and_on_delete_set_null():
+    """The FK is added via a named constraint (DROP CONSTRAINT IF EXISTS
+    / ADD CONSTRAINT), not inline on the column -- so re-running this on
+    an environment that already has an earlier version of the FK
+    converges to ON DELETE SET NULL instead of erroring on 'constraint
+    already exists'."""
+    mod = _load_migration("023_candidate_profiles_candidate_id.py")
+    sql = mod.MIGRATION_SQL
+    assert "DROP CONSTRAINT IF EXISTS candidate_profiles_candidate_id_fkey" in sql
+    assert (
+        "ADD CONSTRAINT candidate_profiles_candidate_id_fkey "
+        "FOREIGN KEY (candidate_id) REFERENCES candidates(id) ON DELETE SET NULL" in sql
+    )
 
 
 def test_migration_023_column_is_nullable():
@@ -75,9 +90,24 @@ def test_migration_023_is_idempotent_guarded():
     mod = _load_migration("023_candidate_profiles_candidate_id.py")
     sql = mod.MIGRATION_SQL
     assert "ADD COLUMN IF NOT EXISTS" in sql
+    assert "DROP CONSTRAINT IF EXISTS" in sql
     assert "CREATE INDEX IF NOT EXISTS" in sql
     # Both backfill UPDATEs must be guarded so a second run touches 0 rows.
     assert sql.count("candidate_id IS NULL") >= 2
+
+
+def test_migration_023_backfill_and_version_insert_run_in_one_transaction():
+    src_path = os.path.join(MIGRATIONS_DIR, "023_candidate_profiles_candidate_id.py")
+    with open(src_path, encoding="utf-8") as fh:
+        src = fh.read()
+    assert "async with conn.transaction():" in src
+    # The three backfill statements and the schema_migrations INSERT must
+    # all sit inside that transaction block, not before it.
+    tx_block = src[src.index("async with conn.transaction():"):]
+    assert "LINK_EXISTING_SQL" in tx_block
+    assert "CREATE_MISSING_SQL" in tx_block
+    assert "LINK_CREATED_SQL" in tx_block
+    assert "INSERT INTO schema_migrations (version) VALUES ($1)" in tx_block
 
 
 def test_migration_023_backfill_matches_case_insensitively_lowest_id_wins():
@@ -126,7 +156,13 @@ def test_migration_023_uses_schema_migrations_version_guard():
 
 # ── No remaining UNION anywhere in routers/ ────────────────────────────────
 
+_SQL_UNION_RE = re.compile(r"\bUNION\s+(?:ALL|SELECT)\b")
+
+
 def test_no_union_left_in_routers():
+    """Matches the actual SQL keyword combination (`UNION ALL` / `UNION
+    SELECT`), not just the bare word `UNION` -- a comment or docstring
+    prose mentioning "not a SQL UNION" or similar must not trip this."""
     offenders = []
     for fname in os.listdir(ROUTERS_DIR):
         if not fname.endswith(".py"):
@@ -134,7 +170,7 @@ def test_no_union_left_in_routers():
         path = os.path.join(ROUTERS_DIR, fname)
         with open(path, encoding="utf-8") as fh:
             text = fh.read()
-        if re.search(r"\bUNION\b", text):
+        if _SQL_UNION_RE.search(text):
             offenders.append(fname)
     assert not offenders, f"UNION still present in: {offenders}"
 

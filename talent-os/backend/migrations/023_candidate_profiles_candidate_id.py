@@ -15,10 +15,21 @@ LOWER(email) every time, including a UNION CTE in admin.py. This
 migration adds the FK so that join only has to happen once, here, as a
 one-time backfill.
 
-Adds `candidate_profiles.candidate_id INTEGER REFERENCES candidates(id)`
-(nullable — a self-registered person who has never triggered candidates
-row creation, e.g. an unverified signup per WS-E.2, legitimately has
-none yet) plus a plain (non-unique) index for the lookup.
+Adds `candidate_profiles.candidate_id INTEGER` (nullable — a
+self-registered person who has never triggered candidates row creation,
+e.g. an unverified signup per WS-E.2, legitimately has none yet), a
+named FK constraint `candidate_profiles_candidate_id_fkey REFERENCES
+candidates(id) ON DELETE SET NULL` (a `candidates` row being erased/
+deleted must not fail or cascade-delete the person's own profile — see
+routers/gdpr.py's erase_person, which already anonymises the candidates
+row in place rather than deleting it, but ON DELETE SET NULL is the
+correct behaviour regardless of how a candidates row disappears), plus a
+plain (non-unique) index for the lookup. The FK constraint is added via
+`DROP CONSTRAINT IF EXISTS ... ; ADD CONSTRAINT ...` under the fixed name
+above rather than inline on the column, so re-running this on an
+environment that already has an earlier (unnamed-equivalent, no ON
+DELETE clause) version of this FK converges it to the current definition
+instead of erroring on "constraint already exists".
 
 Backfill, in order:
   1. Link every candidate_profiles row to an existing candidates row by
@@ -51,19 +62,28 @@ path); a plain index is enough for the lookups routers/*.py need
 rows this backfill somehow missed — see routers/candidate.py's
 _get_candidate_id() and routers/admin.py's candidate list).
 
-Pattern of 014/015: idempotent (ADD COLUMN IF NOT EXISTS / CREATE INDEX
-IF NOT EXISTS, and both backfill UPDATEs are WHERE candidate_id IS NULL
--guarded so a second run touches zero rows), no `DO $$ ... END $$;`
-blocks (migrations/_runner.py's run_migration() splits on a literal ";",
-which would mangle one — see 000_baseline.py's docstring). This
-migration doesn't use run_migration() directly, unlike 014/015, only
-because it needs the per-statement affected-row counts for its log
-line (asyncpg's conn.execute() return tag, e.g. "UPDATE 5") — it still
-uses the same schema_migrations version-guard
+Pattern of 014/015: idempotent (ADD COLUMN IF NOT EXISTS / DROP+ADD
+CONSTRAINT / CREATE INDEX IF NOT EXISTS, and both backfill UPDATEs are
+WHERE candidate_id IS NULL-guarded so a second run touches zero rows),
+no `DO $$ ... END $$;` blocks (migrations/_runner.py's run_migration()
+splits on a literal ";", which would mangle one — see 000_baseline.py's
+docstring). This migration doesn't use run_migration() directly, unlike
+014/015, only because it needs the per-statement affected-row counts for
+its log line (asyncpg's conn.execute() return tag, e.g. "UPDATE 5") — it
+still uses the same schema_migrations version-guard
 (ensure_schema_migrations_table / SELECT ... WHERE version = $1 /
 INSERT INTO schema_migrations) so `python3 migrations/023_*.py` behaves
 identically to every other migration script in this directory, and
 still runs as part of the normal 000→NNN sequence.
+
+The three backfill statements (LINK_EXISTING_SQL, CREATE_MISSING_SQL,
+LINK_CREATED_SQL) plus the schema_migrations version insert run inside a
+single `async with conn.transaction():` block — either the whole backfill
+lands and is recorded as applied, or (on any error) none of it does,
+rather than leaving candidate_profiles partially linked with the version
+row not yet written (which a retry would then redo safely anyway thanks
+to the IS NULL guards, but there is no reason to allow the partial state
+to be observable in between).
 
 The migration log reports counts only (rows linked / rows created) —
 never any e-mail address or other PII, per the GSP house rule (secrets/
@@ -79,7 +99,9 @@ from _runner import ensure_schema_migrations_table  # noqa: E402
 VERSION = "023_candidate_profiles_candidate_id"
 
 SCHEMA_SQL = """
-ALTER TABLE candidate_profiles ADD COLUMN IF NOT EXISTS candidate_id INTEGER REFERENCES candidates(id);
+ALTER TABLE candidate_profiles ADD COLUMN IF NOT EXISTS candidate_id INTEGER;
+ALTER TABLE candidate_profiles DROP CONSTRAINT IF EXISTS candidate_profiles_candidate_id_fkey;
+ALTER TABLE candidate_profiles ADD CONSTRAINT candidate_profiles_candidate_id_fkey FOREIGN KEY (candidate_id) REFERENCES candidates(id) ON DELETE SET NULL;
 CREATE INDEX IF NOT EXISTS idx_candidate_profiles_candidate_id ON candidate_profiles(candidate_id);
 """
 
@@ -162,13 +184,13 @@ async def run():
             if stmt:
                 await conn.execute(stmt)
 
-        linked_existing = _rowcount(await conn.execute(LINK_EXISTING_SQL))
-        created = _rowcount(await conn.execute(CREATE_MISSING_SQL))
-        linked_created = _rowcount(await conn.execute(LINK_CREATED_SQL))
-
-        await conn.execute(
-            "INSERT INTO schema_migrations (version) VALUES ($1)", VERSION
-        )
+        async with conn.transaction():
+            linked_existing = _rowcount(await conn.execute(LINK_EXISTING_SQL))
+            created = _rowcount(await conn.execute(CREATE_MISSING_SQL))
+            linked_created = _rowcount(await conn.execute(LINK_CREATED_SQL))
+            await conn.execute(
+                "INSERT INTO schema_migrations (version) VALUES ($1)", VERSION
+            )
         # Counts only — never e-mails or other PII (GSP house rule).
         print(
             f"Migration {VERSION} applied and recorded. "
