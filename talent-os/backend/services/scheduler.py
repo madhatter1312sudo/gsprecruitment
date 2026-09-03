@@ -387,6 +387,23 @@ async def _purge_sourced_no_response(lawful_basis: str, reason: str) -> int:
     return len(rows)
 
 
+async def _count_talentpool_expired() -> list:
+    # WS-C.17: mirrors _count_sourced_no_response -- reads the shared
+    # selector from core/retention.py so the query this job runs and the
+    # one that module documents can never drift apart.
+    return await fetch_all(retention.TALENTPOOL_EXPIRED_SQL)
+
+
+async def _purge_talentpool_expired(reason: str) -> int:
+    from routers.gdpr import erase_person
+
+    rows = await _count_talentpool_expired()
+    for row in rows:
+        if row["email"]:
+            await erase_person(row["email"], actor_id=None, reason=reason)
+    return len(rows)
+
+
 async def _count_prospect_no_response() -> list:
     # security-auditor follow-up (LOW): no code path updates
     # client_prospects.status once a draft is sent or answered (routers/
@@ -454,6 +471,11 @@ async def _category_result(row: "retention.RetentionRow", dry_run: bool) -> dict
                 count = await _purge_sourced_no_response(
                     "toestemming_referral", f"retention_purge:{row.key}",
                 )
+        elif row.key == "talentpool_consent":
+            if dry_run:
+                count = len(await _count_talentpool_expired())
+            else:
+                count = await _purge_talentpool_expired(f"retention_purge:{row.key}")
         elif row.key == "prospect_no_response":
             count = len(await _count_prospect_no_response()) if dry_run else await _purge_prospect_no_response()
         elif row.key == "leads_quiz":

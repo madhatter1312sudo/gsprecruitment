@@ -117,6 +117,7 @@ from routers.candidate import router as candidate_portal_router
 from routers.client import router as client_portal_router
 from routers.admin import router as admin_portal_router
 from routers.public import router as public_router
+from routers.public import talentpool_public_router
 from routers.gdpr import router as gdpr_router
 from routers.gdpr import admin_router as gdpr_admin_router
 from routers.gdpr import suppression_router
@@ -142,6 +143,7 @@ app.include_router(candidate_portal_router)
 app.include_router(client_portal_router)
 app.include_router(admin_portal_router)
 app.include_router(public_router)
+app.include_router(talentpool_public_router)
 app.include_router(gdpr_router)
 app.include_router(gdpr_admin_router)
 app.include_router(suppression_router)

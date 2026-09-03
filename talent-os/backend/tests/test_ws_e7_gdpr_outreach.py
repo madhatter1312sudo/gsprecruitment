@@ -12,6 +12,7 @@ tests/test_gdpr_erasure.py.
 import asyncio
 import os
 import sys
+from datetime import datetime, timedelta, timezone
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
@@ -66,6 +67,7 @@ def _candidate(**overrides):
         "consent_withdrawn_at": None,
         "consent_spec_presentation_at": None,
         "source_url": "https://linkedin.com/in/x",
+        "consent_talentpool_until": None,
     }
     base.update(overrides)
     return base
@@ -171,6 +173,49 @@ def test_approve_allows_portal_registratie_without_art14_block(patch_db):
     draft = _draft(body=NL_STOP)
     result = asyncio.run(outreach._draft_refusal(draft))
     assert result is None
+
+
+def test_approve_allows_opt_in_talentpool_with_consent_still_valid(patch_db):
+    """WS-C.17: opt_in_talentpool is a valid Art. 13 basis (no Art. 14
+    block needed, same as portal_registratie) as long as
+    consent_talentpool_until is still in the future."""
+    future = datetime.now(timezone.utc) + timedelta(days=30)
+    outreach = patch_db(_FakeDB(candidate=_candidate(
+        lawful_basis="opt_in_talentpool", consent_talentpool_until=future,
+    )))
+    draft = _draft(body=NL_STOP)
+    result = asyncio.run(outreach._draft_refusal(draft))
+    assert result is None
+
+
+def test_approve_refuses_opt_in_talentpool_with_expired_consent(patch_db):
+    """WS-C.17 (SOP §1.5): 'verlopen ... toestemming = direct geen contact
+    meer op deze grondslag' -- expired consent_talentpool_until refuses
+    outright, distinct from missing provenance."""
+    past = datetime.now(timezone.utc) - timedelta(days=1)
+    outreach = patch_db(_FakeDB(candidate=_candidate(
+        lawful_basis="opt_in_talentpool", consent_talentpool_until=past,
+    )))
+    draft = _draft(body=NL_STOP)
+    result = asyncio.run(outreach._draft_refusal(draft))
+    assert result is not None
+    status_code, code, _detail = result
+    assert (status_code, code) == outreach.REFUSAL_TALENTPOOL_CONSENT_EXPIRED
+
+
+def test_approve_refuses_opt_in_talentpool_with_no_consent_until_set(patch_db):
+    """A pre-WS-C.17 row (or one whose consent was withdrawn via the
+    candidate-portal endpoint, which nulls consent_talentpool_until)
+    carries lawful_basis=opt_in_talentpool but no consent_talentpool_until
+    -- also refused, not silently treated as valid forever."""
+    outreach = patch_db(_FakeDB(candidate=_candidate(
+        lawful_basis="opt_in_talentpool", consent_talentpool_until=None,
+    )))
+    draft = _draft(body=NL_STOP)
+    result = asyncio.run(outreach._draft_refusal(draft))
+    assert result is not None
+    status_code, code, _detail = result
+    assert (status_code, code) == outreach.REFUSAL_TALENTPOOL_CONSENT_EXPIRED
 
 
 def test_approve_refuses_withdrawn_consent(patch_db):

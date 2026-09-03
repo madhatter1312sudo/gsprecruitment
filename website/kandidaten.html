@@ -127,6 +127,21 @@
       </button>
       <p class="signup-alt"><span class="lang-en">Already have a profile?</span><span class="lang-nl">Al een profiel?</span> <a href="#" id="signupLoginLink"><span class="lang-en">Log in</span><span class="lang-nl">Log in</span></a></p>
     </div>
+    <div class="talentpool-optin" id="talentpoolOptin">
+      <label class="talentpool-optin-check" for="talentpoolConsentCheck">
+        <input type="checkbox" id="talentpoolConsentCheck">
+        <span class="lang-nl">Ja, neem mij op in de talentpool van GSP Recruitment voor passende rollen. Bewaartermijn 12 maanden, daarna vragen wij opnieuw. Intrekken kan altijd via info@gsprecruitment.nl.</span>
+        <span class="lang-en">Yes, add me to GSP Recruitment's talent pool for suitable roles. Retention period 12 months, after which we ask again. You can withdraw at any time via info@gsprecruitment.nl.</span>
+      </label>
+      <div class="talentpool-optin-row" id="talentpoolOptinRow" hidden>
+        <input type="email" id="talentpoolOptinEmail" placeholder="Email address" data-lang-en="Email address" data-lang-nl="E-mailadres">
+        <button type="button" id="talentpoolOptinBtn" class="btn btn-ghost btn-sm">
+          <span class="lang-en">Sign up</span><span class="lang-nl">Aanmelden</span>
+        </button>
+      </div>
+      <div class="form-error" id="talentpoolOptinError" role="alert" aria-live="polite"></div>
+      <div class="form-success" id="talentpoolOptinSuccess" role="status" aria-live="polite"></div>
+    </div>
   </div>
 </section>
 <!-- ─── WHY GSP ───────────────────────────────────────────── -->

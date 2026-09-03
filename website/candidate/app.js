@@ -261,6 +261,43 @@
       }
     });
 
+    /* ---- Talentpool consent (WS-C.17) ----
+       No GET counterpart exists yet (candidates.consent_* isn't part of
+       CandidatePortalProfile) -- the checkbox starts unchecked each visit;
+       submitting always tells the candidate the resulting state via the
+       POST response instead. */
+    const tpCheck = document.getElementById('talentpoolConsentCheck');
+    const tpSaveBtn = document.getElementById('talentpoolConsentSaveBtn');
+    const tpStatus = document.getElementById('talentpoolConsentStatus');
+    if (tpCheck && tpSaveBtn) {
+      tpSaveBtn.addEventListener('click', async () => {
+        const isNl = document.documentElement.getAttribute('data-lang') === 'nl';
+        try {
+          const res = await Auth.fetch('/v1/candidate/talentpool-consent', {
+            method: 'POST',
+            body: JSON.stringify({
+              consent: tpCheck.checked,
+              scope: tpCheck.checked ? 'matching_and_contact' : null,
+            }),
+          });
+          if (res && res.ok) {
+            const row = await res.json();
+            if (tpStatus) {
+              tpStatus.textContent = row.consent_talentpool_until
+                ? (isNl ? `Actief tot ${new Date(row.consent_talentpool_until).toLocaleDateString('nl-NL')}.`
+                        : `Active until ${new Date(row.consent_talentpool_until).toLocaleDateString('en-GB')}.`)
+                : (isNl ? 'Talentpool-toestemming ingetrokken.' : 'Talent pool consent withdrawn.');
+            }
+            Auth.toast(isNl ? 'Opgeslagen!' : 'Saved!');
+          } else {
+            Auth.toast(isNl ? 'Opslaan mislukt' : 'Failed to save', 'error');
+          }
+        } catch (err) {
+          Auth.toast('Error saving talentpool consent', 'error');
+        }
+      });
+    }
+
     /* ---- CV Upload ---- */
     const pCvZone = document.getElementById('profileCvZone');
     const pCvInput = document.getElementById('profileCvInput');

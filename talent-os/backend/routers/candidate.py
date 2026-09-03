@@ -10,12 +10,15 @@ from models.schemas import (
     CandidatePortalProfile, CandidateProfileUpdate, CandidateMatchItem,
     ApplicationCreate, SavedJobCreate, CandidateDashboard,
     SalaryBenchmarkResponse, MessageListResponse, MessageResponse,
+    TalentpoolConsentUpdate,
 )
 from typing import Optional, List
 import asyncio
+import json
 import os
 import uuid
 import logging
+from datetime import datetime, timedelta, timezone
 
 from services import storage
 from services.candidate_link import get_or_create_candidate_id
@@ -135,6 +138,83 @@ async def update_candidate_profile(
             )
 
     return await get_candidate_profile(current_user)
+
+
+# ── Talentpool consent (WS-C.17) ───────────────────────────────────────
+# docs/SOURCING-SOP.md §1.5/§2, core/retention.py's talentpool_consent row.
+
+TALENTPOOL_CONSENT_MONTHS = 12
+
+
+@router.post("/talentpool-consent")
+async def update_talentpool_consent(
+    data: TalentpoolConsentUpdate,
+    current_user: dict = Depends(get_verified_user),
+):
+    """Candidate portal talentpool opt-in/withdrawal (one of the three
+    WS-C.17 consent touchpoints; the other two are the public
+    kandidaten.html/blog CTA flow and the admin-recorded flow).
+
+    consent=True requires `scope` and sets consent_talentpool_at (now),
+    consent_talentpool_until (now + 12 months, renewable by ticking again),
+    consent_scope, and consent_source='portal' on the candidates row.
+    lawful_basis becomes 'opt_in_talentpool' -- but only when this
+    candidate's current lawful_basis is NULL or already
+    'portal_registratie' (i.e. they registered through the portal
+    themselves): a candidate sourced on a different basis
+    (gerechtvaardigd_belang, toestemming_referral) never has that basis
+    silently overwritten by ticking a talentpool checkbox.
+
+    consent=False clears all four consent columns (withdrawal -- SOP §1.5
+    "verlopen of ingetrokken toestemming = direct geen contact meer op
+    deze grondslag"); lawful_basis is left untouched (a NULL
+    consent_talentpool_until already makes outreach.py's _draft_refusal
+    refuse any opt_in_talentpool-basis draft for this person)."""
+    if current_user["role"] != "candidate":
+        raise HTTPException(status_code=403, detail="Only candidates can set talentpool consent")
+
+    if data.consent and not data.scope:
+        raise HTTPException(status_code=422, detail="scope is required when consent=true")
+
+    candidate_id = await _get_candidate_id(current_user["id"])
+    if not candidate_id:
+        raise HTTPException(status_code=404, detail="No candidate record found for this account")
+
+    candidate = await fetch_one("SELECT lawful_basis FROM candidates WHERE id = $1", candidate_id)
+
+    if data.consent:
+        now = datetime.now(timezone.utc)
+        until = now + timedelta(days=365)  # 12 months, renewable on re-tick
+        set_lawful_basis = candidate and candidate["lawful_basis"] in (None, "portal_registratie")
+        row = await fetch_one(
+            """UPDATE candidates
+               SET consent_talentpool_at = $1, consent_talentpool_until = $2,
+                   consent_scope = $3, consent_source = 'portal',
+                   lawful_basis = CASE WHEN $4 THEN 'opt_in_talentpool' ELSE lawful_basis END,
+                   updated_at = NOW()
+               WHERE id = $5
+               RETURNING id, consent_talentpool_at, consent_talentpool_until, consent_scope,
+                         consent_source, lawful_basis""",
+            now, until, data.scope, set_lawful_basis, candidate_id,
+        )
+    else:
+        row = await fetch_one(
+            """UPDATE candidates
+               SET consent_talentpool_at = NULL, consent_talentpool_until = NULL,
+                   consent_scope = NULL, consent_source = NULL, updated_at = NOW()
+               WHERE id = $1
+               RETURNING id, consent_talentpool_at, consent_talentpool_until, consent_scope,
+                         consent_source, lawful_basis""",
+            candidate_id,
+        )
+
+    await execute(
+        "INSERT INTO audit_log (action, actor_id, target_type, target_id, changes) VALUES ($1, $2, $3, $4, $5::jsonb)",
+        "talentpool_consent_update", current_user["id"], "candidate", candidate_id,
+        json.dumps({"consent": data.consent, "scope": data.scope, "source": "portal"}),
+    )
+
+    return row
 
 
 # ── CV Upload ───────────────────────────────────────────────────────────

@@ -189,6 +189,23 @@ def test_prospect_no_response_sql_guards_against_replies_and_sent_drafts():
     assert retention.get_row("prospect_no_response").selector_sql is retention.PROSPECT_NO_RESPONSE_SQL
 
 
+# ── WS-C.17: talentpool_consent is now schema_ready ───────────────────────
+
+def test_talentpool_expired_sql_selects_expired_opt_in_talentpool_only():
+    sql = retention.TALENTPOOL_EXPIRED_SQL
+    assert "lawful_basis = 'opt_in_talentpool'" in sql
+    assert "consent_talentpool_until" in sql
+    assert "deleted_at IS NULL" in sql
+
+
+def test_talentpool_consent_row_is_schema_ready_with_shared_selector():
+    row = retention.get_row("talentpool_consent")
+    assert row.schema_ready is True
+    assert row.action == "anonymise"
+    assert row.anchor_column == "candidates.consent_talentpool_until"
+    assert row.selector_sql is retention.TALENTPOOL_EXPIRED_SQL
+
+
 def test_scheduler_reuses_the_shared_retention_selectors_not_a_local_copy():
     """The purge job must run exactly the query core/retention.py documents
     -- not a second, independently-maintained copy that could drift."""
@@ -267,7 +284,10 @@ def test_dry_run_issues_no_execute_calls(patch_scheduler_db):
     assert rec.execute_calls == []  # no UPDATE/DELETE/INSERT at all
     # every schema_ready, actionable category returned a count
     counted = {c["key"]: c["count"] for c in result["categories"] if c["status"] == "counted"}
-    assert counted == {"sourced_no_response": 0, "prospect_no_response": 0, "referral": 0, "leads_quiz": 0}
+    assert counted == {
+        "sourced_no_response": 0, "prospect_no_response": 0, "referral": 0,
+        "leads_quiz": 0, "talentpool_consent": 0,
+    }
 
 
 def test_dry_run_reports_schema_not_ready_categories(patch_scheduler_db):
@@ -276,16 +296,19 @@ def test_dry_run_reports_schema_not_ready_categories(patch_scheduler_db):
     result = asyncio.run(scheduler.run_retention_purge(dry_run=True))
     by_key = {c["key"]: c["status"] for c in result["categories"]}
     assert by_key["rejected_applicant"] == "schema_not_ready"
-    assert by_key["talentpool_consent"] == "schema_not_ready"
     assert by_key["prospect_responding"] == "schema_not_ready"
     assert by_key["portal_account_inactive"] == "schema_not_ready"
     assert by_key["placed_candidate"] == "not_applicable"
     assert by_key["logs"] == "not_applicable"
-    # none of these ever issued a fetch either -- no query against a
-    # column that doesn't exist in the DB
+    # WS-C.17: talentpool_consent is schema_ready as of migrations/030 --
+    # it's counted, not reported schema_not_ready, and it fetches the
+    # shared retention.TALENTPOOL_EXPIRED_SQL selector.
+    assert by_key["talentpool_consent"] == "counted"
     fetched_categories = {sql for sql, _ in rec.fetch_calls}
+    assert any("consent_talentpool_until" in sql for sql in fetched_categories)
+    # the still-not-ready categories never issued a fetch -- no query
+    # against a column that doesn't exist in the DB
     assert not any("rejected_at" in sql for sql in fetched_categories)
-    assert not any("consent_talentpool_until" in sql for sql in fetched_categories)
 
 
 def test_real_run_purges_and_writes_one_audit_row_per_purged_category(monkeypatch, patch_scheduler_db):
@@ -312,7 +335,9 @@ def test_real_run_purges_and_writes_one_audit_row_per_purged_category(monkeypatc
     # delete calls actually fired since there was nothing to act on.
     audit_inserts = [c for c in rec.execute_calls if c[0].startswith("INSERT INTO audit_log")]
     purged_keys = {c["key"] for c in result["categories"] if c["status"] == "purged"}
-    assert purged_keys == {"sourced_no_response", "prospect_no_response", "referral", "leads_quiz"}
+    assert purged_keys == {
+        "sourced_no_response", "prospect_no_response", "referral", "leads_quiz", "talentpool_consent",
+    }
     assert len(audit_inserts) == len(purged_keys)
     for sql, args in audit_inserts:
         assert sql.strip().startswith("INSERT INTO audit_log")
@@ -608,5 +633,26 @@ def test_migration_022_is_idempotent_and_matches_the_documented_condition():
     assert mod.VERSION == "022_apollo_pool_flag"
     # no DELETE/DROP anywhere in this migration -- WS-E.8 hard rule: this
     # PR must not delete production data by itself.
+    assert "DELETE" not in sql.upper()
+    assert "DROP" not in sql.upper()
+
+
+# ── Migration 030 text (WS-C.17) ──────────────────────────────────────────
+
+def test_migration_030_is_idempotent_and_matches_the_documented_columns():
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "migrations"))
+    import importlib
+    mod = importlib.import_module("030_talentpool_consent")
+    sql = mod.MIGRATION_SQL
+    assert mod.VERSION == "030_talentpool_consent"
+    assert "ADD COLUMN IF NOT EXISTS consent_talentpool_at TIMESTAMPTZ" in sql
+    assert "ADD COLUMN IF NOT EXISTS consent_talentpool_until TIMESTAMPTZ" in sql
+    assert "ADD COLUMN IF NOT EXISTS consent_scope TEXT CHECK" in sql
+    assert "matching_only" in sql and "matching_and_contact" in sql
+    assert "ADD COLUMN IF NOT EXISTS consent_source TEXT CHECK" in sql
+    assert "'portal','kandidaten_page','blog_cta','admin'" in sql
+    assert "CREATE TABLE IF NOT EXISTS talentpool_optin_requests" in sql
+    assert "token_hash      TEXT NOT NULL UNIQUE" in sql
+    assert "DO $$" not in sql  # _runner.py splits SQL on literal ";"
     assert "DELETE" not in sql.upper()
     assert "DROP" not in sql.upper()
