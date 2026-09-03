@@ -2916,6 +2916,133 @@
         "title": "MessageResponse",
         "type": "object"
       },
+      "MfaDisableRequest": {
+        "properties": {
+          "code": {
+            "maxLength": 8,
+            "minLength": 6,
+            "title": "Code",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code"
+        ],
+        "title": "MfaDisableRequest",
+        "type": "object"
+      },
+      "MfaEnableRequest": {
+        "properties": {
+          "code": {
+            "maxLength": 8,
+            "minLength": 6,
+            "title": "Code",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code"
+        ],
+        "title": "MfaEnableRequest",
+        "type": "object"
+      },
+      "MfaEnableResponse": {
+        "properties": {
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "recovery_codes": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Recovery Codes",
+            "type": "array"
+          }
+        },
+        "required": [
+          "message",
+          "recovery_codes"
+        ],
+        "title": "MfaEnableResponse",
+        "type": "object"
+      },
+      "MfaRecoveryRequest": {
+        "properties": {
+          "mfa_token": {
+            "title": "Mfa Token",
+            "type": "string"
+          },
+          "recovery_code": {
+            "maxLength": 16,
+            "minLength": 6,
+            "title": "Recovery Code",
+            "type": "string"
+          }
+        },
+        "required": [
+          "mfa_token",
+          "recovery_code"
+        ],
+        "title": "MfaRecoveryRequest",
+        "type": "object"
+      },
+      "MfaSetupResponse": {
+        "properties": {
+          "otpauth_uri": {
+            "title": "Otpauth Uri",
+            "type": "string"
+          },
+          "qr_svg": {
+            "title": "Qr Svg",
+            "type": "string"
+          },
+          "secret": {
+            "title": "Secret",
+            "type": "string"
+          }
+        },
+        "required": [
+          "otpauth_uri",
+          "qr_svg",
+          "secret"
+        ],
+        "title": "MfaSetupResponse",
+        "type": "object"
+      },
+      "MfaStatusResponse": {
+        "properties": {
+          "mfa_enabled": {
+            "title": "Mfa Enabled",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "mfa_enabled"
+        ],
+        "title": "MfaStatusResponse",
+        "type": "object"
+      },
+      "MfaVerifyRequest": {
+        "properties": {
+          "code": {
+            "maxLength": 8,
+            "minLength": 6,
+            "title": "Code",
+            "type": "string"
+          },
+          "mfa_token": {
+            "title": "Mfa Token",
+            "type": "string"
+          }
+        },
+        "required": [
+          "mfa_token",
+          "code"
+        ],
+        "title": "MfaVerifyRequest",
+        "type": "object"
+      },
       "PipelineAdd": {
         "properties": {
           "candidate_id": {
@@ -4122,7 +4249,7 @@
     },
     "/api/auth/login": {
       "post": {
-        "description": "Authenticate a user and return a JWT token.",
+        "description": "Authenticate a user and return a JWT token (or, for an admin with\nMFA enabled, an mfa_required challenge -- WS-E.12, see core/mfa.py).\n\nLocked-out and wrong-password both return the exact same generic 401\n-- a locked account must never be distinguishable from a bad password\n(which itself must never be distinguishable from \"no such account\",\nsee _get_user_by_email's callers) -- the only extra signal is a\nRetry-After header, and only while actually locked.",
         "operationId": "login_api_auth_login_post",
         "requestBody": {
           "content": {
@@ -4138,9 +4265,7 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/TokenResponse"
-                }
+                "schema": {}
               }
             },
             "description": "Successful Response"
@@ -4234,9 +4359,233 @@
         ]
       }
     },
+    "/api/auth/mfa/disable": {
+      "post": {
+        "description": "Requires a currently-valid code (not a recovery code) -- disabling\nMFA is itself a sensitive action and must not be reachable purely by\nknowing the session token, e.g. from a stolen/leaked Bearer token.",
+        "operationId": "mfa_disable_api_auth_mfa_disable_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MfaDisableRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Mfa Disable",
+        "tags": [
+          "mfa"
+        ]
+      }
+    },
+    "/api/auth/mfa/enable": {
+      "post": {
+        "description": "Confirm setup with a first live code. On success, marks MFA\nenabled and returns 10 recovery codes -- shown exactly once here,\nonly their hashes are ever stored (see core/mfa.py).",
+        "operationId": "mfa_enable_api_auth_mfa_enable_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MfaEnableRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MfaEnableResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Mfa Enable",
+        "tags": [
+          "mfa"
+        ]
+      }
+    },
+    "/api/auth/mfa/recovery": {
+      "post": {
+        "operationId": "mfa_recovery_api_auth_mfa_recovery_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MfaRecoveryRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Mfa Recovery",
+        "tags": [
+          "mfa"
+        ]
+      }
+    },
+    "/api/auth/mfa/setup": {
+      "post": {
+        "description": "Generate a fresh TOTP secret, store it encrypted (unconfirmed --\ntotp_enabled_at stays NULL until POST /enable verifies a code), and\nreturn the otpauth:// URI plus a scannable QR SVG.\n\n409s once MFA is already enabled: without this, a stolen/leaked\nBearer token could silently call /setup again to rotate the secret\nout from under the real admin, generate its own otpauth URI for the\nnew secret, and use that to satisfy the *existing* mfa_pending\nchallenge going forward -- effectively hijacking the second factor\nwithout ever needing the current TOTP code. Once enabled, rotating\nthe secret must go through /disable (which requires a current code)\nfirst.",
+        "operationId": "mfa_setup_api_auth_mfa_setup_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MfaSetupResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Mfa Setup",
+        "tags": [
+          "mfa"
+        ]
+      }
+    },
+    "/api/auth/mfa/status": {
+      "get": {
+        "description": "Any authenticated user can read their own MFA status -- the admin\npanel banner (\"Zet tweestapsverificatie aan\") uses this. Deliberately\nnot gated behind _require_admin: a non-admin gets a meaningless-but-\nharmless mfa_enabled=false rather than a 403 that would complicate\nthe panel's banner logic for no security benefit (this leaks nothing\nbeyond what /api/auth/me already exposes about the caller's own\naccount).",
+        "operationId": "mfa_status_api_auth_mfa_status_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MfaStatusResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Mfa Status",
+        "tags": [
+          "mfa"
+        ]
+      }
+    },
+    "/api/auth/mfa/verify": {
+      "post": {
+        "operationId": "mfa_verify_api_auth_mfa_verify_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MfaVerifyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Mfa Verify",
+        "tags": [
+          "mfa"
+        ]
+      }
+    },
     "/api/auth/refresh": {
       "post": {
-        "description": "Issue a new access token using an existing valid token.\n\nRejects tokens carrying an `impersonator` claim -- an admin\nimpersonation token must stay short-lived and never be silently\nextended into a fresh, long-lived session (see routers/admin.py\nimpersonate_user).",
+        "description": "Issue a new access token using an existing valid token.\n\nRejects tokens carrying an `impersonator` claim -- an admin\nimpersonation token must stay short-lived and never be silently\nextended into a fresh, long-lived session (see routers/admin.py\nimpersonate_user).\n\nSecurity-audit follow-up on WS-E.4: this endpoint decodes the token\nitself (get_current_user is not in its dependency chain), so it must\nrun the same iat-vs-password_changed_at check get_current_user does\n-- otherwise a token stolen before a password reset could be\n\"laundered\" into a fresh one here even though it would be rejected\neverywhere else.",
         "operationId": "refresh_token_api_auth_refresh_post",
         "requestBody": {
           "content": {
@@ -7430,6 +7779,52 @@
           }
         ],
         "summary": "Impersonate User",
+        "tags": [
+          "admin-portal"
+        ]
+      }
+    },
+    "/api/v1/admin/users/{user_id}/unlock": {
+      "post": {
+        "description": "WS-E.4: clear an account's login lockout (failed_login_count /\nlocked_until) early -- e.g. a legitimate user got rate-limited by\ntheir own retries. Does not touch password_hash or\npassword_changed_at, so any JWT already issued to this user stays\nvalid (unlocking is not a password reset).",
+        "operationId": "unlock_user_api_v1_admin_users__user_id__unlock_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "title": "User Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Unlock User",
         "tags": [
           "admin-portal"
         ]

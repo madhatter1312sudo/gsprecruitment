@@ -320,8 +320,26 @@ const GSP_WHATSAPP = '31617913965';
     const tabs = qsa('.modal-tab');
     const loginForm = $('loginForm');
     const registerForm = $('registerForm');
+    const mfaLoginForm = $('mfaLoginForm');
     const errEl = $('authError');
     const successEl = $('authSuccess');
+    let mfaToken = null;
+    let mfaUseRecovery = false;
+
+    // WS-E.12: swap the login form for the MFA-code step; closeAuthModal()
+    // resets this back to the login tab.
+    function showMfaStep(token) {
+      mfaToken = token;
+      mfaUseRecovery = false;
+      if (loginForm) loginForm.style.display = 'none';
+      if (registerForm) registerForm.style.display = 'none';
+      if (mfaLoginForm) mfaLoginForm.style.display = 'flex';
+      if (errEl) errEl.style.display = 'none';
+      const codeInput = $('mfaLoginCode');
+      const recoveryInput = $('mfaRecoveryCodeInput');
+      if (codeInput) { codeInput.style.display = ''; codeInput.value = ''; codeInput.focus(); }
+      if (recoveryInput) { recoveryInput.style.display = 'none'; recoveryInput.value = ''; }
+    }
 
     function openModal(tab, triggerEl) {
       if (!modal) return;
@@ -337,6 +355,10 @@ const GSP_WHATSAPP = '31617913965';
     function closeAuthModal() {
       modal?.classList.remove('active');
       Auth.releaseFocusTrap(modal);
+      mfaToken = null;
+      if (mfaLoginForm) mfaLoginForm.style.display = 'none';
+      if (loginForm) loginForm.style.display = 'flex';
+      if (registerForm) registerForm.style.display = 'none';
     }
 
     // Check logged-in state using Auth module
@@ -403,6 +425,10 @@ const GSP_WHATSAPP = '31617913965';
         if (result.error) {
           if (errEl) { errEl.textContent = result.error; errEl.style.display = 'block'; }
           Auth.toast(result.error, 'error');
+        } else if (result.mfaRequired) {
+          // WS-E.12: swap to the second-step MFA form instead of closing
+          // the modal -- no tokens exist yet.
+          showMfaStep(result.mfaToken);
         } else {
           closeAuthModal();
           window.location.href = Auth.getDashboardUrl(result.user);
@@ -461,6 +487,45 @@ const GSP_WHATSAPP = '31617913965';
         }
       }
     });
+
+    // WS-E.12: MFA second step — code or recovery-code submit
+    $('mfaUseRecoveryLink')?.addEventListener('click', () => {
+      mfaUseRecovery = !mfaUseRecovery;
+      const codeInput = $('mfaLoginCode');
+      const recoveryInput = $('mfaRecoveryCodeInput');
+      if (codeInput) codeInput.style.display = mfaUseRecovery ? 'none' : '';
+      if (recoveryInput) recoveryInput.style.display = mfaUseRecovery ? '' : 'none';
+    });
+
+    mfaLoginForm?.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      if (!mfaToken) return;
+      if (errEl) errEl.style.display = 'none';
+
+      const submitBtn = mfaLoginForm.querySelector('button[type="submit"]');
+      if (submitBtn) { submitBtn.disabled = true; submitBtn.innerHTML = '<span class="spinner-sm"></span>'; }
+
+      try {
+        const result = mfaUseRecovery
+          ? await Auth.verifyMfaRecovery(mfaToken, $('mfaRecoveryCodeInput')?.value)
+          : await Auth.verifyMfa(mfaToken, $('mfaLoginCode')?.value);
+        if (result.error) {
+          if (errEl) { errEl.textContent = result.error; errEl.style.display = 'block'; }
+          Auth.toast(result.error, 'error');
+        } else {
+          closeAuthModal();
+          window.location.href = Auth.getDashboardUrl(result.user);
+        }
+      } catch (err) {
+        if (errEl) { errEl.textContent = 'An unexpected error occurred. Please try again.'; errEl.style.display = 'block'; }
+        Auth.toast('Verification failed. Please try again.', 'error');
+      } finally {
+        if (submitBtn) {
+          submitBtn.disabled = false;
+          submitBtn.innerHTML = '<i class="fas fa-shield-halved"></i> <span class="lang-en">Verify</span><span class="lang-nl">Verifiëren</span>';
+        }
+      }
+    });
   }
 
   // ── Job Board ──────────────────────────────────────────
@@ -476,13 +541,16 @@ const GSP_WHATSAPP = '31617913965';
     let searchTimeout = null;
 
     function showLoading() {
-      grid.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:60px 20px"><div class="spinner" style="margin:0 auto 16px"></div><p style="color:var(--text-muted)">Loading vacancies...</p></div>';
+      const lang = localStorage.getItem('gsp_lang') || 'nl';
+      const text = lang === 'nl' ? 'Vacatures laden...' : 'Loading vacancies...';
+      grid.innerHTML = `<div style="grid-column:1/-1;text-align:center;padding:60px 20px"><div class="spinner" style="margin:0 auto 16px"></div><p style="color:var(--text-muted)">${text}</p></div>`;
     }
 
     function showError(msg) {
       const lang = localStorage.getItem('gsp_lang') || 'nl';
-      const text = msg || (lang === 'nl' ? 'Could not load vacancies. Please try again later.' : 'Could not load vacancies. Please try again later.');
-      grid.innerHTML = `<div style="grid-column:1/-1;text-align:center;padding:60px 20px"><i class="fas fa-exclamation-triangle" style="font-size:2rem;color:var(--gold);margin-bottom:12px"></i><p>${text}</p><button class="btn btn-ghost btn-sm" onclick="location.reload()" style="margin-top:16px"><i class="fas fa-redo"></i> Retry</button></div>`;
+      const text = msg || (lang === 'nl' ? 'Kon vacatures niet laden. Probeer het later opnieuw.' : 'Could not load vacancies. Please try again later.');
+      const retryLabel = lang === 'nl' ? 'Opnieuw proberen' : 'Retry';
+      grid.innerHTML = `<div style="grid-column:1/-1;text-align:center;padding:60px 20px"><i class="fas fa-exclamation-triangle" style="font-size:2rem;color:var(--gold);margin-bottom:12px"></i><p>${text}</p><button class="btn btn-ghost btn-sm" onclick="location.reload()" style="margin-top:16px"><i class="fas fa-redo"></i> ${retryLabel}</button></div>`;
     }
 
     async function fetchJobs() {
@@ -502,7 +570,7 @@ const GSP_WHATSAPP = '31617913965';
         }
       } catch (e) {
         console.warn('[Jobs] API fetch failed:', e);
-        showError('Network error. Please check your connection.');
+        showError();
         return;
       }
       renderJobs();
@@ -664,94 +732,28 @@ const GSP_WHATSAPP = '31617913965';
   // Note: key "Embedded Software Engineer" matches the HTML <select> value
   const FALLBACK_SALARIES = {
     'Embedded Software Engineer': {
-      Junior: { p25: 40, p50: 47, p75: 52, p90: 55, sample_size: 120 },
-      Medior: { p25: 55, p50: 62, p75: 67, p90: 70, sample_size: 180 },
-      Senior: { p25: 70, p50: 80, p75: 87, p90: 90, sample_size: 200 },
-      Lead: { p25: 90, p50: 100, p75: 107, p90: 110, sample_size: 80 }
-    },
-    'Frontend Developer': {
-      Junior: { p25: 36, p50: 42, p75: 46, p90: 48, sample_size: 90 },
-      Medior: { p25: 48, p50: 55, p75: 60, p90: 62, sample_size: 140 },
-      Senior: { p25: 62, p50: 70, p75: 75, p90: 78, sample_size: 160 },
-      Lead: { p25: 78, p50: 88, p75: 92, p90: 95, sample_size: 50 }
-    },
-    'Backend Developer': {
-      Junior: { p25: 40, p50: 47, p75: 52, p90: 55, sample_size: 100 },
-      Medior: { p25: 52, p50: 62, p75: 67, p90: 72, sample_size: 160 },
-      Senior: { p25: 68, p50: 78, p75: 84, p90: 88, sample_size: 190 },
-      Lead: { p25: 88, p50: 98, p75: 104, p90: 108, sample_size: 60 }
+      Junior: { p25: 40, p50: 47, p75: 52, p90: 55 },
+      Medior: { p25: 55, p50: 62, p75: 67, p90: 70 },
+      Senior: { p25: 70, p50: 80, p75: 87, p90: 90 },
+      Lead: { p25: 90, p50: 100, p75: 107, p90: 110 }
     },
     'C++ Developer': {
-      Junior: { p25: 42, p50: 50, p75: 55, p90: 58, sample_size: 140 },
-      Medior: { p25: 58, p50: 66, p75: 71, p90: 75, sample_size: 190 },
-      Senior: { p25: 75, p50: 85, p75: 91, p90: 95, sample_size: 220 },
-      Lead: { p25: 95, p50: 105, p75: 111, p90: 115, sample_size: 70 }
+      Junior: { p25: 42, p50: 50, p75: 55, p90: 58 },
+      Medior: { p25: 58, p50: 66, p75: 71, p90: 75 },
+      Senior: { p25: 75, p50: 85, p75: 91, p90: 95 },
+      Lead: { p25: 95, p50: 105, p75: 111, p90: 115 }
     },
     'Mechatronics Engineer': {
-      Junior: { p25: 40, p50: 47, p75: 52, p90: 55, sample_size: 100 },
-      Medior: { p25: 55, p50: 63, p75: 68, p90: 72, sample_size: 150 },
-      Senior: { p25: 72, p50: 82, p75: 88, p90: 92, sample_size: 170 },
-      Lead: { p25: 92, p50: 101, p75: 107, p90: 110, sample_size: 60 }
+      Junior: { p25: 40, p50: 47, p75: 52, p90: 55 },
+      Medior: { p25: 55, p50: 63, p75: 68, p90: 72 },
+      Senior: { p25: 72, p50: 82, p75: 88, p90: 92 },
+      Lead: { p25: 92, p50: 101, p75: 107, p90: 110 }
     },
-    'Cybersecurity Engineer': {
-      Junior: { p25: 45, p50: 52, p75: 57, p90: 60, sample_size: 90 },
-      Medior: { p25: 60, p50: 70, p75: 76, p90: 80, sample_size: 130 },
-      Senior: { p25: 80, p50: 90, p75: 96, p90: 100, sample_size: 150 },
-      Lead: { p25: 100, p50: 115, p75: 125, p90: 130, sample_size: 50 }
-    },
-    'Software Engineer': {
-      Junior: { p25: 40, p50: 47, p75: 52, p90: 55, sample_size: 200 },
-      Medior: { p25: 55, p50: 63, p75: 68, p90: 70, sample_size: 260 },
-      Senior: { p25: 70, p50: 80, p75: 86, p90: 90, sample_size: 280 },
-      Lead: { p25: 90, p50: 100, p75: 106, p90: 110, sample_size: 90 }
-    },
-    'AI/ML Engineer': {
-      Junior: { p25: 45, p50: 53, p75: 59, p90: 62, sample_size: 80 },
-      Medior: { p25: 62, p50: 72, p75: 78, p90: 82, sample_size: 110 },
-      Senior: { p25: 82, p50: 93, p75: 100, p90: 105, sample_size: 130 },
-      Lead: { p25: 105, p50: 120, p75: 129, p90: 135, sample_size: 40 }
-    },
-    'DevOps / Cloud Engineer': {
-      Junior: { p25: 42, p50: 50, p75: 55, p90: 58, sample_size: 110 },
-      Medior: { p25: 58, p50: 66, p75: 72, p90: 75, sample_size: 160 },
-      Senior: { p25: 75, p50: 85, p75: 91, p90: 95, sample_size: 180 },
-      Lead: { p25: 95, p50: 105, p75: 111, p90: 115, sample_size: 60 }
-    },
-    'Data Engineer': {
-      Junior: { p25: 42, p50: 49, p75: 54, p90: 57, sample_size: 90 },
-      Medior: { p25: 55, p50: 64, p75: 70, p90: 74, sample_size: 130 },
-      Senior: { p25: 72, p50: 82, p75: 88, p90: 92, sample_size: 150 },
-      Lead: { p25: 92, p50: 102, p75: 108, p90: 112, sample_size: 50 }
-    },
-    'Data Scientist / AI Engineer': {
-      Junior: { p25: 45, p50: 53, p75: 59, p90: 62, sample_size: 80 },
-      Medior: { p25: 60, p50: 70, p75: 77, p90: 82, sample_size: 110 },
-      Senior: { p25: 78, p50: 90, p75: 97, p90: 102, sample_size: 130 },
-      Lead: { p25: 98, p50: 112, p75: 120, p90: 125, sample_size: 40 }
-    },
-    'IT Infrastructure Engineer': {
-      Junior: { p25: 32, p50: 38, p75: 42, p90: 44, sample_size: 70 },
-      Medior: { p25: 44, p50: 52, p75: 57, p90: 60, sample_size: 100 },
-      Senior: { p25: 58, p50: 66, p75: 71, p90: 74, sample_size: 110 },
-      Lead: { p25: 72, p50: 80, p75: 85, p90: 88, sample_size: 40 }
-    },
-    'Systems Architect': {
-      Junior: { p25: 50, p50: 57, p75: 62, p90: 65, sample_size: 60 },
-      Medior: { p25: 65, p50: 75, p75: 81, p90: 85, sample_size: 100 },
-      Senior: { p25: 85, p50: 97, p75: 105, p90: 110, sample_size: 120 },
-      Lead: { p25: 110, p50: 125, p75: 134, p90: 140, sample_size: 50 }
-    },
-    'Software Architect': {
-      Junior: { p25: 60, p50: 68, p75: 73, p90: 76, sample_size: 50 },
-      Medior: { p25: 75, p50: 84, p75: 90, p90: 94, sample_size: 80 },
-      Senior: { p25: 92, p50: 105, p75: 112, p90: 118, sample_size: 100 },
-      Lead: { p25: 115, p50: 128, p75: 136, p90: 142, sample_size: 40 }
-    },
-    'Engineering Manager': {
-      Junior: { p25: 55, p50: 64, p75: 70, p90: 73, sample_size: 40 },
-      Medior: { p25: 70, p50: 80, p75: 87, p90: 92, sample_size: 70 },
-      Senior: { p25: 90, p50: 102, p75: 109, p90: 114, sample_size: 90 },
-      Lead: { p25: 110, p50: 125, p75: 134, p90: 140, sample_size: 50 }
+    'OT/Cybersecurity Engineer': {
+      Junior: { p25: 45, p50: 52, p75: 57, p90: 60 },
+      Medior: { p25: 60, p50: 70, p75: 76, p90: 80 },
+      Senior: { p25: 80, p50: 90, p75: 96, p90: 100 },
+      Lead: { p25: 100, p50: 115, p75: 125, p90: 130 }
     }
   };
 
@@ -833,9 +835,9 @@ const GSP_WHATSAPP = '31617913965';
       const sample = $('calcSample');
       if (sample) {
         const lang = localStorage.getItem('gsp_lang') || 'nl';
-        sample.textContent = data.sample_size
-          ? (lang === 'nl' ? `Gebaseerd op ${data.sample_size} datapunten` : `Based on ${data.sample_size} data points`)
-          : (lang === 'nl' ? 'Gebaseerd op branche benchmarks' : 'Based on industry benchmarks');
+        sample.textContent = lang === 'nl'
+          ? 'Indicatief, op basis van openbare bronnen (CBS, cao-schalen, vacatures)'
+          : 'Indicative, based on public sources (CBS, cao scales, vacancies)';
       }
     }
 
@@ -847,10 +849,10 @@ const GSP_WHATSAPP = '31617913965';
   // ── Tech Match Quiz ────────────────────────────────────
   const QUIZ = [
     { q: { en: 'Which area is closest to your work?', nl: 'Welk vakgebied past het best bij jou?' }, options: [
-      { text: { en: 'Web & application development', nl: 'Web- & applicatieontwikkeling' }, score: 22 },
-      { text: { en: 'Cloud, infrastructure & DevOps', nl: 'Cloud, infrastructuur & DevOps' }, score: 22 },
-      { text: { en: 'Data, AI & machine learning', nl: 'Data, AI & machine learning' }, score: 22 },
-      { text: { en: 'Security & privacy', nl: 'Security & privacy' }, score: 22 }
+      { text: { en: 'Embedded software (C/C++)', nl: 'Embedded software (C/C++)' }, score: 22 },
+      { text: { en: 'Mechatronics & motion control software', nl: 'Mechatronica en besturingssoftware' }, score: 22 },
+      { text: { en: 'OT cybersecurity', nl: 'OT-cybersecurity' }, score: 22 },
+      { text: { en: 'Something else', nl: 'Anders' }, score: 0, route: 'contact.html' }
     ]},
     { q: { en: 'How many years of experience do you have?', nl: 'Hoeveel jaar ervaring heb je?' }, options: [
       { text: { en: '0–2 years (Junior)', nl: '0–2 jaar (Junior)' }, score: 5 },
@@ -907,13 +909,17 @@ const GSP_WHATSAPP = '31617913965';
         <div class="quiz-question">${questionText}</div>
         <div class="quiz-options">
           ${q.options.map((opt, i) => // xss-static-check: safe -- QUIZ is a hardcoded local array, not API/user data
-            `<button class="quiz-option" data-score="${opt.score}">${opt.text[lang] || opt.text.en}</button>` // xss-static-check: safe -- QUIZ is a hardcoded local array, not API/user data
+            `<button class="quiz-option" data-score="${opt.score}"${opt.route ? ` data-route="${opt.route}"` : ''}>${opt.text[lang] || opt.text.en}</button>` // xss-static-check: safe -- QUIZ is a hardcoded local array, not API/user data
           ).join('')}
         </div>
       `;
 
       container.querySelectorAll('.quiz-option').forEach(btn => {
         btn.addEventListener('click', () => {
+          if (btn.dataset.route) {
+            window.location.href = btn.dataset.route;
+            return;
+          }
           score += parseInt(btn.dataset.score);
           currentQ++;
           setTimeout(renderQuestion, 200);

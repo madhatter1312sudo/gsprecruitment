@@ -70,13 +70,26 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -
     """Create a JWT access token with expiration.
 
     python-jose requires 'sub' to be a string, so we convert it if needed.
+
+    WS-E.4: always stamps 'iat' (issued-at) unless the caller already
+    supplied one -- core/deps.get_current_user compares this against
+    users.password_changed_at to reject a token issued before the
+    account's most recent password change/reset/set-password (e.g. a
+    token stolen before a reset). A token minted before this change (or
+    by any code path that doesn't go through here) carries no 'iat' at
+    all; get_current_user treats that as "nothing to compare against" and
+    lets it through until its own 'exp' expiry -- it is NOT retroactively
+    invalidated by a later password change. That's an accepted gap for
+    already-issued tokens, not a bug in new ones.
     """
     to_encode = data.copy()
     if "sub" in to_encode and not isinstance(to_encode["sub"], str):
         to_encode["sub"] = str(to_encode["sub"])
-    expire = datetime.now(timezone.utc) + (
+    now = datetime.now(timezone.utc)
+    expire = now + (
         expires_delta or timedelta(minutes=settings.access_token_expire_minutes)
     )
+    to_encode.setdefault("iat", now)
     to_encode.update({"exp": expire})
     encoded_jwt = jwt.encode(
         to_encode,

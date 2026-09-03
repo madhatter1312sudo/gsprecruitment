@@ -118,6 +118,25 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     access_token_expire_minutes: int = 60
 
+    # ── MFA (WS-E.12, admin TOTP) ────────────────────────────────────────
+    # 32-byte urlsafe-base64 Fernet key (cryptography.fernet.Fernet.generate_key()).
+    # Empty by default so the app still boots without it -- core/mfa.py
+    # refuses to encrypt/decrypt a TOTP secret and POST /api/auth/mfa/setup
+    # returns 503 until this is set, but nothing else in the app depends
+    # on it (see core/mfa.py get_fernet()).
+    mfa_enc_key: str = ""
+    # Master switch: when true, an admin who has not enabled MFA gets 403
+    # mfa_setup_required from admin endpoints once MFA_GRACE_UNTIL has
+    # passed (core/deps.py). Defaults false so a fresh/staging deploy, or
+    # the very first admin on a brand-new deploy, is never locked out
+    # without an explicit opt-in -- see .env.example.
+    mfa_required_for_admin: bool = False
+    # ISO 8601 date/datetime (e.g. "2026-10-01"); before this moment admin
+    # endpoints work regardless of mfa_required_for_admin so existing
+    # admins have time to run the setup flow. Empty means "no grace" (the
+    # 403 applies immediately once mfa_required_for_admin is true).
+    mfa_grace_until: str = ""
+
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "case_sensitive": False}
 
     @model_validator(mode="after")
