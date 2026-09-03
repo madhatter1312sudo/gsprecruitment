@@ -48,6 +48,50 @@ from dataclasses import dataclass
 from typing import Optional, Tuple
 
 
+# Shared SQL, imported by services/scheduler.py rather than duplicated
+# there -- security-auditor follow-up (WS-E.8 FIX FIRST): the selectors
+# below and the ones the purge job actually runs must never drift apart,
+# so this module owns the one copy of each and the job imports it.
+#
+# "status = 'sourced'" alone is not proof nobody has reacted: nothing in
+# this codebase moves candidates.status off 'sourced' when a match
+# progresses, a client pipeline entry is created, an outreach reply comes
+# in, or the person registers a portal account. The four NOT EXISTS
+# guards check those signal tables directly instead of trusting one
+# column that nothing keeps in sync.
+SOURCED_NO_RESPONSE_SQL = """
+    SELECT c.id, c.email FROM candidates c WHERE c.lawful_basis = $1
+      AND c.status = 'sourced' AND c.date_found IS NOT NULL
+      AND c.date_found <= (CURRENT_DATE - INTERVAL '3 months')
+      AND c.consent_withdrawn_at IS NULL AND c.deleted_at IS NULL AND c.email IS NOT NULL
+      AND NOT EXISTS (SELECT 1 FROM matches m WHERE m.candidate_id = c.id AND m.status <> 'suggested')
+      AND NOT EXISTS (SELECT 1 FROM pipeline_entries p WHERE p.candidate_id = c.id)
+      AND NOT EXISTS (SELECT 1 FROM outreach_messages o WHERE o.candidate_id = c.id AND o.replied_at IS NOT NULL)
+      AND NOT EXISTS (SELECT 1 FROM users u WHERE LOWER(u.email) = LOWER(c.email) AND u.deleted_at IS NULL)
+"""
+
+# Same "the status column isn't kept in sync" problem on the prospect
+# side: routers/outreach.py never writes back to client_prospects.status
+# once a draft is approved and sent, or once a reply comes in -- see
+# _count_prospect_no_response()'s docstring (services/scheduler.py).
+# outreach_drafts has no reply column of its own (only outreach_messages
+# does, once a draft becomes an actually-sent message), so the reply
+# guard runs against outreach_messages; a sent-but-not-yet-replied draft
+# is still caught by the second NOT EXISTS.
+PROSPECT_NO_RESPONSE_SQL = """
+    SELECT cp.id FROM client_prospects cp WHERE cp.status = 'new'
+      AND cp.created_at <= (NOW() - INTERVAL '12 months') AND cp.opt_out_at IS NULL
+      AND NOT EXISTS (
+          SELECT 1 FROM outreach_messages om
+          WHERE LOWER(om.recipient_email) = LOWER(cp.contact_email) AND om.replied_at IS NOT NULL
+      )
+      AND NOT EXISTS (
+          SELECT 1 FROM outreach_drafts od
+          WHERE LOWER(od.target_email) = LOWER(cp.contact_email) AND od.target_type = 'prospect' AND od.status = 'sent'
+      )
+"""
+
+
 @dataclass(frozen=True)
 class RetentionRow:
     key: str
@@ -101,12 +145,7 @@ RETENTION_TABLE: Tuple[RetentionRow, ...] = (
         anchor_column="candidates.date_found",
         action="anonymise",
         schema_ready=True,
-        selector_sql=(
-            "SELECT id, email FROM candidates WHERE lawful_basis = 'gerechtvaardigd_belang' "
-            "AND status = 'sourced' AND date_found IS NOT NULL "
-            "AND date_found <= (CURRENT_DATE - INTERVAL '3 months') "
-            "AND consent_withdrawn_at IS NULL AND deleted_at IS NULL AND email IS NOT NULL"
-        ),
+        selector_sql=SOURCED_NO_RESPONSE_SQL,
     ),
     RetentionRow(
         key="prospect_no_response",
@@ -117,10 +156,7 @@ RETENTION_TABLE: Tuple[RetentionRow, ...] = (
         anchor_column="client_prospects.created_at",
         action="hard_delete",
         schema_ready=True,
-        selector_sql=(
-            "SELECT id FROM client_prospects WHERE status = 'new' "
-            "AND created_at <= (NOW() - INTERVAL '12 months') AND opt_out_at IS NULL"
-        ),
+        selector_sql=PROSPECT_NO_RESPONSE_SQL,
     ),
     RetentionRow(
         key="prospect_responding",
@@ -161,12 +197,7 @@ RETENTION_TABLE: Tuple[RetentionRow, ...] = (
         anchor_column="candidates.date_found",
         action="anonymise",
         schema_ready=True,
-        selector_sql=(
-            "SELECT id, email FROM candidates WHERE lawful_basis = 'toestemming_referral' "
-            "AND status = 'sourced' AND date_found IS NOT NULL "
-            "AND date_found <= (CURRENT_DATE - INTERVAL '3 months') "
-            "AND consent_withdrawn_at IS NULL AND deleted_at IS NULL AND email IS NOT NULL"
-        ),
+        selector_sql=SOURCED_NO_RESPONSE_SQL,  # same guarded query; lawful_basis is the $1 parameter
     ),
     RetentionRow(
         key="leads_quiz",

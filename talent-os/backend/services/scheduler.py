@@ -71,8 +71,15 @@ async def apollo_search_and_sync() -> dict:
     """Search Apollo.io for candidates matching our target titles/region and
     upsert new ones into candidates. Skips duplicates by email. Capped at
     APOLLO_SEARCH_CAP inserts per run."""
-    if not await _flag_enabled("apollo_sync_enabled"):
-        logger.info("apollo_search_and_sync: disabled via system_settings, skipping")
+    # security-auditor follow-up (WS-E.8 MEDIUM): this cron job is also
+    # reachable manually via POST /api/v1/admin/outreach/run/sourcing
+    # (routers/outreach.py's JOBS_BY_NAME dispatch) -- checking only the
+    # DB flag here (which defaults to *enabled* when unset) let an admin
+    # trigger a live Apollo call even with the env-level master switch
+    # (APOLLO_SYNC_ENABLED) left at its safe default. Reuse
+    # harvest_service._apollo_sync_enabled(), which checks both.
+    if not await harvest_service._apollo_sync_enabled():
+        logger.info("apollo_search_and_sync: disabled (apollo_sync_enabled), skipping")
         return {"status": "skipped", "reason": "apollo_sync_enabled=false"}
 
     if not settings.apollo_api_key:
@@ -146,8 +153,10 @@ async def apollo_search_and_sync() -> dict:
 async def apollo_enrich_batch() -> dict:
     """Enrich candidates that have a linkedin_url but no email yet, capped
     at APOLLO_ENRICH_CAP per run."""
-    if not await _flag_enabled("apollo_sync_enabled"):
-        logger.info("apollo_enrich_batch: disabled via system_settings, skipping")
+    # security-auditor follow-up (WS-E.8 MEDIUM) -- see apollo_search_and_sync
+    # above: also reachable via POST /api/v1/admin/outreach/run/enrich.
+    if not await harvest_service._apollo_sync_enabled():
+        logger.info("apollo_enrich_batch: disabled (apollo_sync_enabled), skipping")
         return {"status": "skipped", "reason": "apollo_sync_enabled=false"}
 
     if not settings.apollo_api_key:
@@ -356,13 +365,16 @@ async def draft_blog_post() -> dict:
 # (RETENTION_PURGE_ENABLED unset/false) only ever logs counts.
 
 async def _count_sourced_no_response(lawful_basis: str) -> list:
-    return await fetch_all(
-        "SELECT id, email FROM candidates WHERE lawful_basis = $1 "
-        "AND status = 'sourced' AND date_found IS NOT NULL "
-        "AND date_found <= (CURRENT_DATE - INTERVAL '3 months') "
-        "AND consent_withdrawn_at IS NULL AND deleted_at IS NULL AND email IS NOT NULL",
-        lawful_basis,
-    )
+    # security-auditor follow-up (WS-E.8): status='sourced' alone isn't
+    # proof of "no reaction" -- a candidate can pick up a match, a
+    # pipeline entry, a reply, or a portal account without candidates.status
+    # ever being written past 'sourced' by any current code path. The four
+    # NOT EXISTS guards in retention.SOURCED_NO_RESPONSE_SQL make "no
+    # reaction" check the actual signal tables instead of trusting one
+    # column. That query lives in core/retention.py (not duplicated here)
+    # so the selector this job runs and the one core/retention.py
+    # documents/tests can never drift apart.
+    return await fetch_all(retention.SOURCED_NO_RESPONSE_SQL, lawful_basis)
 
 
 async def _purge_sourced_no_response(lawful_basis: str, reason: str) -> int:
@@ -376,10 +388,21 @@ async def _purge_sourced_no_response(lawful_basis: str, reason: str) -> int:
 
 
 async def _count_prospect_no_response() -> list:
-    return await fetch_all(
-        "SELECT id FROM client_prospects WHERE status = 'new' "
-        "AND created_at <= (NOW() - INTERVAL '12 months') AND opt_out_at IS NULL",
-    )
+    # security-auditor follow-up (LOW): no code path updates
+    # client_prospects.status once a draft is sent or answered (routers/
+    # outreach.py never writes back to client_prospects) -- status='new'
+    # therefore does NOT by itself mean "no reaction" here either, same
+    # gap as sourced_no_response above. outreach_drafts has no replied_at
+    # column of its own (only outreach_messages does, once a draft is
+    # approved and actually sent), so the reply guard in
+    # retention.PROSPECT_NO_RESPONSE_SQL runs against outreach_messages; a
+    # sent-but-not-yet-replied draft is still caught by the second NOT
+    # EXISTS so a prospect mid-conversation isn't wiped out from under an
+    # in-flight thread. client_prospects.status still only ever moves by
+    # manual admin action (no automatic transition exists anywhere in
+    # this codebase) -- this guard compensates for that gap rather than
+    # fixing it.
+    return await fetch_all(retention.PROSPECT_NO_RESPONSE_SQL)
 
 
 async def _purge_prospect_no_response() -> int:

@@ -101,14 +101,34 @@ class ApolloPoolPurgeRequest(BaseModel):
 APOLLO_POOL_CONFIRM = "DELETE APOLLO POOL"
 
 # Rows without an http(s) source_url never passed the LIA (§2.6) — those
-# are the only ones this endpoint ever touches. A row that later gained a
-# real public source_url (the owner's other option besides wiping the
-# pool, §5.7) is left alone entirely by this endpoint.
-_TARGET_ROWS_SQL = """
+# are the pool this endpoint considers. A row that later gained a real
+# public source_url (the owner's other option besides wiping the pool,
+# §5.7) is left alone entirely, at both queries below.
+_POOL_ROWS_SQL = """
     SELECT id, email FROM candidates
     WHERE pool_origin = 'apollo'
       AND deleted_at IS NULL
       AND (source_url IS NULL OR source_url !~* '^https?://')
+"""
+
+# security-auditor follow-up (WS-E.8 HIGH): pool_origin='apollo' plus a
+# missing source_url is not by itself proof the row is inert bulk-harvest
+# noise -- an Apollo-sourced candidate can still have picked up a real
+# match, a client pipeline entry, an outreach reply, a portal account, or
+# be the (anonymised) subject of a presented-candidate outreach draft to
+# a client_prospect, all independent of source_url ever being backfilled.
+# Same five guards as core/retention.SOURCED_NO_RESPONSE_SQL, plus a
+# fifth specific to this pool: outreach_drafts.presented_candidate_id
+# (SOP §5 spec-candidate presentation), which points at a candidate row
+# without going through target_email/target_id at all. Applied to BOTH
+# the anonymise and the hard-delete branches -- neither is safe to run
+# against a row any of these five reference.
+_TARGET_ROWS_SQL = _POOL_ROWS_SQL + """
+      AND NOT EXISTS (SELECT 1 FROM matches m WHERE m.candidate_id = candidates.id AND m.status <> 'suggested')
+      AND NOT EXISTS (SELECT 1 FROM pipeline_entries p WHERE p.candidate_id = candidates.id)
+      AND NOT EXISTS (SELECT 1 FROM outreach_messages o WHERE o.candidate_id = candidates.id AND o.replied_at IS NOT NULL)
+      AND NOT EXISTS (SELECT 1 FROM users u WHERE LOWER(u.email) = LOWER(candidates.email) AND u.deleted_at IS NULL)
+      AND NOT EXISTS (SELECT 1 FROM outreach_drafts d WHERE d.presented_candidate_id = candidates.id)
 """
 
 
@@ -146,7 +166,9 @@ async def purge_apollo_pool(
             },
         )
 
+    pool_rows = await fetch_all(_POOL_ROWS_SQL)
     rows = await fetch_all(_TARGET_ROWS_SQL)
+    skipped = len(pool_rows) - len(rows)
     with_email = [r for r in rows if r["email"]]
     without_email = [r for r in rows if not r["email"]]
 
@@ -156,29 +178,42 @@ async def purge_apollo_pool(
             "total": len(rows),
             "would_anonymise": len(with_email),
             "would_hard_delete": len(without_email),
+            "skipped": skipped,
         }
 
     from routers.gdpr import erase_person
 
+    # security-auditor follow-up (WS-E.8 HIGH): the audit row records
+    # whatever actually completed, written from a `finally` so a failure
+    # partway through the anonymise loop or the hard-delete still leaves
+    # an accurate audit_log entry rather than none at all.
     anonymised = 0
-    for row in with_email:
-        await erase_person(row["email"], actor_id=current_user["id"], reason="apollo_pool_purge")
-        anonymised += 1
-
     deleted = 0
-    if without_email:
-        ids = [r["id"] for r in without_email]
-        await execute("DELETE FROM candidates WHERE id = ANY($1::int[])", ids)
-        deleted = len(ids)
+    try:
+        for row in with_email:
+            await erase_person(row["email"], actor_id=current_user["id"], reason="apollo_pool_purge")
+            anonymised += 1
 
-    await execute(
-        "INSERT INTO audit_log (action, actor_id, target_type, target_id, changes) "
-        "VALUES ($1, $2, $3, NULL, $4::jsonb)",
-        "apollo_pool_purge", current_user["id"], "candidates_pool",
-        json.dumps({"anonymised": anonymised, "hard_deleted": deleted, "total": len(rows)}),
-    )
-    logger.warning(
-        "Apollo pool purge run by admin user_id=%s: anonymised=%s hard_deleted=%s",
-        current_user["id"], anonymised, deleted,
-    )
-    return {"dry_run": False, "total": len(rows), "anonymised": anonymised, "hard_deleted": deleted}
+        if without_email:
+            ids = [r["id"] for r in without_email]
+            await execute("DELETE FROM candidates WHERE id = ANY($1::int[])", ids)
+            deleted = len(ids)
+    finally:
+        await execute(
+            "INSERT INTO audit_log (action, actor_id, target_type, target_id, changes) "
+            "VALUES ($1, $2, $3, NULL, $4::jsonb)",
+            "apollo_pool_purge", current_user["id"], "candidates_pool",
+            json.dumps({
+                "anonymised": anonymised, "hard_deleted": deleted,
+                "total": len(rows), "skipped": skipped,
+            }),
+        )
+        logger.warning(
+            "Apollo pool purge run by admin user_id=%s: anonymised=%s hard_deleted=%s skipped=%s",
+            current_user["id"], anonymised, deleted, skipped,
+        )
+
+    return {
+        "dry_run": False, "total": len(rows), "anonymised": anonymised,
+        "hard_deleted": deleted, "skipped": skipped,
+    }

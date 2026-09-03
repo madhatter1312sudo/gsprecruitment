@@ -15,9 +15,18 @@ Backfill condition matches exactly how Apollo rows are marked today
     source = 'apollo' (candidates INSERT, "apollo", "scheduler-apollo-sync").
   - services/harvest.py's harvest_candidates() (bulk one-shot harvest)
     inserts with source = 'apollo_bulk' and source_url = 'apollo:{id}'
-    (harvest.py:222/236/476) -- caught here by the source_url LIKE
-    'apollo:%' clause, not by the source='apollo' clause, since its
-    source value differs. Both are therefore covered.
+    when Apollo returned a person id (harvest.py:222/236/476) -- caught
+    by the source_url LIKE 'apollo:%' clause below. But apollo_ref is
+    None (source_url stays NULL) whenever Apollo's preview record has no
+    id at all (harvest.py's `apollo_ref = f"apollo:{person.get('id')}" if
+    person.get('id') else None`), so the source_url clause alone misses
+    that subset. security-auditor follow-up (WS-E.8 MEDIUM): the backfill
+    also matches source = 'apollo_bulk' directly, independent of
+    source_url, so those NULL-source_url rows are still labelled
+    pool_origin='apollo' (and, not incidentally, still land in
+    routers/retention_admin.py's purge target set, since that endpoint
+    already treats any pool_origin='apollo' row without an http(s)
+    source_url as in-scope).
 
 Pattern of 014/015/018: idempotent (ADD COLUMN IF NOT EXISTS, a plain
 UPDATE ... WHERE that is safe to re-run since it only ever sets the same
@@ -44,7 +53,7 @@ MIGRATION_SQL = """
 ALTER TABLE candidates ADD COLUMN IF NOT EXISTS pool_origin TEXT;
 UPDATE candidates SET pool_origin = 'apollo'
     WHERE pool_origin IS NULL
-      AND (source = 'apollo' OR source_url LIKE 'apollo:%');
+      AND (source = 'apollo' OR source = 'apollo_bulk' OR source_url LIKE 'apollo:%');
 CREATE INDEX IF NOT EXISTS idx_candidates_pool_origin ON candidates(pool_origin) WHERE pool_origin IS NOT NULL;
 """
 
