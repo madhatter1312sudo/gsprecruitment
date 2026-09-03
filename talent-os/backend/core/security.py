@@ -29,6 +29,16 @@ async def verify_api_key(api_key: Optional[str] = Security(api_key_header)) -> s
     return api_key
 
 
+def hash_token(token: str) -> str:
+    """sha256 hex digest of a random one-time token (e-mail verification /
+    set-password links, WS-E.2 + WS-E.3). Only this hash is ever written
+    to the database (users.verification_token_hash) -- the raw token
+    exists only in the outbound e-mail and the URL the recipient clicks,
+    same principle as password hashing above, just a fast digest since
+    this is a high-entropy random value, not a low-entropy user secret."""
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
 def verify_webhook_signature(payload_body: bytes, signature_header: str, secret: str) -> bool:
     """Verify HMAC-SHA256 signature for webhook payloads."""
     expected = hmac.new(

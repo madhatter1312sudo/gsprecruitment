@@ -5,18 +5,22 @@ pipeline, analytics, messages, team management.
 """
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from core.database import fetch_one, fetch_all, execute, fetch_val
-from core.deps import get_current_user, require_role
-from core.security import hash_password
+from core.deps import require_verified_role
+from core.security import hash_password, hash_token
 from models.schemas import (
     ClientDashboard, ClientJobCreate, ClientJobUpdate, JobOrderResponse,
     CandidateSearchParams, PipelineAdd, ClientAnalytics, TeamInvite,
     MessageListResponse, MessageResponse,
 )
+from services.email_service import email_service
 from typing import Optional, List
 from pydantic import BaseModel
 import asyncio
 import json
+import logging
 import secrets
+
+logger = logging.getLogger("talent_os.client_portal")
 
 
 class ClientProfileUpdate(BaseModel):
@@ -68,17 +72,34 @@ async def _get_client_by_user(user_id: int) -> Optional[dict]:
 # in bulk. `_require_candidate_access` is the single gate for the client
 # portal's candidate endpoints — relax it in exactly this one place.
 #
-# TODO(WS-E.2): once `candidates.approved_by_admin_at` (or equivalent) exists,
-# gate non-admin clients on "candidate has been approved for client-facing
-# search" here instead of blocking every non-admin outright.
+# WS-E.2: the blanket "admin-only" block is replaced with an explicit
+# per-client approval gate on `users.approved_by_admin_at` (set by
+# POST /api/v1/admin/clients/{user_id}/approve). A client user is not
+# enough on its own -- role='client' alone no longer grants candidate
+# access, an admin must additionally have approved that specific account.
+# This runs on top of require_verified_role("client", "admin"), so
+# current_user here is always e-mail-verified already; this only adds the
+# admin-approval check. (The router's TODO originally imagined a
+# per-*candidate* approval column instead of a per-*client* one -- the
+# per-client gate is what was actually specified and built for WS-E.2;
+# a finer per-candidate grant can still be layered on top later without
+# touching this function's signature.)
 def _require_candidate_access(current_user: dict) -> None:
-    if current_user["role"] != "admin":
+    if current_user["role"] == "admin":
+        return
+    if current_user["role"] != "client":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Candidate search/detail is available to client and admin accounts only.",
+        )
+    if not current_user.get("approved_by_admin_at"):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=(
-                "Candidate search/detail is temporarily admin-only "
-                "(WS-C.2). Client access returns in WS-E.2 with an "
-                "explicit per-candidate approval gate."
+                "Your company account is pending admin approval. Candidate "
+                "search/detail unlocks once GSP Recruitment approves your "
+                "account -- contact info@gsprecruitment.nl if this is "
+                "taking longer than expected."
             ),
         )
 
@@ -101,7 +122,7 @@ def _project_candidate_public(row: dict) -> dict:
 # ── Dashboard ───────────────────────────────────────────────────────────
 
 @router.get("/dashboard", response_model=ClientDashboard)
-async def get_client_dashboard(current_user: dict = Depends(require_role("client", "admin"))):
+async def get_client_dashboard(current_user: dict = Depends(require_verified_role("client", "admin"))):
     """Get client dashboard stats."""
     client = await _get_client_by_user(current_user["id"])
     if not client:
@@ -146,7 +167,7 @@ async def list_client_jobs(
     date_to: Optional[str] = Query(None),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
-    current_user: dict = Depends(require_role("client", "admin")),
+    current_user: dict = Depends(require_verified_role("client", "admin")),
 ):
     """List jobs for this client with optional filters."""
     client = await _get_client_by_user(current_user["id"])
@@ -187,7 +208,7 @@ async def list_client_jobs(
 @router.post("/jobs", status_code=201)
 async def create_client_job(
     data: ClientJobCreate,
-    current_user: dict = Depends(require_role("client", "admin")),
+    current_user: dict = Depends(require_verified_role("client", "admin")),
 ):
     """Create a job posting for this client."""
     client = await _get_client_by_user(current_user["id"])
@@ -225,7 +246,7 @@ async def create_client_job(
 @router.get("/jobs/{job_id}")
 async def get_client_job(
     job_id: int,
-    current_user: dict = Depends(require_role("client", "admin")),
+    current_user: dict = Depends(require_verified_role("client", "admin")),
 ):
     """Get job detail for a client-owned job."""
     client = await _get_client_by_user(current_user["id"])
@@ -245,7 +266,7 @@ async def get_client_job(
 async def update_client_job(
     job_id: int,
     updates: ClientJobUpdate,
-    current_user: dict = Depends(require_role("client", "admin")),
+    current_user: dict = Depends(require_verified_role("client", "admin")),
 ):
     """Update a job posting."""
     client = await _get_client_by_user(current_user["id"])
@@ -317,7 +338,7 @@ async def update_client_job(
 @router.delete("/jobs/{job_id}")
 async def delete_client_job(
     job_id: int,
-    current_user: dict = Depends(require_role("client", "admin")),
+    current_user: dict = Depends(require_verified_role("client", "admin")),
 ):
     """Soft-delete (draft) a job posting."""
     client = await _get_client_by_user(current_user["id"])
@@ -360,7 +381,7 @@ async def search_candidates(
     skills: Optional[str] = Query(None),
     limit: int = Query(20, ge=1, le=200),
     offset: int = Query(0, ge=0),
-    current_user: dict = Depends(require_role("client", "admin")),
+    current_user: dict = Depends(require_verified_role("client", "admin")),
 ):
     """Search candidates with filters."""
     _require_candidate_access(current_user)
@@ -426,14 +447,15 @@ async def search_candidates(
 @router.get("/candidates/{candidate_id}")
 async def view_candidate_profile(
     candidate_id: int,
-    current_user: dict = Depends(require_role("client", "admin")),
+    current_user: dict = Depends(require_verified_role("client", "admin")),
 ):
     """View a candidate's anonymised profile.
 
-    Admin: unrestricted (until WS-E.2 tightens this further). Non-admin
-    client: implemented now, even though _require_candidate_access blocks
-    every non-admin today — once WS-E.2 lands, a client may only view a
-    candidate who is in their own pipeline (job_orders/pipeline_entries).
+    Admin: unrestricted. Non-admin client: gated on WS-E.2's
+    _require_candidate_access (verified + approved_by_admin_at) and then,
+    below, on the candidate actually being in that client's own pipeline
+    (job_orders/pipeline_entries) — an approved client still can't browse
+    candidates outside their own pipeline via this endpoint.
     """
     _require_candidate_access(current_user)
 
@@ -465,9 +487,11 @@ async def view_candidate_profile(
 @router.post("/pipeline", status_code=201)
 async def add_to_pipeline(
     data: PipelineAdd,
-    current_user: dict = Depends(require_role("client", "admin")),
+    current_user: dict = Depends(require_verified_role("client", "admin")),
 ):
     """Add a candidate to the client's pipeline."""
+    _require_candidate_access(current_user)
+
     client = await _get_client_by_user(current_user["id"])
     if not client:
         raise HTTPException(status_code=400, detail="Client profile not found")
@@ -518,9 +542,11 @@ async def get_pipeline(
     stage: Optional[str] = Query(None),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
-    current_user: dict = Depends(require_role("client", "admin")),
+    current_user: dict = Depends(require_verified_role("client", "admin")),
 ):
     """Get pipeline entries for the client."""
+    _require_candidate_access(current_user)
+
     client = await _get_client_by_user(current_user["id"])
     if not client:
         return {"items": [], "total": 0, "limit": limit, "offset": offset}
@@ -560,7 +586,7 @@ async def get_pipeline(
 # ── Analytics ───────────────────────────────────────────────────────────
 
 @router.get("/analytics", response_model=ClientAnalytics)
-async def get_client_analytics(current_user: dict = Depends(require_role("client", "admin"))):
+async def get_client_analytics(current_user: dict = Depends(require_verified_role("client", "admin"))):
     """Get client analytics data."""
     client = await _get_client_by_user(current_user["id"])
     if not client:
@@ -626,7 +652,7 @@ async def get_client_analytics(current_user: dict = Depends(require_role("client
 async def get_client_messages(
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
-    current_user: dict = Depends(require_role("client", "admin")),
+    current_user: dict = Depends(require_verified_role("client", "admin")),
 ):
     """Get messages for this client."""
     client = await _get_client_by_user(current_user["id"])
@@ -661,7 +687,7 @@ async def get_client_messages(
 # ── Team ────────────────────────────────────────────────────────────────
 
 @router.get("/team")
-async def get_team_members(current_user: dict = Depends(require_role("client", "admin"))):
+async def get_team_members(current_user: dict = Depends(require_verified_role("client", "admin"))):
     """Get team members for this client."""
     client = await _get_client_by_user(current_user["id"])
     if not client:
@@ -680,7 +706,7 @@ async def get_team_members(current_user: dict = Depends(require_role("client", "
 @router.post("/team", status_code=201)
 async def invite_team_member(
     data: TeamInvite,
-    current_user: dict = Depends(require_role("client", "admin")),
+    current_user: dict = Depends(require_verified_role("client", "admin")),
 ):
     """Invite a team member (create user + link to client)."""
     client = await _get_client_by_user(current_user["id"])
@@ -707,18 +733,28 @@ async def invite_team_member(
         )
         return {"message": "User added to team", "user_id": existing_user["id"]}
 
-    # Create new user with a temporary password
-    temp_password = secrets.token_urlsafe(12)
-    password_hash = hash_password(temp_password)
+    # WS-E.3: no more server-generated password (temporary or otherwise) --
+    # the account is created unverified, with an unusable random password
+    # hash (same pattern as routers/auth.py google_callback's Google-only
+    # accounts), and a one-time set-password token is e-mailed to the
+    # invitee. POST /api/auth/set-password consumes that token, lets them
+    # choose their own password, and marks the e-mail verified in the same
+    # step -- there is never a plaintext password or a password-bearing
+    # link in the API response, logs, or audit trail.
+    unusable_password_hash = hash_password(secrets.token_urlsafe(32))
+    set_password_token = secrets.token_urlsafe(32)
+    token_hash = hash_token(set_password_token)
 
     # Privilege-escalation fix (WS-C.2): role is hardcoded to 'client' here
     # regardless of what the request body claims — TeamInvite.role is now a
     # Literal["client"] too, but the INSERT does not trust it either way.
     user = await fetch_one(
-        """INSERT INTO users (email, password_hash, full_name, role, is_verified)
-           VALUES ($1, $2, $3, 'client', FALSE)
+        """INSERT INTO users
+           (email, password_hash, full_name, role, is_verified,
+            verification_token_hash, verification_sent_at)
+           VALUES ($1, $2, $3, 'client', FALSE, $4, NOW())
            RETURNING id, email, full_name, role""",
-        data.email.lower().strip(), password_hash, data.full_name,
+        data.email.lower().strip(), unusable_password_hash, data.full_name, token_hash,
     )
     if not user:
         raise HTTPException(status_code=500, detail="Failed to create user")
@@ -729,6 +765,43 @@ async def invite_team_member(
         user["id"], client["id"],
     )
 
+    set_password_link = f"https://gsprecruitment.nl/verify?token={set_password_token}&mode=set-password"
+    inviter_company = client.get("company_name") or "GSP Recruitment"
+    email_sent = await email_service.send_email(
+        to_email=user["email"],
+        subject="Uitnodiging teamlid — GSP Recruitment",
+        body_text=f"""Beste {user['full_name']},
+
+Je bent uitgenodigd om je aan te sluiten bij het team van {inviter_company} op GSP Recruitment. Stel je wachtwoord in via onderstaande link om je account te activeren:
+{set_password_link}
+
+Deze link is 24 uur geldig.
+
+Als je deze uitnodiging niet verwachtte, kun je dit bericht negeren.
+
+Met vriendelijke groet,
+GSP Recruitment
+info@gsprecruitment.nl
+
+---
+
+Dear {user['full_name']},
+
+You have been invited to join {inviter_company}'s team on GSP Recruitment. Set your password via the link below to activate your account:
+{set_password_link}
+
+This link is valid for 24 hours.
+
+If you did not expect this invitation, you can ignore this message.
+
+Kind regards,
+GSP Recruitment
+info@gsprecruitment.nl
+""",
+    )
+    if not email_sent:
+        logger.warning("Failed to send team-invite set-password e-mail to user_id=%s", user["id"])
+
     await execute(
         "INSERT INTO audit_log (action, actor_id, target_type, target_id, changes) "
         "VALUES ($1, $2, $3, $4, $5::jsonb)",
@@ -736,17 +809,10 @@ async def invite_team_member(
         json.dumps({"client_id": client["id"], "existing_user": False}),
     )
 
-    # NOTE (WS-C.2): the plaintext temporary_password used to be returned in
-    # this response body, which is a credential leak to anything that can
-    # read API responses/logs. We still generate it server-side so the
-    # invited account is usable today, but we no longer hand it back over
-    # the wire. Trade-off: there is currently no way for the invitee to
-    # learn this password — WS-E.3 replaces this whole flow with an
-    # email-delivered set-password link instead of a server-generated one.
     return {
-        "message": "Team member invited successfully. A temporary password "
-                    "was generated server-side; WS-E.3 will deliver a "
-                    "set-password link instead.",
+        "message": "Team member invited successfully. A set-password link "
+                    "was e-mailed to them; the account activates once they "
+                    "use it.",
         "user_id": user["id"],
         "email": user["email"],
     }
@@ -755,7 +821,7 @@ async def invite_team_member(
 # ── Client Profile ──────────────────────────────────────────────────────
 
 @router.get("/profile")
-async def get_client_profile(current_user: dict = Depends(require_role("client", "admin"))):
+async def get_client_profile(current_user: dict = Depends(require_verified_role("client", "admin"))):
     """Get this client's company profile."""
     client = await _get_client_by_user(current_user["id"])
     if not client:
@@ -766,7 +832,7 @@ async def get_client_profile(current_user: dict = Depends(require_role("client",
 @router.patch("/profile")
 async def update_client_profile(
     updates: ClientProfileUpdate,
-    current_user: dict = Depends(require_role("client", "admin")),
+    current_user: dict = Depends(require_verified_role("client", "admin")),
 ):
     """Update this client's company profile."""
     client = await _get_client_by_user(current_user["id"])
