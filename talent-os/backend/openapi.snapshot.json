@@ -38,6 +38,11 @@
             ],
             "title": "Due At"
           },
+          "internal": {
+            "default": true,
+            "title": "Internal",
+            "type": "boolean"
+          },
           "subject_id": {
             "title": "Subject Id",
             "type": "integer"
@@ -98,6 +103,17 @@
               }
             ],
             "title": "Due At"
+          },
+          "internal": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Internal"
           }
         },
         "title": "ActivityUpdate",

@@ -29,6 +29,14 @@ Columns:
     place for the two to drift out of sync.
   - created_by      FK -> users(id) -- the staff member (or client-portal
     user, for client-portal-authored activities) who wrote the row.
+  - internal        BOOLEAN NOT NULL DEFAULT true -- code-review follow-up:
+    an admin-authored row defaults to internal (recruiter-only) and may
+    opt in to client-visible via ActivityCreate/ActivityUpdate's
+    `internal: false`; a client-portal-authored row is always forced to
+    internal=false server-side (routers/activities.py never trusts the
+    client for this). GET /api/v1/client/activities filters
+    `internal = false` in addition to the ownership scoping, so a client
+    can never see an internal-only note even on a subject it owns.
   - created_at/updated_at/deleted_at -- same soft-delete pattern as
     client_contacts (migrations/024_client_contacts.py) and clients/
     candidates: never a real DELETE, GDPR provenance/audit-trail parity.
@@ -39,6 +47,11 @@ EXISTS), CHECK constraints declared inline on the CREATE TABLE (so
 re-running against an already-created table is a no-op via the outer IF
 NOT EXISTS, no DROP/ADD CONSTRAINT dance needed), no unique indexes, no
 DO $$ ... END $$ blocks (migrations/_runner.py splits on a literal ";").
+`internal` is added via a separate `ADD COLUMN IF NOT EXISTS` statement
+after the CREATE TABLE (rather than inline on it) so an environment that
+already ran this migration's first cut (CREATE TABLE only, no `internal`
+column) converges to the same end state on a re-run, same reasoning as
+016/018's ALTER-on-an-existing-table case.
 
 Indexes: (subject_type, subject_id) for "all activities on this record"
 lookups (the router's primary list query), and due_at on its own for the
@@ -67,6 +80,8 @@ CREATE TABLE IF NOT EXISTS activities (
     updated_at      TIMESTAMPTZ,
     deleted_at      TIMESTAMPTZ
 );
+
+ALTER TABLE activities ADD COLUMN IF NOT EXISTS internal BOOLEAN NOT NULL DEFAULT true;
 
 CREATE INDEX IF NOT EXISTS idx_activities_subject ON activities(subject_type, subject_id);
 CREATE INDEX IF NOT EXISTS idx_activities_due_at ON activities(due_at);

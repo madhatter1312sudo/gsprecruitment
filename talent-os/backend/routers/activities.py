@@ -36,7 +36,18 @@ router = APIRouter(prefix="/api/v1/admin/activities", tags=["activities-admin"])
 client_router = APIRouter(prefix="/api/v1/client/activities", tags=["activities-portal"])
 
 
-async def _audit(action: str, actor_id: int, target_id: int, changes: dict) -> None:
+async def _audit_activity(action: str, actor_id: int, target_id: int, row: dict) -> None:
+    """Code-review follow-up: the free-text `body` of an activity must
+    never land in audit_log -- it can carry candidate/client personal
+    data far beyond what an audit trail needs. Log only the shape of the
+    change: {subject_type, subject_id, type, internal, has_body}."""
+    changes = {
+        "subject_type": row.get("subject_type"),
+        "subject_id": row.get("subject_id"),
+        "type": row.get("type"),
+        "internal": row.get("internal"),
+        "has_body": bool(row.get("body")),
+    }
     await execute(
         "INSERT INTO audit_log (action, actor_id, target_type, target_id, changes) "
         "VALUES ($1, $2, $3, $4, $5::jsonb)",
@@ -133,13 +144,13 @@ async def create_activity(
 ):
     row = await fetch_one(
         """INSERT INTO activities
-           (subject_type, subject_id, type, body, due_at, completed_at, created_by)
-           VALUES ($1, $2, $3, $4, $5, $6, $7)
+           (subject_type, subject_id, type, body, due_at, completed_at, created_by, internal)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
            RETURNING *""",
         payload.subject_type, payload.subject_id, payload.type, payload.body,
-        payload.due_at, payload.completed_at, current_user["id"],
+        payload.due_at, payload.completed_at, current_user["id"], payload.internal,
     )
-    await _audit("activity_create", current_user["id"], row["id"], payload.model_dump(mode="json"))
+    await _audit_activity("activity_create", current_user["id"], row["id"], row)
     return row
 
 
@@ -172,10 +183,7 @@ async def update_activity(
     if not row:
         raise HTTPException(status_code=404, detail="Activity not found")
 
-    await _audit(
-        "activity_update", current_user["id"], activity_id,
-        updates.model_dump(exclude_unset=True, mode="json"),
-    )
+    await _audit_activity("activity_update", current_user["id"], activity_id, row)
     return row
 
 
@@ -189,13 +197,13 @@ async def delete_activity(
     row = await fetch_one(
         """UPDATE activities SET deleted_at = NOW(), updated_at = NOW()
            WHERE id = $1 AND deleted_at IS NULL
-           RETURNING id""",
+           RETURNING *""",
         activity_id,
     )
     if not row:
         raise HTTPException(status_code=404, detail="Activity not found")
 
-    await _audit("activity_delete", current_user["id"], activity_id, {})
+    await _audit_activity("activity_delete", current_user["id"], activity_id, row)
     return None
 
 
@@ -220,6 +228,9 @@ async def list_own_client_activities(
 
     conditions = [
         "a.deleted_at IS NULL",
+        # Code-review follow-up: a client must never see an internal
+        # (recruiter-only) row, even on a subject it owns.
+        "a.internal = false",
         "((a.subject_type = 'job' AND EXISTS "
         "(SELECT 1 FROM job_orders jo WHERE jo.id = a.subject_id AND jo.client_id = $1)) "
         "OR (a.subject_type = 'candidate' AND EXISTS "
@@ -270,11 +281,11 @@ async def create_own_client_activity(
 
     row = await fetch_one(
         """INSERT INTO activities
-           (subject_type, subject_id, type, body, due_at, completed_at, created_by)
-           VALUES ($1, $2, $3, $4, $5, $6, $7)
+           (subject_type, subject_id, type, body, due_at, completed_at, created_by, internal)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, false)
            RETURNING *""",
         payload.subject_type, payload.subject_id, payload.type, payload.body,
         payload.due_at, payload.completed_at, current_user["id"],
     )
-    await _audit("activity_create_client", current_user["id"], row["id"], payload.model_dump(mode="json"))
+    await _audit_activity("activity_create_client", current_user["id"], row["id"], row)
     return row

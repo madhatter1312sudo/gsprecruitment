@@ -793,6 +793,12 @@ class ActivityCreate(BaseModel):
     body: Optional[str] = None
     due_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
+    # Code-review follow-up: an admin-created row defaults to internal
+    # (recruiter-only) and may opt in to client-visible with
+    # internal=false. Client-portal rows never go through this model --
+    # see ClientActivityCreate, which has no internal field at all and
+    # is always forced to internal=false server-side.
+    internal: bool = True
 
 
 class ActivityUpdate(BaseModel):
@@ -802,6 +808,7 @@ class ActivityUpdate(BaseModel):
     body: Optional[str] = None
     due_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
+    internal: Optional[bool] = None
 
 
 class ActivityResponse(BaseModel):
@@ -812,6 +819,7 @@ class ActivityResponse(BaseModel):
     body: Optional[str] = None
     due_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
+    internal: bool = True
     created_by: Optional[int] = None
     created_at: datetime
     updated_at: Optional[datetime] = None
@@ -821,7 +829,9 @@ class ActivityResponse(BaseModel):
 
 # Client-portal create: subject_type is restricted server-side (job | candidate,
 # scoped to the caller's own client via user_clients -- routers/activities.py),
-# never trusted from the body the way the admin create is.
+# never trusted from the body the way the admin create is. Deliberately has
+# no `internal` field -- a client-portal-authored activity is always
+# internal=false, forced by the router, never a client-supplied value.
 class ClientActivityCreate(BaseModel):
     subject_type: str = Field(..., pattern=r"^(job|candidate)$")
     subject_id: int
