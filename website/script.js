@@ -311,6 +311,46 @@ const GSP_WHATSAPP = '31617913965';
     });
   }
 
+  // ── FAQPage JSON-LD (WS-A.6) ────────────────────────────
+  // Reads only the currently-visible lang-en/lang-nl text out of each
+  // .faq-item so the structured data is always literally what a visitor
+  // sees -- never a mash-up of both languages -- with no separate copy of
+  // the FAQ copy to keep in sync by hand. Runs after initLang() (so the
+  // inline display:none it sets on the inactive language's spans is
+  // already in place) and initFAQ(). Only werkgevers.html has #faqPageJsonLd
+  // + .faq-item today; on any other page this is a silent no-op.
+  function visibleFaqText(el) {
+    let text = '';
+    qsa('.lang-en, .lang-nl', el).forEach(span => {
+      if (getComputedStyle(span).display === 'none') return;
+      const t = span.textContent.trim();
+      if (t) text += (text ? ' ' : '') + t;
+    });
+    return text.trim();
+  }
+
+  function initFaqPageLd() {
+    const container = $('faqPageJsonLd');
+    const items = qsa('.faq-item');
+    if (!container || !items.length) return;
+    const mainEntity = [];
+    items.forEach(item => {
+      const questionEl = qs('.faq-question', item);
+      const answerEl = qs('.faq-answer', item);
+      if (!questionEl || !answerEl) return;
+      const name = visibleFaqText(questionEl);
+      const text = visibleFaqText(answerEl);
+      if (!name || !text) return;
+      mainEntity.push({ '@type': 'Question', name, acceptedAnswer: { '@type': 'Answer', text } });
+    });
+    if (!mainEntity.length) return;
+    container.textContent = JSON.stringify({
+      '@context': 'https://schema.org',
+      '@type': 'FAQPage',
+      mainEntity,
+    });
+  }
+
   // ── Auth Modal ─────────────────────────────────────────
   function initAuth() {
     const modal = $('authModal');
@@ -1016,7 +1056,7 @@ const GSP_WHATSAPP = '31617913965';
               email,
               name: 'Quiz Lead',
               message: `Quiz score: ${pct}% - ${label}`,
-              interest_type: 'candidate'
+              interest_type: 'kandidaat'
             })
           });
           if (res.ok) {
@@ -1385,6 +1425,7 @@ const GSP_WHATSAPP = '31617913965';
     initHeaderScroll();
     initScrollAnimations();
     initFAQ();
+    initFaqPageLd();
     initAuth();
     initCookieConsent();
     initJobBoard();

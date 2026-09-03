@@ -3,9 +3,20 @@
    Full admin portal: all sections wired to real API, no stubs.
    ============================================================ */
 
+// html`` auto-escapes every interpolated value (GSP.esc under the hood);
+// raw() marks an already-safe fragment (or array of them) so html`` does
+// not re-escape it; mount() is `el.innerHTML = result` with a null-safe
+// guard. See website/admin/js/render.js (load order: gsp-util.js, then
+// render.js, then this file).
+const { html, raw, mount } = GSP;
+
 const Admin = {
   _data: {},
-  _currentPage: { users: 1, candidates: 1, audit: 1, outreach: 1, blog: 1 },
+  _currentPage: { users: 1, candidates: 1, audit: 1, outreach: 1, blog: 1, leads: 1 },
+  // Filters passed to the load*() call that produced the currently-rendered
+  // page, keyed the same as _currentPage — a data-page click re-derives the
+  // page from here instead of needing a fresh closure per render.
+  _lastParams: { users: {}, candidates: {}, audit: {}, outreach: {}, blog: {}, leads: {} },
   _pageSize: 20,
 
   /* ---- Init ---- */
@@ -60,12 +71,14 @@ const Admin = {
   },
   setLoading(tbodyId, cols) {
     const el = document.querySelector(tbodyId);
-    if (el) el.innerHTML = `<tr><td colspan="${cols}" style="text-align:center;padding:2rem;color:var(--navy-300);">
-      <i class="fa-solid fa-spinner fa-spin"></i> Loading…</td></tr>`;
+    mount(el, html`<tr><td colspan="${cols}" style="text-align:center;padding:2rem;color:var(--navy-300);">
+      <i class="fa-solid fa-spinner fa-spin"></i> Loading…</td></tr>`);
   },
+  // msg is always a literal called by our own code (never API/user text),
+  // so it is passed through raw() rather than escaped a second time.
   setEmpty(tbodyId, cols, msg = 'No results') {
     const el = document.querySelector(tbodyId);
-    if (el) el.innerHTML = `<tr><td colspan="${cols}" style="text-align:center;padding:2rem;color:var(--navy-300);">${msg}</td></tr>`;
+    mount(el, html`<tr><td colspan="${cols}" style="text-align:center;padding:2rem;color:var(--navy-300);">${raw(msg)}</td></tr>`);
   },
   // Table-row error state with a retry link — replaces an infinite spinner
   // when a fetch fails or times out.
@@ -73,18 +86,18 @@ const Admin = {
     const el = document.querySelector(tbodyId);
     if (!el) return;
     const id = '_retry_' + Math.random().toString(36).slice(2, 9);
-    el.innerHTML = `<tr><td colspan="${cols}" style="text-align:center;padding:2rem;color:var(--navy-300);">
+    mount(el, html`<tr><td colspan="${cols}" style="text-align:center;padding:2rem;color:var(--navy-300);">
       <i class="fa-solid fa-triangle-exclamation"></i> Kon niet laden — <a href="#" id="${id}">probeer opnieuw</a>
-    </td></tr>`;
+    </td></tr>`);
     document.getElementById(id)?.addEventListener('click', (e) => { e.preventDefault(); if (typeof retryFn === 'function') retryFn(); });
   },
   // Non-table container error state with a retry link.
   setContainerLoadError(el, retryFn) {
     if (!el) return;
     const id = '_retry_' + Math.random().toString(36).slice(2, 9);
-    el.innerHTML = `<div style="color:var(--navy-300);font-size:var(--font-size-sm);padding:1rem 0;">
+    mount(el, html`<div style="color:var(--navy-300);font-size:var(--font-size-sm);padding:1rem 0;">
       <i class="fa-solid fa-triangle-exclamation"></i> Kon niet laden — <a href="#" id="${id}">probeer opnieuw</a>
-    </div>`;
+    </div>`);
     document.getElementById(id)?.addEventListener('click', (e) => { e.preventDefault(); if (typeof retryFn === 'function') retryFn(); });
   },
 
@@ -145,45 +158,45 @@ const Admin = {
     if (badge) badge.textContent = items.length || '0';
     if (!el) return;
     if (!items.length) {
-      el.innerHTML = `<div style="color:var(--navy-300);font-size:var(--font-size-sm);padding:0.5rem 0;">
+      mount(el, html`<div style="color:var(--navy-300);font-size:var(--font-size-sm);padding:0.5rem 0;">
         Nog geen zelf geregistreerde kandidaten. Nieuwe registraties via het kandidatenportaal verschijnen hier automatisch.
-      </div>`;
+      </div>`);
       return;
     }
-    el.innerHTML = items.map(c => `
+    mount(el, html`${items.map(c => html`
       <div class="activity-item">
         <div class="activity-icon" style="background:rgba(74,222,128,0.12);color:#4ade80;"><i class="fa-solid fa-user-plus"></i></div>
         <div class="activity-content" style="flex:1;min-width:0;">
           <div class="activity-text" style="font-weight:500;color:var(--white);">
-            ${this.esc(c.full_name || c.email || 'Onbekend')}
-            ${c.is_verified ? '<i class="fa-regular fa-circle-check ms-1" style="color:#4ade80;" title="Geverifieerd"></i>' : ''}
+            ${c.full_name || c.email || 'Onbekend'}
+            ${c.is_verified ? raw('<i class="fa-regular fa-circle-check ms-1" style="color:#4ade80;" title="Geverifieerd"></i>') : ''}
           </div>
-          <div class="activity-text" style="color:var(--navy-300);">${this.esc(c.current_title || '—')}${c.location ? ' · ' + this.esc(c.location) : ''}</div>
+          <div class="activity-text" style="color:var(--navy-300);">${c.current_title || '—'}${c.location ? ' · ' + c.location : ''}</div>
           <div class="activity-time">${this.timeAgo(c.created_at)}</div>
         </div>
         <button class="btn btn-sm btn-ghost-secondary" data-action="view-candidate" data-kind="self-registered" data-id="${c.user_id ?? c.id}" style="flex-shrink:0;" title="Profiel bekijken">
           <i class="fa-regular fa-eye"></i>
         </button>
-      </div>`).join('');
+      </div>`)}`);
   },
 
   renderRecentActivity(items) {
     const el = document.getElementById('recentActivityList');
     if (!el) return;
-    if (!items.length) { el.innerHTML = '<div style="color:var(--navy-300);font-size:var(--font-size-sm);padding:1rem 0;">Nog geen activiteit.</div>'; return; }
+    if (!items.length) { mount(el, html`<div style="color:var(--navy-300);font-size:var(--font-size-sm);padding:1rem 0;">Nog geen activiteit.</div>`); return; }
     const icons = { user_update: 'fa-user-pen', user_delete: 'fa-user-xmark', impersonate: 'fa-mask',
       job_update: 'fa-briefcase', content_update: 'fa-newspaper', settings_update: 'fa-gear',
       placement: 'fa-calendar-check' };
-    el.innerHTML = items.map(e => `
+    mount(el, html`${items.map(e => html`
       <div class="activity-item">
         <div class="activity-icon" style="background:rgba(250,200,0,0.1);color:var(--gold-400);">
           <i class="fa-regular ${icons[e.action] || 'fa-circle-dot'}"></i>
         </div>
         <div class="activity-content" style="flex:1;">
-          <div class="activity-text">${this.esc(e.action?.replace(/_/g, ' '))} <span style="color:var(--navy-300);">by ${this.esc(e.actor_email || 'system')}</span></div>
+          <div class="activity-text">${e.action?.replace(/_/g, ' ')} <span style="color:var(--navy-300);">by ${e.actor_email || 'system'}</span></div>
           <div class="activity-time">${this.timeAgo(e.created_at)}</div>
         </div>
-      </div>`).join('');
+      </div>`)}`);
   },
 
   renderPendingRegistrations(items) {
@@ -191,16 +204,16 @@ const Admin = {
     const badge = document.getElementById('pendingBadge');
     if (badge) badge.textContent = items.length || '0';
     if (!el) return;
-    if (!items.length) { el.innerHTML = '<div style="color:var(--navy-300);font-size:var(--font-size-sm);padding:0.5rem 0;">Geen openstaande verificaties.</div>'; return; }
-    el.innerHTML = items.map(u => `
+    if (!items.length) { mount(el, html`<div style="color:var(--navy-300);font-size:var(--font-size-sm);padding:0.5rem 0;">Geen openstaande verificaties.</div>`); return; }
+    mount(el, html`${items.map(u => html`
       <div class="activity-item">
         <div class="activity-icon" style="background:rgba(250,200,0,0.1);color:var(--gold-500);"><i class="fa-solid fa-user-plus"></i></div>
         <div class="activity-content" style="flex:1;">
-          <div class="activity-text">${this.esc(u.full_name || u.email)} — <span style="color:var(--gold-400);">${this.esc(u.role)}</span></div>
+          <div class="activity-text">${u.full_name || u.email} — <span style="color:var(--gold-400);">${u.role}</span></div>
           <div class="activity-time">${this.timeAgo(u.created_at)}</div>
         </div>
         <button class="btn btn-sm btn-primary" data-action="verify-user" data-id="${u.id}" style="flex-shrink:0;">Verify</button>
-      </div>`).join('');
+      </div>`)}`);
   },
 
   async verifyUser(userId, btn) {
@@ -227,6 +240,7 @@ const Admin = {
      USERS
      ============================================================ */
   async loadUsers(params = {}) {
+    this._lastParams.users = params;
     const qs = new URLSearchParams();
     const limit = this._pageSize;
     const offset = ((this._currentPage.users || 1) - 1) * limit;
@@ -244,10 +258,7 @@ const Admin = {
       if (!res.ok) throw new Error(data.detail);
       this._data.users = data;
       this.renderUsers(data);
-      this.renderPagination('usersPagination', data.total, limit, this._currentPage.users, (p) => {
-        this._currentPage.users = p;
-        this.loadUsers(params);
-      });
+      this.renderPagination('usersPagination', data.total, limit, this._currentPage.users, 'users');
     } catch (err) {
       this.setEmpty('#section-users table tbody', 6, 'Failed to load users');
       console.error(err);
@@ -259,11 +270,11 @@ const Admin = {
     if (!tbody) return;
     const items = data.items || [];
     if (!items.length) { this.setEmpty('#section-users table tbody', 6, 'Geen gebruikers gevonden voor deze filters.'); return; }
-    tbody.innerHTML = items.map(u => `
+    mount(tbody, html`${items.map(u => html`
       <tr>
-        <td style="font-weight:600;color:var(--white);">${this.esc(u.full_name || '—')}</td>
-        <td style="color:var(--navy-200);font-size:var(--font-size-xs);">${this.esc(u.email)}</td>
-        <td><span class="${this.badge(u.role)}">${this.esc(u.role)}</span></td>
+        <td style="font-weight:600;color:var(--white);">${u.full_name || '—'}</td>
+        <td style="color:var(--navy-200);font-size:var(--font-size-xs);">${u.email}</td>
+        <td><span class="${this.badge(u.role)}">${u.role}</span></td>
         <td><span class="${u.is_verified ? 'badge bg-green-lt' : 'badge bg-blue-lt'}">${u.is_verified ? 'Verified' : 'Pending'}</span></td>
         <td style="font-size:var(--font-size-xs);color:var(--navy-300);">${this.timeAgo(u.created_at)}</td>
         <td>
@@ -272,14 +283,14 @@ const Admin = {
               <i class="fa-solid fa-ellipsis-vertical"></i>
             </button>
             <div class="action-menu" id="user-menu-${u.id}" style="display:none;">
-              ${!u.is_verified ? `<button data-action="verify-user" data-id="${u.id}"><i class="fa-regular fa-circle-check"></i> Verify</button>` : ''}
+              ${!u.is_verified ? html`<button data-action="verify-user" data-id="${u.id}"><i class="fa-regular fa-circle-check"></i> Verify</button>` : ''}
               <button data-action="edit-user" data-id="${u.id}"><i class="fa-solid fa-pen"></i> Edit Role</button>
-              <button data-action="impersonate-user" data-id="${u.id}" data-email="${this.esc(u.email)}"><i class="fa-solid fa-mask"></i> Impersonate</button>
-              <button data-action="delete-user" data-id="${u.id}" data-email="${this.esc(u.email)}" style="color:#f87171;"><i class="fa-solid fa-trash"></i> Delete</button>
+              <button data-action="impersonate-user" data-id="${u.id}" data-email="${u.email}"><i class="fa-solid fa-mask"></i> Impersonate</button>
+              <button data-action="delete-user" data-id="${u.id}" data-email="${u.email}" style="color:#f87171;"><i class="fa-solid fa-trash"></i> Delete</button>
             </div>
           </div>
         </td>
-      </tr>`).join('');
+      </tr>`)}`);
   },
 
   toggleUserMenu(id) {
@@ -299,25 +310,25 @@ const Admin = {
   openEditUserModal(userId) {
     const user = (this._data.users?.items || []).find(u => u.id === userId);
     if (!user) return;
-    this.openModal('editUserModal', `
-      <h3 style="color:var(--white);margin-bottom:var(--space-lg);">Edit User: ${this.esc(user.full_name || user.email)}</h3>
+    this.openModal('editUserModal', html`
+      <h3 style="color:var(--white);margin-bottom:var(--space-lg);">Edit User: ${user.full_name || user.email}</h3>
       <div class="form-group">
         <label>Full Name</label>
-        <input type="text" id="editUserName" value="${this.esc(user.full_name || '')}">
+        <input type="text" id="editUserName" value="${user.full_name || ''}">
       </div>
       <div class="form-group">
         <label>Role</label>
         <select id="editUserRole">
-          <option value="candidate" ${user.role === 'candidate' ? 'selected' : ''}>Candidate</option>
-          <option value="client" ${user.role === 'client' ? 'selected' : ''}>Client</option>
-          <option value="admin" ${user.role === 'admin' ? 'selected' : ''}>Admin</option>
+          <option value="candidate" ${raw(user.role === 'candidate' ? 'selected' : '')}>Candidate</option>
+          <option value="client" ${raw(user.role === 'client' ? 'selected' : '')}>Client</option>
+          <option value="admin" ${raw(user.role === 'admin' ? 'selected' : '')}>Admin</option>
         </select>
       </div>
       <div class="form-group">
         <label>Verified</label>
         <select id="editUserVerified">
-          <option value="true" ${user.is_verified ? 'selected' : ''}>Yes</option>
-          <option value="false" ${!user.is_verified ? 'selected' : ''}>No</option>
+          <option value="true" ${raw(user.is_verified ? 'selected' : '')}>Yes</option>
+          <option value="false" ${raw(!user.is_verified ? 'selected' : '')}>No</option>
         </select>
       </div>
       <div style="display:flex;gap:var(--space-md);margin-top:var(--space-lg);">
@@ -409,18 +420,18 @@ const Admin = {
     if (!tbody) return;
     const items = data.items || [];
     if (!items.length) { this.setEmpty('#section-jobs table tbody', 5, 'Nog geen vacatures. Vacatures die klanten aanleveren verschijnen hier voor goedkeuring.'); return; }
-    tbody.innerHTML = items.map(j => `
+    mount(tbody, html`${items.map(j => html`
       <tr>
-        <td style="font-weight:600;color:var(--white);">${this.esc(j.title || 'Untitled')}</td>
-        <td style="color:var(--navy-200);">${this.esc(j.company_name || '—')}</td>
+        <td style="font-weight:600;color:var(--white);">${j.title || 'Untitled'}</td>
+        <td style="color:var(--navy-200);">${j.company_name || '—'}</td>
         <td style="text-align:center;">${j.application_count ?? '—'}</td>
-        <td><span class="${this.badge(j.status)}">${this.esc(j.status || 'draft')}</span></td>
+        <td><span class="${this.badge(j.status)}">${j.status || 'draft'}</span></td>
         <td>
-          ${j.status === 'draft' || j.status === 'pending' ? `
+          ${(j.status === 'draft' || j.status === 'pending') ? html`
             <button class="btn btn-sm btn-primary" data-action="set-job-status" data-id="${j.id}" data-status="open" title="Approve">
               <i class="fa-regular fa-circle-check"></i> Approve
             </button>` : ''}
-          ${j.status === 'open' ? `
+          ${j.status === 'open' ? html`
             <button class="btn btn-sm btn-ghost-secondary" data-action="set-job-status" data-id="${j.id}" data-status="closed" title="Close" style="color:#f87171;">
               <i class="fa-solid fa-xmark"></i> Close
             </button>` : ''}
@@ -428,7 +439,7 @@ const Admin = {
             <i class="fa-solid fa-trash"></i>
           </button>
         </td>
-      </tr>`).join('');
+      </tr>`)}`);
   },
 
   async setJobStatus(jobId, status) {
@@ -467,6 +478,7 @@ const Admin = {
      CANDIDATES
      ============================================================ */
   async loadCandidates(params = {}) {
+    this._lastParams.candidates = params;
     const qs = new URLSearchParams();
     const limit = this._pageSize;
     const offset = ((this._currentPage.candidates || 1) - 1) * limit;
@@ -484,10 +496,7 @@ const Admin = {
       if (!res.ok) throw new Error(data.detail);
       this._data.candidates = data;
       this.renderCandidates(data);
-      this.renderPagination('candidatesPagination', data.total, limit, this._currentPage.candidates, (p) => {
-        this._currentPage.candidates = p;
-        this.loadCandidates(params);
-      });
+      this.renderPagination('candidatesPagination', data.total, limit, this._currentPage.candidates, 'candidates');
     } catch (err) {
       this.setLoadError('#section-candidates table tbody', 8, () => this.loadCandidates(params));
     }
@@ -509,28 +518,28 @@ const Admin = {
         'Geen kandidaten gevonden voor deze filters. Pas de zoekopdracht of het type-filter aan.');
       return;
     }
-    tbody.innerHTML = items.map(c => {
+    mount(tbody, html`${items.map(c => {
       const kb = this.kindBadge(c.kind);
       // A self-registered row without a resolved user_id (email-case edge) is
       // really a candidates-table row: view it via the sourced detail path.
       const effKind = (c.kind === 'self-registered' && c.user_id == null && c.candidate_id != null) ? 'sourced' : c.kind;
       const itemId = effKind === 'self-registered' ? (c.user_id ?? c.id) : (c.candidate_id ?? c.id);
-      return `
+      return html`
       <tr>
         <td style="font-weight:600;color:var(--white);">
-          ${this.esc(c.full_name || '—')}
-          ${c.is_verified ? '<i class="fa-regular fa-circle-check ms-1" style="color:#4ade80;" title="Geverifieerd"></i>' : '<i class="fa-regular fa-circle ms-1" style="color:var(--navy-300);" title="Niet geverifieerd"></i>'}
+          ${c.full_name || '—'}
+          ${c.is_verified ? raw('<i class="fa-regular fa-circle-check ms-1" style="color:#4ade80;" title="Geverifieerd"></i>') : raw('<i class="fa-regular fa-circle ms-1" style="color:var(--navy-300);" title="Niet geverifieerd"></i>')}
         </td>
-        <td style="color:var(--navy-200);font-size:var(--font-size-xs);">${this.esc(c.email)}</td>
-        <td>${this.esc(c.current_title || '—')}</td>
+        <td style="color:var(--navy-200);font-size:var(--font-size-xs);">${c.email}</td>
+        <td>${c.current_title || '—'}</td>
         <td style="text-align:center;">${c.years_experience ? c.years_experience + ' yrs' : '—'}</td>
         <td style="text-align:center;">
           <span title="Matches">${c.match_count ?? 0}</span>
-          ${c.placement_count ? ` / <span style="color:#4ade80;" title="Placed">${c.placement_count} placed</span>` : ''}
+          ${c.placement_count ? html` / <span style="color:#4ade80;" title="Placed">${c.placement_count} placed</span>` : ''}
         </td>
-        <td><span class="${kb.cls}" title="${c.source ? 'Bron: ' + this.esc(c.source) : ''}">${kb.label}</span></td>
+        <td><span class="${kb.cls}" title="${c.source ? 'Bron: ' + c.source : ''}">${kb.label}</span></td>
         <td>
-          <span class="${this.badge(c.status || 'active')}">${this.esc(c.status || 'active')}</span>
+          <span class="${this.badge(c.status || 'active')}">${c.status || 'active'}</span>
         </td>
         <td>
           <button class="btn btn-sm btn-ghost-secondary" data-action="view-candidate" data-kind="${effKind === 'self-registered' ? 'self-registered' : 'sourced'}" data-id="${itemId}" title="View profile">
@@ -538,12 +547,12 @@ const Admin = {
           </button>
         </td>
       </tr>`;
-    }).join('');
+    })}`);
   },
 
   /* ---- Candidate detail modal (kind-aware) ---- */
   async viewCandidate(kind, itemId) {
-    this.openModal('viewCandidateModal', `
+    this.openModal('viewCandidateModal', html`
       <div style="text-align:center;padding:2rem 0;color:var(--navy-300);">
         <i class="fa-solid fa-spinner fa-spin"></i> Laden…
       </div>`);
@@ -551,9 +560,9 @@ const Admin = {
       const res = await Auth.fetch(`/v1/admin/candidates/${kind}/${itemId}`);
       if (!res?.ok) {
         const d = await res?.json().catch(() => null);
-        this.openModal('viewCandidateModal', `
+        this.openModal('viewCandidateModal', html`
           <h3 style="color:var(--white);margin-bottom:var(--space-md);">Kon profiel niet laden</h3>
-          <p style="color:var(--navy-300);">${this.esc(d?.detail || 'Er ging iets mis bij het ophalen van dit profiel.')}</p>
+          <p style="color:var(--navy-300);">${d?.detail || 'Er ging iets mis bij het ophalen van dit profiel.'}</p>
           <div style="display:flex;gap:var(--space-md);margin-top:var(--space-lg);">
             <button class="btn btn-primary btn-sm" data-action="view-candidate" data-kind="${kind}" data-id="${itemId}">Opnieuw proberen</button>
             <button class="btn btn-ghost-secondary btn-sm" data-action="close-modal">Sluiten</button>
@@ -563,7 +572,7 @@ const Admin = {
       const detail = await res.json();
       this.renderCandidateDetailModal(kind, itemId, detail);
     } catch {
-      this.openModal('viewCandidateModal', `
+      this.openModal('viewCandidateModal', html`
         <h3 style="color:var(--white);margin-bottom:var(--space-md);">Netwerkfout</h3>
         <p style="color:var(--navy-300);">Kon geen verbinding maken met de server.</p>
         <div style="display:flex;gap:var(--space-md);margin-top:var(--space-lg);">
@@ -599,7 +608,6 @@ const Admin = {
   renderCandidateDetailModal(kind, itemId, detail) {
     const d = this._flattenDetail(detail);
     const p = this._pick.bind(this, d);
-    const esc = this.esc.bind(this);
 
     const fullName = p('full_name', 'name') || 'Onbekend';
     const email = p('email');
@@ -620,49 +628,53 @@ const Admin = {
     const kb = this.kindBadge(kind);
 
     const chips = (arr, color) => arr.length
-      ? `<div style="display:flex;flex-wrap:wrap;gap:6px;">${arr.map(s => `<span class="badge" style="background:${color};color:var(--white);font-weight:500;">${esc(s)}</span>`).join('')}</div>`
-      : '<div style="color:var(--navy-300);">—</div>';
+      ? html`<div style="display:flex;flex-wrap:wrap;gap:6px;">${arr.map(s => html`<span class="badge" style="background:${color};color:var(--white);font-weight:500;">${s}</span>`)}</div>`
+      : html`<div style="color:var(--navy-300);">—</div>`;
 
-    const field = (label, value) => `
-      <div><div style="font-size:var(--font-size-xs);color:var(--navy-300);margin-bottom:4px;">${esc(label)}</div><div>${value}</div></div>`;
+    const field = (label, value) => html`
+      <div><div style="font-size:var(--font-size-xs);color:var(--navy-300);margin-bottom:4px;">${label}</div><div>${value}</div></div>`;
 
-    let salaryDisplay = '—';
+    let salaryDisplay = raw('—');
     if (salaryMin || salaryMax) {
-      salaryDisplay = `€${esc(salaryMin ?? '?')} – €${esc(salaryMax ?? '?')}`;
+      salaryDisplay = html`€${salaryMin ?? '?'} – €${salaryMax ?? '?'}`;
     } else if (salarySingle) {
-      salaryDisplay = `€${esc(salarySingle)}`;
+      salaryDisplay = html`€${salarySingle}`;
     }
 
-    let relocationDisplay = '—';
-    if (relocationRaw === true || relocationRaw === 'true' || relocationRaw === 'yes') relocationDisplay = 'Ja';
-    else if (relocationRaw === false || relocationRaw === 'false' || relocationRaw === 'no') relocationDisplay = 'Nee';
-    else if (relocationRaw) relocationDisplay = esc(relocationRaw);
+    let relocationDisplay = raw('—');
+    if (relocationRaw === true || relocationRaw === 'true' || relocationRaw === 'yes') relocationDisplay = raw('Ja');
+    else if (relocationRaw === false || relocationRaw === 'false' || relocationRaw === 'no') relocationDisplay = raw('Nee');
+    else if (relocationRaw) relocationDisplay = html`${relocationRaw}`;
 
-    const contactLinks = [
-      email ? `<a href="mailto:${esc(email)}" class="btn btn-sm btn-ghost-secondary"><i class="fa-regular fa-envelope me-1"></i>${esc(email)}</a>` : '',
-      this.safeUrl(linkedin) ? `<a href="${esc(this.safeUrl(linkedin))}" target="_blank" rel="noopener" class="btn btn-sm btn-ghost-secondary"><i class="fa-brands fa-linkedin me-1"></i>LinkedIn</a>` : '',
-      this.safeUrl(github) ? `<a href="${esc(this.safeUrl(github))}" target="_blank" rel="noopener" class="btn btn-sm btn-ghost-secondary"><i class="fa-brands fa-github me-1"></i>GitHub</a>` : '',
-      this.safeUrl(portfolio) ? `<a href="${esc(this.safeUrl(portfolio))}" target="_blank" rel="noopener" class="btn btn-sm btn-ghost-secondary"><i class="fa-solid fa-globe me-1"></i>Portfolio</a>` : '',
-    ].filter(Boolean).join(' ');
+    const safeLinkedin = this.safeUrl(linkedin);
+    const safeGithub = this.safeUrl(github);
+    const safePortfolio = this.safeUrl(portfolio);
+    const contactLinks = raw([
+      email ? html`<a href="mailto:${email}" class="btn btn-sm btn-ghost-secondary"><i class="fa-regular fa-envelope me-1"></i>${email}</a>` : '',
+      safeLinkedin ? html`<a href="${safeLinkedin}" target="_blank" rel="noopener" class="btn btn-sm btn-ghost-secondary"><i class="fa-brands fa-linkedin me-1"></i>LinkedIn</a>` : '',
+      safeGithub ? html`<a href="${safeGithub}" target="_blank" rel="noopener" class="btn btn-sm btn-ghost-secondary"><i class="fa-brands fa-github me-1"></i>GitHub</a>` : '',
+      safePortfolio ? html`<a href="${safePortfolio}" target="_blank" rel="noopener" class="btn btn-sm btn-ghost-secondary"><i class="fa-solid fa-globe me-1"></i>Portfolio</a>` : '',
+    ].filter(Boolean));
+    const hasContactLinks = !!(email || safeLinkedin || safeGithub || safePortfolio);
 
-    this.openModal('viewCandidateModal', `
+    this.openModal('viewCandidateModal', html`
       <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:var(--space-md);margin-bottom:var(--space-md);">
-        <h3 style="color:var(--white);margin:0;">${esc(fullName)}</h3>
+        <h3 style="color:var(--white);margin:0;">${fullName}</h3>
         <span class="${kb.cls}">${kb.label}</span>
       </div>
-      ${contactLinks ? `<div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:var(--space-lg);">${contactLinks}</div>` : ''}
+      ${hasContactLinks ? html`<div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:var(--space-lg);">${contactLinks}</div>` : ''}
 
       <div class="detail-grid">
-        ${field('Phone', esc(phone || '—'))}
-        ${field('Current Title', esc(p('current_title') || '—'))}
-        ${field('Company', esc(p('current_company') || '—'))}
-        ${field('Experience', p('years_experience') ? esc(p('years_experience')) + ' years' : '—')}
-        ${field('Location', esc(p('location') || '—'))}
-        ${field('Source', esc(p('source', 'candidate_source') || '—'))}
-        ${field('Status', `<span class="${this.badge(p('status') || p('candidate_status'))}">${esc(p('status') || p('candidate_status') || (kind === 'self-registered' ? 'new' : 'active'))}</span>`)}
-        ${field('Education', esc(education || '—'))}
+        ${field('Phone', phone || '—')}
+        ${field('Current Title', p('current_title') || '—')}
+        ${field('Company', p('current_company') || '—')}
+        ${field('Experience', p('years_experience') ? html`${p('years_experience')} years` : '—')}
+        ${field('Location', p('location') || '—')}
+        ${field('Source', p('source', 'candidate_source') || '—')}
+        ${field('Status', html`<span class="${this.badge(p('status') || p('candidate_status'))}">${p('status') || p('candidate_status') || (kind === 'self-registered' ? 'new' : 'active')}</span>`)}
+        ${field('Education', education || '—')}
         ${field('Salary expectation', salaryDisplay)}
-        ${field('Notice period', notice ? esc(notice) + ' days' : '—')}
+        ${field('Notice period', notice ? html`${notice} days` : '—')}
         ${field('Open to relocation', relocationDisplay)}
         ${field('Registered', p('created_at') ? this.formatDate(p('created_at')) : '—')}
       </div>
@@ -679,14 +691,14 @@ const Admin = {
       <div style="margin-bottom:var(--space-lg);padding:var(--space-md);background:rgba(74,111,159,0.08);border:1px solid rgba(74,111,159,0.18);border-radius:var(--radius-md);">
         <div style="font-size:var(--font-size-xs);color:var(--navy-300);margin-bottom:6px;"><i class="fa-regular fa-file-lines me-1"></i>CV</div>
         ${cvFilePath
-          ? `<div style="color:#4ade80;"><i class="fa-regular fa-circle-check me-1"></i>CV geüpload</div>
+          ? html`<div style="color:#4ade80;"><i class="fa-regular fa-circle-check me-1"></i>CV geüpload</div>
              <div style="font-size:var(--font-size-xs);color:var(--navy-300);margin-top:4px;">
                Het bestand zelf is nog niet downloadbaar vanuit dit paneel — alleen via de geauthenticeerde kandidaatroute.
              </div>`
-          : `<div style="color:var(--navy-300);">Geen CV geüpload</div>`}
-        ${cvText ? `
+          : html`<div style="color:var(--navy-300);">Geen CV geüpload</div>`}
+        ${cvText ? html`
           <div style="margin-top:10px;font-size:var(--font-size-xs);color:var(--navy-300);margin-bottom:4px;">Preview (tekst uit CV)</div>
-          <div style="max-height:160px;overflow-y:auto;font-size:var(--font-size-sm);color:var(--navy-100);white-space:pre-wrap;background:rgba(6,13,26,0.5);border-radius:var(--radius-sm);padding:10px;">${esc(cvText).slice(0, 2000)}${cvText.length > 2000 ? '…' : ''}</div>
+          <div style="max-height:160px;overflow-y:auto;font-size:var(--font-size-sm);color:var(--navy-100);white-space:pre-wrap;background:rgba(6,13,26,0.5);border-radius:var(--radius-sm);padding:10px;">${cvText.slice(0, 2000)}${cvText.length > 2000 ? '…' : ''}</div>
         ` : ''}
       </div>
 
@@ -710,6 +722,7 @@ const Admin = {
      OUTREACH
      ============================================================ */
   async loadOutreach(params = {}) {
+    this._lastParams.outreach = params;
     const qs = new URLSearchParams();
     const limit = this._pageSize;
     const offset = ((this._currentPage.outreach || 1) - 1) * limit;
@@ -727,10 +740,7 @@ const Admin = {
       if (!res.ok) throw new Error(data.detail);
       this._data.outreach = data;
       this.renderOutreach(data);
-      this.renderPagination('outreachPagination', data.total, limit, this._currentPage.outreach, (p) => {
-        this._currentPage.outreach = p;
-        this.loadOutreach(params);
-      });
+      this.renderPagination('outreachPagination', data.total, limit, this._currentPage.outreach, 'outreach');
     } catch (err) {
       this.setEmpty('#section-outreach table tbody', 8, 'Failed to load outreach drafts');
       console.error(err);
@@ -742,20 +752,20 @@ const Admin = {
     if (!tbody) return;
     const items = data.items || [];
     if (!items.length) { this.setEmpty('#section-outreach table tbody', 8, 'Nog geen outreach-concepten. Start een sourcing- of drafting-run hierboven om concepten te genereren.'); return; }
-    tbody.innerHTML = items.map(d => `
+    mount(tbody, html`${items.map(d => html`
       <tr>
-        <td style="color:var(--navy-200);font-size:var(--font-size-xs);">${this.esc(d.target_name || d.target_email || '—')}</td>
-        <td style="color:var(--navy-200);">${this.esc(d.company || '—')}</td>
-        <td style="color:var(--white);">${this.esc(d.subject || '—')}</td>
-        <td><span class="${this.badge(d.target_type)}">${this.esc(d.target_type)}</span></td>
-        <td style="font-size:var(--font-size-xs);color:var(--navy-300);">${this.esc(d.ai_model || '—')}</td>
+        <td style="color:var(--navy-200);font-size:var(--font-size-xs);">${d.target_name || d.target_email || '—'}</td>
+        <td style="color:var(--navy-200);">${d.company || '—'}</td>
+        <td style="color:var(--white);">${d.subject || '—'}</td>
+        <td><span class="${this.badge(d.target_type)}">${d.target_type}</span></td>
+        <td style="font-size:var(--font-size-xs);color:var(--navy-300);">${d.ai_model || '—'}</td>
         <td style="font-size:var(--font-size-xs);color:var(--navy-300);">${this.timeAgo(d.created_at)}</td>
-        <td><span class="${this.badge(d.status)}">${this.esc(d.status)}</span></td>
+        <td><span class="${this.badge(d.status)}">${d.status}</span></td>
         <td>
           <button class="btn btn-sm btn-ghost-secondary" data-action="open-draft-modal" data-id="${d.id}" title="Review">
             <i class="fa-regular fa-eye"></i>
           </button>
-          ${d.status === 'draft' ? `
+          ${d.status === 'draft' ? html`
             <button class="btn btn-sm btn-ghost-secondary" data-action="approve-draft" data-id="${d.id}" title="Approve &amp; send" style="color:#4ade80;">
               <i class="fa-regular fa-paper-plane"></i>
             </button>
@@ -763,35 +773,35 @@ const Admin = {
               <i class="fa-solid fa-xmark"></i>
             </button>` : ''}
         </td>
-      </tr>`).join('');
+      </tr>`)}`);
   },
 
   openDraftModal(id) {
     const d = (this._data.outreach?.items || []).find(x => x.id === id);
     if (!d) return;
     const editable = d.status === 'draft';
-    this.openModal('outreachDraftModal', `
+    this.openModal('outreachDraftModal', html`
       <h3 style="color:var(--white);margin-bottom:var(--space-lg);">Outreach Draft</h3>
       <div class="detail-grid">
-        <div><div style="font-size:var(--font-size-xs);color:var(--navy-300);margin-bottom:4px;">To</div><div>${this.esc(d.target_name || '—')} &lt;${this.esc(d.target_email || '')}&gt;</div></div>
-        <div><div style="font-size:var(--font-size-xs);color:var(--navy-300);margin-bottom:4px;">Company</div><div>${this.esc(d.company || '—')}</div></div>
-        <div><div style="font-size:var(--font-size-xs);color:var(--navy-300);margin-bottom:4px;">Type</div><div><span class="${this.badge(d.target_type)}">${this.esc(d.target_type)}</span></div></div>
-        <div><div style="font-size:var(--font-size-xs);color:var(--navy-300);margin-bottom:4px;">Status</div><div><span class="${this.badge(d.status)}">${this.esc(d.status)}</span></div></div>
-        <div><div style="font-size:var(--font-size-xs);color:var(--navy-300);margin-bottom:4px;">Channel</div><div>${this.esc(d.channel || '—')}</div></div>
-        <div><div style="font-size:var(--font-size-xs);color:var(--navy-300);margin-bottom:4px;">Language</div><div>${this.esc(d.language || '—')}</div></div>
-        <div><div style="font-size:var(--font-size-xs);color:var(--navy-300);margin-bottom:4px;">AI Model</div><div>${this.esc(d.ai_model || '—')}</div></div>
+        <div><div style="font-size:var(--font-size-xs);color:var(--navy-300);margin-bottom:4px;">To</div><div>${d.target_name || '—'} &lt;${d.target_email || ''}&gt;</div></div>
+        <div><div style="font-size:var(--font-size-xs);color:var(--navy-300);margin-bottom:4px;">Company</div><div>${d.company || '—'}</div></div>
+        <div><div style="font-size:var(--font-size-xs);color:var(--navy-300);margin-bottom:4px;">Type</div><div><span class="${this.badge(d.target_type)}">${d.target_type}</span></div></div>
+        <div><div style="font-size:var(--font-size-xs);color:var(--navy-300);margin-bottom:4px;">Status</div><div><span class="${this.badge(d.status)}">${d.status}</span></div></div>
+        <div><div style="font-size:var(--font-size-xs);color:var(--navy-300);margin-bottom:4px;">Channel</div><div>${d.channel || '—'}</div></div>
+        <div><div style="font-size:var(--font-size-xs);color:var(--navy-300);margin-bottom:4px;">Language</div><div>${d.language || '—'}</div></div>
+        <div><div style="font-size:var(--font-size-xs);color:var(--navy-300);margin-bottom:4px;">AI Model</div><div>${d.ai_model || '—'}</div></div>
         <div><div style="font-size:var(--font-size-xs);color:var(--navy-300);margin-bottom:4px;">Created</div><div>${this.formatDate(d.created_at)}</div></div>
       </div>
       <div class="form-group">
         <label>Subject</label>
-        <input type="text" id="draftSubject" value="${this.esc(d.subject || '')}" ${editable ? '' : 'disabled'}>
+        <input type="text" id="draftSubject" value="${d.subject || ''}" ${raw(editable ? '' : 'disabled')}>
       </div>
       <div class="form-group">
         <label>Body</label>
-        <textarea id="draftBody" rows="10" style="width:100%;background:rgba(6,13,26,0.6);border:1px solid rgba(74,111,159,0.3);border-radius:var(--radius-md);color:var(--white);padding:0.75rem;font-family:var(--font-primary);font-size:var(--font-size-sm);resize:vertical;box-sizing:border-box;" ${editable ? '' : 'disabled'}>${this.esc(d.body || '')}</textarea>
+        <textarea id="draftBody" rows="10" style="width:100%;background:rgba(6,13,26,0.6);border:1px solid rgba(74,111,159,0.3);border-radius:var(--radius-md);color:var(--white);padding:0.75rem;font-family:var(--font-primary);font-size:var(--font-size-sm);resize:vertical;box-sizing:border-box;" ${raw(editable ? '' : 'disabled')}>${d.body || ''}</textarea>
       </div>
       <div style="display:flex;gap:var(--space-md);margin-top:var(--space-lg);flex-wrap:wrap;">
-        ${editable ? `
+        ${editable ? html`
           <button class="btn btn-ghost-secondary" data-action="save-draft" data-id="${d.id}"><i class="fa-regular fa-floppy-disk"></i> Save</button>
           <button class="btn btn-primary" data-action="approve-draft" data-id="${d.id}"><i class="fa-regular fa-paper-plane"></i> Approve &amp; Send</button>
           <button class="btn btn-ghost-secondary" data-action="reject-draft" data-id="${d.id}" style="color:#f87171;"><i class="fa-solid fa-xmark"></i> Reject</button>` : ''}
@@ -868,6 +878,7 @@ const Admin = {
      BLOG
      ============================================================ */
   async loadBlog(params = {}) {
+    this._lastParams.blog = params;
     const qs = new URLSearchParams();
     const limit = this._pageSize;
     const offset = ((this._currentPage.blog || 1) - 1) * limit;
@@ -885,10 +896,7 @@ const Admin = {
       if (!res.ok) throw new Error(data.detail);
       this._data.blog = data;
       this.renderBlog(data);
-      this.renderPagination('blogPagination', data.total, limit, this._currentPage.blog, (p) => {
-        this._currentPage.blog = p;
-        this.loadBlog(params);
-      });
+      this.renderPagination('blogPagination', data.total, limit, this._currentPage.blog, 'blog');
     } catch (err) {
       this.setEmpty('#section-blog table tbody', 6, 'Failed to load blog posts');
       console.error(err);
@@ -900,67 +908,67 @@ const Admin = {
     if (!tbody) return;
     const items = data.items || [];
     if (!items.length) { this.setEmpty('#section-blog table tbody', 6, 'Nog geen blogposts. Klik op "New post" of "Draft new post (AI)" hierboven om te beginnen.'); return; }
-    tbody.innerHTML = items.map(p => {
+    mount(tbody, html`${items.map(p => {
       const tags = Array.isArray(p.tags) ? p.tags.join(', ') : (p.tags || '—');
-      return `
+      return html`
       <tr>
-        <td style="font-weight:600;color:var(--white);">${this.esc(p.title_nl || '—')}</td>
-        <td style="color:var(--navy-200);font-size:var(--font-size-xs);">${this.esc(p.slug)}</td>
-        <td style="color:var(--navy-200);font-size:var(--font-size-xs);">${this.esc(tags)}</td>
-        <td><span class="${this.badge(p.status)}">${this.esc(p.status)}</span></td>
+        <td style="font-weight:600;color:var(--white);">${p.title_nl || '—'}</td>
+        <td style="color:var(--navy-200);font-size:var(--font-size-xs);">${p.slug}</td>
+        <td style="color:var(--navy-200);font-size:var(--font-size-xs);">${tags}</td>
+        <td><span class="${this.badge(p.status)}">${p.status}</span></td>
         <td style="font-size:var(--font-size-xs);color:var(--navy-300);">${p.published_at ? this.formatDate(p.published_at) : '—'}</td>
         <td>
           <button class="btn btn-sm btn-ghost-secondary" data-action="open-blog-modal" data-id="${p.id}" title="Edit">
             <i class="fa-solid fa-pen"></i>
           </button>
-          ${p.status === 'draft' ? `
+          ${p.status === 'draft' ? html`
             <button class="btn btn-sm btn-ghost-secondary" data-action="publish-blog-post" data-id="${p.id}" title="Publish" style="color:#4ade80;">
               <i class="fa-regular fa-circle-check"></i>
             </button>` : ''}
-          ${p.status === 'published' ? `
+          ${p.status === 'published' ? html`
             <button class="btn btn-sm btn-ghost-secondary" data-action="archive-blog-post" data-id="${p.id}" title="Archive" style="color:#f87171;">
               <i class="fa-solid fa-box-archive"></i>
             </button>` : ''}
         </td>
       </tr>`;
-    }).join('');
+    })}`);
   },
 
   openBlogModal(id) {
     const p = id ? (this._data.blog?.items || []).find(x => x.id === id) : null;
-    this.openModal('blogModal', `
+    this.openModal('blogModal', html`
       <h3 style="color:var(--white);margin-bottom:var(--space-lg);">${p ? 'Edit Post' : 'New Post'}</h3>
       <div class="form-group">
         <label>Slug</label>
-        <input type="text" id="blogSlug" value="${this.esc(p?.slug || '')}">
+        <input type="text" id="blogSlug" value="${p?.slug || ''}">
       </div>
       <div class="form-group">
         <label>Title (NL)</label>
-        <input type="text" id="blogTitleNl" value="${this.esc(p?.title_nl || '')}">
+        <input type="text" id="blogTitleNl" value="${p?.title_nl || ''}">
       </div>
       <div class="form-group">
         <label>Title (EN)</label>
-        <input type="text" id="blogTitleEn" value="${this.esc(p?.title_en || '')}">
+        <input type="text" id="blogTitleEn" value="${p?.title_en || ''}">
       </div>
       <div class="form-group">
         <label>Excerpt (NL)</label>
-        <textarea id="blogExcerptNl" rows="3" style="width:100%;background:rgba(6,13,26,0.6);border:1px solid rgba(74,111,159,0.3);border-radius:var(--radius-md);color:var(--white);padding:0.75rem;font-family:var(--font-primary);font-size:var(--font-size-sm);resize:vertical;box-sizing:border-box;">${this.esc(p?.excerpt_nl || '')}</textarea>
+        <textarea id="blogExcerptNl" rows="3" style="width:100%;background:rgba(6,13,26,0.6);border:1px solid rgba(74,111,159,0.3);border-radius:var(--radius-md);color:var(--white);padding:0.75rem;font-family:var(--font-primary);font-size:var(--font-size-sm);resize:vertical;box-sizing:border-box;">${p?.excerpt_nl || ''}</textarea>
       </div>
       <div class="form-group">
         <label>Excerpt (EN)</label>
-        <textarea id="blogExcerptEn" rows="3" style="width:100%;background:rgba(6,13,26,0.6);border:1px solid rgba(74,111,159,0.3);border-radius:var(--radius-md);color:var(--white);padding:0.75rem;font-family:var(--font-primary);font-size:var(--font-size-sm);resize:vertical;box-sizing:border-box;">${this.esc(p?.excerpt_en || '')}</textarea>
+        <textarea id="blogExcerptEn" rows="3" style="width:100%;background:rgba(6,13,26,0.6);border:1px solid rgba(74,111,159,0.3);border-radius:var(--radius-md);color:var(--white);padding:0.75rem;font-family:var(--font-primary);font-size:var(--font-size-sm);resize:vertical;box-sizing:border-box;">${p?.excerpt_en || ''}</textarea>
       </div>
       <div class="form-group">
         <label>Body HTML (NL)</label>
-        <textarea id="blogBodyNl" rows="10" style="width:100%;background:rgba(6,13,26,0.6);border:1px solid rgba(74,111,159,0.3);border-radius:var(--radius-md);color:var(--white);padding:0.75rem;font-family:var(--font-primary);font-size:var(--font-size-sm);resize:vertical;box-sizing:border-box;">${this.esc(p?.body_nl || '')}</textarea>
+        <textarea id="blogBodyNl" rows="10" style="width:100%;background:rgba(6,13,26,0.6);border:1px solid rgba(74,111,159,0.3);border-radius:var(--radius-md);color:var(--white);padding:0.75rem;font-family:var(--font-primary);font-size:var(--font-size-sm);resize:vertical;box-sizing:border-box;">${p?.body_nl || ''}</textarea>
       </div>
       <div class="form-group">
         <label>Body HTML (EN)</label>
-        <textarea id="blogBodyEn" rows="10" style="width:100%;background:rgba(6,13,26,0.6);border:1px solid rgba(74,111,159,0.3);border-radius:var(--radius-md);color:var(--white);padding:0.75rem;font-family:var(--font-primary);font-size:var(--font-size-sm);resize:vertical;box-sizing:border-box;">${this.esc(p?.body_en || '')}</textarea>
+        <textarea id="blogBodyEn" rows="10" style="width:100%;background:rgba(6,13,26,0.6);border:1px solid rgba(74,111,159,0.3);border-radius:var(--radius-md);color:var(--white);padding:0.75rem;font-family:var(--font-primary);font-size:var(--font-size-sm);resize:vertical;box-sizing:border-box;">${p?.body_en || ''}</textarea>
       </div>
       <div class="form-group">
         <label>Tags (comma-separated)</label>
-        <input type="text" id="blogTags" value="${this.esc(Array.isArray(p?.tags) ? p.tags.join(', ') : (p?.tags || ''))}">
+        <input type="text" id="blogTags" value="${Array.isArray(p?.tags) ? p.tags.join(', ') : (p?.tags || '')}">
       </div>
       <div class="form-group">
         <label>Read time (min)</label>
@@ -1074,17 +1082,17 @@ const Admin = {
         this._growthChart.render();
       } else {
         const max = Math.max(...entries.map(([, v]) => v), 1);
-        growthEl.innerHTML = `<div style="display:flex;align-items:flex-end;gap:6px;height:120px;width:100%;">
+        mount(growthEl, html`<div style="display:flex;align-items:flex-end;gap:6px;height:120px;width:100%;">
           ${entries.map(([month, count]) => {
             const h = Math.round((count / max) * 110);
             const label = new Date(month).toLocaleDateString('en-GB', { month: 'short' });
-            return `<div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:4px;">
+            return html`<div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:4px;">
               <div style="font-size:9px;color:var(--navy-300);">${count}</div>
               <div style="width:100%;border-radius:4px 4px 0 0;background:var(--gold-gradient);height:${h}px;"></div>
               <div style="font-size:9px;color:var(--navy-300);">${label}</div>
             </div>`;
-          }).join('')}
-        </div>`;
+          })}
+        </div>`);
       }
     }
   },
@@ -1093,6 +1101,7 @@ const Admin = {
      AUDIT LOG
      ============================================================ */
   async loadAuditLog(params = {}) {
+    this._lastParams.audit = params;
     const qs = new URLSearchParams();
     const limit = this._pageSize;
     const offset = ((this._currentPage.audit || 1) - 1) * limit;
@@ -1108,10 +1117,7 @@ const Admin = {
       if (!res.ok) throw new Error(data.detail);
       this._data.audit = data;
       this.renderAuditLog(data);
-      this.renderPagination('auditPagination', data.total, limit, this._currentPage.audit, (p) => {
-        this._currentPage.audit = p;
-        this.loadAuditLog(params);
-      });
+      this.renderPagination('auditPagination', data.total, limit, this._currentPage.audit, 'audit');
     } catch {
       this.setEmpty('#section-audit table tbody', 4, 'Failed to load audit log');
     }
@@ -1123,13 +1129,13 @@ const Admin = {
     const items = data.items || [];
     if (!items.length) { this.setEmpty('#section-audit table tbody', 4, 'Nog geen audit-log entries voor dit filter.'); return; }
     const colors = { user_delete: '#f87171', impersonate: '#fb923c', settings_update: '#a78bfa' };
-    tbody.innerHTML = items.map(e => `
+    mount(tbody, html`${items.map(e => html`
       <tr>
         <td style="font-size:var(--font-size-xs);color:var(--navy-300);white-space:nowrap;">${this.formatDate(e.created_at)}</td>
-        <td><span style="color:${colors[e.action] || 'var(--gold-400)'};">${this.esc(e.action?.replace(/_/g, ' '))}</span></td>
-        <td style="font-size:var(--font-size-xs);color:var(--navy-200);">${this.esc(e.actor_email || 'system')}</td>
-        <td style="font-size:var(--font-size-xs);color:var(--navy-300);">${this.esc(e.target_type ? e.target_type + ' #' + e.target_id : '—')}</td>
-      </tr>`).join('');
+        <td><span style="color:${colors[e.action] || 'var(--gold-400)'};">${e.action?.replace(/_/g, ' ')}</span></td>
+        <td style="font-size:var(--font-size-xs);color:var(--navy-200);">${e.actor_email || 'system'}</td>
+        <td style="font-size:var(--font-size-xs);color:var(--navy-300);">${e.target_type ? e.target_type + ' #' + e.target_id : '—'}</td>
+      </tr>`)}`);
   },
 
   /* ============================================================
@@ -1185,25 +1191,25 @@ const Admin = {
   renderContent(rows) {
     const el = document.getElementById('contentList');
     if (!el) return;
-    if (!rows.length) { el.innerHTML = '<div style="color:var(--navy-300);padding:1rem;">Nog geen content-items. Voeg ze toe via de API of database.</div>'; return; }
-    el.innerHTML = rows.map(item => `
+    if (!rows.length) { mount(el, html`<div style="color:var(--navy-300);padding:1rem;">Nog geen content-items. Voeg ze toe via de API of database.</div>`); return; }
+    mount(el, html`${rows.map(item => html`
       <div style="display:flex;align-items:center;gap:var(--space-md);padding:var(--space-md) 0;border-bottom:1px solid rgba(74,111,159,0.08);">
         <div style="flex:1;">
-          <div style="font-size:var(--font-size-xs);color:var(--navy-300);">${this.esc(item.section)} / ${this.esc(item.key)}</div>
-          <div style="color:var(--navy-100);margin-top:2px;font-size:var(--font-size-sm);">${this.esc((item.value || '').slice(0, 80))}${(item.value || '').length > 80 ? '…' : ''}</div>
+          <div style="font-size:var(--font-size-xs);color:var(--navy-300);">${item.section} / ${item.key}</div>
+          <div style="color:var(--navy-100);margin-top:2px;font-size:var(--font-size-sm);">${(item.value || '').slice(0, 80)}${(item.value || '').length > 80 ? '…' : ''}</div>
         </div>
-        <button class="btn btn-sm btn-ghost-secondary" data-action="edit-content" data-id="${item.id}" data-key="${this.esc(item.key)}" data-value="${this.esc(item.value || '')}">
+        <button class="btn btn-sm btn-ghost-secondary" data-action="edit-content" data-id="${item.id}" data-key="${item.key}" data-value="${item.value || ''}">
           <i class="fa-solid fa-pen"></i>
         </button>
-      </div>`).join('');
+      </div>`)}`);
   },
 
   editContent(id, key, value) {
-    this.openModal('editContentModal', `
-      <h3 style="color:var(--white);margin-bottom:var(--space-lg);">Edit: ${this.esc(key)}</h3>
+    this.openModal('editContentModal', html`
+      <h3 style="color:var(--white);margin-bottom:var(--space-lg);">Edit: ${key}</h3>
       <div class="form-group">
         <label>Value</label>
-        <textarea id="editContentValue" rows="5" style="width:100%;background:rgba(6,13,26,0.6);border:1px solid rgba(74,111,159,0.3);border-radius:var(--radius-md);color:var(--white);padding:0.75rem;font-family:var(--font-primary);font-size:var(--font-size-sm);resize:vertical;">${this.esc(value)}</textarea>
+        <textarea id="editContentValue" rows="5" style="width:100%;background:rgba(6,13,26,0.6);border:1px solid rgba(74,111,159,0.3);border-radius:var(--radius-md);color:var(--white);padding:0.75rem;font-family:var(--font-primary);font-size:var(--font-size-sm);resize:vertical;">${value}</textarea>
       </div>
       <div style="display:flex;gap:var(--space-md);margin-top:var(--space-lg);">
         <button class="btn btn-primary" data-action="save-content" data-id="${id}">Save</button>
@@ -1228,44 +1234,620 @@ const Admin = {
   },
 
   /* ============================================================
+     OPDRACHTGEVERS (WS-B.5)
+
+     Main has no GET /v1/admin/clients list endpoint (checked
+     talent-os/backend/routers/*.py and openapi.snapshot.json — only
+     /v1/admin/clients/{client_id}/contacts and .../{user_id}/approve
+     exist under that prefix). The roster here is therefore built
+     client-side: list users with role=client, then GET each user's detail
+     (which joins the linked `clients` row + an unfiltered job_count) and
+     dedupe by client id. A second pass hits /v1/admin/jobs?client_id=..
+     &status=open for an accurate *open* count, since the join only gives
+     every job_orders row regardless of status. This is N+1 (~2x the
+     number of client accounts) — fine for the current roster size, but a
+     real GET /v1/admin/clients?... endpoint returning company_name,
+     domain, open_job_count and primary_contact in one row would remove
+     both extra round-trips.
+
+     `erkend_referent` (recognised-sponsor / IND) is not a column on
+     `clients` (talent-os/backend/migrations/000_baseline.py) — the column
+     always renders "onbekend" per the task spec rather than guessing.
+     ============================================================ */
+  async loadClients() {
+    this.setLoading('#section-clients table tbody', 6);
+    try {
+      const res = await Auth.fetch('/v1/admin/users?role=client&limit=200');
+      if (!res) return;
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail);
+      const users = data.items || [];
+      if (!users.length) {
+        this._data.clients = [];
+        this.setEmpty('#section-clients table tbody', 6, 'Nog geen opdrachtgevers met een portal-account.');
+        return;
+      }
+
+      const details = await Promise.all(users.map(u =>
+        Auth.fetch(`/v1/admin/users/${u.id}`).then(r => (r && r.ok) ? r.json() : null).catch(() => null)
+      ));
+
+      const byClientId = new Map();
+      details.forEach(d => {
+        if (d && d.client && d.client.id != null && !byClientId.has(d.client.id)) {
+          byClientId.set(d.client.id, {
+            ...d.client,
+            job_count: d.job_count ?? 0,
+            open_jobs: null,
+            _accountName: d.full_name || '',
+            _accountEmail: d.email || '',
+          });
+        }
+      });
+      const clients = Array.from(byClientId.values());
+
+      await Promise.all(clients.map(async c => {
+        try {
+          const r = await Auth.fetch(`/v1/admin/jobs?client_id=${c.id}&status=open&limit=1`);
+          if (r && r.ok) { const jd = await r.json(); c.open_jobs = jd.total ?? 0; }
+        } catch { /* leave open_jobs null -> falls back to job_count in render */ }
+      }));
+
+      this._data.clients = clients;
+      this.renderClients(clients);
+    } catch (err) {
+      this.setLoadError('#section-clients table tbody', 6, () => this.loadClients());
+    }
+  },
+
+  renderClients(clients) {
+    const tbody = document.querySelector('#section-clients table tbody');
+    if (!tbody) return;
+    if (!clients.length) { this.setEmpty('#section-clients table tbody', 6, 'Nog geen opdrachtgevers met een portal-account.'); return; }
+    mount(tbody, html`${clients.map(c => html`
+      <tr data-action="open-client" data-id="${c.id}" style="cursor:pointer;">
+        <td style="font-weight:600;color:var(--white);">${c.company_name || 'Onbekend'}</td>
+        <td style="color:var(--navy-200);">${c.domain || '—'}</td>
+        <td class="text-center">${c.open_jobs != null ? c.open_jobs : c.job_count}</td>
+        <td style="color:var(--navy-200);">${c._accountName || c._accountEmail || '—'}</td>
+        <td><span class="badge bg-secondary-lt" title="Geen erkend-referent-veld op clients">onbekend</span></td>
+        <td class="text-end"><i class="fa-solid fa-chevron-right text-secondary"></i></td>
+      </tr>`)}`);
+  },
+
+  roleLabel(role) {
+    const map = { hiring_manager: 'Hiring manager', finance: 'Financiën', tekenbevoegd: 'Tekenbevoegd', overig: 'Overig' };
+    return map[role] || '—';
+  },
+
+  openClientDrawer(clientId) {
+    const client = (this._data.clients || []).find(c => c.id === clientId);
+    const tabs = [
+      ['contacts', 'Contacten'], ['jobs', 'Vacatures'],
+      ['activity', 'Notities/Activiteit'], ['prospects', 'Prospects'],
+    ];
+    this.openModal('clientDrawer', html`
+      <h3 style="color:var(--white);margin-bottom:4px;">${client?.company_name || 'Opdrachtgever'}</h3>
+      <div style="color:var(--navy-300);font-size:var(--font-size-sm);margin-bottom:var(--space-lg);">${client?.domain || '—'}</div>
+      <div style="display:flex;gap:4px;flex-wrap:wrap;border-bottom:1px solid rgba(74,111,159,0.2);margin-bottom:var(--space-md);padding-bottom:var(--space-sm);">
+        ${tabs.map(([key, label]) => html`
+          <button class="btn btn-sm ${key === 'contacts' ? 'btn-primary' : 'btn-ghost-secondary'}"
+            data-action="client-tab" data-client-id="${clientId}" data-tab="${key}">${label}</button>`)}
+      </div>
+      <div id="clientDrawerTabContent" style="min-height:120px;"><i class="fa-solid fa-spinner fa-spin"></i></div>
+    `, { wide: true });
+    this.switchClientTab(clientId, 'contacts');
+  },
+
+  switchClientTab(clientId, tab) {
+    document.querySelectorAll('#adminModalOverlay [data-action="client-tab"]').forEach(btn => {
+      btn.classList.toggle('btn-primary', btn.dataset.tab === tab);
+      btn.classList.toggle('btn-ghost-secondary', btn.dataset.tab !== tab);
+    });
+    const loaders = {
+      contacts: () => this.loadClientContacts(clientId),
+      jobs: () => this.loadClientJobsTab(clientId),
+      activity: () => this.loadClientActivityTab(clientId),
+      prospects: () => this.loadClientProspectsTab(clientId),
+    };
+    (loaders[tab] || loaders.contacts)();
+  },
+
+  /* ---- Contacts tab (WS-C.4 CRUD) ---- */
+  async loadClientContacts(clientId) {
+    const el = document.getElementById('clientDrawerTabContent');
+    if (!el) return;
+    mount(el, html`<i class="fa-solid fa-spinner fa-spin"></i>`);
+    try {
+      const res = await Auth.fetch(`/v1/admin/clients/${clientId}/contacts`);
+      if (!res) return;
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail);
+      this._data.clientContacts = this._data.clientContacts || {};
+      this._data.clientContacts[clientId] = data.items || [];
+      this.renderClientContacts(clientId);
+    } catch {
+      this.setContainerLoadError(el, () => this.loadClientContacts(clientId));
+    }
+  },
+
+  renderClientContacts(clientId) {
+    const el = document.getElementById('clientDrawerTabContent');
+    if (!el) return;
+    const items = (this._data.clientContacts && this._data.clientContacts[clientId]) || [];
+    mount(el, html`
+      <div style="display:flex;justify-content:flex-end;margin-bottom:var(--space-md);">
+        <button class="btn btn-sm btn-primary" data-action="client-contact-new" data-client-id="${clientId}">
+          <i class="fa-solid fa-plus"></i> Nieuw contact
+        </button>
+      </div>
+      <div id="clientContactForm"></div>
+      ${items.length ? html`
+        <div class="table-responsive">
+          <table class="table table-vcenter card-table">
+            <thead><tr><th>Naam</th><th>Rol</th><th>E-mail</th><th>Telefoon</th><th>Primair</th><th style="width:110px;">Acties</th></tr></thead>
+            <tbody>${items.map(c => html`
+              <tr>
+                <td style="color:var(--white);">${c.full_name}</td>
+                <td>${this.roleLabel(c.role)}</td>
+                <td style="color:var(--navy-200);">${c.email || '—'}</td>
+                <td style="color:var(--navy-200);">${c.phone || '—'}</td>
+                <td>${c.is_primary ? html`<span class="badge bg-yellow-lt">Primair</span>` : html`
+                  <button class="btn btn-sm btn-ghost-secondary" data-action="client-contact-make-primary" data-client-id="${clientId}" data-id="${c.id}">Maak primair</button>`}</td>
+                <td>
+                  <button class="btn btn-sm btn-ghost-secondary" data-action="client-contact-edit" data-client-id="${clientId}" data-id="${c.id}" title="Bewerken"><i class="fa-solid fa-pen"></i></button>
+                  <button class="btn btn-sm btn-ghost-secondary" data-action="client-contact-delete" data-client-id="${clientId}" data-id="${c.id}" title="Verwijderen" style="color:#f87171;"><i class="fa-solid fa-trash"></i></button>
+                </td>
+              </tr>`)}</tbody>
+          </table>
+        </div>` : html`<div style="color:var(--navy-300);padding:1rem 0;">Nog geen contacten voor deze opdrachtgever.</div>`}
+    `);
+  },
+
+  openClientContactForm(clientId, contactId) {
+    const contact = contactId
+      ? ((this._data.clientContacts?.[clientId] || []).find(c => c.id === contactId))
+      : null;
+    const formEl = document.getElementById('clientContactForm');
+    if (!formEl) return;
+    mount(formEl, html`
+      <div style="border:1px solid rgba(74,111,159,0.2);border-radius:var(--radius-md);padding:var(--space-md);margin-bottom:var(--space-md);">
+        <h4 style="color:var(--white);margin-bottom:var(--space-md);">${contact ? 'Contact bewerken' : 'Nieuw contact'}</h4>
+        <div class="form-group"><label>Naam</label><input type="text" id="ccFullName" value="${contact?.full_name || ''}"></div>
+        <div class="form-group"><label>E-mail</label><input type="email" id="ccEmail" value="${contact?.email || ''}"></div>
+        <div class="form-group"><label>Telefoon</label><input type="text" id="ccPhone" value="${contact?.phone || ''}"></div>
+        <div class="form-group">
+          <label>Rol</label>
+          <select id="ccRole">
+            <option value="">—</option>
+            ${['hiring_manager', 'finance', 'tekenbevoegd', 'overig'].map(r => html`
+              <option value="${r}" ${raw(contact?.role === r ? 'selected' : '')}>${this.roleLabel(r)}</option>`)}
+          </select>
+        </div>
+        <div class="form-group">
+          <label><input type="checkbox" id="ccPrimary" ${raw(contact?.is_primary ? 'checked' : '')}> Primair contact</label>
+        </div>
+        <div style="display:flex;gap:var(--space-md);margin-top:var(--space-md);">
+          <button class="btn btn-primary btn-sm" data-action="client-contact-save" data-client-id="${clientId}" data-id="${contactId || ''}">Opslaan</button>
+          <button class="btn btn-ghost-secondary btn-sm" data-action="client-contact-cancel" data-client-id="${clientId}">Annuleren</button>
+        </div>
+      </div>
+    `);
+  },
+
+  async saveClientContact(clientId, contactId) {
+    const payload = {
+      full_name: document.getElementById('ccFullName')?.value?.trim(),
+      email: document.getElementById('ccEmail')?.value?.trim() || null,
+      phone: document.getElementById('ccPhone')?.value?.trim() || null,
+      role: document.getElementById('ccRole')?.value || null,
+      is_primary: !!document.getElementById('ccPrimary')?.checked,
+    };
+    if (!payload.full_name) { Auth.toast('Naam is verplicht', 'error'); return; }
+    try {
+      const res = contactId
+        ? await Auth.fetch(`/v1/admin/clients/${clientId}/contacts/${contactId}`, { method: 'PUT', body: JSON.stringify(payload) })
+        : await Auth.fetch(`/v1/admin/clients/${clientId}/contacts`, { method: 'POST', body: JSON.stringify({ ...payload, lawful_basis: 'zakelijk_functioneel_adres' }) });
+      if (res?.ok) {
+        Auth.toast(contactId ? 'Contact bijgewerkt' : 'Contact toegevoegd', 'success');
+        document.getElementById('clientContactForm') && mount(document.getElementById('clientContactForm'), '');
+        await this.loadClientContacts(clientId);
+      } else {
+        const d = await res?.json().catch(() => null);
+        Auth.toast(d?.detail || 'Opslaan mislukt', 'error');
+      }
+    } catch { Auth.toast('Netwerkfout', 'error'); }
+  },
+
+  async makeClientContactPrimary(clientId, contactId) {
+    try {
+      const res = await Auth.fetch(`/v1/admin/clients/${clientId}/contacts/${contactId}`, {
+        method: 'PUT', body: JSON.stringify({ is_primary: true }),
+      });
+      if (res?.ok) { await this.loadClientContacts(clientId); }
+      else { Auth.toast('Bijwerken mislukt', 'error'); }
+    } catch { Auth.toast('Netwerkfout', 'error'); }
+  },
+
+  async deleteClientContact(clientId, contactId) {
+    if (!confirm('Dit contact verwijderen?')) return;
+    try {
+      const res = await Auth.fetch(`/v1/admin/clients/${clientId}/contacts/${contactId}`, { method: 'DELETE' });
+      if (res?.ok || res?.status === 204) {
+        Auth.toast('Contact verwijderd', 'success');
+        await this.loadClientContacts(clientId);
+      } else { Auth.toast('Verwijderen mislukt', 'error'); }
+    } catch { Auth.toast('Netwerkfout', 'error'); }
+  },
+
+  /* ---- Jobs tab (read-only, existing jobs endpoint filtered by client) ---- */
+  async loadClientJobsTab(clientId) {
+    const el = document.getElementById('clientDrawerTabContent');
+    if (!el) return;
+    mount(el, html`<i class="fa-solid fa-spinner fa-spin"></i>`);
+    try {
+      const res = await Auth.fetch(`/v1/admin/jobs?client_id=${clientId}&limit=50`);
+      if (!res) return;
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail);
+      const items = data.items || [];
+      mount(el, items.length ? html`
+        <div class="table-responsive">
+          <table class="table table-vcenter card-table">
+            <thead><tr><th>Titel</th><th>Type</th><th>Status</th><th>Sollicitaties</th></tr></thead>
+            <tbody>${items.map(j => html`
+              <tr>
+                <td style="color:var(--white);">${j.title || 'Untitled'}</td>
+                <td style="color:var(--navy-200);">${j.employment_type ? this.dienstlijnLabel(j.employment_type) : '—'}</td>
+                <td><span class="${this.badge(j.status)}">${j.status || 'draft'}</span></td>
+                <td class="text-center">${j.application_count ?? '—'}</td>
+              </tr>`)}</tbody>
+          </table>
+        </div>` : html`<div style="color:var(--navy-300);padding:1rem 0;">Nog geen vacatures voor deze opdrachtgever.</div>`);
+    } catch {
+      this.setContainerLoadError(el, () => this.loadClientJobsTab(clientId));
+    }
+  },
+
+  /* ---- Notities/Activiteit tab (WS-C.6) --
+     GET /v1/admin/activities?subject_type=client&subject_id=.. landed on
+     main after this feature was first built (migrations/028_activities.py,
+     routers/activities.py) -- read-only here, matching the task spec. */
+  activityTypeLabel(type) {
+    const map = { note: 'Notitie', call: 'Telefoongesprek', email: 'E-mail', meeting: 'Afspraak', task: 'Taak', status_change: 'Statuswijziging' };
+    return map[type] || type || '—';
+  },
+
+  async loadClientActivityTab(clientId) {
+    const el = document.getElementById('clientDrawerTabContent');
+    if (!el) return;
+    mount(el, html`<i class="fa-solid fa-spinner fa-spin"></i>`);
+    try {
+      const res = await Auth.fetch(`/v1/admin/activities?subject_type=client&subject_id=${clientId}&limit=50`);
+      if (!res) return;
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail);
+      const items = data.items || [];
+      mount(el, items.length ? html`
+        <div class="table-responsive">
+          <table class="table table-vcenter card-table">
+            <thead><tr><th>Type</th><th>Notitie</th><th>Datum</th><th>Status</th></tr></thead>
+            <tbody>${items.map(a => html`
+              <tr>
+                <td style="color:var(--white);">${this.activityTypeLabel(a.type)}</td>
+                <td style="color:var(--navy-200);">${a.body || '—'}</td>
+                <td style="color:var(--navy-200);">${this.formatDate(a.created_at)}</td>
+                <td>${a.completed_at ? html`<span class="badge bg-secondary-lt">Afgerond</span>` : (a.due_at ? html`<span class="badge bg-blue-lt">Open</span>` : '—')}</td>
+              </tr>`)}</tbody>
+          </table>
+        </div>` : html`<div style="color:var(--navy-300);padding:1rem 0;">Nog geen notities of activiteit voor deze opdrachtgever.</div>`);
+    } catch {
+      this.setContainerLoadError(el, () => this.loadClientActivityTab(clientId));
+    }
+  },
+
+  /* ---- Prospects tab (existing global prospects router, best-effort
+     matched to this client by company name -- client_prospects has no
+     client_id FK to `clients`, so this is a name search, not a join). ---- */
+  async loadClientProspectsTab(clientId) {
+    const el = document.getElementById('clientDrawerTabContent');
+    if (!el) return;
+    mount(el, html`<i class="fa-solid fa-spinner fa-spin"></i>`);
+    const client = (this._data.clients || []).find(c => c.id === clientId);
+    const search = client?.company_name || '';
+    try {
+      const qs = new URLSearchParams({ limit: '50' });
+      if (search) qs.set('search', search);
+      const res = await Auth.fetch(`/v1/admin/prospects?${qs}`);
+      if (!res) return;
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail);
+      const items = data.items || [];
+      mount(el, html`
+        <div style="color:var(--navy-300);font-size:var(--font-size-xs);margin-bottom:var(--space-sm);">
+          Gematcht op bedrijfsnaam (geen directe koppeling in de database).
+        </div>
+        ${items.length ? html`
+          <div class="table-responsive">
+            <table class="table table-vcenter card-table">
+              <thead><tr><th>Bedrijf</th><th>Contact</th><th>Functie</th><th>Status</th></tr></thead>
+              <tbody>${items.map(p => html`
+                <tr>
+                  <td style="color:var(--white);">${p.company_name || '—'}</td>
+                  <td style="color:var(--navy-200);">${p.contact_name || '—'}</td>
+                  <td style="color:var(--navy-200);">${p.contact_title || '—'}</td>
+                  <td><span class="${this.badge(p.status)}">${p.status || '—'}</span></td>
+                </tr>`)}</tbody>
+            </table>
+          </div>` : html`<div style="color:var(--navy-300);padding:1rem 0;">Geen prospects gevonden voor deze bedrijfsnaam.</div>`}
+      `);
+    } catch {
+      this.setContainerLoadError(el, () => this.loadClientProspectsTab(clientId));
+    }
+  },
+
+  /* ============================================================
+     LEADS (WS-C.10) — unified inbox: GET /v1/admin/leads across
+     contact_submissions + quiz_submissions, PATCH marks one row read.
+     ============================================================ */
+  async loadLeads(params = {}) {
+    this._lastParams.leads = params;
+    const qs = new URLSearchParams();
+    const limit = this._pageSize;
+    const offset = ((this._currentPage.leads || 1) - 1) * limit;
+    if (params.type) qs.set('type', params.type);
+    if (params.unread) qs.set('unread', 'true');
+    qs.set('limit', limit);
+    qs.set('offset', offset);
+
+    this.setLoading('#section-leads table tbody', 6);
+    try {
+      const res = await Auth.fetch(`/v1/admin/leads?${qs}`);
+      if (!res) return;
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail);
+      this._data.leads = data;
+      this.renderLeads(data);
+      this.renderPagination('leadsPagination', data.total, limit, this._currentPage.leads, 'leads');
+    } catch {
+      this.setLoadError('#section-leads table tbody', 6, () => this.loadLeads(params));
+    }
+  },
+
+  leadInterestLabel(type) {
+    const map = {
+      werving_selectie: 'Werving & selectie', detachering_internationaal: 'Detachering (internationaal)',
+      kandidaat: 'Kandidaat', overig: 'Overig',
+    };
+    return map[type] || '—';
+  },
+
+  // Dienstlijn label for a job's raw `employment_type` value -- used by the
+  // client drawer's Vacatures tab and the Rapportage breakdown so a raw
+  // enum string (or an unrecognised one) never renders straight into the
+  // UI. Unknown values fall back to the raw value itself (still escaped by
+  // html``, never raw()) rather than a silent "—", so a value this map
+  // hasn't caught up with is still visible instead of hidden.
+  dienstlijnLabel(type) {
+    const map = {
+      vast: 'Vast (werving en selectie)',
+      detachering: 'Detachering',
+      interim: 'Interim',
+      werving_selectie: 'Werving en selectie',
+      detachering_internationaal: 'Detachering (internationaal)',
+    };
+    return map[type] || type || 'onbekend';
+  },
+
+  renderLeads(data) {
+    const tbody = document.querySelector('#section-leads table tbody');
+    if (!tbody) return;
+    const items = data.items || [];
+    if (!items.length) { this.setEmpty('#section-leads table tbody', 6, 'Geen leads gevonden voor deze filters.'); return; }
+    mount(tbody, html`${items.map(l => html`
+      <tr data-action="toggle-lead-read" data-source="${l.source}" data-id="${l.id}" data-read="${l.is_read ? '1' : '0'}"
+        style="cursor:pointer;${raw(l.is_read ? '' : 'font-weight:600;')}">
+        <td><span class="badge ${l.source === 'quiz_submissions' ? 'bg-yellow-lt' : 'bg-blue-lt'}">${l.source === 'quiz_submissions' ? 'Quiz' : 'Contact'}</span></td>
+        <td style="color:var(--white);">${l.name || '—'}</td>
+        <td style="color:var(--navy-200);">${l.email || '—'}</td>
+        <td>${l.interest_type ? html`<span class="badge bg-secondary-lt">${this.leadInterestLabel(l.interest_type)}</span>` : '—'}</td>
+        <td style="color:var(--navy-200);">${this.formatDate(l.created_at)}</td>
+        <td>${l.is_read
+          ? html`<span class="badge bg-secondary-lt">Gelezen</span>`
+          : html`<span class="badge bg-green-lt">Ongelezen</span>`}</td>
+      </tr>`)}`);
+  },
+
+  async toggleLeadRead(source, leadId, currentlyRead) {
+    try {
+      const res = await Auth.fetch(`/v1/admin/leads/${source}/${leadId}`, {
+        method: 'PATCH', body: JSON.stringify({ is_read: !currentlyRead }),
+      });
+      if (res?.ok) {
+        await this.loadLeads(this._lastParams.leads || {});
+      } else {
+        Auth.toast('Bijwerken mislukt', 'error');
+      }
+    } catch { Auth.toast('Netwerkfout', 'error'); }
+  },
+
+  /* ============================================================
+     RAPPORTAGE — computed client-side from data the API already
+     returns (no invented KPIs): open jobs per dienstlijn
+     (employment_type, excluding is_demo -- the admin jobs endpoint
+     already excludes those unless include_demo=true), and leads per
+     category this week/month + total unread, from the most recent 200
+     leads (the leads endpoint has no date filter, so this is a sample,
+     called out in the UI caption rather than pretending it's exhaustive).
+     ============================================================ */
+  async loadReporting() {
+    const el = document.getElementById('reportingContent');
+    if (el) mount(el, html`<div style="text-align:center;padding:3rem;color:var(--navy-300);"><i class="fa-solid fa-spinner fa-spin"></i> Laden…</div>`);
+    try {
+      const [jobsRes, leadsRes, unreadRes] = await Promise.all([
+        Auth.fetch('/v1/admin/jobs?status=open&limit=200'),
+        Auth.fetch('/v1/admin/leads?limit=200'),
+        Auth.fetch('/v1/admin/leads?unread=true&limit=1'),
+      ]);
+      if (!jobsRes?.ok || !leadsRes?.ok) throw new Error('Failed');
+      const jobsData = await jobsRes.json();
+      const leadsData = await leadsRes.json();
+      const unreadData = unreadRes?.ok ? await unreadRes.json() : null;
+      this.renderReporting(jobsData, leadsData, unreadData);
+    } catch {
+      if (el) mount(el, html`<div style="text-align:center;padding:3rem;color:#f87171;">Rapportage kon niet geladen worden.</div>`);
+    }
+  },
+
+  renderReporting(jobsData, leadsData, unreadData) {
+    const el = document.getElementById('reportingContent');
+    if (!el) return;
+
+    const jobs = jobsData.items || [];
+    const byType = new Map();
+    jobs.forEach(j => {
+      const t = j.employment_type || 'onbekend';
+      byType.set(t, (byType.get(t) || 0) + 1);
+    });
+
+    const now = new Date();
+    const startOfWeek = new Date(now);
+    const dow = (startOfWeek.getDay() + 6) % 7; // Monday = 0
+    startOfWeek.setDate(startOfWeek.getDate() - dow);
+    startOfWeek.setHours(0, 0, 0, 0);
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+
+    const leads = leadsData.items || [];
+    const bucket = () => ({ werving_selectie: 0, detachering_internationaal: 0, kandidaat: 0, overig: 0, quiz: 0 });
+    const week = bucket();
+    const month = bucket();
+    leads.forEach(l => {
+      const created = new Date(l.created_at);
+      const key = l.interest_type || 'quiz';
+      if (created >= startOfWeek) week[key] = (week[key] || 0) + 1;
+      if (created >= startOfMonth) month[key] = (month[key] || 0) + 1;
+    });
+
+    const jobsCapNote = (jobsData.total || 0) > jobs.length ? html`<div style="color:var(--navy-300);font-size:var(--font-size-xs);margin-top:var(--space-sm);">Toont ${jobs.length} van ${jobsData.total} open vacatures.</div>` : '';
+    const leadsCapNote = (leadsData.total || 0) > leads.length ? html`<div style="color:var(--navy-300);font-size:var(--font-size-xs);margin-top:var(--space-sm);">Gebaseerd op de meest recente ${leads.length} van ${leadsData.total} leads.</div>` : '';
+
+    const rows = [
+      ['werving_selectie', 'Werving & selectie'], ['detachering_internationaal', 'Detachering (internationaal)'],
+      ['kandidaat', 'Kandidaat'], ['overig', 'Overig'], ['quiz', 'Quiz (geen categorie)'],
+    ];
+
+    mount(el, html`
+      <div class="row row-deck row-cards mb-4">
+        <div class="col-sm-4">
+          <div class="card card-sm"><div class="card-body">
+            <div class="subheader"><i class="fa-solid fa-briefcase me-1"></i>Open vacatures</div>
+            <div class="h1 mb-0">${jobs.length}</div>
+          </div></div>
+        </div>
+        <div class="col-sm-4">
+          <div class="card card-sm"><div class="card-body">
+            <div class="subheader"><i class="fa-solid fa-envelope me-1"></i>Leads ongelezen</div>
+            <div class="h1 mb-0">${unreadData ? (unreadData.total ?? 0) : '—'}</div>
+          </div></div>
+        </div>
+        <div class="col-sm-4">
+          <div class="card card-sm"><div class="card-body">
+            <div class="subheader"><i class="fa-regular fa-calendar me-1"></i>Leads deze week</div>
+            <div class="h1 mb-0">${Object.values(week).reduce((a, b) => a + b, 0)}</div>
+          </div></div>
+        </div>
+      </div>
+
+      <div class="row row-cards">
+        <div class="col-lg-6">
+          <div class="card">
+            <div class="card-header"><h3 class="card-title"><i class="fa-solid fa-layer-group text-primary me-2"></i>Open vacatures per dienstlijn</h3></div>
+            <div class="card-body">
+              ${byType.size ? html`<table class="table table-vcenter card-table">
+                <tbody>${Array.from(byType.entries()).map(([t, n]) => html`
+                  <tr><td style="color:var(--navy-200);">${this.dienstlijnLabel(t)}</td><td class="text-end" style="color:var(--white);font-weight:600;">${n}</td></tr>`)}</tbody>
+              </table>` : html`<div style="color:var(--navy-300);">Geen open vacatures.</div>`}
+              ${jobsCapNote}
+            </div>
+          </div>
+        </div>
+        <div class="col-lg-6">
+          <div class="card">
+            <div class="card-header"><h3 class="card-title"><i class="fa-solid fa-chart-column text-primary me-2"></i>Leads per categorie</h3></div>
+            <div class="card-body">
+              <table class="table table-vcenter card-table">
+                <thead><tr><th>Categorie</th><th class="text-end">Deze week</th><th class="text-end">Deze maand</th></tr></thead>
+                <tbody>${rows.map(([key, label]) => html`
+                  <tr>
+                    <td style="color:var(--navy-200);">${label}</td>
+                    <td class="text-end" style="color:var(--white);">${week[key] || 0}</td>
+                    <td class="text-end" style="color:var(--white);">${month[key] || 0}</td>
+                  </tr>`)}</tbody>
+              </table>
+              ${leadsCapNote}
+            </div>
+          </div>
+        </div>
+      </div>
+    `);
+  },
+
+  /* ============================================================
      PAGINATION
      ============================================================ */
-  renderPagination(containerId, total, limit, current, onPage) {
+  // `section` is one of the _currentPage/_lastParams keys (users, candidates,
+  // outreach, blog, audit). Buttons carry data-action="page" + data-section +
+  // data-page and go through the one delegated click listener in
+  // handleDataAction() -> goToPage() -- no inline onclick=, no per-render
+  // addEventListener closures.
+  renderPagination(containerId, total, limit, current, section) {
     const el = document.getElementById(containerId);
     if (!el) return;
     const pages = Math.ceil(total / limit);
-    el.innerHTML = '';
-    if (pages <= 1) return;
+    if (pages <= 1) { mount(el, ''); return; }
 
-    // Built as real DOM nodes with addEventListener (CSP: no inline onclick=
-    // attributes) -- also lets each button call the real `onPage` closure
-    // directly instead of serializing it into a string with .toString().
-    const makeBtn = (label, page, opts = {}) => {
-      const btn = document.createElement('button');
-      if (opts.html) btn.innerHTML = label; else btn.textContent = label;
-      if (opts.active) btn.classList.add('active');
-      if (opts.disabled) btn.disabled = true;
-      else btn.addEventListener('click', () => onPage(page));
-      return btn;
+    const pageBtn = (label, page, opts = {}) => html`<button
+        data-action="page" data-section="${section}" data-page="${page}"
+        class="${opts.active ? 'active' : ''}"
+        ${raw(opts.disabled ? 'disabled' : '')}>${opts.icon ? raw(label) : label}</button>`;
+
+    mount(el, html`
+      ${pageBtn('<i class="fa-solid fa-chevron-left"></i>', current - 1, { icon: true, disabled: current === 1 })}
+      ${(function () {
+        const nums = [];
+        for (let i = 1; i <= Math.min(pages, 7); i++) nums.push(pageBtn(String(i), i, { active: i === current }));
+        return nums;
+      })()}
+      ${pages > 7 ? html`<span style="color:var(--navy-300);padding:0 4px;">…${pages}</span>` : ''}
+      ${pageBtn('<i class="fa-solid fa-chevron-right"></i>', current + 1, { icon: true, disabled: current === pages })}
+    `);
+  },
+
+  // Dispatch target for data-action="page" -- re-derives the page's params
+  // from the last load*() call for that section (set in loadUsers() etc.)
+  // rather than needing a fresh onPage closure per render.
+  goToPage(section, page) {
+    const loaders = {
+      users: 'loadUsers', candidates: 'loadCandidates',
+      outreach: 'loadOutreach', blog: 'loadBlog', audit: 'loadAuditLog',
+      leads: 'loadLeads',
     };
-
-    el.appendChild(makeBtn('<i class="fa-solid fa-chevron-left"></i>', current - 1, { html: true, disabled: current === 1 }));
-    for (let i = 1; i <= Math.min(pages, 7); i++) {
-      el.appendChild(makeBtn(String(i), i, { active: i === current }));
-    }
-    if (pages > 7) {
-      const span = document.createElement('span');
-      span.style.cssText = 'color:var(--navy-300);padding:0 4px;';
-      span.textContent = `…${pages}`;
-      el.appendChild(span);
-    }
-    el.appendChild(makeBtn('<i class="fa-solid fa-chevron-right"></i>', current + 1, { html: true, disabled: current === pages }));
+    const fn = loaders[section];
+    if (!fn || !Number.isFinite(page) || page < 1) return;
+    this._currentPage[section] = page;
+    this[fn](this._lastParams[section] || {});
   },
 
   /* ============================================================
      MODAL
      ============================================================ */
-  openModal(id, html) {
+  // `bodyHtml` is always an html``/raw() RawHtml result from the caller —
+  // never renamed to `html`, which would shadow the module-level html``
+  // tag this method sits alongside.
+  // `opts.wide` widens the panel (760px vs the 520px default) for content
+  // that needs more room -- the client detail drawer's tabs (WS-B.5), which
+  // reuse this same modal overlay rather than a separate drawer component.
+  openModal(id, bodyHtml, opts = {}) {
     let overlay = document.getElementById('adminModalOverlay');
     if (!overlay) {
       overlay = document.createElement('div');
@@ -1274,13 +1856,14 @@ const Admin = {
       overlay.addEventListener('click', e => { if (e.target === overlay) this.closeModal(); });
       document.body.appendChild(overlay);
     }
-    overlay.innerHTML = `
-      <div style="background:var(--navy-900);border:1px solid rgba(74,111,159,0.2);border-radius:var(--radius-xl);padding:var(--space-2xl);max-width:520px;width:100%;max-height:80vh;overflow-y:auto;position:relative;">
+    const maxWidth = opts.wide ? '760px' : '520px';
+    mount(overlay, html`
+      <div style="background:var(--navy-900);border:1px solid rgba(74,111,159,0.2);border-radius:var(--radius-xl);padding:var(--space-2xl);max-width:${maxWidth};width:100%;max-height:80vh;overflow-y:auto;position:relative;">
         <button data-action="close-modal" style="position:absolute;top:1rem;right:1rem;background:none;border:none;color:var(--navy-200);cursor:pointer;font-size:1.2rem;">
           <i class="fa-solid fa-xmark"></i>
         </button>
-        ${html}
-      </div>`;
+        ${bodyHtml}
+      </div>`);
     overlay.style.display = 'flex';
   },
 
@@ -1323,6 +1906,24 @@ const Admin = {
     if (jobStatusFilter) jobStatusFilter.addEventListener('change', e => {
       const v = e.target.value;
       this.loadJobs({ status: ['open','closed','draft'].includes(v) ? v : '' });
+    });
+
+    const leadTypeFilter = document.getElementById('leadTypeFilter');
+    if (leadTypeFilter) leadTypeFilter.addEventListener('change', e => {
+      this._currentPage.leads = 1;
+      this.loadLeads({
+        type: e.target.value || undefined,
+        unread: document.getElementById('leadUnreadFilter')?.checked || undefined,
+      });
+    });
+
+    const leadUnreadFilter = document.getElementById('leadUnreadFilter');
+    if (leadUnreadFilter) leadUnreadFilter.addEventListener('change', e => {
+      this._currentPage.leads = 1;
+      this.loadLeads({
+        type: document.getElementById('leadTypeFilter')?.value || undefined,
+        unread: e.target.checked || undefined,
+      });
     });
 
     document.addEventListener('click', () => this.closeMenus());
@@ -1411,8 +2012,40 @@ const Admin = {
       case 'save-settings':
         this.saveSettings();
         break;
+      case 'page':
+        this.goToPage(el.dataset.section, Number(el.dataset.page));
+        break;
       case 'close-modal':
         this.closeModal();
+        break;
+      case 'open-client':
+        this.openClientDrawer(Number(id));
+        break;
+      case 'client-tab':
+        this.switchClientTab(Number(el.dataset.clientId), el.dataset.tab);
+        break;
+      case 'client-contact-new':
+        this.openClientContactForm(Number(el.dataset.clientId), null);
+        break;
+      case 'client-contact-edit':
+        this.openClientContactForm(Number(el.dataset.clientId), Number(id));
+        break;
+      case 'client-contact-cancel': {
+        const formEl = document.getElementById('clientContactForm');
+        if (formEl) mount(formEl, '');
+        break;
+      }
+      case 'client-contact-save':
+        this.saveClientContact(Number(el.dataset.clientId), id ? Number(id) : null);
+        break;
+      case 'client-contact-make-primary':
+        this.makeClientContactPrimary(Number(el.dataset.clientId), Number(id));
+        break;
+      case 'client-contact-delete':
+        this.deleteClientContact(Number(el.dataset.clientId), Number(id));
+        break;
+      case 'toggle-lead-read':
+        this.toggleLeadRead(el.dataset.source, Number(id), el.dataset.read === '1');
         break;
     }
   },

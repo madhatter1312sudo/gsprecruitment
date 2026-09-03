@@ -2,6 +2,7 @@
 from pydantic import BaseModel, EmailStr, Field, field_validator
 from typing import Optional, List, Any, Literal
 from datetime import datetime, date
+from decimal import Decimal
 
 
 # ── Auth / Users ─────────────────────────────────────────────────────────
@@ -206,7 +207,14 @@ class CandidateResponse(CandidateCreate):
     quality_score: Optional[float] = None
     cv_file_path: Optional[str] = None
     created_at: datetime
-    updated_at: datetime
+    # NOT required: no INSERT into candidates (create_candidate, the
+    # webhook, portal registration, harvest.py, scheduler.py) ever sets
+    # this column explicitly, so any row inserted before the column
+    # picked up a DEFAULT NOW() (see migrations/027_candidates_updated_at_default.py)
+    # reads back NULL here -- a required datetime raised
+    # ResponseValidationError on GET /api/candidates and GET
+    # /api/candidates/{id} for every such row.
+    updated_at: Optional[datetime] = None
 
     model_config = {"from_attributes": True}
 
@@ -607,13 +615,57 @@ class SiteContentResponse(BaseModel):
     items: List[dict]
 
 
+LEAD_INTEREST_TYPES = ("werving_selectie", "detachering_internationaal", "kandidaat", "overig")
+
+# WS-C.10 code-review follow-ups: website/contact.html's <select> sent
+# these six values before this PR's fix -- candidate/client/partner, plus
+# uitzenden/detacheren/zzp_bemiddeling (WS-A.3, the staffing/secondment/
+# freelance-placement options) -- and quiz submissions (website/script.js)
+# hardcoded 'candidate'. Any in-flight/cached page, or a request replayed
+# from history, can still arrive with one of these for a while after the
+# site itself is fixed. Same remap as migrations/026_leads_interest_type.py's
+# UPDATEs, kept in sync deliberately: candidate -> kandidaat, client ->
+# werving_selectie, partner -> overig, and uitzenden/detacheren/
+# zzp_bemiddeling -> detachering_internationaal (all three are staffing/
+# secondment/freelance variants, the same bucket the canonical select's
+# second option now covers).
+_LEGACY_INTEREST_TYPE_MAP = {
+    "candidate": "kandidaat",
+    "client": "werving_selectie",
+    "partner": "overig",
+    "uitzenden": "detachering_internationaal",
+    "detacheren": "detachering_internationaal",
+    "zzp_bemiddeling": "detachering_internationaal",
+}
+
+
 class LeadSubmit(BaseModel):
     name: str = Field(..., min_length=1)
     email: EmailStr
     company: Optional[str] = None
     phone: Optional[str] = None
     message: str = Field(..., min_length=1)
-    interest_type: Optional[str] = None
+    # validate_default=True: the normalising validator below must run even
+    # when the caller omits interest_type entirely (default None), not
+    # only when an explicit bad value is sent -- pydantic v2 skips
+    # validators on unsupplied defaults otherwise.
+    interest_type: Optional[str] = Field(None, validate_default=True)
+
+    @field_validator("interest_type")
+    @classmethod
+    def _interest_type_or_overig(cls, v):
+        """WS-C.10: contact_submissions.interest_type is CHECK'd to
+        LEAD_INTEREST_TYPES (migrations/026_leads_interest_type.py) -- the
+        migration maps existing NULL/unknown rows to 'overig' at the DB
+        level (plus the three legacy values below), and this validator
+        does the same at the API boundary so a caller sending an empty
+        string, a legacy value, or an unrecognised value never reaches
+        the INSERT with something the CHECK would reject."""
+        if v in _LEGACY_INTEREST_TYPE_MAP:
+            return _LEGACY_INTEREST_TYPE_MAP[v]
+        if v is None or v.strip() == "" or v not in LEAD_INTEREST_TYPES:
+            return "overig"
+        return v
 
 
 # ── Generic Pagination ─────────────────────────────────────────────────
@@ -671,3 +723,289 @@ class QuizAnswerItem(BaseModel):
 class QuizSubmitRequest(BaseModel):
     email: Optional[EmailStr] = None
     answers: List[QuizAnswerItem] = Field(..., min_length=1)
+
+
+# ── WS-C.4: Client Contacts ──────────────────────────────────────────────
+
+class ClientContactCreate(BaseModel):
+    full_name: str = Field(..., min_length=1, max_length=255)
+    email: Optional[EmailStr] = None
+    phone: Optional[str] = Field(None, max_length=50)
+    role: Optional[str] = Field(None, pattern=r"^(hiring_manager|finance|tekenbevoegd|overig)$")
+    is_primary: bool = False
+    # Same GDPR lawful-basis set as client_prospects (WS-E.7,
+    # migrations/018_gdpr_provenance_optout.py) -- a client_contacts row is
+    # a business contact, not a consumer, so it isn't mandatory the way
+    # candidates.lawful_basis is, but it's validated when supplied.
+    lawful_basis: Optional[str] = Field(None, pattern=r"^(zakelijk_functioneel_adres|opt_in|bestaande_relatie)$")
+
+
+class ClientContactUpdate(BaseModel):
+    full_name: Optional[str] = Field(None, min_length=1, max_length=255)
+    email: Optional[EmailStr] = None
+    phone: Optional[str] = Field(None, max_length=50)
+    role: Optional[str] = Field(None, pattern=r"^(hiring_manager|finance|tekenbevoegd|overig)$")
+    is_primary: Optional[bool] = None
+    lawful_basis: Optional[str] = Field(None, pattern=r"^(zakelijk_functioneel_adres|opt_in|bestaande_relatie)$")
+
+
+class ClientContactResponse(BaseModel):
+    id: int
+    client_id: int
+    full_name: str
+    email: Optional[str] = None
+    phone: Optional[str] = None
+    role: Optional[str] = None
+    is_primary: bool = False
+    lawful_basis: Optional[str] = None
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+
+    model_config = {"from_attributes": True}
+
+
+# ── WS-B.5: Admin clients list/detail (migrations/031) ───────────────────
+
+class ClientPrimaryContact(BaseModel):
+    full_name: str
+    email: Optional[str] = None
+    role: Optional[str] = None
+
+
+class ClientListItem(BaseModel):
+    id: int
+    company_name: str
+    domain: Optional[str] = None
+    industry: Optional[str] = None
+    erkend_referent: str = "onbekend"
+    open_job_count: int = 0
+    primary_contact: Optional[ClientPrimaryContact] = None
+    created_at: datetime
+
+
+class ClientDetail(BaseModel):
+    id: int
+    company_name: str
+    domain: Optional[str] = None
+    industry: Optional[str] = None
+    location: Optional[str] = None
+    erkend_referent: str = "onbekend"
+    notes: Optional[str] = None
+    open_job_count: int = 0
+    contacts: List[ClientContactResponse] = []
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+
+
+class ClientAdminUpdate(BaseModel):
+    company_name: Optional[str] = Field(None, min_length=1, max_length=255)
+    domain: Optional[str] = Field(None, max_length=255)
+    industry: Optional[str] = Field(None, max_length=255)
+    erkend_referent: Optional[str] = Field(None, pattern=r"^(ja|nee|onbekend)$")
+    notes: Optional[str] = None
+
+
+# ── WS-C.5: Pipeline Stage History ───────────────────────────────────────
+
+class PipelineStageUpdate(BaseModel):
+    stage: str = Field(..., min_length=1, max_length=50)
+
+
+class PipelineStageHistoryItem(BaseModel):
+    id: int
+    pipeline_entry_id: int
+    from_stage: Optional[str] = None
+    to_stage: str
+    changed_by: Optional[int] = None
+    changed_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+# ── WS-C.7: Placements (minimal) + immigratiestatus. PROVISIONAL. ────────
+# Pricing/margin factors here are owner decisions not yet finalised, and
+# nothing built on top of these models is published to the public site or
+# the client portal (routers/placements.py is admin-only). See
+# migrations/029_placements.py and core/margin.py for the full rationale.
+#
+# security-auditor follow-up (M2 WS-C.7 FIX FIRST, MEDIUM #2/#3): every
+# money/rate field is Decimal, not float -- floats can silently carry NaN/
+# inf and lose precision on read-modify-write; Decimal with
+# allow_inf_nan=False rejects both at the API boundary (422), matching
+# each column's own NUMERIC(precision,scale) bound from
+# migrations/029_placements.py so a value pydantic accepts can never
+# overflow the column at insert time.
+
+_PLACEMENT_TYPES = r"^(werving_selectie|detachering)$"
+_BILLING_BASES = r"^(vast_maandbedrag|per_uur)$"
+_FEE_TYPES = r"^(percentage|vast)$"
+_PLACEMENT_STATUSES = r"^(concept|actief|beeindigd|geannuleerd)$"
+
+
+def _money_field() -> Any:
+    """NUMERIC(10,2) columns (hourly_bill_rate, monthly_purchase_price,
+    fee_amount): non-negative, 2 decimal places, capped at the column's
+    max (8 integer digits + 2 decimal = 99999999.99), no NaN/Infinity."""
+    return Field(
+        None, ge=0, le=Decimal("99999999.99"), decimal_places=2, allow_inf_nan=False,
+    )
+
+
+def _eor_cost_factor_field() -> Any:
+    """NUMERIC(6,4): non-negative, 4 decimal places, capped at 99.9999."""
+    return Field(
+        None, ge=0, le=Decimal("99.9999"), decimal_places=4, allow_inf_nan=False,
+    )
+
+
+def _fee_percentage_field() -> Any:
+    """NUMERIC(5,2): a percentage, so also capped at 100 (not just the
+    column's raw 999.99 headroom)."""
+    return Field(
+        None, ge=0, le=Decimal("100"), decimal_places=2, allow_inf_nan=False,
+    )
+
+
+def _expected_billable_hours_field() -> Any:
+    """NUMERIC(6,2): non-negative, 2 decimal places, capped at 9999.99."""
+    return Field(
+        None, ge=0, le=Decimal("9999.99"), decimal_places=2, allow_inf_nan=False,
+    )
+
+
+class OneOffCost(BaseModel):
+    """One ad-hoc one-off cost line item inside placements.one_off_costs
+    (jsonb). extra='forbid' so an arbitrary/unexpected key never silently
+    rides along into the stored jsonb array."""
+    model_config = {"extra": "forbid"}
+
+    label: str = Field(..., min_length=1, max_length=120)
+    amount: Decimal = Field(..., ge=0, decimal_places=2, allow_inf_nan=False)
+
+
+class PlacementCreate(BaseModel):
+    candidate_id: int
+    job_id: int
+    client_id: int
+    placement_type: str = Field(..., pattern=_PLACEMENT_TYPES)
+    start_date: Optional[date] = None
+    end_date: Optional[date] = None
+    hourly_bill_rate: Optional[Decimal] = _money_field()
+    monthly_purchase_price: Optional[Decimal] = _money_field()
+    eor_partner: Optional[str] = None
+    eor_cost_factor: Optional[Decimal] = _eor_cost_factor_field()
+    billing_basis: Optional[str] = Field(None, pattern=_BILLING_BASES)
+    expected_billable_hours: Optional[Decimal] = _expected_billable_hours_field()
+    fee_type: Optional[str] = Field(None, pattern=_FEE_TYPES)
+    fee_percentage: Optional[Decimal] = _fee_percentage_field()
+    fee_amount: Optional[Decimal] = _money_field()
+    one_off_costs: List[OneOffCost] = []
+    status: str = Field("concept", pattern=_PLACEMENT_STATUSES)
+    notes: Optional[str] = None
+
+
+class PlacementUpdate(BaseModel):
+    start_date: Optional[date] = None
+    end_date: Optional[date] = None
+    hourly_bill_rate: Optional[Decimal] = _money_field()
+    monthly_purchase_price: Optional[Decimal] = _money_field()
+    eor_partner: Optional[str] = None
+    eor_cost_factor: Optional[Decimal] = _eor_cost_factor_field()
+    billing_basis: Optional[str] = Field(None, pattern=_BILLING_BASES)
+    expected_billable_hours: Optional[Decimal] = _expected_billable_hours_field()
+    fee_type: Optional[str] = Field(None, pattern=_FEE_TYPES)
+    fee_percentage: Optional[Decimal] = _fee_percentage_field()
+    fee_amount: Optional[Decimal] = _money_field()
+    one_off_costs: Optional[List[OneOffCost]] = None
+    notes: Optional[str] = None
+
+
+class PlacementStatusUpdate(BaseModel):
+    status: str = Field(..., pattern=_PLACEMENT_STATUSES)
+
+
+class PlacementResponse(BaseModel):
+    id: int
+    candidate_id: int
+    job_id: int
+    client_id: int
+    placement_type: str
+    start_date: Optional[date] = None
+    end_date: Optional[date] = None
+    hourly_bill_rate: Optional[Decimal] = None
+    monthly_purchase_price: Optional[Decimal] = None
+    eor_partner: Optional[str] = None
+    eor_cost_factor: Optional[Decimal] = None
+    billing_basis: Optional[str] = None
+    expected_billable_hours: Optional[Decimal] = None
+    fee_type: Optional[str] = None
+    fee_percentage: Optional[Decimal] = None
+    fee_amount: Optional[Decimal] = None
+    one_off_costs: List[OneOffCost] = []
+    status: str
+    notes: Optional[str] = None
+# ── WS-C.6: Activities (unified activity/task log) ───────────────────────
+
+ACTIVITY_SUBJECT_TYPES = ("candidate", "client", "job", "prospect", "placement", "lead")
+ACTIVITY_TYPES = ("note", "call", "email", "meeting", "task", "status_change")
+
+
+class ActivityCreate(BaseModel):
+    subject_type: str = Field(..., pattern=r"^(candidate|client|job|prospect|placement|lead)$")
+    subject_id: int
+    type: str = Field(..., pattern=r"^(note|call|email|meeting|task|status_change)$")
+    body: Optional[str] = None
+    due_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+    # Code-review follow-up: an admin-created row defaults to internal
+    # (recruiter-only) and may opt in to client-visible with
+    # internal=false. Client-portal rows never go through this model --
+    # see ClientActivityCreate, which has no internal field at all and
+    # is always forced to internal=false server-side.
+    internal: bool = True
+
+
+class ActivityUpdate(BaseModel):
+    """Only the fields the admin/client can revise after the fact --
+    subject_type/subject_id/type are the row's identity and are not
+    editable (create a new activity instead of re-pointing one)."""
+    body: Optional[str] = None
+    due_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+    internal: Optional[bool] = None
+
+
+class ActivityResponse(BaseModel):
+    id: int
+    subject_type: str
+    subject_id: int
+    type: str
+    body: Optional[str] = None
+    due_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+    internal: bool = True
+    created_by: Optional[int] = None
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+
+    model_config = {"from_attributes": True}
+
+
+# Client-portal create: subject_type is restricted server-side (job | candidate,
+# scoped to the caller's own client via user_clients -- routers/activities.py),
+# never trusted from the body the way the admin create is. Deliberately has
+# no `internal` field -- a client-portal-authored activity is always
+# internal=false, forced by the router, never a client-supplied value.
+class ClientActivityCreate(BaseModel):
+    subject_type: str = Field(..., pattern=r"^(job|candidate)$")
+    subject_id: int
+    type: str = Field(..., pattern=r"^(note|call|email|meeting|task|status_change)$")
+    body: Optional[str] = None
+    due_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+
+
+# ── WS-C.10: Leads (unified contact_submissions + quiz_submissions) ──────
+
+class LeadReadUpdate(BaseModel):
+    is_read: bool

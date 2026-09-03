@@ -53,9 +53,17 @@ async def export_my_data(current_user: dict = Depends(get_current_user)):
     profile = await fetch_one(
         "SELECT * FROM candidate_profiles WHERE user_id = $1", user_id,
     )
-    candidate = await fetch_one(
-        "SELECT * FROM candidates WHERE LOWER(email) = LOWER($1) AND deleted_at IS NULL", email,
-    )
+    # FK first (candidate_profiles.candidate_id, WS-C.16/migrations/023);
+    # e-mail match is the fallback for a row the backfill hasn't linked.
+    candidate = None
+    if profile and profile.get("candidate_id"):
+        candidate = await fetch_one(
+            "SELECT * FROM candidates WHERE id = $1 AND deleted_at IS NULL", profile["candidate_id"],
+        )
+    if not candidate:
+        candidate = await fetch_one(
+            "SELECT * FROM candidates WHERE LOWER(email) = LOWER($1) AND deleted_at IS NULL", email,
+        )
     applications = []
     saved = []
     if candidate:
@@ -215,7 +223,9 @@ async def _delete_cv_files(user_ids: list, cv_rows: list) -> tuple:
 def _redact_value(value, needle_lower: str, replacement: str):
     """Recursively walk a JSON-decoded audit_log.changes value, replacing
     any string containing needle_lower (case-insensitive) with replacement.
-    Returns (new_value, changed)."""
+    Returns (new_value, changed). Operates on already-decoded Python
+    objects (dict/list/str/...) -- see _redact_audit_log_email for the
+    json.loads() done before calling this on a jsonb column value."""
     if isinstance(value, str):
         if needle_lower in value.lower():
             return replacement, True
@@ -242,14 +252,30 @@ async def _redact_audit_log_email(email: str, replacement: str) -> int:
     (outreach_draft_approved/rejected's target_email, prospect_create's
     payload dump, ...) -- WS-E.7 requires those replaced with a hash, not
     left as plaintext after a person is erased. Rewritten via
-    json.dumps(), never a raw dict (commit 72b4bcd)."""
+    json.dumps(), never a raw dict (commit 72b4bcd).
+
+    asyncpg has no jsonb codec registered on this connection, so
+    audit_log.changes (a jsonb column) comes back here as a plain JSON
+    string, not a dict/list. Decode it first -- otherwise _redact_value
+    treats the whole row as one opaque string and, when it matches,
+    replaces the entire changes payload with `replacement` instead of
+    only the e-mail inside it, wiping out every other key (actor,
+    target_type, ...). A row that somehow already comes back decoded
+    (e.g. a future jsonb codec, or a dict passed in directly by a test)
+    is passed through unchanged."""
     rows = await fetch_all(
         "SELECT id, changes FROM audit_log WHERE changes IS NOT NULL AND changes::text ILIKE $1",
         f"%{email}%",
     )
     redacted = 0
     for row in rows:
-        new_changes, changed = _redact_value(row["changes"], email.lower(), replacement)
+        changes = row["changes"]
+        if isinstance(changes, str):
+            try:
+                changes = json.loads(changes)
+            except (ValueError, TypeError):
+                pass  # not valid JSON -- fall back to plain-string redaction below
+        new_changes, changed = _redact_value(changes, email.lower(), replacement)
         if changed:
             await execute(
                 "UPDATE audit_log SET changes = $2::jsonb WHERE id = $1",
@@ -259,17 +285,20 @@ async def _redact_audit_log_email(email: str, replacement: str) -> int:
     return redacted
 
 
-async def _anonymize_by_id(select_sql: str, update_sql: str, email_norm: str, email_hash: str) -> int:
-    """Fetch matching row ids (select_sql, filtered to email_norm as $1,
-    must return an 'id' column) and UPDATE each individually with its own
-    id-suffixed placeholder address (update_sql takes id as $1, the
-    placeholder as $2). Per-row placeholders -- rather than one shared
-    address for every matched row -- avoid a duplicate-key violation on
-    any column that carries a uniqueness constraint (candidates.email,
-    users.email) when more than one row matches the same original
-    address, and keep every anonymised row individually distinguishable
-    even where no such constraint exists."""
-    rows = await fetch_all(select_sql, email_norm)
+async def _anonymize_by_id(select_sql: str, update_sql: str, select_param, email_hash: str) -> int:
+    """Fetch matching row ids (select_sql, filtered to select_param as $1
+    -- normally email_norm, but any value select_sql's $1 expects works,
+    e.g. WS-C.16's FK-linked-candidates lookup below passes an id list
+    for `id = ANY($1::int[])` -- must return an 'id' column) and UPDATE
+    each individually with its own id-suffixed placeholder address
+    (update_sql takes id as $1, the placeholder as $2). Per-row
+    placeholders -- rather than one shared address for every matched row
+    -- avoid a duplicate-key violation on any column that carries a
+    uniqueness constraint (candidates.email, users.email) when more than
+    one row matches the same original address, and keep every anonymised
+    row individually distinguishable even where no such constraint
+    exists."""
+    rows = await fetch_all(select_sql, select_param)
     for row in rows:
         anon = f"erased-{email_hash[:16]}-{row['id']}@erased.invalid"
         await execute(update_sql, row["id"], anon)
@@ -284,7 +313,9 @@ async def erase_person(email: str, actor_id: Optional[int] = None, reason: str =
     and POST /api/v1/admin/gdpr/erase (admin, for sourced persons with no
     portal account).
 
-    Tables touched: candidates (full PII set), candidate_profiles (phone,
+    Tables touched: candidates (full PII set, including the WS-C.7
+    immigratiestatus columns -- nationality, needs_work_permit,
+    kennismigrant_status, ruling_30pct_status, ind_case_number), candidate_profiles (phone,
     linkedin_url, github_url, portfolio_url, current_company,
     current_title, location, education, salary fields, cv), users,
     push_tokens, quiz_submissions, contact_submissions, outreach_drafts,
@@ -319,21 +350,66 @@ async def erase_person(email: str, actor_id: Optional[int] = None, reason: str =
     )
     candidate_ids = [c["id"] for c in candidate_rows]
 
+    # WS-C.16 (migrations/023): also pick up any candidates row this
+    # person's candidate_profiles.candidate_id points to but whose own
+    # email column has since drifted from email_norm (e.g. edited
+    # independently, or not yet touched by that backfill) -- an addition
+    # to the e-mail-based lookup above, never a replacement for it, so
+    # erasure still works purely on e-mail across both records even if
+    # the FK is unset or points somewhere the email match wouldn't reach.
+    extra_ids = []
+    if user_ids:
+        linked_rows = await fetch_all(
+            "SELECT candidate_id FROM candidate_profiles WHERE user_id = ANY($1::int[]) AND candidate_id IS NOT NULL",
+            user_ids,
+        )
+        extra_ids = [r["candidate_id"] for r in linked_rows if r["candidate_id"] not in candidate_ids]
+        if extra_ids:
+            extra_candidates = await fetch_all(
+                "SELECT id, cv_file_path FROM candidates WHERE id = ANY($1::int[])", extra_ids,
+            )
+            candidate_rows = list(candidate_rows) + list(extra_candidates)
+            candidate_ids = candidate_ids + [c["id"] for c in extra_candidates]
+
     deleted_paths, failed_paths = await _delete_cv_files(user_ids, profile_rows + list(candidate_rows))
 
     # candidates and users both carry a unique constraint on email
     # (uq_candidates_email, users.email UNIQUE) — per-row placeholders via
     # _anonymize_by_id avoid a duplicate-key violation if more than one
     # row happens to match.
+    # WS-C.7 (migrations/029_placements.py): nationality/needs_work_permit/
+    # kennismigrant_status/ruling_30pct_status/ind_case_number fall under
+    # the same 7-year "geplaatste kandidaat" retention floor as the rest of
+    # a placed candidate's PII (core/retention.py) -- they exist only to
+    # support a placement, so they're nulled here alongside every other
+    # candidates.* PII column, not retained separately.
     await _anonymize_by_id(
         "SELECT id FROM candidates WHERE LOWER(email) = $1",
         """UPDATE candidates SET
              full_name = 'Erased', email = $2, phone = NULL, linkedin_url = NULL,
              github_url = NULL, portfolio_url = NULL, cv_text = NULL, cv_file_path = NULL,
-             education = NULL, deleted_at = NOW(), consent_withdrawn_at = COALESCE(consent_withdrawn_at, NOW())
+             education = NULL, nationality = NULL, needs_work_permit = NULL,
+             kennismigrant_status = NULL, ruling_30pct_status = NULL, ind_case_number = NULL,
+             deleted_at = NOW(), consent_withdrawn_at = COALESCE(consent_withdrawn_at, NOW())
            WHERE id = $1""",
         email_norm, email_hash,
     )
+    # WS-C.16 extra: anonymise the FK-linked candidates rows the e-mail
+    # match above wouldn't have reached (see extra_ids above) -- reuses
+    # _anonymize_by_id with an id list instead of an e-mail as the $1
+    # filter, same per-row placeholder reasoning.
+    if extra_ids:
+        await _anonymize_by_id(
+            "SELECT id FROM candidates WHERE id = ANY($1::int[])",
+            """UPDATE candidates SET
+                 full_name = 'Erased', email = $2, phone = NULL, linkedin_url = NULL,
+                 github_url = NULL, portfolio_url = NULL, cv_text = NULL, cv_file_path = NULL,
+                 education = NULL, nationality = NULL, needs_work_permit = NULL,
+                 kennismigrant_status = NULL, ruling_30pct_status = NULL, ind_case_number = NULL,
+                 deleted_at = NOW(), consent_withdrawn_at = COALESCE(consent_withdrawn_at, NOW())
+               WHERE id = $1""",
+            extra_ids, email_hash,
+        )
     for uid in user_ids:
         await execute(
             """UPDATE candidate_profiles SET

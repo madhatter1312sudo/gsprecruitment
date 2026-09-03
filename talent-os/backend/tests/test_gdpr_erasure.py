@@ -150,6 +150,16 @@ EXPECTED_CANDIDATE_PROFILE_COLUMNS = [
     "salary_expectation_min", "salary_expectation_max",
 ]
 
+# WS-C.7 (migrations/029_placements.py): immigratiestatus columns on
+# candidates -- must be nulled by the same UPDATE candidates statement
+# erase_person() issues for every other candidates.* PII column, since
+# they fall under the same 7-year placed-candidate retention floor
+# (core/retention.py) rather than being retained separately.
+EXPECTED_CANDIDATE_IMMIGRATION_COLUMNS = [
+    "nationality", "needs_work_permit", "kennismigrant_status",
+    "ruling_30pct_status", "ind_case_number",
+]
+
 
 def test_erase_person_touches_every_required_table(fake_db):
     import routers.gdpr as gdpr
@@ -174,6 +184,20 @@ def test_erase_person_touches_every_required_table(fake_db):
     missing_cols = [c for c in EXPECTED_CANDIDATE_PROFILE_COLUMNS if c not in profile_sql]
     assert not missing_cols, (
         f"UPDATE candidate_profiles never clears: {missing_cols}\n\nSQL:\n{profile_sql}"
+    )
+
+    candidates_updates = [
+        sql for sql, _args in fake_db.statements
+        if sql.strip().startswith("UPDATE candidates SET")
+    ]
+    assert candidates_updates, "expected an UPDATE candidates statement"
+    candidates_sql = "\n".join(candidates_updates)
+    missing_immigration_cols = [
+        c for c in EXPECTED_CANDIDATE_IMMIGRATION_COLUMNS if c not in candidates_sql
+    ]
+    assert not missing_immigration_cols, (
+        f"UPDATE candidates never clears the WS-C.7 immigratiestatus columns: "
+        f"{missing_immigration_cols}\n\nSQL:\n{candidates_sql}"
     )
 
 
@@ -359,3 +383,89 @@ def test_admin_erase_allows_ordinary_sourced_person_without_confirm(patch_users_
     ))
     assert result["status"] == "complete"
     assert len(calls) == 1
+
+
+# ── _redact_audit_log_email() -- asyncpg jsonb-as-string bug ─────────────
+#
+# audit_log.changes is a jsonb column, but this codebase's asyncpg
+# connections have no jsonb codec registered, so fetch_all() hands
+# _redact_audit_log_email() a plain JSON *string* for row["changes"], not
+# a dict. Before the fix, _redact_value() treated that string as one
+# opaque value: since it contained the target e-mail, the whole payload
+# got replaced by the hash, silently destroying every other key (actor,
+# target_type, note, ...) instead of only redacting the e-mail.
+
+class _AuditLogFakeDB:
+    """Minimal fetch_all/execute stub: one canned audit_log row per test,
+    with `changes` stored exactly as asyncpg would hand it back (a JSON
+    string when the test wants to reproduce the codec gap, or a dict to
+    prove dict input still works as before)."""
+
+    def __init__(self, changes_value):
+        self.changes_value = changes_value
+        self.executed = []  # [(sql, args)]
+
+    async def fetch_all(self, sql, *args):
+        return [{"id": 1, "changes": self.changes_value}]
+
+    async def execute(self, sql, *args):
+        self.executed.append((sql, args))
+        return "OK"
+
+
+def _run_redact(monkeypatch, changes_value, email="a@example.com", replacement="HASHED"):
+    import routers.gdpr as gdpr
+
+    db = _AuditLogFakeDB(changes_value)
+    monkeypatch.setattr(gdpr, "fetch_all", db.fetch_all)
+    monkeypatch.setattr(gdpr, "execute", db.execute)
+
+    count = asyncio.run(gdpr._redact_audit_log_email(email, replacement))
+    return count, db
+
+
+def test_redact_audit_log_email_json_string_keeps_other_keys(monkeypatch):
+    """Reproduces the bug: changes arrives as a JSON *string* (the
+    asyncpg-no-jsonb-codec case), not a dict. Only target_email should be
+    replaced -- actor and note must survive."""
+    import json as _json
+
+    raw = _json.dumps({"actor": "x", "target_email": "a@example.com", "note": "n"})
+    count, db = _run_redact(monkeypatch, raw)
+
+    assert count == 1
+    assert len(db.executed) == 1
+    _sql, args = db.executed[0]
+    new_changes = _json.loads(args[1])  # UPDATE audit_log SET changes = $2::jsonb WHERE id = $1
+    assert new_changes["target_email"] == "HASHED"
+    assert new_changes["actor"] == "x"
+    assert new_changes["note"] == "n"
+
+
+def test_redact_audit_log_email_dict_input_still_works(monkeypatch):
+    """Belt-and-braces: if changes ever does come back already decoded
+    (a jsonb codec, or a test passing a dict directly), behaviour is
+    unchanged from before this fix."""
+    import json as _json
+
+    raw = {"actor": "x", "target_email": "a@example.com", "note": "n"}
+    count, db = _run_redact(monkeypatch, raw)
+
+    assert count == 1
+    new_changes = _json.loads(db.executed[0][1][1])
+    assert new_changes["target_email"] == "HASHED"
+    assert new_changes["actor"] == "x"
+    assert new_changes["note"] == "n"
+
+
+def test_redact_audit_log_email_plain_string_value_still_redacted(monkeypatch):
+    """changes is a bare string (not JSON at all) containing the e-mail --
+    must still be redacted whole, same as before the JSON-decode fix."""
+    raw = "note: contacted a@example.com about role"
+    count, db = _run_redact(monkeypatch, raw)
+
+    assert count == 1
+    _sql, args = db.executed[0]
+    # A plain (non-JSON) string is written back as its JSON-encoded form
+    # (json.dumps of a str), per the existing ::jsonb write path.
+    assert args[1] == '"HASHED"'

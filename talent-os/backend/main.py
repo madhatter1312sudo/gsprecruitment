@@ -126,6 +126,12 @@ from routers.retention_admin import router as retention_admin_router
 from routers.retention_admin import apollo_pool_router
 from routers.mobile import router as mobile_router
 from routers.prospects import router as prospects_router
+from routers.client_contacts import router as client_contacts_admin_router
+from routers.client_contacts import client_router as client_contacts_portal_router
+from routers.placements import router as placements_admin_router
+from routers.activities import router as activities_admin_router
+from routers.activities import client_router as activities_portal_router
+from routers.clients_admin import router as clients_admin_router
 
 app.include_router(health_router)
 app.include_router(auth_router)
@@ -149,6 +155,12 @@ app.include_router(retention_admin_router)
 app.include_router(apollo_pool_router)
 app.include_router(mobile_router)
 app.include_router(prospects_router)
+app.include_router(client_contacts_admin_router)
+app.include_router(client_contacts_portal_router)
+app.include_router(placements_admin_router)
+app.include_router(activities_admin_router)
+app.include_router(activities_portal_router)
+app.include_router(clients_admin_router)
 
 
 # ── Admin-gated API docs ───────────────────────────────────────────────

@@ -64,7 +64,7 @@
       "@context": "https://schema.org",
       "@type": "Article",
       "mainEntityOfPage": { "@type": "WebPage", "@id": canonicalHref },
-      "headline": `${p.title_nl || ''} / ${p.title_en || ''}`,
+      "headline": pageTitle,
       "description": p.excerpt_nl || p.excerpt_en || '',
       "image": "https://gsprecruitment.nl/og-image.png",
       "datePublished": p.published_at || undefined,

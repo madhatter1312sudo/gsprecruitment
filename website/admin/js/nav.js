@@ -1,18 +1,22 @@
   /* ---- Navigation ---- */
   const sectionTitles = {
     dashboard: 'Dashboard', users: 'User Management', jobs: 'All Jobs',
-    candidates: 'All Candidates', outreach: 'Outreach', blog: 'Blog', analytics: 'Analytics',
-    audit: 'Audit Log', cms: 'Content CMS', settings: 'Settings',
+    candidates: 'All Candidates', clients: 'Opdrachtgevers', outreach: 'Outreach',
+    leads: 'Leads', blog: 'Blog', analytics: 'Analytics',
+    audit: 'Audit Log', reporting: 'Rapportage', cms: 'Content CMS', settings: 'Settings',
   };
 
   const sectionLoaders = {
     users:      () => Admin.loadUsers(),
     jobs:       () => Admin.loadJobs(),
     candidates: () => Admin.loadCandidates(),
+    clients:    () => Admin.loadClients(),
     outreach:   () => Admin.loadOutreach(),
+    leads:      () => Admin.loadLeads(),
     blog:       () => Admin.loadBlog(),
     analytics:  () => Admin.loadAnalytics(),
     audit:      () => Admin.loadAuditLog(),
+    reporting:  () => Admin.loadReporting(),
     cms:        () => Admin.loadContent(),
     settings:   () => Admin.loadSettings(),
   };
