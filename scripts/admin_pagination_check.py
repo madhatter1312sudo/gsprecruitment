@@ -137,13 +137,32 @@ def make_audit(n=TOTAL_ROWS):
     } for i in range(1, n + 1)]
 
 
+def make_jobs(n=TOTAL_ROWS):
+    statuses = ["open", "draft", "closed"]
+    return [{
+        "id": i,
+        "client_id": 1,
+        "title": f"Test Vacature {i}",
+        "company_name": "Example Client BV",
+        "application_count": i % 4,
+        "status": statuses[i % 3],
+        "created_at": "2026-01-01T00:00:00Z",
+    } for i in range(1, n + 1)]
+
+
 LIST_DATA = {
     "users": make_users(),
     "candidates": make_candidates(),
     "outreach": make_outreach(),
     "blog": make_blog(),
     "audit": make_audit(),
+    "jobs": make_jobs(),
 }
+
+# WS-B.2: id an admin_pagination_check DELETE request uses to exercise the
+# "job not found" (404) branch -- deliberately outside the make_jobs() id
+# range (1..60) so it never collides with a real fake row.
+DELETE_404_JOB_ID = 99999
 
 
 def paginate(items, qs):
@@ -171,6 +190,12 @@ def route_admin_api(route, request):
     if path == "/api/v1/admin/audit-log":
         json_response(paginate(LIST_DATA["audit"], qs))
         return
+    # WS-B.2 follow-up: the "Nieuwe vacature" client picker fetches
+    # GET /v1/admin/clients (Admin.fetchClientOptions()), not
+    # /users?role=client any more.
+    if path == "/api/v1/admin/clients":
+        json_response({"items": [{"id": 1, "company_name": "Example Client BV"}], "total": 1, "page": 1, "limit": 200})
+        return
     if path == "/api/v1/admin/users":
         json_response(paginate(LIST_DATA["users"], qs))
         return
@@ -183,8 +208,38 @@ def route_admin_api(route, request):
     if path == "/api/v1/admin/blog/" or path == "/api/v1/admin/blog":
         json_response(paginate(LIST_DATA["blog"], qs))
         return
+    # WS-B.2: POST creates a job (client picker + "Nieuwe vacature" modal);
+    # GET lists/paginates/searches them.
     if path == "/api/v1/admin/jobs":
-        json_response({"items": [], "total": 0})
+        if request.method == "POST":
+            body = json.loads(request.post_data or "{}")
+            json_response({
+                "id": 9001, "client_id": body.get("client_id"), "title": body.get("title"),
+                "status": body.get("status", "draft"), "company_name": "Example Client BV",
+            }, status=201)
+            return
+        search = (qs.get("search") or [None])[0]
+        rows = LIST_DATA["jobs"]
+        if search:
+            rows = [r for r in rows if search.lower() in r["title"].lower()]
+        json_response(paginate(rows, qs))
+        return
+    # WS-B.2: DELETE /jobs/{id} -- DELETE_404_JOB_ID exercises the "not
+    # found" branch (must NOT be treated as success by the frontend);
+    # any other id is a normal soft-delete success. PUT is the existing
+    # approve/close status change, untouched by WS-B.2.
+    m_job = re.match(r"^/api/v1/admin/jobs/(\d+)$", path)
+    if m_job and request.method == "DELETE":
+        job_id = int(m_job.group(1))
+        if job_id == DELETE_404_JOB_ID:
+            json_response({"detail": "Job not found"}, status=404)
+        else:
+            json_response({"message": "Job deleted successfully"})
+        return
+    if m_job and request.method == "PUT":
+        job_id = int(m_job.group(1))
+        body = json.loads(request.post_data or "{}")
+        json_response({"id": job_id, "status": body.get("status", "open")})
         return
     if path == "/api/v1/admin/analytics":
         json_response({"job_fill_rate": 0, "client_retention_rate": 0, "candidate_satisfaction": 0, "user_growth": {}})
@@ -207,6 +262,7 @@ SECTIONS = [
     ("outreach", "#section-outreach table tbody tr", "outreachPagination"),
     ("blog", "#section-blog table tbody tr", "blogPagination"),
     ("audit", "#section-audit table tbody tr", "auditPagination"),
+    ("jobs", "#section-jobs table tbody tr", "jobsPagination"),
 ]
 
 
@@ -295,6 +351,50 @@ def main():
             new_errors = console_errors[errors_before:]
             if new_errors:
                 failures.append(f"{section}: {len(new_errors)} console error(s): {new_errors[:3]}")
+
+        # ---- WS-B.2: "Nieuwe vacature" create flow ---------------------
+        page.click('.nav-link[data-section="jobs"]')
+        page.wait_for_timeout(600)
+
+        page.click('[data-action="open-new-job-modal"]')
+        page.wait_for_timeout(400)
+        client_options = page.eval_on_selector_all(
+            "#newJobClient option", "els => els.map(e => e.value)"
+        )
+        if client_options != ["1"]:
+            failures.append(f"jobs create: client picker options were {client_options!r}, expected ['1']")
+
+        page.fill("#newJobTitle", "Playwright Test Vacature")
+        page.click('[data-action="save-new-job"]')
+        page.wait_for_timeout(500)
+
+        toast_texts = page.eval_on_selector_all(
+            ".toast-container .toast span:last-child", "els => els.map(e => e.textContent)"
+        )
+        if not any("aangemaakt" in t for t in toast_texts):
+            failures.append(f"jobs create: expected a success toast mentioning 'aangemaakt', got {toast_texts!r}")
+
+        # ---- WS-B.2: delete must treat 404 as an error, 2xx as success --
+        # Exercised directly through Admin.deleteJob() (bypassing the
+        # confirm() dialog confirmDeleteJob() would show) since the
+        # question here is response-status handling, not the confirm UI.
+        page.evaluate(f"() => Admin.deleteJob({DELETE_404_JOB_ID})")
+        page.wait_for_timeout(400)
+        toast_texts_404 = page.eval_on_selector_all(
+            ".toast-container .toast span:last-child", "els => els.map(e => e.textContent)"
+        )
+        last_404 = toast_texts_404[len(toast_texts):]
+        if not last_404 or any("deleted" in t.lower() for t in last_404):
+            failures.append(f"jobs delete (404): expected an error toast, not a success one — got {last_404!r}")
+
+        page.evaluate("() => Admin.deleteJob(1)")
+        page.wait_for_timeout(400)
+        toast_texts_200 = page.eval_on_selector_all(
+            ".toast-container .toast span:last-child", "els => els.map(e => e.textContent)"
+        )
+        last_200 = toast_texts_200[len(toast_texts_404):]
+        if not any("deleted" in t.lower() for t in last_200):
+            failures.append(f"jobs delete (200): expected a 'Job deleted' success toast — got {last_200!r}")
 
         browser.close()
 

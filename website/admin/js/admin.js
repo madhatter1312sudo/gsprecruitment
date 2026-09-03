@@ -12,11 +12,13 @@ const { html, raw, mount } = GSP;
 
 const Admin = {
   _data: {},
-  _currentPage: { users: 1, candidates: 1, audit: 1, outreach: 1, blog: 1, leads: 1 },
+  _currentPage: { users: 1, candidates: 1, audit: 1, outreach: 1, blog: 1, leads: 1, jobs: 1 },
   // Filters passed to the load*() call that produced the currently-rendered
   // page, keyed the same as _currentPage — a data-page click re-derives the
   // page from here instead of needing a fresh closure per render.
-  _lastParams: { users: {}, candidates: {}, audit: {}, outreach: {}, blog: {}, leads: {} },
+  // `clients` isn't in _currentPage/goToPage's loaders map -- the roster
+  // fetches a single limit=200 page (see loadClients()), no data-page UI.
+  _lastParams: { users: {}, candidates: {}, audit: {}, outreach: {}, blog: {}, leads: {}, jobs: {}, clients: {} },
   _pageSize: 20,
 
   /* ---- Init ---- */
@@ -369,7 +371,10 @@ const Admin = {
       if (!res?.ok) { Auth.toast('Impersonation failed', 'error'); return; }
       const data = await res.json();
       const user = data.user;
-      Auth.setAuth(data.access_token, user);
+      // WS-B.2: park the admin's own token/user first so it's never left
+      // sitting in the normal (impersonated-session) token slot -- see
+      // Auth.startImpersonation() / restoreAdmin() in auth.js.
+      Auth.startImpersonation(data.access_token, user);
       const dest = user.role === 'candidate' ? '/candidate/' : user.role === 'client' ? '/client/' : '/admin/';
       window.location.href = dest;
     } catch { Auth.toast('Network error', 'error'); }
@@ -398,9 +403,14 @@ const Admin = {
      JOBS
      ============================================================ */
   async loadJobs(params = {}) {
+    this._lastParams.jobs = params;
     const qs = new URLSearchParams();
+    const limit = this._pageSize;
+    const offset = ((this._currentPage.jobs || 1) - 1) * limit;
     if (params.status) qs.set('status', params.status);
-    qs.set('limit', 50);
+    if (params.search) qs.set('search', params.search);
+    qs.set('limit', limit);
+    qs.set('offset', offset);
 
     this.setLoading('#section-jobs table tbody', 5);
     try {
@@ -410,6 +420,7 @@ const Admin = {
       if (!res.ok) throw new Error(data.detail);
       this._data.jobs = data;
       this.renderJobs(data);
+      this.renderPagination('jobsPagination', data.total, limit, this._currentPage.jobs, 'jobs');
     } catch (err) {
       this.setEmpty('#section-jobs table tbody', 5, 'Failed to load jobs');
     }
@@ -449,7 +460,7 @@ const Admin = {
       });
       if (res?.ok) {
         Auth.toast(`Job ${status === 'open' ? 'approved' : 'closed'}`, 'success');
-        await this.loadJobs();
+        await this.loadJobs(this._lastParams.jobs || {});
       } else {
         const d = await res?.json();
         Auth.toast(d?.detail || 'Update failed', 'error');
@@ -465,13 +476,143 @@ const Admin = {
   async deleteJob(jobId) {
     try {
       const res = await Auth.fetch(`/v1/admin/jobs/${jobId}`, { method: 'DELETE' });
-      if (res?.ok || res?.status === 404) {
+      // Only a real 2xx counts as success -- a 404 (job already gone, or
+      // never existed) is an error the operator needs to see, not a
+      // silent success (this used to also accept status===404 as OK).
+      if (res?.ok) {
         Auth.toast('Job deleted', 'success');
-        await this.loadJobs();
+        await this.loadJobs(this._lastParams.jobs || {});
       } else {
-        Auth.toast('Delete failed', 'error');
+        const d = await res?.json().catch(() => null);
+        Auth.toast(d?.detail || 'Delete failed', 'error');
       }
     } catch { Auth.toast('Network error', 'error'); }
+  },
+
+  /* ---- "Nieuwe vacature" (WS-B.2) ----
+     Lets an admin record a job on a client's behalf -- e.g. a telephone
+     assignment -- without the client needing a portal login. The client
+     picker reads GET /v1/admin/clients (routers/clients_admin.py) --
+     every client row, one call, not scoped to accounts with a portal
+     login the way /users?role=client was. Cached in
+     this._data.clientOptions so reopening the modal doesn't re-fetch. */
+  async fetchClientOptions(force = false) {
+    if (!force && this._data.clientOptions) return this._data.clientOptions;
+    try {
+      const res = await Auth.fetch('/v1/admin/clients?limit=200');
+      if (!res?.ok) return this._data.clientOptions || [];
+      const data = await res.json();
+      this._data.clientOptions = (data.items || []).map(c => ({ id: c.id, company_name: c.company_name || 'Onbekend' }));
+    } catch {
+      this._data.clientOptions = this._data.clientOptions || [];
+    }
+    return this._data.clientOptions;
+  },
+
+  async openNewJobModal() {
+    const clients = await this.fetchClientOptions();
+    this.openModal('newJobModal', html`
+      <h3 style="color:var(--white);margin-bottom:var(--space-lg);">Nieuwe vacature</h3>
+      ${!clients.length ? html`
+        <div class="alert alert-warning" role="alert">Nog geen opdrachtgevers met een portal-account gevonden.</div>
+      ` : ''}
+      <div class="form-group">
+        <label>Opdrachtgever</label>
+        <select id="newJobClient" ${raw(!clients.length ? 'disabled' : '')}>
+          ${clients.map(c => html`<option value="${c.id}">${c.company_name}</option>`)}
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Functietitel</label>
+        <input type="text" id="newJobTitle" placeholder="Bijv. Embedded software engineer">
+      </div>
+      <div class="form-group">
+        <label>Afdeling</label>
+        <input type="text" id="newJobDepartment">
+      </div>
+      <div class="form-group">
+        <label>Senioriteit</label>
+        <input type="text" id="newJobSeniority" placeholder="Bijv. medior">
+      </div>
+      <div class="form-group">
+        <label>Standplaats</label>
+        <input type="text" id="newJobCity">
+      </div>
+      <div class="form-group">
+        <label>Dienstverband</label>
+        <select id="newJobEmploymentType">
+          <option value="">— Kies —</option>
+          <option value="vast">Vast (werving en selectie)</option>
+          <option value="detachering">Detachering</option>
+          <option value="interim">Interim</option>
+        </select>
+      </div>
+      <div style="display:flex;gap:var(--space-md);">
+        <div class="form-group" style="flex:1;">
+          <label>Salaris min (EUR/mnd)</label>
+          <input type="number" id="newJobSalaryMin">
+        </div>
+        <div class="form-group" style="flex:1;">
+          <label>Salaris max (EUR/mnd)</label>
+          <input type="number" id="newJobSalaryMax">
+        </div>
+      </div>
+      <div class="form-group">
+        <label>Omschrijving</label>
+        <textarea id="newJobDescription" rows="4" style="width:100%;background:rgba(6,13,26,0.6);border:1px solid rgba(74,111,159,0.3);border-radius:var(--radius-md);color:var(--white);padding:0.75rem;font-family:var(--font-primary);font-size:var(--font-size-sm);resize:vertical;box-sizing:border-box;"></textarea>
+      </div>
+      <div class="form-group">
+        <label>Eisen</label>
+        <textarea id="newJobRequirements" rows="3" style="width:100%;background:rgba(6,13,26,0.6);border:1px solid rgba(74,111,159,0.3);border-radius:var(--radius-md);color:var(--white);padding:0.75rem;font-family:var(--font-primary);font-size:var(--font-size-sm);resize:vertical;box-sizing:border-box;"></textarea>
+      </div>
+      <div class="form-group">
+        <label style="display:flex;align-items:center;gap:0.5rem;font-weight:normal;">
+          <input type="checkbox" id="newJobSponsorship"> Sponsoring kennismigrant mogelijk
+        </label>
+      </div>
+      <div style="display:flex;gap:var(--space-md);margin-top:var(--space-lg);">
+        <button class="btn btn-primary" data-action="save-new-job" ${raw(!clients.length ? 'disabled' : '')}>Vacature aanmaken</button>
+        <button class="btn btn-ghost-secondary" data-action="close-modal">Annuleren</button>
+      </div>
+    `);
+  },
+
+  async saveNewJob() {
+    const clientId = Number(document.getElementById('newJobClient')?.value);
+    const title = document.getElementById('newJobTitle')?.value?.trim();
+    if (!clientId) { Auth.toast('Kies een opdrachtgever', 'error'); return; }
+    if (!title) { Auth.toast('Functietitel is verplicht', 'error'); return; }
+
+    const salaryMin = document.getElementById('newJobSalaryMin')?.value;
+    const salaryMax = document.getElementById('newJobSalaryMax')?.value;
+    const employmentType = document.getElementById('newJobEmploymentType')?.value;
+
+    const payload = {
+      client_id: clientId,
+      title,
+      department: document.getElementById('newJobDepartment')?.value?.trim() || null,
+      seniority: document.getElementById('newJobSeniority')?.value?.trim() || null,
+      city: document.getElementById('newJobCity')?.value?.trim() || null,
+      employment_type: employmentType || null,
+      salary_min: salaryMin ? Number(salaryMin) : null,
+      salary_max: salaryMax ? Number(salaryMax) : null,
+      description: document.getElementById('newJobDescription')?.value?.trim() || null,
+      requirements: document.getElementById('newJobRequirements')?.value?.trim() || null,
+      sponsorship_possible: !!document.getElementById('newJobSponsorship')?.checked,
+    };
+
+    try {
+      const res = await Auth.fetch('/v1/admin/jobs', { method: 'POST', body: JSON.stringify(payload) });
+      if (res?.ok) {
+        Auth.toast('Vacature aangemaakt', 'success');
+        this.closeModal();
+        this._currentPage.jobs = 1;
+        await this.loadJobs(this._lastParams.jobs || {});
+      } else {
+        const d = await res?.json().catch(() => null);
+        Auth.toast(d?.detail || 'Aanmaken mislukt', 'error');
+      }
+    } catch { Auth.toast('Netwerkfout', 'error'); }
   },
 
   /* ============================================================
@@ -1234,70 +1375,42 @@ const Admin = {
   },
 
   /* ============================================================
-     OPDRACHTGEVERS (WS-B.5)
+     OPDRACHTGEVERS (WS-B.5 / WS-B.2 follow-up)
 
-     Main has no GET /v1/admin/clients list endpoint (checked
-     talent-os/backend/routers/*.py and openapi.snapshot.json — only
-     /v1/admin/clients/{client_id}/contacts and .../{user_id}/approve
-     exist under that prefix). The roster here is therefore built
-     client-side: list users with role=client, then GET each user's detail
-     (which joins the linked `clients` row + an unfiltered job_count) and
-     dedupe by client id. A second pass hits /v1/admin/jobs?client_id=..
-     &status=open for an accurate *open* count, since the join only gives
-     every job_orders row regardless of status. This is N+1 (~2x the
-     number of client accounts) — fine for the current roster size, but a
-     real GET /v1/admin/clients?... endpoint returning company_name,
-     domain, open_job_count and primary_contact in one row would remove
-     both extra round-trips.
-
-     `erkend_referent` (recognised-sponsor / IND) is not a column on
-     `clients` (talent-os/backend/migrations/000_baseline.py) — the column
-     always renders "onbekend" per the task spec rather than guessing.
+     GET /v1/admin/clients (routers/clients_admin.py) returns
+     company_name/domain/erkend_referent/open_job_count/primary_contact
+     for the whole page in one query (LEFT JOIN LATERAL, no N+1) -- this
+     used to derive the roster from /users?role=client plus one detail
+     fetch per row plus one open-jobs-count fetch per row; both are gone.
      ============================================================ */
-  async loadClients() {
+  async loadClients(params = {}) {
+    this._lastParams.clients = params;
+    const qs = new URLSearchParams();
+    if (params.search) qs.set('search', params.search);
+    qs.set('limit', 200);
+
     this.setLoading('#section-clients table tbody', 6);
     try {
-      const res = await Auth.fetch('/v1/admin/users?role=client&limit=200');
+      const res = await Auth.fetch(`/v1/admin/clients?${qs}`);
       if (!res) return;
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail);
-      const users = data.items || [];
-      if (!users.length) {
-        this._data.clients = [];
-        this.setEmpty('#section-clients table tbody', 6, 'Nog geen opdrachtgevers met een portal-account.');
-        return;
-      }
-
-      const details = await Promise.all(users.map(u =>
-        Auth.fetch(`/v1/admin/users/${u.id}`).then(r => (r && r.ok) ? r.json() : null).catch(() => null)
-      ));
-
-      const byClientId = new Map();
-      details.forEach(d => {
-        if (d && d.client && d.client.id != null && !byClientId.has(d.client.id)) {
-          byClientId.set(d.client.id, {
-            ...d.client,
-            job_count: d.job_count ?? 0,
-            open_jobs: null,
-            _accountName: d.full_name || '',
-            _accountEmail: d.email || '',
-          });
-        }
-      });
-      const clients = Array.from(byClientId.values());
-
-      await Promise.all(clients.map(async c => {
-        try {
-          const r = await Auth.fetch(`/v1/admin/jobs?client_id=${c.id}&status=open&limit=1`);
-          if (r && r.ok) { const jd = await r.json(); c.open_jobs = jd.total ?? 0; }
-        } catch { /* leave open_jobs null -> falls back to job_count in render */ }
-      }));
-
-      this._data.clients = clients;
-      this.renderClients(clients);
+      this._data.clients = data.items || [];
+      this.renderClients(this._data.clients);
     } catch (err) {
-      this.setLoadError('#section-clients table tbody', 6, () => this.loadClients());
+      this.setLoadError('#section-clients table tbody', 6, () => this.loadClients(params));
     }
+  },
+
+  erkendReferentLabel(value) {
+    const map = { ja: 'Ja', nee: 'Nee', onbekend: 'Onbekend' };
+    return map[value] || 'Onbekend';
+  },
+
+  erkendReferentBadgeClass(value) {
+    if (value === 'ja') return 'badge bg-green-lt';
+    if (value === 'nee') return 'badge bg-red-lt';
+    return 'badge bg-secondary-lt';
   },
 
   renderClients(clients) {
@@ -1308,9 +1421,9 @@ const Admin = {
       <tr data-action="open-client" data-id="${c.id}" style="cursor:pointer;">
         <td style="font-weight:600;color:var(--white);">${c.company_name || 'Onbekend'}</td>
         <td style="color:var(--navy-200);">${c.domain || '—'}</td>
-        <td class="text-center">${c.open_jobs != null ? c.open_jobs : c.job_count}</td>
-        <td style="color:var(--navy-200);">${c._accountName || c._accountEmail || '—'}</td>
-        <td><span class="badge bg-secondary-lt" title="Geen erkend-referent-veld op clients">onbekend</span></td>
+        <td class="text-center">${c.open_job_count ?? 0}</td>
+        <td style="color:var(--navy-200);">${c.primary_contact?.full_name || c.primary_contact?.email || '—'}</td>
+        <td><span class="${this.erkendReferentBadgeClass(c.erkend_referent)}">${this.erkendReferentLabel(c.erkend_referent)}</span></td>
         <td class="text-end"><i class="fa-solid fa-chevron-right text-secondary"></i></td>
       </tr>`)}`);
   },
@@ -1323,7 +1436,7 @@ const Admin = {
   openClientDrawer(clientId) {
     const client = (this._data.clients || []).find(c => c.id === clientId);
     const tabs = [
-      ['contacts', 'Contacten'], ['jobs', 'Vacatures'],
+      ['info', 'Info'], ['contacts', 'Contacten'], ['jobs', 'Vacatures'],
       ['activity', 'Notities/Activiteit'], ['prospects', 'Prospects'],
     ];
     this.openModal('clientDrawer', html`
@@ -1331,12 +1444,12 @@ const Admin = {
       <div style="color:var(--navy-300);font-size:var(--font-size-sm);margin-bottom:var(--space-lg);">${client?.domain || '—'}</div>
       <div style="display:flex;gap:4px;flex-wrap:wrap;border-bottom:1px solid rgba(74,111,159,0.2);margin-bottom:var(--space-md);padding-bottom:var(--space-sm);">
         ${tabs.map(([key, label]) => html`
-          <button class="btn btn-sm ${key === 'contacts' ? 'btn-primary' : 'btn-ghost-secondary'}"
+          <button class="btn btn-sm ${key === 'info' ? 'btn-primary' : 'btn-ghost-secondary'}"
             data-action="client-tab" data-client-id="${clientId}" data-tab="${key}">${label}</button>`)}
       </div>
       <div id="clientDrawerTabContent" style="min-height:120px;"><i class="fa-solid fa-spinner fa-spin"></i></div>
     `, { wide: true });
-    this.switchClientTab(clientId, 'contacts');
+    this.switchClientTab(clientId, 'info');
   },
 
   switchClientTab(clientId, tab) {
@@ -1345,12 +1458,81 @@ const Admin = {
       btn.classList.toggle('btn-ghost-secondary', btn.dataset.tab !== tab);
     });
     const loaders = {
+      info: () => this.loadClientInfoTab(clientId),
       contacts: () => this.loadClientContacts(clientId),
       jobs: () => this.loadClientJobsTab(clientId),
       activity: () => this.loadClientActivityTab(clientId),
       prospects: () => this.loadClientProspectsTab(clientId),
     };
-    (loaders[tab] || loaders.contacts)();
+    (loaders[tab] || loaders.info)();
+  },
+
+  /* ---- Info tab: erkend_referent + notes, PATCH /v1/admin/clients/{id} ---- */
+  async loadClientInfoTab(clientId) {
+    const el = document.getElementById('clientDrawerTabContent');
+    if (!el) return;
+    mount(el, html`<i class="fa-solid fa-spinner fa-spin"></i>`);
+    try {
+      const res = await Auth.fetch(`/v1/admin/clients/${clientId}`);
+      if (!res) return;
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail);
+      this._data.clientDetail = this._data.clientDetail || {};
+      this._data.clientDetail[clientId] = data;
+      this.renderClientInfoTab(clientId);
+    } catch {
+      this.setContainerLoadError(el, () => this.loadClientInfoTab(clientId));
+    }
+  },
+
+  renderClientInfoTab(clientId) {
+    const el = document.getElementById('clientDrawerTabContent');
+    if (!el) return;
+    const client = (this._data.clientDetail && this._data.clientDetail[clientId]) || {};
+    mount(el, html`
+      <div class="form-group">
+        <label>Erkend referent (IND)</label>
+        <select id="clientInfoErkendReferent">
+          <option value="onbekend" ${raw(client.erkend_referent === 'onbekend' || !client.erkend_referent ? 'selected' : '')}>Onbekend</option>
+          <option value="ja" ${raw(client.erkend_referent === 'ja' ? 'selected' : '')}>Ja</option>
+          <option value="nee" ${raw(client.erkend_referent === 'nee' ? 'selected' : '')}>Nee</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Notities</label>
+        <textarea id="clientInfoNotes" rows="5" style="width:100%;background:rgba(6,13,26,0.6);border:1px solid rgba(74,111,159,0.3);border-radius:var(--radius-md);color:var(--white);padding:0.75rem;font-family:var(--font-primary);font-size:var(--font-size-sm);resize:vertical;box-sizing:border-box;">${client.notes || ''}</textarea>
+      </div>
+      <div style="display:flex;gap:var(--space-md);margin-top:var(--space-lg);">
+        <button class="btn btn-primary" data-action="save-client-info" data-client-id="${clientId}">Opslaan</button>
+      </div>
+    `);
+  },
+
+  async saveClientInfo(clientId) {
+    const payload = {
+      erkend_referent: document.getElementById('clientInfoErkendReferent')?.value || 'onbekend',
+      notes: document.getElementById('clientInfoNotes')?.value ?? '',
+    };
+    try {
+      const res = await Auth.fetch(`/v1/admin/clients/${clientId}`, {
+        method: 'PATCH', body: JSON.stringify(payload),
+      });
+      if (res?.ok) {
+        Auth.toast('Opgeslagen', 'success');
+        const updated = await res.json();
+        this._data.clientDetail = this._data.clientDetail || {};
+        this._data.clientDetail[clientId] = { ...(this._data.clientDetail[clientId] || {}), ...updated };
+        // Keep the roster's badge in sync without a full reload.
+        const rosterRow = (this._data.clients || []).find(c => c.id === clientId);
+        if (rosterRow) {
+          rosterRow.erkend_referent = updated.erkend_referent;
+          this.renderClients(this._data.clients);
+        }
+      } else {
+        const d = await res?.json().catch(() => null);
+        Auth.toast(d?.detail || 'Opslaan mislukt', 'error');
+      }
+    } catch { Auth.toast('Netwerkfout', 'error'); }
   },
 
   /* ---- Contacts tab (WS-C.4 CRUD) ---- */
@@ -1830,7 +2012,7 @@ const Admin = {
     const loaders = {
       users: 'loadUsers', candidates: 'loadCandidates',
       outreach: 'loadOutreach', blog: 'loadBlog', audit: 'loadAuditLog',
-      leads: 'loadLeads',
+      leads: 'loadLeads', jobs: 'loadJobs',
     };
     const fn = loaders[section];
     if (!fn || !Number.isFinite(page) || page < 1) return;
@@ -1905,8 +2087,23 @@ const Admin = {
     const jobStatusFilter = document.getElementById('jobStatusFilter');
     if (jobStatusFilter) jobStatusFilter.addEventListener('change', e => {
       const v = e.target.value;
-      this.loadJobs({ status: ['open','closed','draft'].includes(v) ? v : '' });
+      this._currentPage.jobs = 1;
+      this.loadJobs({
+        status: ['open','closed','draft'].includes(v) ? v : '',
+        search: document.getElementById('jobSearch')?.value?.trim() || undefined,
+      });
     });
+
+    // Server-side search (WS-B.2): #jobSearch used to be disabled/inert.
+    const debouncedJobs = debounce(val => {
+      this._currentPage.jobs = 1;
+      this.loadJobs({
+        status: document.getElementById('jobStatusFilter')?.value || undefined,
+        search: val || undefined,
+      });
+    }, 400);
+    const jobSearch = document.getElementById('jobSearch');
+    if (jobSearch) jobSearch.addEventListener('input', e => debouncedJobs(e.target.value));
 
     const leadTypeFilter = document.getElementById('leadTypeFilter');
     if (leadTypeFilter) leadTypeFilter.addEventListener('change', e => {
@@ -1979,6 +2176,12 @@ const Admin = {
       case 'confirm-delete-job':
         this.confirmDeleteJob(Number(id));
         break;
+      case 'open-new-job-modal':
+        this.openNewJobModal();
+        break;
+      case 'save-new-job':
+        this.saveNewJob();
+        break;
       case 'open-draft-modal':
         this.openDraftModal(Number(id));
         break;
@@ -2023,6 +2226,9 @@ const Admin = {
         break;
       case 'client-tab':
         this.switchClientTab(Number(el.dataset.clientId), el.dataset.tab);
+        break;
+      case 'save-client-info':
+        this.saveClientInfo(Number(el.dataset.clientId));
         break;
       case 'client-contact-new':
         this.openClientContactForm(Number(el.dataset.clientId), null);

@@ -16,8 +16,12 @@
        copy if the vendored file is ever missing (WS-A.9b: no inline onerror=
        attributes -- those are blocked by the enforced CSP too). -->
   <script src="js/vendor-fallback-css.js"></script>
-  <!-- ApexCharts is not vendored (chart-only, non-blocking for layout/nav) — TODO: vendor if this becomes a reliability problem. -->
-  <script src="https://cdn.jsdelivr.net/npm/apexcharts@4.7.0" integrity="sha384-Hf0cGsweCbozkRP14s5KIue6STJYKaoipB/i1gTdbX+umKD59qA/Szk42FPMuKtB" crossorigin="anonymous"></script>
+  <!-- ApexCharts vendored locally (WS-B.2) -- was a bare CDN <script> with no
+       fallback; script-src 'self' already covers vendor/ in website/_headers,
+       so no CDN entry or SRI is needed for it any more. Pinned at v4.7.0
+       (sha384 verified against the CDN copy at vendor time; bump the file
+       together with this comment if the pin ever changes). -->
+  <script src="vendor/apexcharts.min.js"></script>
   <style>
     /* ==== Legacy design-token compatibility ====
        admin.js still writes inline style="...var(--navy-300)..." etc (~150
@@ -343,7 +347,7 @@
               <div class="d-flex gap-2 flex-wrap align-items-center">
                 <div class="input-icon flex-fill" style="min-width:220px;">
                   <span class="input-icon-addon"><i class="fa-solid fa-magnifying-glass"></i></span>
-                  <input type="text" class="form-control" placeholder="Search jobs…" id="jobSearch" disabled style="cursor:default;">
+                  <input type="text" class="form-control" placeholder="Search jobs…" id="jobSearch">
                 </div>
                 <select class="form-select" style="max-width:180px;" id="jobStatusFilter">
                   <option value="">All Status</option>
@@ -351,6 +355,7 @@
                   <option value="draft">Draft / Pending</option>
                   <option value="closed">Closed</option>
                 </select>
+                <button class="btn btn-primary btn-sm" data-action="open-new-job-modal"><i class="fa-solid fa-plus me-1"></i>Nieuwe vacature</button>
               </div>
             </div>
             <div class="table-responsive">
@@ -367,20 +372,20 @@
                 <tbody><tr><td colspan="5" class="text-center text-secondary py-4"><i class="fa-solid fa-spinner fa-spin"></i></td></tr></tbody>
               </table>
             </div>
+            <div class="card-footer d-flex justify-content-center">
+              <div class="pagination-wrap" id="jobsPagination"></div>
+            </div>
           </div>
         </section>
 
-        <!-- ==================== OPDRACHTGEVERS (WS-B.5) ====================
-             No GET /v1/admin/clients list endpoint exists on main -- the
-             roster is built client-side from /v1/admin/users?role=client
-             (see Admin.loadClients() in js/admin.js for the exact fetch
-             sequence and why). Row click opens a tabbed detail drawer
-             (contacten / vacatures / notities-activiteit / prospects). -->
+        <!-- ==================== OPDRACHTGEVERS (WS-B.5 / WS-B.2 follow-up) ====================
+             Roster from GET /v1/admin/clients (routers/clients_admin.py) --
+             company_name/domain/erkend_referent/open_job_count/primary_contact
+             in one query, no N+1. Row click opens a tabbed detail drawer
+             (info / contacten / vacatures / notities-activiteit / prospects);
+             the Info tab edits erkend_referent + notes via
+             PATCH /v1/admin/clients/{id}. -->
         <section class="portal-section" id="section-clients">
-          <div class="alert alert-info d-flex align-items-center mb-3" role="alert">
-            <i class="fa-solid fa-circle-info me-2"></i>
-            <div>Erkend-referent-status wordt niet bijgehouden in de database — de kolom toont daarom altijd "onbekend".</div>
-          </div>
           <div class="card">
             <div class="table-responsive">
               <table class="table table-vcenter card-table">
