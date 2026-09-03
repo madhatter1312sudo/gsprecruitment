@@ -294,6 +294,40 @@ def test_erase_person_rejects_empty_email(fake_db):
     assert exc_info.value.status_code == 400
 
 
+def _suppression_inserts(db):
+    return [
+        (sql, args) for sql, args in db.statements
+        if sql.strip().startswith("INSERT INTO suppression_list")
+    ]
+
+
+def test_erase_person_adds_suppression_entry_for_a_normal_erasure(fake_db):
+    """A self-service or admin erasure (opt-out/STOP semantics) is added
+    to suppression_list as usual -- unaffected by the WS-C.17 talentpool
+    exception below."""
+    import routers.gdpr as gdpr
+
+    asyncio.run(gdpr.erase_person("Person@Example.com", actor_id=7, reason="unit-test"))
+    inserts = _suppression_inserts(fake_db)
+    assert len(inserts) == 1
+
+
+def test_erase_person_skips_suppression_entry_for_lapsed_talentpool_consent(fake_db):
+    """Security-audit follow-up (WS-C.17, LOW, post-APPROVED): erasure
+    triggered by the retention purge of a lapsed talentpool consent
+    (services/scheduler.py._purge_talentpool_expired's
+    reason=f"retention_purge:{row.key}", row.key="talentpool_consent")
+    must NOT add the person to suppression_list -- that would silently
+    block the exact re-signup the reminder e-mail invites. This is the
+    one exception; every other erasure reason still adds the entry."""
+    import routers.gdpr as gdpr
+
+    asyncio.run(
+        gdpr.erase_person("Person@Example.com", actor_id=None, reason="retention_purge:talentpool_consent")
+    )
+    assert _suppression_inserts(fake_db) == []
+
+
 def test_redact_value_walks_nested_dicts_and_lists():
     import routers.gdpr as gdpr
 

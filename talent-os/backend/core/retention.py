@@ -21,14 +21,16 @@ assumptions from the SOP pending the owner's confirmation (§6.4); the
 other seven are settled.
 
 `schema_ready=False` marks a row whose anchor column does not exist in the
-database yet (rejected_at, consent_talentpool_until, a "last contact"/
-"last login" column — none of these exist as of WS-E.7). The purge job
-(services/scheduler.py) skips those categories entirely — it never issues
-a query against a column that isn't there — and reports them as
-"schema_not_ready" so an admin calling GET /api/v1/admin/retention/table
-or POST .../retention/run can see exactly which rows are enforced today
-and which need a follow-up migration (owner decision, not made in this
-PR — see the WS-E.8 task notes).
+database yet (rejected_at, a "last contact"/"last login" column — none of
+these exist as of WS-C.17). The purge job (services/scheduler.py) skips
+those categories entirely — it never issues a query against a column that
+isn't there — and reports them as "schema_not_ready" so an admin calling
+GET /api/v1/admin/retention/table or POST .../retention/run can see
+exactly which rows are enforced today and which need a follow-up migration
+(owner decision, not made in this PR — see the WS-E.8 task notes).
+`consent_talentpool_until` (talentpool_consent row) is schema_ready=True as
+of WS-C.17 (migrations/030_talentpool_consent.py) — see that migration and
+TALENTPOOL_EXPIRED_SQL below.
 
 `action` is one of:
   - "anonymise": run via erase_person()-style logic (routers/gdpr.py) —
@@ -91,6 +93,38 @@ PROSPECT_NO_RESPONSE_SQL = """
       )
 """
 
+# WS-C.17 — migrations/030_talentpool_consent.py adds
+# candidates.consent_talentpool_until, so the talentpool_consent row below
+# is schema_ready=True as of this PR. A candidate whose talentpool consent
+# has lapsed (12 months, renewable -- SOP §1.5/§6 row 2) and was never
+# renewed is purged the same way sourced_no_response/referral are: via
+# erase_person() (services/scheduler.py._purge_talentpool_expired), which
+# also drops them from suppression risk (they simply stop being contacted
+# on this basis; SOP §1.5 "verlopen of ingetrokken toestemming = direct
+# geen contact meer op deze grondslag").
+#
+# Security-audit follow-up (H3b): same "status alone isn't proof of no
+# reaction" problem SOURCED_NO_RESPONSE_SQL guards against applies here --
+# a talentpool candidate can pick up a real match, a pipeline entry, a
+# reply, or a live portal account without any of that ever clearing
+# lawful_basis/consent_talentpool_until. The same four NOT EXISTS guards
+# apply. A 30-day grace period on top of consent_talentpool_until (not
+# just "<= NOW()") gives the reminder e-mail (services/scheduler.py's
+# talentpool_reminder job, sent 30 days *before* expiry) room to land and
+# be acted on before this selector would otherwise purge the same row --
+# renewing (re-ticking the consent) always pushes consent_talentpool_until
+# back out, removing the candidate from this selector immediately.
+TALENTPOOL_EXPIRED_SQL = """
+    SELECT c.id, c.email FROM candidates c WHERE c.lawful_basis = 'opt_in_talentpool'
+      AND c.consent_talentpool_until IS NOT NULL
+      AND c.consent_talentpool_until <= (NOW() - INTERVAL '30 days')
+      AND c.deleted_at IS NULL AND c.email IS NOT NULL
+      AND NOT EXISTS (SELECT 1 FROM matches m WHERE m.candidate_id = c.id AND m.status <> 'suggested')
+      AND NOT EXISTS (SELECT 1 FROM pipeline_entries p WHERE p.candidate_id = c.id)
+      AND NOT EXISTS (SELECT 1 FROM outreach_messages o WHERE o.candidate_id = c.id AND o.replied_at IS NOT NULL)
+      AND NOT EXISTS (SELECT 1 FROM users u WHERE LOWER(u.email) = LOWER(c.email) AND u.deleted_at IS NULL)
+"""
+
 
 @dataclass(frozen=True)
 class RetentionRow:
@@ -129,12 +163,8 @@ RETENTION_TABLE: Tuple[RetentionRow, ...] = (
         legal_basis_ref="VERWERKINGSREGISTER §1.4 rij 2 / SOP §6 rij 2",
         anchor_column="candidates.consent_talentpool_until",
         action="anonymise",
-        schema_ready=False,
-        selector_sql=(
-            "SELECT id, email FROM candidates WHERE lawful_basis = 'opt_in_talentpool' "
-            "AND consent_talentpool_until IS NOT NULL AND consent_talentpool_until <= NOW() "
-            "AND deleted_at IS NULL -- schema_ready=False: candidates.consent_talentpool_until does not exist yet"
-        ),
+        schema_ready=True,
+        selector_sql=TALENTPOOL_EXPIRED_SQL,
     ),
     RetentionRow(
         key="sourced_no_response",

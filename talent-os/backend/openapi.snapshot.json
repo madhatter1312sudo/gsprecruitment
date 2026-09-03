@@ -357,6 +357,38 @@
         "title": "AdminJobUpdate",
         "type": "object"
       },
+      "AdminTalentpoolConsentUpdate": {
+        "description": "Admin: PATCH /api/v1/admin/candidates/{id}/talentpool-consent.\n`evidence` is mandatory -- a short note on what evidence of consent\nthe admin has on file (e.g. a signed form, an e-mail) since this\nendpoint records consent on the candidate's behalf rather than\ncapturing a live tick of the box.",
+        "properties": {
+          "consent": {
+            "title": "Consent",
+            "type": "boolean"
+          },
+          "evidence": {
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Evidence",
+            "type": "string"
+          },
+          "scope": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scope"
+          }
+        },
+        "required": [
+          "consent",
+          "evidence"
+        ],
+        "title": "AdminTalentpoolConsentUpdate",
+        "type": "object"
+      },
       "AdminUserUpdate": {
         "properties": {
           "email": {
@@ -805,6 +837,52 @@
       "CandidatePortalProfile": {
         "description": "Full candidate profile combining users + candidate_profiles.",
         "properties": {
+          "consent_scope": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Consent Scope"
+          },
+          "consent_source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Consent Source"
+          },
+          "consent_talentpool_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Consent Talentpool At"
+          },
+          "consent_talentpool_until": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Consent Talentpool Until"
+          },
           "created_at": {
             "format": "date-time",
             "title": "Created At",
@@ -4697,6 +4775,75 @@
         "title": "SystemSettingsUpdate",
         "type": "object"
       },
+      "TalentpoolConfirmRequest": {
+        "description": "Public: POST /api/public/talentpool-confirm. token is the raw,\nsingle-use value e-mailed to the candidate (only its sha256 hash is\never stored -- core.security.hash_token, same as WS-E.2's verify-email\nflow).",
+        "properties": {
+          "token": {
+            "title": "Token",
+            "type": "string"
+          }
+        },
+        "required": [
+          "token"
+        ],
+        "title": "TalentpoolConfirmRequest",
+        "type": "object"
+      },
+      "TalentpoolConsentUpdate": {
+        "description": "Candidate portal: POST /api/v1/candidate/talentpool-consent.\nconsent=True sets consent_talentpool_at/_until/_scope (source='portal');\nconsent=False clears all three (withdrawal) -- see SOP \u00a71.5.",
+        "properties": {
+          "consent": {
+            "title": "Consent",
+            "type": "boolean"
+          },
+          "scope": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scope"
+          }
+        },
+        "required": [
+          "consent"
+        ],
+        "title": "TalentpoolConsentUpdate",
+        "type": "object"
+      },
+      "TalentpoolOptinRequest": {
+        "description": "Public: POST /api/public/talentpool-optin -- e-mail + consent tick\nfrom website/kandidaten.html or website/blog/post.html's CTA. Does not\nitself set anything on `candidates`; only issues a confirmation e-mail\n(routers/public.py talentpool_public_router). Consent only becomes\neffective once the token is confirmed via talentpool-confirm.",
+        "properties": {
+          "consent": {
+            "title": "Consent",
+            "type": "boolean"
+          },
+          "email": {
+            "format": "email",
+            "title": "Email",
+            "type": "string"
+          },
+          "scope": {
+            "title": "Scope",
+            "type": "string"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          }
+        },
+        "required": [
+          "email",
+          "consent",
+          "scope",
+          "source"
+        ],
+        "title": "TalentpoolOptinRequest",
+        "type": "object"
+      },
       "TeamInvite": {
         "properties": {
           "email": {
@@ -6794,6 +6941,86 @@
         ]
       }
     },
+    "/api/public/talentpool-confirm": {
+      "post": {
+        "description": "Step 2: consumes the one-time token from the confirmation e-mail.\nOnly here does consent become effective on the candidates row --\ncreating it (source='talentpool_optin', no source_url \u2014 SOP \u00a71.5) if\nthis e-mail has no existing candidates row, or updating it in place\notherwise. lawful_basis is set to 'opt_in_talentpool' only via the\nshared privacy.should_set_talentpool_lawful_basis() rule (H3a) --\nnever silently overwriting a different lawful_basis already on file\n(portal_registratie included -- same rule as the portal endpoint).",
+        "operationId": "talentpool_confirm_api_public_talentpool_confirm_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TalentpoolConfirmRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Talentpool Confirm",
+        "tags": [
+          "public-talentpool"
+        ]
+      }
+    },
+    "/api/public/talentpool-optin": {
+      "post": {
+        "description": "Step 1: e-mail + consent tick from website/kandidaten.html or the\nblog CTA. Never touches `candidates` directly -- only issues a\nconfirmation e-mail with a one-time token. Always returns the same\ngeneric message and status code regardless of consent value, whether\nthe e-mail is already known, whether it's suppressed, or whether a\nrequest was just sent -- this endpoint must never be usable to\nenumerate e-mails or probe existing candidates/suppression state\n(same no-enumeration pattern as routers/auth.py resend_verification).\n\nSecurity-audit fix (L1): skips actually sending (no row inserted, no\ne-mail sent -- but still returns 202 with the same message) when\neither holds:\n  - the address is on suppression_list (STOP received -- never\n    e-mail it again, on any basis);\n  - an unconfirmed request for this same e-mail was already made in\n    the last 10 minutes (double-submit / repeated-click guard --\n    avoids sending a fresh token + e-mail for every click).",
+        "operationId": "talentpool_optin_api_public_talentpool_optin_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TalentpoolOptinRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Talentpool Optin",
+        "tags": [
+          "public-talentpool"
+        ]
+      }
+    },
     "/api/v1/admin/activities": {
       "get": {
         "operationId": "list_activities_api_v1_admin_activities_get",
@@ -7614,6 +7841,61 @@
           }
         ],
         "summary": "List All Candidates",
+        "tags": [
+          "admin-portal"
+        ]
+      }
+    },
+    "/api/v1/admin/candidates/{candidate_id}/talentpool-consent": {
+      "patch": {
+        "operationId": "admin_update_talentpool_consent_api_v1_admin_candidates__candidate_id__talentpool_consent_patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "candidate_id",
+            "required": true,
+            "schema": {
+              "title": "Candidate Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdminTalentpoolConsentUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Admin Update Talentpool Consent",
         "tags": [
           "admin-portal"
         ]
@@ -10622,7 +10904,7 @@
     },
     "/api/v1/candidate/profile": {
       "get": {
-        "description": "Get full candidate profile (user + candidate_profiles).",
+        "description": "Get full candidate profile (user + candidate_profiles + the\ncandidates-row talentpool consent fields, WS-C.17).",
         "operationId": "get_candidate_profile_api_v1_candidate_profile_get",
         "responses": {
           "200": {
@@ -10927,6 +11209,51 @@
           }
         ],
         "summary": "Unsave Job",
+        "tags": [
+          "candidate-portal"
+        ]
+      }
+    },
+    "/api/v1/candidate/talentpool-consent": {
+      "post": {
+        "description": "Candidate portal talentpool opt-in/withdrawal (one of the three\nWS-C.17 consent touchpoints; the other two are the public\nkandidaten.html/blog CTA flow and the admin-recorded flow).\n\nconsent=True requires `scope` and sets consent_talentpool_at (now),\nconsent_talentpool_until (now + 12 months, renewable by ticking again),\nconsent_scope, and consent_source='portal' on the candidates row.\nlawful_basis becomes 'opt_in_talentpool' only via the shared\nshould_set_talentpool_lawful_basis() rule (core/privacy.py) -- NULL or\nalready 'opt_in_talentpool'. Security-audit fix (H3a): a\n'portal_registratie' candidate's basis is their own portal\nregistration (Art. 13) and is NEVER flipped to opt_in_talentpool by\nthis endpoint -- they keep portal_registratie and simply gain the\nfour consent columns alongside it, same as a gerechtvaardigd_belang/\ntoestemming_referral candidate would.\n\nconsent=False clears all four consent columns (withdrawal -- SOP \u00a71.5\n\"verlopen of ingetrokken toestemming = direct geen contact meer op\ndeze grondslag\"). Security-audit fix (M1): if lawful_basis is\ncurrently 'opt_in_talentpool' (this WAS their only basis for\ncontact), consent_withdrawn_at is also stamped -- a NULL\nconsent_talentpool_until alone already makes outreach.py's\n_draft_refusal refuse the draft, but consent_withdrawn_at is the\nstronger, permanent \"never contact again\" signal SOP \u00a73.3/\u00a77.1\nchecks everywhere else. A portal_registratie candidate keeps that\nbasis and is not otherwise affected -- they can still use the portal,\nonly their talentpool preference is gone.",
+        "operationId": "update_talentpool_consent_api_v1_candidate_talentpool_consent_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TalentpoolConsentUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Update Talentpool Consent",
         "tags": [
           "candidate-portal"
         ]

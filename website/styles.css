@@ -1684,6 +1684,17 @@ html[data-lang="en"] .lang-nl { display: none; }
 .signup-upload em { color: var(--gold-dark); font-style: normal; font-weight: 600; }
 .signup-alt { text-align: center; font-size: 0.85rem; color: var(--text-muted); }
 .signup-alt a { color: var(--gold-dark); font-weight: 600; }
+.talentpool-optin {
+  max-width: 480px; width: 100%; margin-top: 18px; padding-top: 18px;
+  border-top: 1px solid var(--border); display: flex; flex-direction: column; gap: 10px;
+}
+.talentpool-optin-check {
+  display: flex; align-items: flex-start; gap: 8px; font-size: 0.82rem;
+  color: var(--text-muted); cursor: pointer;
+}
+.talentpool-optin-check input { margin-top: 3px; flex-shrink: 0; }
+.talentpool-optin-row { display: flex; gap: 8px; }
+.talentpool-optin-row input { flex: 1; }
 @media (max-width: 1023px) {
   .signup-split { grid-template-columns: 1fr; }
   .signup-value, .signup-panel { padding: 48px 24px; }

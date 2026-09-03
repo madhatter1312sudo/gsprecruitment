@@ -72,6 +72,78 @@ class SetPasswordRequest(BaseModel):
     new_password: str = Field(..., min_length=8, max_length=128)
 
 
+# ── WS-C.17 talentpool consent (migrations/030_talentpool_consent.py) ────
+
+TALENTPOOL_CONSENT_SCOPES = ("matching_only", "matching_and_contact")
+
+
+class TalentpoolConsentUpdate(BaseModel):
+    """Candidate portal: POST /api/v1/candidate/talentpool-consent.
+    consent=True sets consent_talentpool_at/_until/_scope (source='portal');
+    consent=False clears all three (withdrawal) -- see SOP §1.5."""
+    consent: bool
+    scope: Optional[str] = None
+
+    @field_validator("scope")
+    @classmethod
+    def _scope_in_set(cls, v):
+        if v is not None and v not in TALENTPOOL_CONSENT_SCOPES:
+            raise ValueError(f"scope must be one of {TALENTPOOL_CONSENT_SCOPES}")
+        return v
+
+
+class TalentpoolOptinRequest(BaseModel):
+    """Public: POST /api/public/talentpool-optin -- e-mail + consent tick
+    from website/kandidaten.html or website/blog/post.html's CTA. Does not
+    itself set anything on `candidates`; only issues a confirmation e-mail
+    (routers/public.py talentpool_public_router). Consent only becomes
+    effective once the token is confirmed via talentpool-confirm."""
+    email: EmailStr
+    consent: bool
+    scope: str
+    source: str
+
+    @field_validator("scope")
+    @classmethod
+    def _scope_in_set(cls, v):
+        if v not in TALENTPOOL_CONSENT_SCOPES:
+            raise ValueError(f"scope must be one of {TALENTPOOL_CONSENT_SCOPES}")
+        return v
+
+    @field_validator("source")
+    @classmethod
+    def _source_in_set(cls, v):
+        if v not in ("kandidaten_page", "blog_cta"):
+            raise ValueError("source must be one of ('kandidaten_page', 'blog_cta')")
+        return v
+
+
+class TalentpoolConfirmRequest(BaseModel):
+    """Public: POST /api/public/talentpool-confirm. token is the raw,
+    single-use value e-mailed to the candidate (only its sha256 hash is
+    ever stored -- core.security.hash_token, same as WS-E.2's verify-email
+    flow)."""
+    token: str
+
+
+class AdminTalentpoolConsentUpdate(BaseModel):
+    """Admin: PATCH /api/v1/admin/candidates/{id}/talentpool-consent.
+    `evidence` is mandatory -- a short note on what evidence of consent
+    the admin has on file (e.g. a signed form, an e-mail) since this
+    endpoint records consent on the candidate's behalf rather than
+    capturing a live tick of the box."""
+    consent: bool
+    scope: Optional[str] = None
+    evidence: str = Field(..., min_length=1, max_length=2000)
+
+    @field_validator("scope")
+    @classmethod
+    def _scope_in_set(cls, v):
+        if v is not None and v not in TALENTPOOL_CONSENT_SCOPES:
+            raise ValueError(f"scope must be one of {TALENTPOOL_CONSENT_SCOPES}")
+        return v
+
+
 class RefreshRequest(BaseModel):
     refresh_token: Optional[str] = None
 
@@ -281,6 +353,15 @@ class CandidatePortalProfile(BaseModel):
     education: Optional[str] = None
     cv_text: Optional[str] = None
     cv_file_path: Optional[str] = None
+    # WS-C.17: read from the linked `candidates` row (C.16 FK /
+    # get_or_create_candidate_id), not candidate_profiles -- these four
+    # live on candidates alongside lawful_basis. None/None/None/None when
+    # no candidates row exists yet or no talentpool consent has ever been
+    # recorded.
+    consent_talentpool_at: Optional[datetime] = None
+    consent_talentpool_until: Optional[datetime] = None
+    consent_scope: Optional[str] = None
+    consent_source: Optional[str] = None
     created_at: datetime
     updated_at: Optional[datetime] = None
 
