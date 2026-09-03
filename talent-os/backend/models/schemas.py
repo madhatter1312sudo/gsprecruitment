@@ -780,6 +780,86 @@ class PipelineStageHistoryItem(BaseModel):
     model_config = {"from_attributes": True}
 
 
+# ── WS-C.7: Placements (minimal) + immigratiestatus. PROVISIONAL. ────────
+# Pricing/margin factors here are owner decisions not yet finalised, and
+# nothing built on top of these models is published to the public site or
+# the client portal (routers/placements.py is admin-only). See
+# migrations/029_placements.py and core/margin.py for the full rationale.
+
+_PLACEMENT_TYPES = r"^(werving_selectie|detachering)$"
+_BILLING_BASES = r"^(vast_maandbedrag|per_uur)$"
+_FEE_TYPES = r"^(percentage|vast)$"
+_PLACEMENT_STATUSES = r"^(concept|actief|beeindigd|geannuleerd)$"
+
+
+class PlacementCreate(BaseModel):
+    candidate_id: int
+    job_id: int
+    client_id: int
+    placement_type: str = Field(..., pattern=_PLACEMENT_TYPES)
+    start_date: Optional[date] = None
+    end_date: Optional[date] = None
+    hourly_bill_rate: Optional[float] = None
+    monthly_purchase_price: Optional[float] = None
+    eor_partner: Optional[str] = None
+    eor_cost_factor: Optional[float] = None
+    billing_basis: Optional[str] = Field(None, pattern=_BILLING_BASES)
+    expected_billable_hours: Optional[float] = None
+    fee_type: Optional[str] = Field(None, pattern=_FEE_TYPES)
+    fee_percentage: Optional[float] = None
+    fee_amount: Optional[float] = None
+    one_off_costs: List[dict] = []
+    status: str = Field("concept", pattern=_PLACEMENT_STATUSES)
+    notes: Optional[str] = None
+
+
+class PlacementUpdate(BaseModel):
+    start_date: Optional[date] = None
+    end_date: Optional[date] = None
+    hourly_bill_rate: Optional[float] = None
+    monthly_purchase_price: Optional[float] = None
+    eor_partner: Optional[str] = None
+    eor_cost_factor: Optional[float] = None
+    billing_basis: Optional[str] = Field(None, pattern=_BILLING_BASES)
+    expected_billable_hours: Optional[float] = None
+    fee_type: Optional[str] = Field(None, pattern=_FEE_TYPES)
+    fee_percentage: Optional[float] = None
+    fee_amount: Optional[float] = None
+    one_off_costs: Optional[List[dict]] = None
+    notes: Optional[str] = None
+
+
+class PlacementStatusUpdate(BaseModel):
+    status: str = Field(..., pattern=_PLACEMENT_STATUSES)
+
+
+class PlacementResponse(BaseModel):
+    id: int
+    candidate_id: int
+    job_id: int
+    client_id: int
+    placement_type: str
+    start_date: Optional[date] = None
+    end_date: Optional[date] = None
+    hourly_bill_rate: Optional[float] = None
+    monthly_purchase_price: Optional[float] = None
+    eor_partner: Optional[str] = None
+    eor_cost_factor: Optional[float] = None
+    billing_basis: Optional[str] = None
+    expected_billable_hours: Optional[float] = None
+    fee_type: Optional[str] = None
+    fee_percentage: Optional[float] = None
+    fee_amount: Optional[float] = None
+    one_off_costs: List[dict] = []
+    status: str
+    notes: Optional[str] = None
+    created_by: Optional[int] = None
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+
+    model_config = {"from_attributes": True}
+
+
 # ── WS-C.10: Leads (unified contact_submissions + quiz_submissions) ──────
 
 class LeadReadUpdate(BaseModel):
