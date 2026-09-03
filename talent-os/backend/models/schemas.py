@@ -209,7 +209,7 @@ class CandidateResponse(CandidateCreate):
     # NOT required: no INSERT into candidates (create_candidate, the
     # webhook, portal registration, harvest.py, scheduler.py) ever sets
     # this column explicitly, so any row inserted before the column
-    # picked up a DEFAULT NOW() (see migrations/023_candidates_updated_at_default.py)
+    # picked up a DEFAULT NOW() (see migrations/027_candidates_updated_at_default.py)
     # reads back NULL here -- a required datetime raised
     # ResponseValidationError on GET /api/candidates and GET
     # /api/candidates/{id} for every such row.
