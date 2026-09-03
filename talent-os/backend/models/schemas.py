@@ -222,6 +222,10 @@ class JobOrderCreate(BaseModel):
     requirements: Optional[str] = None
     nice_to_have: Optional[str] = None
     urgency: str = "normal"
+    city: Optional[str] = None
+    company_display: Optional[str] = None
+    employment_type: Optional[Literal["vast", "detachering", "interim"]] = None
+    sponsorship_possible: bool = False
 
 
 class JobOrderResponse(JobOrderCreate):
@@ -246,6 +250,10 @@ class JobOrderUpdate(BaseModel):
     nice_to_have: Optional[str] = None
     status: Optional[str] = None
     urgency: Optional[str] = None
+    city: Optional[str] = None
+    company_display: Optional[str] = None
+    employment_type: Optional[Literal["vast", "detachering", "interim"]] = None
+    sponsorship_possible: Optional[bool] = None
 
 
 # ── Match ───────────────────────────────────────────────────────────────
@@ -450,6 +458,13 @@ class AdminJobUpdate(BaseModel):
     requirements: Optional[str] = None
     fee_percentage: Optional[float] = None
     urgency: Optional[str] = None
+    # WS-C.15 / WS-A.5 (migrations/016_job_orders_columns.py). employment_type
+    # is validated here (suspenders) on top of the DB CHECK constraint
+    # (belt) -- same pattern as quiz_questions.domain in migrations/012.
+    city: Optional[str] = None
+    company_display: Optional[str] = None
+    employment_type: Optional[Literal["vast", "detachering", "interim"]] = None
+    sponsorship_possible: Optional[bool] = None
 
 
 class AdminAnalytics(BaseModel):

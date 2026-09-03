@@ -79,6 +79,28 @@
       },
       "AdminJobUpdate": {
         "properties": {
+          "city": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "City"
+          },
+          "company_display": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Company Display"
+          },
           "department": {
             "anyOf": [
               {
@@ -100,6 +122,22 @@
               }
             ],
             "title": "Description"
+          },
+          "employment_type": {
+            "anyOf": [
+              {
+                "enum": [
+                  "vast",
+                  "detachering",
+                  "interim"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Employment Type"
           },
           "fee_percentage": {
             "anyOf": [
@@ -133,6 +171,17 @@
               }
             ],
             "title": "Seniority"
+          },
+          "sponsorship_possible": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sponsorship Possible"
           },
           "status": {
             "anyOf": [
@@ -2181,9 +2230,31 @@
       },
       "JobOrderCreate": {
         "properties": {
+          "city": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "City"
+          },
           "client_id": {
             "title": "Client Id",
             "type": "integer"
+          },
+          "company_display": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Company Display"
           },
           "department": {
             "anyOf": [
@@ -2206,6 +2277,22 @@
               }
             ],
             "title": "Description"
+          },
+          "employment_type": {
+            "anyOf": [
+              {
+                "enum": [
+                  "vast",
+                  "detachering",
+                  "interim"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Employment Type"
           },
           "location_type": {
             "anyOf": [
@@ -2278,6 +2365,11 @@
             ],
             "title": "Seniority"
           },
+          "sponsorship_possible": {
+            "default": false,
+            "title": "Sponsorship Possible",
+            "type": "boolean"
+          },
           "title": {
             "minLength": 1,
             "title": "Title",
@@ -2298,6 +2390,28 @@
       },
       "JobOrderUpdate": {
         "properties": {
+          "city": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "City"
+          },
+          "company_display": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Company Display"
+          },
           "department": {
             "anyOf": [
               {
@@ -2319,6 +2433,22 @@
               }
             ],
             "title": "Description"
+          },
+          "employment_type": {
+            "anyOf": [
+              {
+                "enum": [
+                  "vast",
+                  "detachering",
+                  "interim"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Employment Type"
           },
           "location_type": {
             "anyOf": [
@@ -2396,6 +2526,17 @@
               }
             ],
             "title": "Seniority"
+          },
+          "sponsorship_possible": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sponsorship Possible"
           },
           "status": {
             "anyOf": [
@@ -4356,7 +4497,7 @@
         ]
       },
       "post": {
-        "description": "Create a new job order.",
+        "description": "Create a new job order. New jobs are never demo jobs -- is_demo is\nonly ever true for migrations/012's 6 seed vacancies, set directly by\nmigrations/016_job_orders_columns.py's backfill, never via this API.",
         "operationId": "create_job_api_jobs_post",
         "requestBody": {
           "content": {
@@ -4860,7 +5001,7 @@
     },
     "/api/public/jobs": {
       "get": {
-        "description": "List open job orders for the public job board.",
+        "description": "List open, non-demo job orders for the public job board. is_demo\nrows (migrations/012's 6 seed vacancies) are excluded by default so the\npublic board never shows placeholder data as a real opening.",
         "operationId": "list_public_jobs_api_public_jobs_get",
         "responses": {
           "200": {
@@ -5610,7 +5751,7 @@
     },
     "/api/v1/admin/jobs": {
       "get": {
-        "description": "List all jobs cross-client.",
+        "description": "List all jobs cross-client. Excludes is_demo jobs (migrations/012's\n6 seed vacancies) unless include_demo=true is explicitly passed.",
         "operationId": "list_all_jobs_api_v1_admin_jobs_get",
         "parameters": [
           {
@@ -5643,6 +5784,18 @@
                 }
               ],
               "title": "Client Id"
+            }
+          },
+          {
+            "description": "Include is_demo=true seed/placeholder jobs (default excludes them).",
+            "in": "query",
+            "name": "include_demo",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "Include is_demo=true seed/placeholder jobs (default excludes them).",
+              "title": "Include Demo",
+              "type": "boolean"
             }
           },
           {

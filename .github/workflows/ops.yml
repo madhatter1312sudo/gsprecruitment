@@ -1,0 +1,79 @@
+# Operational actions on the VPS, run from GitHub Actions with the same SSH
+# key deploy.yml uses. Lets maintainers (and Claude sessions without a
+# shell on the box) do server chores in a reviewable, logged way.
+#
+# Actions -> "VPS ops" -> Run workflow -> pick an action:
+#   status        read-only: containers, disk, cron, backup dir, .env key NAMES
+#   schema-dump   pg_dump --schema-only of the production DB as an artifact
+#                 (structure only, no rows, no personal data) for WS-C.1
+#   setup-backup  one-time: passphrase file, .env keys, cron job, first
+#                 backup + freshness check (docs/BACKUP-RESTORE.md §1a, §1d)
+#   backup-now    run backup.sh once and the freshness check
+#   backup-check  freshness check only
+# Nothing here prints secret values: .env is only ever grepped for key names.
+
+name: VPS ops
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: "What to run on the VPS"
+        type: choice
+        required: true
+        options:
+          - status
+          - schema-dump
+          - setup-backup
+          - backup-now
+          - backup-check
+
+# Same group as deploy.yml so an ops run never overlaps a deploy.
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+env:
+  VPS_HOST: 188.245.254.248
+  VPS_USER: gsp
+  VPS_PATH: /home/gsp/projects/gsp-recruitment
+
+jobs:
+  ops:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.VPS_SSH_PRIVATE_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -H "$VPS_HOST" >> ~/.ssh/known_hosts
+
+      - name: Ship helper and backup scripts
+        # deploy.yml only rsyncs talent-os/backend, so the backup scripts
+        # (talent-os/scripts) are copied here; .env in talent-os/ is untouched.
+        run: |
+          scp scripts/vps-ops.sh "$VPS_USER@$VPS_HOST:/tmp/vps-ops.sh"
+          scp -r talent-os/scripts "$VPS_USER@$VPS_HOST:$VPS_PATH/talent-os/"
+
+      - name: Run action
+        if: inputs.action != 'schema-dump'
+        run: ssh "$VPS_USER@$VPS_HOST" "bash /tmp/vps-ops.sh '${{ inputs.action }}' '$VPS_PATH'"
+
+      - name: schema-dump
+        if: inputs.action == 'schema-dump'
+        run: |
+          mkdir -p out
+          ssh "$VPS_USER@$VPS_HOST" "bash /tmp/vps-ops.sh schema-dump '$VPS_PATH'" > out/schema.sql
+          echo "schema.sql: $(wc -l < out/schema.sql) lines, $(grep -c '^CREATE TABLE' out/schema.sql) tables"
+          if grep -qiE '^(INSERT|COPY) ' out/schema.sql; then echo '::error::dump contains data statements'; exit 1; fi
+
+      - name: Upload schema artifact
+        if: inputs.action == 'schema-dump'
+        uses: actions/upload-artifact@v4
+        with:
+          name: prod-schema
+          path: out/schema.sql
+          retention-days: 7

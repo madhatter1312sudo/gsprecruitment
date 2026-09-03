@@ -76,7 +76,7 @@ async def run_matching(
         return {"message": "Matching started", "job_ids": [job_id]}
 
     jobs = await fetch_all(
-        "SELECT id FROM job_orders WHERE status = 'open' AND deleted_at IS NULL",
+        "SELECT id FROM job_orders WHERE status = 'open' AND deleted_at IS NULL AND is_demo = false",
     )
     for j in jobs:
         background_tasks.add_task(_run_matching_for_job, j["id"])
