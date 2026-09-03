@@ -214,6 +214,140 @@
         "title": "AdminEraseRequest",
         "type": "object"
       },
+      "AdminJobCreate": {
+        "description": "WS-B.2: an admin records a job on a client's behalf -- e.g. a\ntelephone assignment where the client has no portal login yet. Mirrors\nJobOrderCreate/ClientJobCreate plus the WS-C.15 public-facing columns,\nwith an explicit client_id (a client posting their own job never\nsupplies one -- it's derived from their session) and a settable\nstatus, defaulting to 'draft' so nothing an admin phones in reaches the\npublic board unpublished-but-live by accident.",
+        "properties": {
+          "city": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "City"
+          },
+          "client_id": {
+            "title": "Client Id",
+            "type": "integer"
+          },
+          "department": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Department"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "employment_type": {
+            "anyOf": [
+              {
+                "enum": [
+                  "vast",
+                  "detachering",
+                  "interim"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Employment Type"
+          },
+          "location_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Location Type"
+          },
+          "requirements": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Requirements"
+          },
+          "salary_max": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Salary Max"
+          },
+          "salary_min": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Salary Min"
+          },
+          "seniority": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Seniority"
+          },
+          "sponsorship_possible": {
+            "default": false,
+            "title": "Sponsorship Possible",
+            "type": "boolean"
+          },
+          "status": {
+            "default": "draft",
+            "title": "Status",
+            "type": "string"
+          },
+          "title": {
+            "minLength": 1,
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "client_id",
+          "title"
+        ],
+        "title": "AdminJobCreate",
+        "type": "object"
+      },
       "AdminJobUpdate": {
         "properties": {
           "city": {
@@ -8111,6 +8245,24 @@
             }
           },
           {
+            "description": "ILIKE match on job title or client company name (WS-B.2).",
+            "in": "query",
+            "name": "search",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "ILIKE match on job title or client company name (WS-B.2).",
+              "title": "Search"
+            }
+          },
+          {
             "description": "Include is_demo=true seed/placeholder jobs (default excludes them).",
             "in": "query",
             "name": "include_demo",
@@ -8144,6 +8296,25 @@
               "title": "Offset",
               "type": "integer"
             }
+          },
+          {
+            "description": "1-based page number; overrides offset when given (offset = (page-1)*limit).",
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "1-based page number; overrides offset when given (offset = (page-1)*limit).",
+              "title": "Page"
+            }
           }
         ],
         "responses": {
@@ -8175,9 +8346,96 @@
         "tags": [
           "admin-portal"
         ]
+      },
+      "post": {
+        "description": "WS-B.2: record a job on a client's behalf (e.g. a telephone\nassignment) without the client needing a portal login. Unlike\nrouters/client.py's create_client_job, status is settable (default\n'draft') since an admin is a trusted actor here -- but the default\nstill keeps a phoned-in job off the public board until an admin\nexplicitly approves it.",
+        "operationId": "create_job_for_client_api_v1_admin_jobs_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdminJobCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create Job For Client",
+        "tags": [
+          "admin-portal"
+        ]
       }
     },
     "/api/v1/admin/jobs/{job_id}": {
+      "delete": {
+        "description": "Soft-delete a job order.",
+        "operationId": "delete_job_api_v1_admin_jobs__job_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "title": "Job Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Delete Job",
+        "tags": [
+          "admin-portal"
+        ]
+      },
       "put": {
         "description": "Update any job (approve, reject, feature, etc.).",
         "operationId": "update_any_job_api_v1_admin_jobs__job_id__put",

@@ -9,7 +9,7 @@ from core.database import fetch_one, fetch_all, execute, fetch_val
 from core.deps import get_current_user, require_role
 from core.security import create_access_token
 from models.schemas import (
-    AdminDashboard, AdminUserUpdate, AdminJobUpdate, AdminAnalytics,
+    AdminDashboard, AdminUserUpdate, AdminJobUpdate, AdminJobCreate, AdminAnalytics,
     AuditLogEntry, ContentItem, ContentUpdate, SystemSettings, SystemSettingsUpdate,
     HealthResponse, PipelineStageUpdate, LeadReadUpdate, LEAD_INTEREST_TYPES,
 )
@@ -293,13 +293,18 @@ async def unlock_user(
 async def list_all_jobs(
     status: Optional[str] = Query(None),
     client_id: Optional[int] = Query(None),
+    search: Optional[str] = Query(None, description="ILIKE match on job title or client company name (WS-B.2)."),
     include_demo: bool = Query(False, description="Include is_demo=true seed/placeholder jobs (default excludes them)."),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
+    page: Optional[int] = Query(None, ge=1, description="1-based page number; overrides offset when given (offset = (page-1)*limit)."),
     current_user: dict = Depends(require_role("admin")),
 ):
     """List all jobs cross-client. Excludes is_demo jobs (migrations/012's
     6 seed vacancies) unless include_demo=true is explicitly passed."""
+    if page is not None:
+        offset = (page - 1) * limit
+
     conditions = ["j.deleted_at IS NULL"]
     params = []
     idx = 1
@@ -314,10 +319,16 @@ async def list_all_jobs(
         conditions.append(f"j.client_id = ${idx}")
         params.append(client_id)
         idx += 1
+    if search:
+        conditions.append(f"(j.title ILIKE ${idx} OR c.company_name ILIKE ${idx})")
+        params.append(f"%{search}%")
+        idx += 1
 
     where = " AND ".join(conditions)
 
-    total = await fetch_val(f"SELECT COUNT(*) FROM job_orders j WHERE {where}", *params) or 0
+    total = await fetch_val(
+        f"SELECT COUNT(*) FROM job_orders j JOIN clients c ON c.id = j.client_id WHERE {where}", *params,
+    ) or 0
     params_ext = params + [limit, offset]
     rows = await fetch_all(
         f"""SELECT j.*, c.company_name
@@ -330,6 +341,64 @@ async def list_all_jobs(
     )
 
     return {"items": rows, "total": total, "limit": limit, "offset": offset}
+
+
+@router.post("/jobs", status_code=201)
+async def create_job_for_client(
+    data: AdminJobCreate,
+    current_user: dict = Depends(require_role("admin")),
+):
+    """WS-B.2: record a job on a client's behalf (e.g. a telephone
+    assignment) without the client needing a portal login. Unlike
+    routers/client.py's create_client_job, status is settable (default
+    'draft') since an admin is a trusted actor here -- but the default
+    still keeps a phoned-in job off the public board until an admin
+    explicitly approves it."""
+    client = await fetch_one("SELECT id FROM clients WHERE id = $1 AND deleted_at IS NULL", data.client_id)
+    if not client:
+        raise HTTPException(status_code=422, detail="client_id: client not found")
+
+    job = await fetch_one(
+        """INSERT INTO job_orders
+           (client_id, title, department, seniority, location_type, city,
+            salary_min, salary_max, description, requirements,
+            employment_type, sponsorship_possible, status)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+           RETURNING *""",
+        data.client_id, data.title, data.department, data.seniority,
+        data.location_type, data.city, data.salary_min, data.salary_max,
+        data.description, data.requirements, data.employment_type,
+        data.sponsorship_possible, data.status,
+    )
+
+    await execute(
+        "INSERT INTO audit_log (action, actor_id, target_type, target_id, changes) VALUES ($1, $2, $3, $4, $5::jsonb)",
+        "admin_job_create", current_user["id"], "job", job["id"],
+        json.dumps({"client_id": data.client_id, "title": data.title, "status": data.status}),
+    )
+
+    return job
+
+
+@router.delete("/jobs/{job_id}")
+async def delete_job(
+    job_id: int,
+    current_user: dict = Depends(require_role("admin")),
+):
+    """Soft-delete a job order."""
+    row = await fetch_one(
+        "UPDATE job_orders SET deleted_at = NOW() WHERE id = $1 AND deleted_at IS NULL RETURNING id, title",
+        job_id,
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    await execute(
+        "INSERT INTO audit_log (action, actor_id, target_type, target_id, changes) VALUES ($1, $2, $3, $4, $5::jsonb)",
+        "admin_job_delete", current_user["id"], "job", job_id, json.dumps({"deleted": True}),
+    )
+
+    return {"message": f"Job '{row['title']}' deleted successfully"}
 
 
 @router.put("/jobs/{job_id}")

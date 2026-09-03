@@ -569,6 +569,29 @@ class AdminJobUpdate(BaseModel):
     sponsorship_possible: Optional[bool] = None
 
 
+class AdminJobCreate(BaseModel):
+    """WS-B.2: an admin records a job on a client's behalf -- e.g. a
+    telephone assignment where the client has no portal login yet. Mirrors
+    JobOrderCreate/ClientJobCreate plus the WS-C.15 public-facing columns,
+    with an explicit client_id (a client posting their own job never
+    supplies one -- it's derived from their session) and a settable
+    status, defaulting to 'draft' so nothing an admin phones in reaches the
+    public board unpublished-but-live by accident."""
+    client_id: int
+    title: str = Field(..., min_length=1)
+    department: Optional[str] = None
+    seniority: Optional[str] = None
+    location_type: Optional[str] = None
+    city: Optional[str] = None
+    salary_min: Optional[int] = None
+    salary_max: Optional[int] = None
+    description: Optional[str] = None
+    requirements: Optional[str] = None
+    employment_type: Optional[Literal["vast", "detachering", "interim"]] = None
+    sponsorship_possible: bool = False
+    status: str = "draft"
+
+
 class AdminAnalytics(BaseModel):
     user_growth: dict = {}
     job_fill_rate: Optional[float] = None

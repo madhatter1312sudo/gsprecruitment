@@ -6,6 +6,10 @@
     const user = Auth.requireAuth(['candidate']);
     if (!user) { /* redirect handled in requireAuth */ }
 
+    // WS-B.2: show the "viewing as" banner + return-to-admin control when
+    // this session is an admin impersonating this candidate.
+    if (user) Auth.renderImpersonationBanner();
+
     /* ---- WS-E.2: e-mail verification gate ----
        Auth.requireAuth() only checks the JWT is valid; is_verified is a
        separate, backend-enforced gate (core/deps.py get_verified_user

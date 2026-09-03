@@ -265,7 +265,7 @@ The job posting form collects title, specialisation, location, work/contract typ
 | `#dashboard` | Dashboard | KPI cards, pending-verifications widget, "Nieuwe registraties" widget (top 5 self-registered candidates) |
 | `#users` | Users | User list |
 | `#candidates` | Candidates | Kind filter (Alle / Zelf geregistreerd / Gesourced), per-row type badge and verified indicator; row click opens full detail via `GET /v1/admin/candidates/{kind}/{item_id}` (contact links, skills/languages chips, salary/notice/relocation/education, CV-uploaded indicator; the CV file itself isn't downloadable from this panel yet) |
-| `#jobs` | All Jobs | Cross-client job list |
+| `#jobs` | All Jobs | Cross-client job list, server-side search + status filter, paginated; "Nieuwe vacature" modal lets an admin record a job on a client's behalf (e.g. a phoned-in assignment) without the client needing a portal login |
 | `#outreach` | Outreach | Draft review/approve (outreach is always draft-only; a human sends, see `CLAUDE.md`) |
 | `#blog` | Blog | Blog post CRUD; publish is a separate, explicit action from save |
 | `#analytics` | Analytics | Platform metrics |
@@ -273,7 +273,7 @@ The job posting form collects title, specialisation, location, work/contract typ
 | `#cms` | Content CMS | Currently limited to the Blog section above; a broader page-content/testimonial/case-study CMS is not built (see §9) |
 | `#settings` | Settings | System configuration |
 
-There is no `impersonate` action and no `superadmin` role; every admin account sits behind the MFA flow in `ENTERPRISE-ARCHITECTURE-SPEC.md` §3.2.
+There is no `superadmin` role; every admin account sits behind the MFA flow in `ENTERPRISE-ARCHITECTURE-SPEC.md` §3.2. There is an `impersonate` action (Users list) that gives the admin a 15-minute token as the target user and opens their portal; the admin's own token is parked separately (`gsp_admin_token` in `localStorage`, never the normal session slot) for the length of the impersonation. Both the candidate and client portal show a persistent gold-on-navy banner ("Je bekijkt als &lt;rol&gt;. Terug naar admin") while impersonated, with a button that restores the admin session and returns to `#dashboard`.
 
 Empty/error states across the panel use the Dutch "Kon niet laden, probeer opnieuw" retry pattern and "Nog geen …" empty-state copy.
 
@@ -303,6 +303,7 @@ The Newsreader/Plex redesign is implemented as a token-and-component-class chang
 | `website/candidate/index.html`, `website/portal.css` | Match-score badges now read "Match NN" in mono instead of a percentage circle; portal header title set to the display serif. Sidebar/gold-active-state styling was already on-brand via `theme.css` tokens. |
 | `website/admin/index.html` | Font tokens and the Tabler brand-color override (`--tblr-primary`) updated to the canonical gold; headings and KPI numerals set to serif/mono. The vendored Tabler theme itself was not touched. |
 | `website/admin/index.html`, `website/admin/js/admin.js` (August 2026, candidates overhaul) | Candidates section gained the kind filter and detail view described in §7. Dashboard gained the "Nieuwe registraties" widget above Pending Verifications so a same-day portal sign-up is visible without opening Candidates. Empty/error states standardized across the panel. |
+| `website/admin/vendor/apexcharts.min.js` (WS-B.2) | ApexCharts 4.7.0 vendored locally (was a bare CDN `<script>` with no fallback); `website/admin/index.html` now loads it from `vendor/`, no CDN entry or SRI needed. No visual change — same pinned version, same chart config in `admin.js`. |
 | All other pages (werkgevers, werkwijze, over-ons, contact, blog, privacy, 404, vacature) | No page-specific CSS existed for header/hero/footer; they inherit the new look automatically via the shared `.header`/`.page-hero`/`.eyebrow`/`.footer` classes in `styles.css`. |
 | Google Fonts `<link>` (all pages) | Swapped from Inter+Fraunces to `Newsreader:opsz,wght@6..72,400;6..72,500;6..72,600` + `IBM+Plex+Sans:wght@400;500;600` + `IBM+Plex+Mono:wght@400;500`. |
 | Logos | Header/preloader now use `logo.png` (light wordmark) everywhere, since the header is dark navy on every page, not `logo-dark.png` (dark wordmark, footer/print use only). |

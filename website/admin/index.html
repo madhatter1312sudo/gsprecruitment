@@ -16,8 +16,12 @@
        copy if the vendored file is ever missing (WS-A.9b: no inline onerror=
        attributes -- those are blocked by the enforced CSP too). -->
   <script src="js/vendor-fallback-css.js"></script>
-  <!-- ApexCharts is not vendored (chart-only, non-blocking for layout/nav) — TODO: vendor if this becomes a reliability problem. -->
-  <script src="https://cdn.jsdelivr.net/npm/apexcharts@4.7.0" integrity="sha384-Hf0cGsweCbozkRP14s5KIue6STJYKaoipB/i1gTdbX+umKD59qA/Szk42FPMuKtB" crossorigin="anonymous"></script>
+  <!-- ApexCharts vendored locally (WS-B.2) -- was a bare CDN <script> with no
+       fallback; script-src 'self' already covers vendor/ in website/_headers,
+       so no CDN entry or SRI is needed for it any more. Pinned at v4.7.0
+       (sha384 verified against the CDN copy at vendor time; bump the file
+       together with this comment if the pin ever changes). -->
+  <script src="vendor/apexcharts.min.js"></script>
   <style>
     /* ==== Legacy design-token compatibility ====
        admin.js still writes inline style="...var(--navy-300)..." etc (~150
@@ -343,7 +347,7 @@
               <div class="d-flex gap-2 flex-wrap align-items-center">
                 <div class="input-icon flex-fill" style="min-width:220px;">
                   <span class="input-icon-addon"><i class="fa-solid fa-magnifying-glass"></i></span>
-                  <input type="text" class="form-control" placeholder="Search jobs…" id="jobSearch" disabled style="cursor:default;">
+                  <input type="text" class="form-control" placeholder="Search jobs…" id="jobSearch">
                 </div>
                 <select class="form-select" style="max-width:180px;" id="jobStatusFilter">
                   <option value="">All Status</option>
@@ -351,6 +355,7 @@
                   <option value="draft">Draft / Pending</option>
                   <option value="closed">Closed</option>
                 </select>
+                <button class="btn btn-primary btn-sm" data-action="open-new-job-modal"><i class="fa-solid fa-plus me-1"></i>Nieuwe vacature</button>
               </div>
             </div>
             <div class="table-responsive">
@@ -366,6 +371,9 @@
                 </thead>
                 <tbody><tr><td colspan="5" class="text-center text-secondary py-4"><i class="fa-solid fa-spinner fa-spin"></i></td></tr></tbody>
               </table>
+            </div>
+            <div class="card-footer d-flex justify-content-center">
+              <div class="pagination-wrap" id="jobsPagination"></div>
             </div>
           </div>
         </section>

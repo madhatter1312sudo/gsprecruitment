@@ -12,11 +12,11 @@ const { html, raw, mount } = GSP;
 
 const Admin = {
   _data: {},
-  _currentPage: { users: 1, candidates: 1, audit: 1, outreach: 1, blog: 1, leads: 1 },
+  _currentPage: { users: 1, candidates: 1, audit: 1, outreach: 1, blog: 1, leads: 1, jobs: 1 },
   // Filters passed to the load*() call that produced the currently-rendered
   // page, keyed the same as _currentPage — a data-page click re-derives the
   // page from here instead of needing a fresh closure per render.
-  _lastParams: { users: {}, candidates: {}, audit: {}, outreach: {}, blog: {}, leads: {} },
+  _lastParams: { users: {}, candidates: {}, audit: {}, outreach: {}, blog: {}, leads: {}, jobs: {} },
   _pageSize: 20,
 
   /* ---- Init ---- */
@@ -369,7 +369,10 @@ const Admin = {
       if (!res?.ok) { Auth.toast('Impersonation failed', 'error'); return; }
       const data = await res.json();
       const user = data.user;
-      Auth.setAuth(data.access_token, user);
+      // WS-B.2: park the admin's own token/user first so it's never left
+      // sitting in the normal (impersonated-session) token slot -- see
+      // Auth.startImpersonation() / restoreAdmin() in auth.js.
+      Auth.startImpersonation(data.access_token, user);
       const dest = user.role === 'candidate' ? '/candidate/' : user.role === 'client' ? '/client/' : '/admin/';
       window.location.href = dest;
     } catch { Auth.toast('Network error', 'error'); }
@@ -398,9 +401,14 @@ const Admin = {
      JOBS
      ============================================================ */
   async loadJobs(params = {}) {
+    this._lastParams.jobs = params;
     const qs = new URLSearchParams();
+    const limit = this._pageSize;
+    const offset = ((this._currentPage.jobs || 1) - 1) * limit;
     if (params.status) qs.set('status', params.status);
-    qs.set('limit', 50);
+    if (params.search) qs.set('search', params.search);
+    qs.set('limit', limit);
+    qs.set('offset', offset);
 
     this.setLoading('#section-jobs table tbody', 5);
     try {
@@ -410,6 +418,7 @@ const Admin = {
       if (!res.ok) throw new Error(data.detail);
       this._data.jobs = data;
       this.renderJobs(data);
+      this.renderPagination('jobsPagination', data.total, limit, this._currentPage.jobs, 'jobs');
     } catch (err) {
       this.setEmpty('#section-jobs table tbody', 5, 'Failed to load jobs');
     }
@@ -449,7 +458,7 @@ const Admin = {
       });
       if (res?.ok) {
         Auth.toast(`Job ${status === 'open' ? 'approved' : 'closed'}`, 'success');
-        await this.loadJobs();
+        await this.loadJobs(this._lastParams.jobs || {});
       } else {
         const d = await res?.json();
         Auth.toast(d?.detail || 'Update failed', 'error');
@@ -465,13 +474,154 @@ const Admin = {
   async deleteJob(jobId) {
     try {
       const res = await Auth.fetch(`/v1/admin/jobs/${jobId}`, { method: 'DELETE' });
-      if (res?.ok || res?.status === 404) {
+      // Only a real 2xx counts as success -- a 404 (job already gone, or
+      // never existed) is an error the operator needs to see, not a
+      // silent success (this used to also accept status===404 as OK).
+      if (res?.ok) {
         Auth.toast('Job deleted', 'success');
-        await this.loadJobs();
+        await this.loadJobs(this._lastParams.jobs || {});
       } else {
-        Auth.toast('Delete failed', 'error');
+        const d = await res?.json().catch(() => null);
+        Auth.toast(d?.detail || 'Delete failed', 'error');
       }
     } catch { Auth.toast('Network error', 'error'); }
+  },
+
+  /* ---- "Nieuwe vacature" (WS-B.2) ----
+     Lets an admin record a job on a client's behalf -- e.g. a telephone
+     assignment -- without the client needing a portal login. No
+     GET /v1/admin/clients list endpoint exists, so the client picker is
+     built the same way Opdrachtgevers (loadClients()) does: from
+     GET /v1/admin/users?role=client, fetching each user's detail to read
+     client.id/company_name. Cached in this._data.clientOptions so
+     reopening the modal doesn't re-fetch every time. */
+  async fetchClientOptions(force = false) {
+    if (!force && this._data.clientOptions) return this._data.clientOptions;
+    try {
+      const res = await Auth.fetch('/v1/admin/users?role=client&limit=200');
+      if (!res?.ok) return this._data.clientOptions || [];
+      const data = await res.json();
+      const users = data.items || [];
+      const details = await Promise.all(users.map(u =>
+        Auth.fetch(`/v1/admin/users/${u.id}`).then(r => (r && r.ok) ? r.json() : null).catch(() => null)
+      ));
+      const byClientId = new Map();
+      details.forEach(d => {
+        if (d && d.client && d.client.id != null && !byClientId.has(d.client.id)) {
+          byClientId.set(d.client.id, { id: d.client.id, company_name: d.client.company_name || 'Onbekend' });
+        }
+      });
+      this._data.clientOptions = Array.from(byClientId.values());
+    } catch {
+      this._data.clientOptions = this._data.clientOptions || [];
+    }
+    return this._data.clientOptions;
+  },
+
+  async openNewJobModal() {
+    const clients = await this.fetchClientOptions();
+    this.openModal('newJobModal', html`
+      <h3 style="color:var(--white);margin-bottom:var(--space-lg);">Nieuwe vacature</h3>
+      ${!clients.length ? html`
+        <div class="alert alert-warning" role="alert">Nog geen opdrachtgevers met een portal-account gevonden.</div>
+      ` : ''}
+      <div class="form-group">
+        <label>Opdrachtgever</label>
+        <select id="newJobClient" ${raw(!clients.length ? 'disabled' : '')}>
+          ${clients.map(c => html`<option value="${c.id}">${c.company_name}</option>`)}
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Functietitel</label>
+        <input type="text" id="newJobTitle" placeholder="Bijv. Embedded software engineer">
+      </div>
+      <div class="form-group">
+        <label>Afdeling</label>
+        <input type="text" id="newJobDepartment">
+      </div>
+      <div class="form-group">
+        <label>Senioriteit</label>
+        <input type="text" id="newJobSeniority" placeholder="Bijv. medior">
+      </div>
+      <div class="form-group">
+        <label>Standplaats</label>
+        <input type="text" id="newJobCity">
+      </div>
+      <div class="form-group">
+        <label>Dienstverband</label>
+        <select id="newJobEmploymentType">
+          <option value="">— Kies —</option>
+          <option value="vast">Vast (werving en selectie)</option>
+          <option value="detachering">Detachering</option>
+          <option value="interim">Interim</option>
+        </select>
+      </div>
+      <div style="display:flex;gap:var(--space-md);">
+        <div class="form-group" style="flex:1;">
+          <label>Salaris min (EUR/mnd)</label>
+          <input type="number" id="newJobSalaryMin">
+        </div>
+        <div class="form-group" style="flex:1;">
+          <label>Salaris max (EUR/mnd)</label>
+          <input type="number" id="newJobSalaryMax">
+        </div>
+      </div>
+      <div class="form-group">
+        <label>Omschrijving</label>
+        <textarea id="newJobDescription" rows="4" style="width:100%;background:rgba(6,13,26,0.6);border:1px solid rgba(74,111,159,0.3);border-radius:var(--radius-md);color:var(--white);padding:0.75rem;font-family:var(--font-primary);font-size:var(--font-size-sm);resize:vertical;box-sizing:border-box;"></textarea>
+      </div>
+      <div class="form-group">
+        <label>Eisen</label>
+        <textarea id="newJobRequirements" rows="3" style="width:100%;background:rgba(6,13,26,0.6);border:1px solid rgba(74,111,159,0.3);border-radius:var(--radius-md);color:var(--white);padding:0.75rem;font-family:var(--font-primary);font-size:var(--font-size-sm);resize:vertical;box-sizing:border-box;"></textarea>
+      </div>
+      <div class="form-group">
+        <label style="display:flex;align-items:center;gap:0.5rem;font-weight:normal;">
+          <input type="checkbox" id="newJobSponsorship"> Sponsoring kennismigrant mogelijk
+        </label>
+      </div>
+      <div style="display:flex;gap:var(--space-md);margin-top:var(--space-lg);">
+        <button class="btn btn-primary" data-action="save-new-job" ${raw(!clients.length ? 'disabled' : '')}>Vacature aanmaken</button>
+        <button class="btn btn-ghost-secondary" data-action="close-modal">Annuleren</button>
+      </div>
+    `);
+  },
+
+  async saveNewJob() {
+    const clientId = Number(document.getElementById('newJobClient')?.value);
+    const title = document.getElementById('newJobTitle')?.value?.trim();
+    if (!clientId) { Auth.toast('Kies een opdrachtgever', 'error'); return; }
+    if (!title) { Auth.toast('Functietitel is verplicht', 'error'); return; }
+
+    const salaryMin = document.getElementById('newJobSalaryMin')?.value;
+    const salaryMax = document.getElementById('newJobSalaryMax')?.value;
+    const employmentType = document.getElementById('newJobEmploymentType')?.value;
+
+    const payload = {
+      client_id: clientId,
+      title,
+      department: document.getElementById('newJobDepartment')?.value?.trim() || null,
+      seniority: document.getElementById('newJobSeniority')?.value?.trim() || null,
+      city: document.getElementById('newJobCity')?.value?.trim() || null,
+      employment_type: employmentType || null,
+      salary_min: salaryMin ? Number(salaryMin) : null,
+      salary_max: salaryMax ? Number(salaryMax) : null,
+      description: document.getElementById('newJobDescription')?.value?.trim() || null,
+      requirements: document.getElementById('newJobRequirements')?.value?.trim() || null,
+      sponsorship_possible: !!document.getElementById('newJobSponsorship')?.checked,
+    };
+
+    try {
+      const res = await Auth.fetch('/v1/admin/jobs', { method: 'POST', body: JSON.stringify(payload) });
+      if (res?.ok) {
+        Auth.toast('Vacature aangemaakt', 'success');
+        this.closeModal();
+        this._currentPage.jobs = 1;
+        await this.loadJobs(this._lastParams.jobs || {});
+      } else {
+        const d = await res?.json().catch(() => null);
+        Auth.toast(d?.detail || 'Aanmaken mislukt', 'error');
+      }
+    } catch { Auth.toast('Netwerkfout', 'error'); }
   },
 
   /* ============================================================
@@ -1830,7 +1980,7 @@ const Admin = {
     const loaders = {
       users: 'loadUsers', candidates: 'loadCandidates',
       outreach: 'loadOutreach', blog: 'loadBlog', audit: 'loadAuditLog',
-      leads: 'loadLeads',
+      leads: 'loadLeads', jobs: 'loadJobs',
     };
     const fn = loaders[section];
     if (!fn || !Number.isFinite(page) || page < 1) return;
@@ -1905,8 +2055,23 @@ const Admin = {
     const jobStatusFilter = document.getElementById('jobStatusFilter');
     if (jobStatusFilter) jobStatusFilter.addEventListener('change', e => {
       const v = e.target.value;
-      this.loadJobs({ status: ['open','closed','draft'].includes(v) ? v : '' });
+      this._currentPage.jobs = 1;
+      this.loadJobs({
+        status: ['open','closed','draft'].includes(v) ? v : '',
+        search: document.getElementById('jobSearch')?.value?.trim() || undefined,
+      });
     });
+
+    // Server-side search (WS-B.2): #jobSearch used to be disabled/inert.
+    const debouncedJobs = debounce(val => {
+      this._currentPage.jobs = 1;
+      this.loadJobs({
+        status: document.getElementById('jobStatusFilter')?.value || undefined,
+        search: val || undefined,
+      });
+    }, 400);
+    const jobSearch = document.getElementById('jobSearch');
+    if (jobSearch) jobSearch.addEventListener('input', e => debouncedJobs(e.target.value));
 
     const leadTypeFilter = document.getElementById('leadTypeFilter');
     if (leadTypeFilter) leadTypeFilter.addEventListener('change', e => {
@@ -1978,6 +2143,12 @@ const Admin = {
         break;
       case 'confirm-delete-job':
         this.confirmDeleteJob(Number(id));
+        break;
+      case 'open-new-job-modal':
+        this.openNewJobModal();
+        break;
+      case 'save-new-job':
+        this.saveNewJob();
         break;
       case 'open-draft-modal':
         this.openDraftModal(Number(id));

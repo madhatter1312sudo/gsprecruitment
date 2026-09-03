@@ -7,6 +7,12 @@ const Auth = {
   /* ---- Storage Keys ---- */
   TOKEN_KEY: 'gsp_token',
   USER_KEY: 'gsp_user',
+  /* WS-B.2: while impersonating, the admin's own token/user are parked
+     here instead of being overwritten in TOKEN_KEY/USER_KEY -- so
+     Auth.getToken()/isLoggedIn() inside the impersonated portal never see
+     the admin's session, and "terug naar admin" can restore it exactly. */
+  ADMIN_TOKEN_KEY: 'gsp_admin_token',
+  ADMIN_USER_KEY: 'gsp_admin_user',
 
   /* ---- API Base (no trailing slash) ---- */
   API: 'https://api.gsprecruitment.nl/api',
@@ -96,6 +102,84 @@ const Auth = {
   clearAuth() {
     localStorage.removeItem(this.TOKEN_KEY);
     localStorage.removeItem(this.USER_KEY);
+  },
+
+  /* ---- Impersonation (WS-B.2) ----
+     startImpersonation() is the only path admin.js should use to switch
+     into a target user's session -- it parks the admin's own token/user
+     under ADMIN_TOKEN_KEY/ADMIN_USER_KEY first (never overwritten, so a
+     second impersonate-while-impersonating can't clobber the real admin
+     session), then stores the impersonated token/user in the normal slot
+     via setAuth() same as a real login. */
+  startImpersonation(token, user) {
+    if (!this.isImpersonating()) {
+      const adminToken = this.getToken();
+      const adminUser = this.getUser();
+      if (adminToken && adminUser) {
+        localStorage.setItem(this.ADMIN_TOKEN_KEY, adminToken);
+        localStorage.setItem(this.ADMIN_USER_KEY, JSON.stringify(adminUser));
+      }
+    }
+    return this.setAuth(token, user);
+  },
+
+  isImpersonating() {
+    return !!localStorage.getItem(this.ADMIN_TOKEN_KEY);
+  },
+
+  /* ---- Restore the parked admin session and return to /admin/ ---- */
+  restoreAdmin() {
+    const adminToken = localStorage.getItem(this.ADMIN_TOKEN_KEY);
+    const adminUserRaw = localStorage.getItem(this.ADMIN_USER_KEY);
+    localStorage.removeItem(this.ADMIN_TOKEN_KEY);
+    localStorage.removeItem(this.ADMIN_USER_KEY);
+    if (!adminToken || !adminUserRaw) {
+      // Nothing parked (banner shown without a real impersonation, or the
+      // admin slot was cleared some other way) -- fail safe to logged-out
+      // rather than leaving the impersonated session active.
+      this.clearAuth();
+      window.location.href = '/';
+      return;
+    }
+    localStorage.setItem(this.TOKEN_KEY, adminToken);
+    localStorage.setItem(this.USER_KEY, adminUserRaw);
+    window.location.href = '/admin/';
+  },
+
+  /* ---- Render the persistent "you are viewing as <role>" banner into a
+     portal page. Call once after Auth.requireAuth() succeeds; a no-op
+     when there is no parked admin session. Idempotent (re-running it,
+     e.g. after a re-render, replaces rather than duplicates the banner). */
+  renderImpersonationBanner() {
+    const existing = document.getElementById('gspImpersonationBanner');
+    if (existing) existing.remove();
+    if (!this.isImpersonating()) return;
+
+    const user = this.getUser();
+    const roleLabels = { candidate: 'kandidaat', client: 'opdrachtgever', admin: 'admin' };
+    const roleLabel = roleLabels[user && user.role] || (user && user.role) || 'gebruiker';
+
+    const banner = document.createElement('div');
+    banner.id = 'gspImpersonationBanner';
+    banner.setAttribute('role', 'status');
+    banner.style.cssText = 'position:sticky;top:0;z-index:2000;display:flex;align-items:center;'
+      + 'justify-content:center;gap:1rem;flex-wrap:wrap;padding:0.6rem 1rem;'
+      + 'background:#3a2a05;color:#f5d78a;border-bottom:1px solid #7a5a10;'
+      + 'font-family:inherit;font-size:0.9rem;text-align:center;';
+
+    const label = document.createElement('span');
+    label.textContent = `Je bekijkt als ${roleLabel}. `;
+
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.textContent = 'Terug naar admin';
+    btn.style.cssText = 'background:transparent;border:1px solid #f5d78a;color:#f5d78a;'
+      + 'border-radius:4px;padding:0.25rem 0.75rem;cursor:pointer;font:inherit;';
+    btn.addEventListener('click', () => this.restoreAdmin());
+
+    banner.appendChild(label);
+    banner.appendChild(btn);
+    document.body.insertBefore(banner, document.body.firstChild);
   },
 
   /* ---- Check if logged in ---- */
