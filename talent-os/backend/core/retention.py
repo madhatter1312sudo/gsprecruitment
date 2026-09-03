@@ -102,10 +102,27 @@ PROSPECT_NO_RESPONSE_SQL = """
 # also drops them from suppression risk (they simply stop being contacted
 # on this basis; SOP §1.5 "verlopen of ingetrokken toestemming = direct
 # geen contact meer op deze grondslag").
+#
+# Security-audit follow-up (H3b): same "status alone isn't proof of no
+# reaction" problem SOURCED_NO_RESPONSE_SQL guards against applies here --
+# a talentpool candidate can pick up a real match, a pipeline entry, a
+# reply, or a live portal account without any of that ever clearing
+# lawful_basis/consent_talentpool_until. The same four NOT EXISTS guards
+# apply. A 30-day grace period on top of consent_talentpool_until (not
+# just "<= NOW()") gives the reminder e-mail (services/scheduler.py's
+# talentpool_reminder job, sent 30 days *before* expiry) room to land and
+# be acted on before this selector would otherwise purge the same row --
+# renewing (re-ticking the consent) always pushes consent_talentpool_until
+# back out, removing the candidate from this selector immediately.
 TALENTPOOL_EXPIRED_SQL = """
-    SELECT id, email FROM candidates WHERE lawful_basis = 'opt_in_talentpool'
-      AND consent_talentpool_until IS NOT NULL AND consent_talentpool_until <= NOW()
-      AND deleted_at IS NULL
+    SELECT c.id, c.email FROM candidates c WHERE c.lawful_basis = 'opt_in_talentpool'
+      AND c.consent_talentpool_until IS NOT NULL
+      AND c.consent_talentpool_until <= (NOW() - INTERVAL '30 days')
+      AND c.deleted_at IS NULL AND c.email IS NOT NULL
+      AND NOT EXISTS (SELECT 1 FROM matches m WHERE m.candidate_id = c.id AND m.status <> 'suggested')
+      AND NOT EXISTS (SELECT 1 FROM pipeline_entries p WHERE p.candidate_id = c.id)
+      AND NOT EXISTS (SELECT 1 FROM outreach_messages o WHERE o.candidate_id = c.id AND o.replied_at IS NOT NULL)
+      AND NOT EXISTS (SELECT 1 FROM users u WHERE LOWER(u.email) = LOWER(c.email) AND u.deleted_at IS NULL)
 """
 
 

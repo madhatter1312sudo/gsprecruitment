@@ -404,6 +404,113 @@ async def _purge_talentpool_expired(reason: str) -> int:
     return len(rows)
 
 
+# ── Talentpool renewal reminder (WS-C.17, security-audit follow-up H3c) ──
+#
+# One e-mail, sent once per consent cycle, 30 days before
+# consent_talentpool_until -- consent_reminder_sent_at (NULL again on any
+# fresh consent write, see routers/candidate.py|public.py|admin.py) is
+# what makes this idempotent per cycle: a candidate who renews immediately
+# drops out of this selector (their consent_talentpool_until moves 12
+# months out again, past the 30-day window) even if this job somehow ran
+# twice on the same day.
+TALENTPOOL_REMINDER_SQL = """
+    SELECT id, email, full_name FROM candidates
+    WHERE lawful_basis = 'opt_in_talentpool'
+      AND consent_talentpool_until IS NOT NULL
+      AND consent_talentpool_until > NOW()
+      AND consent_talentpool_until <= (NOW() + INTERVAL '30 days')
+      AND consent_reminder_sent_at IS NULL
+      AND deleted_at IS NULL AND email IS NOT NULL
+"""
+
+
+def _talentpool_reminder_email_body(name: str) -> str:
+    link = "https://gsprecruitment.nl/kandidaten#talentpoolOptin"
+    greeting = name or ""
+    return f"""Beste {greeting},
+
+Je staat in de talentpool van GSP Recruitment. Over ongeveer een maand loopt je toestemming af (bewaartermijn 12 maanden). Wil je verlengd blijven staan, meld je dan hier opnieuw aan:
+{link}
+
+Doe je niets, dan verwijderen wij je gegevens uit de talentpool zodra de termijn is verstreken.
+
+Met vriendelijke groet,
+GSP Recruitment
+info@gsprecruitment.nl
+
+---
+
+Dear {greeting},
+
+You are in GSP Recruitment's talent pool. Your consent expires in about a month (12-month retention period). To stay in the pool, sign up again here:
+{link}
+
+If you do nothing, we will remove your data from the talent pool once the period has passed.
+
+Kind regards,
+GSP Recruitment
+info@gsprecruitment.nl
+"""
+
+
+async def talentpool_reminder_job() -> dict:
+    """Daily cron entry point (04:30). Sends one renewal e-mail per
+    candidate whose talentpool consent is due to expire within 30 days
+    and who hasn't already been reminded this cycle, then stamps
+    consent_reminder_sent_at so the same person is never reminded twice
+    for the same consent_talentpool_until."""
+    from services.email_service import email_service
+
+    rows = await fetch_all(TALENTPOOL_REMINDER_SQL)
+    sent = 0
+    for row in rows:
+        ok = await email_service.send_email(
+            to_email=row["email"],
+            subject="Je talentpool-aanmelding loopt bijna af — GSP Recruitment",
+            body_text=_talentpool_reminder_email_body(row.get("full_name") or ""),
+        )
+        if ok:
+            await execute(
+                "UPDATE candidates SET consent_reminder_sent_at = NOW() WHERE id = $1", row["id"],
+            )
+            sent += 1
+        else:
+            logger.warning("talentpool_reminder_job: failed to send reminder to candidate id=%s", row["id"])
+    logger.info("talentpool_reminder_job: candidates_due=%s sent=%s", len(rows), sent)
+    return {"candidates_due": len(rows), "sent": sent}
+
+
+# ── talentpool_optin_requests retention (WS-C.17, security-audit M2) ─────
+#
+# This table (migrations/030_talentpool_consent.py) holds only e-mail +
+# token hash for the public double-opt-in flow -- an internal, non-public
+# table, not a candidate profile, so it does not get its own row in
+# core/retention.RETENTION_TABLE (that table's ten rows are code-tested
+# against docs/VERWERKINGSREGISTER.md §1.4 / SOURCING-SOP.md §6 /
+# website/privacy.html 1:1 -- adding an eleventh row would mean rewriting
+# all three by hand for a table that isn't itself a candidate record).
+# Documented instead in VERWERKINGSREGISTER.md §1.2 row 3. Purged here,
+# alongside the documented categories but reported under its own key in
+# run_retention_purge()'s result -- confirmed or not, 7 days is plenty
+# for someone to click the link, and an unconfirmed pending row carries
+# no consent to act on anyway.
+TALENTPOOL_OPTIN_REQUESTS_STALE_SQL = """
+    SELECT id FROM talentpool_optin_requests WHERE requested_at <= (NOW() - INTERVAL '7 days')
+"""
+
+
+async def _count_stale_talentpool_optin_requests() -> list:
+    return await fetch_all(TALENTPOOL_OPTIN_REQUESTS_STALE_SQL)
+
+
+async def _purge_stale_talentpool_optin_requests() -> int:
+    rows = await _count_stale_talentpool_optin_requests()
+    ids = [r["id"] for r in rows]
+    if ids:
+        await execute("DELETE FROM talentpool_optin_requests WHERE id = ANY($1::int[])", ids)
+    return len(rows)
+
+
 async def _count_prospect_no_response() -> list:
     # security-auditor follow-up (LOW): no code path updates
     # client_prospects.status once a draft is sent or answered (routers/
@@ -509,11 +616,30 @@ async def run_retention_purge(dry_run: bool = True) -> dict:
                 json.dumps({"category": row.key, "count": result["count"], "action": row.action}),
             )
 
+    # M2: talentpool_optin_requests isn't one of RETENTION_TABLE's ten
+    # documented rows (see that table's docstring above) -- counted/purged
+    # alongside them but reported under its own key, not mixed into
+    # `categories`.
+    if dry_run:
+        optin_count = len(await _count_stale_talentpool_optin_requests())
+    else:
+        optin_count = await _purge_stale_talentpool_optin_requests()
+        if optin_count:
+            await execute(
+                "INSERT INTO audit_log (action, actor_id, target_type, target_id, changes) "
+                "VALUES ($1, NULL, $2, NULL, $3::jsonb)",
+                "retention_purge", "talentpool_optin_requests",
+                json.dumps({"category": "talentpool_optin_requests", "count": optin_count, "action": "hard_delete"}),
+            )
+    talentpool_optin_purge = {
+        "status": "counted" if dry_run else "purged", "count": optin_count,
+    }
+
     logger.info(
-        "run_retention_purge: dry_run=%s results=%s",
-        dry_run, {r["key"]: (r["status"], r["count"]) for r in results},
+        "run_retention_purge: dry_run=%s results=%s talentpool_optin_requests=%s",
+        dry_run, {r["key"]: (r["status"], r["count"]) for r in results}, talentpool_optin_purge,
     )
-    return {"dry_run": dry_run, "categories": results}
+    return {"dry_run": dry_run, "categories": results, "talentpool_optin_requests_purge": talentpool_optin_purge}
 
 
 async def retention_purge_job() -> dict:
@@ -587,11 +713,15 @@ async def start_scheduler() -> None:
         retention_purge_job, CronTrigger(hour=4, minute=0),
         id="retention_purge", replace_existing=True,
     )
+    scheduler.add_job(
+        talentpool_reminder_job, CronTrigger(hour=4, minute=30),
+        id="talentpool_reminder", replace_existing=True,
+    )
 
     scheduler.start()
     logger.info(
         "scheduler: started with %s daily jobs + 1 weekly job (Europe/Amsterdam)",
-        3 + apollo_jobs_registered,
+        4 + apollo_jobs_registered,
     )
 
 

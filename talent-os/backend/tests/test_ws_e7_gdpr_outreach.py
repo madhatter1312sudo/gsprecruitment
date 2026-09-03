@@ -176,16 +176,46 @@ def test_approve_allows_portal_registratie_without_art14_block(patch_db):
 
 
 def test_approve_allows_opt_in_talentpool_with_consent_still_valid(patch_db):
-    """WS-C.17: opt_in_talentpool is a valid Art. 13 basis (no Art. 14
-    block needed, same as portal_registratie) as long as
-    consent_talentpool_until is still in the future."""
+    """WS-C.17 (SOP §1.5): opt_in_talentpool is a valid Art. 13 basis (no
+    Art. 14 block needed, same as portal_registratie) as long as
+    consent_talentpool_until is still in the future -- and, unlike every
+    other basis, needs NO source_url: 'herkomst is de eigen site (het
+    vinkje zelf)'. source_url=None here is the point of this test, not
+    an oversight."""
     future = datetime.now(timezone.utc) + timedelta(days=30)
     outreach = patch_db(_FakeDB(candidate=_candidate(
-        lawful_basis="opt_in_talentpool", consent_talentpool_until=future,
+        lawful_basis="opt_in_talentpool", consent_talentpool_until=future, source_url=None,
     )))
     draft = _draft(body=NL_STOP)
     result = asyncio.run(outreach._draft_refusal(draft))
     assert result is None
+
+
+def test_approve_checks_lawful_basis_before_the_talentpool_source_url_exemption(patch_db):
+    """Order matters: a NULL lawful_basis must still refuse as
+    candidate_missing_provenance even though the source_url exemption
+    only ever applies to lawful_basis == 'opt_in_talentpool' -- never
+    accidentally to a NULL basis too."""
+    outreach = patch_db(_FakeDB(candidate=_candidate(lawful_basis=None, source_url=None)))
+    draft = _draft(body=NL_ART14)
+    result = asyncio.run(outreach._draft_refusal(draft))
+    assert result is not None
+    status_code, code, _detail = result
+    assert (status_code, code) == outreach.REFUSAL_CANDIDATE_MISSING_PROVENANCE
+
+
+def test_approve_still_requires_source_url_for_every_other_lawful_basis(patch_db):
+    """The source_url exemption is specific to opt_in_talentpool -- every
+    other basis (gerechtvaardigd_belang here) still refuses without one,
+    same as before WS-C.17."""
+    outreach = patch_db(_FakeDB(candidate=_candidate(
+        lawful_basis="gerechtvaardigd_belang", source_url=None,
+    )))
+    draft = _draft(body=NL_ART14)
+    result = asyncio.run(outreach._draft_refusal(draft))
+    assert result is not None
+    status_code, code, _detail = result
+    assert (status_code, code) == outreach.REFUSAL_CANDIDATE_MISSING_PROVENANCE
 
 
 def test_approve_refuses_opt_in_talentpool_with_expired_consent(patch_db):

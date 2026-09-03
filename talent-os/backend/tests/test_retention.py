@@ -198,6 +198,26 @@ def test_talentpool_expired_sql_selects_expired_opt_in_talentpool_only():
     assert "deleted_at IS NULL" in sql
 
 
+def test_talentpool_expired_sql_has_a_30_day_grace_period_past_expiry():
+    """Security-audit fix H3b: not just '<= NOW()' -- a 30-day grace past
+    consent_talentpool_until, giving the reminder e-mail room to land and
+    be acted on before this selector would purge the same row."""
+    sql = retention.TALENTPOOL_EXPIRED_SQL
+    assert "consent_talentpool_until <= (NOW() - INTERVAL '30 days')" in sql
+
+
+def test_talentpool_expired_sql_guards_against_every_reaction_signal():
+    """Security-audit fix H3b: same four NOT EXISTS guards as
+    SOURCED_NO_RESPONSE_SQL -- status/lawful_basis alone is not proof a
+    talentpool candidate never reacted."""
+    sql = retention.TALENTPOOL_EXPIRED_SQL
+    assert "NOT EXISTS" in sql
+    assert "FROM matches m" in sql and "m.status <> 'suggested'" in sql
+    assert "FROM pipeline_entries p" in sql
+    assert "FROM outreach_messages o" in sql and "o.replied_at IS NOT NULL" in sql
+    assert "FROM users u" in sql and "u.deleted_at IS NULL" in sql
+
+
 def test_talentpool_consent_row_is_schema_ready_with_shared_selector():
     row = retention.get_row("talentpool_consent")
     assert row.schema_ready is True
@@ -651,6 +671,7 @@ def test_migration_030_is_idempotent_and_matches_the_documented_columns():
     assert "matching_only" in sql and "matching_and_contact" in sql
     assert "ADD COLUMN IF NOT EXISTS consent_source TEXT CHECK" in sql
     assert "'portal','kandidaten_page','blog_cta','admin'" in sql
+    assert "ADD COLUMN IF NOT EXISTS consent_reminder_sent_at TIMESTAMPTZ" in sql
     assert "CREATE TABLE IF NOT EXISTS talentpool_optin_requests" in sql
     assert "token_hash      TEXT NOT NULL UNIQUE" in sql
     assert "DO $$" not in sql  # _runner.py splits SQL on literal ";"

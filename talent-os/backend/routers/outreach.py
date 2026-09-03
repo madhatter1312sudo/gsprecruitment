@@ -126,10 +126,21 @@ async def _draft_refusal(draft: dict):
             return status_code, code, "Candidate has withdrawn consent (consent_withdrawn_at set) — refusing to send."
 
         lawful_basis = candidate["lawful_basis"]
-        if lawful_basis is None or not _is_http_url(candidate["source_url"]):
+        if lawful_basis is None:
             status_code, code = REFUSAL_CANDIDATE_MISSING_PROVENANCE
             return status_code, code, (
-                "Candidate has no lawful_basis and/or no public http(s) source_url on file "
+                "Candidate has no lawful_basis on file (SOP §2 'geen bron-URL = geen contact') "
+                "— refusing to send."
+            )
+
+        # WS-C.17 (SOP §1.5): opt_in_talentpool's own provenance IS the
+        # checkbox itself -- "herkomst is de eigen site (het vinkje zelf),
+        # dus source_url is niet vereist voor talentpool-contact". Every
+        # other basis still needs a public http(s) source_url on file.
+        if lawful_basis != "opt_in_talentpool" and not _is_http_url(candidate["source_url"]):
+            status_code, code = REFUSAL_CANDIDATE_MISSING_PROVENANCE
+            return status_code, code, (
+                "Candidate has no public http(s) source_url on file "
                 "(SOP §2 'geen bron-URL = geen contact') — refusing to send."
             )
 

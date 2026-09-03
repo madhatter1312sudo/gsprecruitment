@@ -6,6 +6,7 @@ saved jobs, messages, salary benchmarks, dashboard.
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, Form, status
 from core.database import fetch_one, fetch_all, execute, fetch_val
 from core.deps import get_verified_user, require_role
+from core import privacy
 from models.schemas import (
     CandidatePortalProfile, CandidateProfileUpdate, CandidateMatchItem,
     ApplicationCreate, SavedJobCreate, CandidateDashboard,
@@ -182,18 +183,26 @@ async def update_talentpool_consent(
     consent=True requires `scope` and sets consent_talentpool_at (now),
     consent_talentpool_until (now + 12 months, renewable by ticking again),
     consent_scope, and consent_source='portal' on the candidates row.
-    lawful_basis becomes 'opt_in_talentpool' -- but only when this
-    candidate's current lawful_basis is NULL or already
-    'portal_registratie' (i.e. they registered through the portal
-    themselves): a candidate sourced on a different basis
-    (gerechtvaardigd_belang, toestemming_referral) never has that basis
-    silently overwritten by ticking a talentpool checkbox.
+    lawful_basis becomes 'opt_in_talentpool' only via the shared
+    should_set_talentpool_lawful_basis() rule (core/privacy.py) -- NULL or
+    already 'opt_in_talentpool'. Security-audit fix (H3a): a
+    'portal_registratie' candidate's basis is their own portal
+    registration (Art. 13) and is NEVER flipped to opt_in_talentpool by
+    this endpoint -- they keep portal_registratie and simply gain the
+    four consent columns alongside it, same as a gerechtvaardigd_belang/
+    toestemming_referral candidate would.
 
     consent=False clears all four consent columns (withdrawal -- SOP §1.5
     "verlopen of ingetrokken toestemming = direct geen contact meer op
-    deze grondslag"); lawful_basis is left untouched (a NULL
-    consent_talentpool_until already makes outreach.py's _draft_refusal
-    refuse any opt_in_talentpool-basis draft for this person)."""
+    deze grondslag"). Security-audit fix (M1): if lawful_basis is
+    currently 'opt_in_talentpool' (this WAS their only basis for
+    contact), consent_withdrawn_at is also stamped -- a NULL
+    consent_talentpool_until alone already makes outreach.py's
+    _draft_refusal refuse the draft, but consent_withdrawn_at is the
+    stronger, permanent "never contact again" signal SOP §3.3/§7.1
+    checks everywhere else. A portal_registratie candidate keeps that
+    basis and is not otherwise affected -- they can still use the portal,
+    only their talentpool preference is gone."""
     if current_user["role"] != "candidate":
         raise HTTPException(status_code=403, detail="Only candidates can set talentpool consent")
 
@@ -205,15 +214,16 @@ async def update_talentpool_consent(
         raise HTTPException(status_code=404, detail="No candidate record found for this account")
 
     candidate = await fetch_one("SELECT lawful_basis FROM candidates WHERE id = $1", candidate_id)
+    current_lawful_basis = candidate["lawful_basis"] if candidate else None
 
     if data.consent:
         now = datetime.now(timezone.utc)
         until = now + timedelta(days=365)  # 12 months, renewable on re-tick
-        set_lawful_basis = candidate and candidate["lawful_basis"] in (None, "portal_registratie")
+        set_lawful_basis = privacy.should_set_talentpool_lawful_basis(current_lawful_basis)
         row = await fetch_one(
             """UPDATE candidates
                SET consent_talentpool_at = $1, consent_talentpool_until = $2,
-                   consent_scope = $3, consent_source = 'portal',
+                   consent_scope = $3, consent_source = 'portal', consent_reminder_sent_at = NULL,
                    lawful_basis = CASE WHEN $4 THEN 'opt_in_talentpool' ELSE lawful_basis END,
                    updated_at = NOW()
                WHERE id = $5
@@ -222,14 +232,17 @@ async def update_talentpool_consent(
             now, until, data.scope, set_lawful_basis, candidate_id,
         )
     else:
+        withdraw = current_lawful_basis == "opt_in_talentpool"
         row = await fetch_one(
             """UPDATE candidates
                SET consent_talentpool_at = NULL, consent_talentpool_until = NULL,
-                   consent_scope = NULL, consent_source = NULL, updated_at = NOW()
-               WHERE id = $1
+                   consent_scope = NULL, consent_source = NULL,
+                   consent_withdrawn_at = CASE WHEN $1 THEN COALESCE(consent_withdrawn_at, NOW()) ELSE consent_withdrawn_at END,
+                   updated_at = NOW()
+               WHERE id = $2
                RETURNING id, consent_talentpool_at, consent_talentpool_until, consent_scope,
                          consent_source, lawful_basis""",
-            candidate_id,
+            withdraw, candidate_id,
         )
 
     await execute(

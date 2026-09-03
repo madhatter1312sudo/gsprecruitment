@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from core.database import fetch_one, fetch_all, execute, fetch_val
 from core.deps import get_current_user, require_role
 from core.security import create_access_token
+from core import privacy
 from models.schemas import (
     AdminDashboard, AdminUserUpdate, AdminJobUpdate, AdminAnalytics,
     AuditLogEntry, ContentItem, ContentUpdate, SystemSettings, SystemSettingsUpdate,
@@ -672,11 +673,11 @@ async def admin_update_talentpool_consent(
     if data.consent:
         now = datetime.now(timezone.utc)
         until = now + timedelta(days=365)  # 12 months, renewable
-        set_lawful_basis = candidate["lawful_basis"] in (None, "opt_in_talentpool")
+        set_lawful_basis = privacy.should_set_talentpool_lawful_basis(candidate["lawful_basis"])
         row = await fetch_one(
             """UPDATE candidates
                SET consent_talentpool_at = $1, consent_talentpool_until = $2,
-                   consent_scope = $3, consent_source = 'admin',
+                   consent_scope = $3, consent_source = 'admin', consent_reminder_sent_at = NULL,
                    lawful_basis = CASE WHEN $4 THEN 'opt_in_talentpool' ELSE lawful_basis END,
                    updated_at = NOW()
                WHERE id = $5
@@ -685,20 +686,30 @@ async def admin_update_talentpool_consent(
             now, until, data.scope, set_lawful_basis, candidate_id,
         )
     else:
+        # M1: withdrawing a talentpool-only basis also stamps
+        # consent_withdrawn_at (stronger, permanent signal than a merely
+        # NULL consent_talentpool_until) -- a portal_registratie
+        # candidate keeps that basis untouched.
+        withdraw = candidate["lawful_basis"] == "opt_in_talentpool"
         row = await fetch_one(
             """UPDATE candidates
                SET consent_talentpool_at = NULL, consent_talentpool_until = NULL,
-                   consent_scope = NULL, consent_source = NULL, updated_at = NOW()
-               WHERE id = $1
+                   consent_scope = NULL, consent_source = NULL,
+                   consent_withdrawn_at = CASE WHEN $1 THEN COALESCE(consent_withdrawn_at, NOW()) ELSE consent_withdrawn_at END,
+                   updated_at = NOW()
+               WHERE id = $2
                RETURNING id, consent_talentpool_at, consent_talentpool_until, consent_scope,
                          consent_source, lawful_basis""",
-            candidate_id,
+            withdraw, candidate_id,
         )
 
+    # L2: evidence is free text an admin typed -- redact any e-mail-looking
+    # substring (same email_hash() used for suppression_list) before it
+    # lands in audit_log.changes, never the plaintext address.
     await execute(
         "INSERT INTO audit_log (action, actor_id, target_type, target_id, changes) VALUES ($1, $2, $3, $4, $5::jsonb)",
         "admin_talentpool_consent_update", current_user["id"], "candidate", candidate_id,
-        json.dumps({"consent": data.consent, "scope": data.scope, "evidence": data.evidence}),
+        json.dumps({"consent": data.consent, "scope": data.scope, "evidence": privacy.redact_emails(data.evidence)}),
     )
 
     return row

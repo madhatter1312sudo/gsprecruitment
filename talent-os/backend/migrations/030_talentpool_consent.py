@@ -29,6 +29,15 @@ candidates columns:
     checkbox), 'blog_cta' (website/blog/post.html CTA -> kandidaten
     anchor), or 'admin' (PATCH .../talentpool-consent with an `evidence`
     field, e.g. a signed form on file).
+  - consent_reminder_sent_at TIMESTAMPTZ    — security-audit follow-up
+    (H3c): stamped once by services/scheduler.py's daily
+    talentpool_reminder job when it sends the one renewal e-mail, 30
+    days before consent_talentpool_until. NULL again after any renewal
+    (a fresh consent write always sets consent_talentpool_until, and the
+    reminder job only ever considers rows where this is NULL for the
+    *current* consent_talentpool_until -- see that job's SQL for how it
+    tells "reminded for this cycle" apart from "reminded for a since-
+    renewed earlier cycle").
 
 talentpool_optin_requests — the public POST /api/public/talentpool-optin ->
 POST /api/public/talentpool-confirm flow (mirrors WS-E.2's hashed
@@ -58,6 +67,7 @@ ALTER TABLE candidates ADD COLUMN IF NOT EXISTS consent_talentpool_at TIMESTAMPT
 ALTER TABLE candidates ADD COLUMN IF NOT EXISTS consent_talentpool_until TIMESTAMPTZ;
 ALTER TABLE candidates ADD COLUMN IF NOT EXISTS consent_scope TEXT CHECK (consent_scope IN ('matching_only','matching_and_contact'));
 ALTER TABLE candidates ADD COLUMN IF NOT EXISTS consent_source TEXT CHECK (consent_source IN ('portal','kandidaten_page','blog_cta','admin'));
+ALTER TABLE candidates ADD COLUMN IF NOT EXISTS consent_reminder_sent_at TIMESTAMPTZ;
 CREATE INDEX IF NOT EXISTS idx_candidates_consent_talentpool_until ON candidates(consent_talentpool_until) WHERE consent_talentpool_until IS NOT NULL;
 CREATE TABLE IF NOT EXISTS talentpool_optin_requests (
     id              SERIAL PRIMARY KEY,
