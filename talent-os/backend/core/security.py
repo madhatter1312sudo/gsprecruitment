@@ -74,10 +74,15 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -
     to_encode = data.copy()
     if "sub" in to_encode and not isinstance(to_encode["sub"], str):
         to_encode["sub"] = str(to_encode["sub"])
-    expire = datetime.now(timezone.utc) + (
-        expires_delta or timedelta(minutes=settings.access_token_expire_minutes)
-    )
-    to_encode.update({"exp": expire})
+    now = datetime.now(timezone.utc)
+    expire = now + (expires_delta or timedelta(minutes=settings.access_token_expire_minutes))
+    # WS-E.12 security-audit follow-up: every minted access token carries
+    # 'iat' -- tokens issued by POST /api/auth/mfa/verify and /recovery in
+    # particular need an issuance timestamp of their own (they're issued
+    # well after the original login attempt), and this is the one place
+    # every token-issuing call site (login, refresh, mfa/verify,
+    # mfa/recovery, Google sign-in) already funnels through.
+    to_encode.update({"exp": expire, "iat": now})
     encoded_jwt = jwt.encode(
         to_encode,
         settings.jwt_secret,

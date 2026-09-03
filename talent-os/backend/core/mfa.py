@@ -45,6 +45,7 @@ from fastapi import HTTPException
 from jose import JWTError, jwt
 
 from core.config import settings
+from core.database import execute
 
 MFA_ISSUER = "GSP Recruitment"
 MFA_PENDING_SCOPE = "mfa_pending"
@@ -195,19 +196,39 @@ def issue_mfa_pending_token(user_id: int) -> str:
     NOT a normal access token: core/deps.py's get_current_user rejects
     any token with this scope outright, so it can only ever be exchanged
     via POST /api/auth/mfa/verify or /recovery, never used to call any
-    other authenticated endpoint."""
+    other authenticated endpoint.
+
+    Carries its own 'iat' (distinct from the eventual real access
+    token's) -- (sub, iat) together identify one specific login
+    challenge, which routers/mfa.py's per-challenge failure counter
+    (record_pending_failure/pending_failures_exceeded below) keys on so
+    two different login attempts by the same admin never share a
+    lockout counter."""
     from datetime import timedelta
+    now = datetime.now(timezone.utc)
     to_encode = {
         "sub": str(user_id),
         "scope": MFA_PENDING_SCOPE,
-        "exp": datetime.now(timezone.utc) + timedelta(minutes=MFA_PENDING_TTL_MINUTES),
+        "iat": now,
+        "exp": now + timedelta(minutes=MFA_PENDING_TTL_MINUTES),
     }
     return jwt.encode(to_encode, settings.jwt_secret, algorithm=settings.jwt_algorithm)
 
 
 def decode_mfa_pending_token(token: str) -> Optional[int]:
     """Decode an mfa_pending token and return the user id, or None if it's
-    invalid/expired/wrong-scope."""
+    invalid/expired/wrong-scope. Kept for callers that only need the
+    identity (e.g. tests) -- routers/mfa.py uses
+    decode_mfa_pending_claims() below when it also needs 'iat' for the
+    failure counter."""
+    claims = decode_mfa_pending_claims(token)
+    return claims[0] if claims else None
+
+
+def decode_mfa_pending_claims(token: str) -> Optional[tuple[int, int]]:
+    """Like decode_mfa_pending_token, but returns (user_id, iat) so the
+    caller can key the per-challenge failure counter. None on any
+    invalid/expired/wrong-scope/missing-iat token."""
     try:
         payload = jwt.decode(token, settings.jwt_secret, algorithms=[settings.jwt_algorithm])
     except JWTError:
@@ -215,9 +236,98 @@ def decode_mfa_pending_token(token: str) -> Optional[int]:
     if payload.get("scope") != MFA_PENDING_SCOPE:
         return None
     try:
-        return int(payload.get("sub"))
+        user_id = int(payload.get("sub"))
+        iat = int(payload.get("iat"))
     except (TypeError, ValueError):
         return None
+    return user_id, iat
+
+
+# ── Per-challenge failed-attempt counter (used by routers/mfa.py) ───────
+# In-memory, per-process dict keyed by (user_id, iat) -- iat uniquely
+# identifies one mfa_pending challenge (see issue_mfa_pending_token).
+# CAVEAT: this is per-worker state, not shared across uvicorn/gunicorn
+# worker processes or app instances behind a load balancer -- with N
+# workers an attacker can get up to N*MAX_PENDING_FAILURES guesses
+# against one challenge before every worker independently locks it out,
+# not a single global ceiling. That's an accepted tradeoff for a 5-minute-
+# lived, single-use, 6-digit-code challenge with a 5/minute rate limit on
+# top (routers/mfa.py) -- a real cross-worker counter would need Redis or
+# equivalent shared storage, which this codebase doesn't otherwise depend
+# on for anything auth-related today.
+MAX_PENDING_FAILURES = 10
+_pending_failures: dict[tuple[int, int], int] = {}
+
+
+def _prune_pending_failures() -> None:
+    """Lazy GC: drop counters for challenges whose token has definitely
+    expired by now (iat older than the pending-token TTL), so a
+    long-running worker doesn't accumulate entries forever."""
+    cutoff = int(datetime.now(timezone.utc).timestamp()) - (MFA_PENDING_TTL_MINUTES * 60) - 60
+    for key in [k for k in _pending_failures if k[1] < cutoff]:
+        _pending_failures.pop(key, None)
+
+
+def pending_failures_exceeded(user_id: int, iat: int) -> bool:
+    return _pending_failures.get((user_id, iat), 0) >= MAX_PENDING_FAILURES
+
+
+def record_pending_failure(user_id: int, iat: int) -> int:
+    key = (user_id, iat)
+    count = _pending_failures.get(key, 0) + 1
+    _pending_failures[key] = count
+    _prune_pending_failures()
+    return count
+
+
+def clear_pending_failures(user_id: int, iat: int) -> None:
+    _pending_failures.pop((user_id, iat), None)
+
+
+# ── Atomic step/recovery-code consumption (security-audit follow-up) ────
+# verify_totp_code()'s last_used_step check above reads that column
+# earlier in the request, non-atomically -- two concurrent requests
+# racing the same valid code could both pass that in-app check before
+# either write lands. These two helpers do the actual write as a single
+# conditional UPDATE (compare-and-set at the row level), so only one
+# concurrent request can ever win; the other sees zero affected rows and
+# must treat that as an invalid/already-used code, not fall back to
+# trusting its own earlier read.
+
+def _rows_affected(status: str) -> int:
+    """asyncpg's execute() returns a command tag like 'UPDATE 1' -- pull
+    the row count off the end of it."""
+    try:
+        return int(status.rsplit(" ", 1)[-1])
+    except (ValueError, AttributeError):
+        return 0
+
+
+async def commit_totp_step(user_id: int, step: int) -> bool:
+    """Atomically advance users.mfa_last_used_step to `step`, but only if
+    it's still NULL or behind `step`. Returns False (commit lost the
+    race / step already consumed) if it affected zero rows -- callers
+    must treat that exactly like a failed code, not proceed."""
+    status = await execute(
+        """UPDATE users SET mfa_last_used_step = $1
+           WHERE id = $2 AND (mfa_last_used_step IS NULL OR mfa_last_used_step < $1)""",
+        step, user_id,
+    )
+    return _rows_affected(status) > 0
+
+
+async def consume_recovery_code(user_id: int, code_hash: str) -> bool:
+    """Atomically remove one recovery-code hash from
+    users.mfa_recovery_codes_hash, but only if it's still present.
+    Returns False if it affected zero rows -- the code was invalid or
+    already used by a concurrent request, and callers must treat that as
+    such."""
+    status = await execute(
+        """UPDATE users SET mfa_recovery_codes_hash = array_remove(mfa_recovery_codes_hash, $1)
+           WHERE id = $2 AND $1 = ANY(mfa_recovery_codes_hash)""",
+        code_hash, user_id,
+    )
+    return _rows_affected(status) > 0
 
 
 # ── Login-hook helpers (called from routers/auth.py login()) ────────────

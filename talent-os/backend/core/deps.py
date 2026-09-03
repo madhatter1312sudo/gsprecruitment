@@ -108,6 +108,13 @@ async def get_optional_user(
     if payload is None:
         return None
 
+    # WS-E.12 security-audit follow-up: same rejection as get_current_user
+    # above -- an mfa_pending challenge token must not be treated as a
+    # valid (optional) session anywhere, including the public/optional-auth
+    # endpoints that use this dependency.
+    if payload.get("scope") == "mfa_pending":
+        return None
+
     try:
         user_id = int(payload.get("sub"))
     except (TypeError, ValueError):

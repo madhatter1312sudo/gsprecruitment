@@ -4448,7 +4448,7 @@
     },
     "/api/auth/mfa/setup": {
       "post": {
-        "description": "Generate a fresh TOTP secret, store it encrypted (unconfirmed --\ntotp_enabled_at stays NULL until POST /enable verifies a code), and\nreturn the otpauth:// URI plus a scannable QR SVG. Safe to call again\nbefore /enable: it simply overwrites the pending secret.",
+        "description": "Generate a fresh TOTP secret, store it encrypted (unconfirmed --\ntotp_enabled_at stays NULL until POST /enable verifies a code), and\nreturn the otpauth:// URI plus a scannable QR SVG.\n\n409s once MFA is already enabled: without this, a stolen/leaked\nBearer token could silently call /setup again to rotate the secret\nout from under the real admin, generate its own otpauth URI for the\nnew secret, and use that to satisfy the *existing* mfa_pending\nchallenge going forward -- effectively hijacking the second factor\nwithout ever needing the current TOTP code. Once enabled, rotating\nthe secret must go through /disable (which requires a current code)\nfirst.",
         "operationId": "mfa_setup_api_auth_mfa_setup_post",
         "responses": {
           "200": {
