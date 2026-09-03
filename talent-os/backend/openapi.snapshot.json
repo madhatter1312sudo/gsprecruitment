@@ -77,6 +77,25 @@
         "title": "AdminDashboard",
         "type": "object"
       },
+      "AdminEraseRequest": {
+        "properties": {
+          "confirm": {
+            "default": false,
+            "title": "Confirm",
+            "type": "boolean"
+          },
+          "email": {
+            "format": "email",
+            "title": "Email",
+            "type": "string"
+          }
+        },
+        "required": [
+          "email"
+        ],
+        "title": "AdminEraseRequest",
+        "type": "object"
+      },
       "AdminJobUpdate": {
         "properties": {
           "city": {
@@ -612,246 +631,6 @@
         "title": "CandidateAdminUpdate",
         "type": "object"
       },
-      "CandidateCreate": {
-        "properties": {
-          "current_company": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Current Company"
-          },
-          "current_title": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Current Title"
-          },
-          "cv_text": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Cv Text"
-          },
-          "education": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Education"
-          },
-          "email": {
-            "anyOf": [
-              {
-                "maxLength": 255,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Email"
-          },
-          "full_name": {
-            "maxLength": 255,
-            "minLength": 1,
-            "title": "Full Name",
-            "type": "string"
-          },
-          "github_url": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Github Url"
-          },
-          "languages": {
-            "default": [],
-            "items": {
-              "type": "string"
-            },
-            "title": "Languages",
-            "type": "array"
-          },
-          "linkedin_url": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Linkedin Url"
-          },
-          "location": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Location"
-          },
-          "notice_period_days": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Notice Period Days"
-          },
-          "phone": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Phone"
-          },
-          "portfolio_url": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Portfolio Url"
-          },
-          "salary_expectation_max": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Salary Expectation Max"
-          },
-          "salary_expectation_min": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Salary Expectation Min"
-          },
-          "skills": {
-            "default": [],
-            "items": {
-              "type": "string"
-            },
-            "title": "Skills",
-            "type": "array"
-          },
-          "source": {
-            "default": "apollo",
-            "title": "Source",
-            "type": "string"
-          },
-          "sourced_by_agent": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Sourced By Agent"
-          },
-          "strength_score": {
-            "anyOf": [
-              {
-                "maximum": 10.0,
-                "minimum": 1.0,
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Strength Score"
-          },
-          "switch_readiness": {
-            "anyOf": [
-              {
-                "pattern": "^(LOW|MEDIUM|HIGH|ACTIVE)$",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Switch Readiness"
-          },
-          "tags": {
-            "default": [],
-            "items": {
-              "type": "string"
-            },
-            "title": "Tags",
-            "type": "array"
-          },
-          "willing_to_relocate": {
-            "default": false,
-            "title": "Willing To Relocate",
-            "type": "boolean"
-          },
-          "years_experience": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Years Experience"
-          }
-        },
-        "required": [
-          "full_name"
-        ],
-        "title": "CandidateCreate",
-        "type": "object"
-      },
       "CandidateDashboard": {
         "properties": {
           "applications_count": {
@@ -1344,6 +1123,18 @@
             ],
             "title": "Cv Text"
           },
+          "date_found": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Date Found"
+          },
           "education": {
             "anyOf": [
               {
@@ -1400,6 +1191,18 @@
             },
             "title": "Languages",
             "type": "array"
+          },
+          "lawful_basis": {
+            "anyOf": [
+              {
+                "pattern": "^(gerechtvaardigd_belang|opt_in_talentpool|toestemming_referral|portal_registratie)$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lawful Basis"
           },
           "linkedin_url": {
             "anyOf": [
@@ -1524,6 +1327,17 @@
             "title": "Source",
             "type": "string"
           },
+          "source_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Url"
+          },
           "sourced_by_agent": {
             "anyOf": [
               {
@@ -1602,6 +1416,264 @@
           "updated_at"
         ],
         "title": "CandidateResponse",
+        "type": "object"
+      },
+      "CandidateSourceCreate": {
+        "description": "POST /api/candidates (X-API-Key sourcing path) only \u2014 WS-E.7,\nSOP \u00a72 \"geen bron-URL = geen contact\". Unlike CandidateCreate,\nsource_url and lawful_basis are mandatory here: this endpoint is for\nmanually-sourced people (LinkedIn/GitHub/meetup/referral per the SOP),\nnot for portal self-registration (routers/candidate.py sets\nlawful_basis='portal_registratie' + the portal URL itself, without\ngoing through this model) or opt-in talentpool (WS-C.17, same\nexemption, SOP \u00a71.5). date_found defaults to today if not supplied \u2014\nit is the anchor for the \"3 months after date_found\" retention clock\n(SOP \u00a76).",
+        "properties": {
+          "current_company": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Company"
+          },
+          "current_title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Title"
+          },
+          "cv_text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cv Text"
+          },
+          "date_found": {
+            "format": "date",
+            "title": "Date Found",
+            "type": "string"
+          },
+          "education": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Education"
+          },
+          "email": {
+            "anyOf": [
+              {
+                "maxLength": 255,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email"
+          },
+          "full_name": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Full Name",
+            "type": "string"
+          },
+          "github_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Github Url"
+          },
+          "languages": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Languages",
+            "type": "array"
+          },
+          "lawful_basis": {
+            "pattern": "^(gerechtvaardigd_belang|opt_in_talentpool|toestemming_referral|portal_registratie)$",
+            "title": "Lawful Basis",
+            "type": "string"
+          },
+          "linkedin_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Linkedin Url"
+          },
+          "location": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Location"
+          },
+          "notice_period_days": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notice Period Days"
+          },
+          "phone": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Phone"
+          },
+          "portfolio_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Portfolio Url"
+          },
+          "salary_expectation_max": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Salary Expectation Max"
+          },
+          "salary_expectation_min": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Salary Expectation Min"
+          },
+          "skills": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Skills",
+            "type": "array"
+          },
+          "source": {
+            "default": "apollo",
+            "title": "Source",
+            "type": "string"
+          },
+          "source_url": {
+            "minLength": 1,
+            "title": "Source Url",
+            "type": "string"
+          },
+          "sourced_by_agent": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sourced By Agent"
+          },
+          "strength_score": {
+            "anyOf": [
+              {
+                "maximum": 10.0,
+                "minimum": 1.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Strength Score"
+          },
+          "switch_readiness": {
+            "anyOf": [
+              {
+                "pattern": "^(LOW|MEDIUM|HIGH|ACTIVE)$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Switch Readiness"
+          },
+          "tags": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Tags",
+            "type": "array"
+          },
+          "willing_to_relocate": {
+            "default": false,
+            "title": "Willing To Relocate",
+            "type": "boolean"
+          },
+          "years_experience": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Years Experience"
+          }
+        },
+        "required": [
+          "full_name",
+          "source_url",
+          "lawful_basis"
+        ],
+        "title": "CandidateSourceCreate",
         "type": "object"
       },
       "ChangePasswordRequest": {
@@ -2084,6 +2156,17 @@
             "default": "nl",
             "title": "Language",
             "type": "string"
+          },
+          "presented_candidate_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Presented Candidate Id"
           },
           "subject": {
             "title": "Subject",
@@ -3023,6 +3106,11 @@
             ],
             "title": "Industry"
           },
+          "lawful_basis": {
+            "pattern": "^(zakelijk_functioneel_adres|opt_in|bestaande_relatie)$",
+            "title": "Lawful Basis",
+            "type": "string"
+          },
           "linkedin_url": {
             "anyOf": [
               {
@@ -3061,6 +3149,17 @@
             "title": "Source",
             "type": "string"
           },
+          "source_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Url"
+          },
           "status": {
             "anyOf": [
               {
@@ -3085,13 +3184,26 @@
           }
         },
         "required": [
-          "company"
+          "company",
+          "lawful_basis"
         ],
         "title": "ProspectCreate",
         "type": "object"
       },
       "ProspectUpdate": {
         "properties": {
+          "lawful_basis": {
+            "anyOf": [
+              {
+                "pattern": "^(zakelijk_functioneel_adres|opt_in|bestaande_relatie)$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lawful Basis"
+          },
           "notes": {
             "anyOf": [
               {
@@ -3102,6 +3214,17 @@
               }
             ],
             "title": "Notes"
+          },
+          "source_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Url"
           },
           "status": {
             "anyOf": [
@@ -3392,6 +3515,25 @@
           "items"
         ],
         "title": "SiteContentResponse",
+        "type": "object"
+      },
+      "SuppressionCreate": {
+        "properties": {
+          "email": {
+            "format": "email",
+            "title": "Email",
+            "type": "string"
+          },
+          "reason": {
+            "default": "STOP",
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "email"
+        ],
+        "title": "SuppressionCreate",
         "type": "object"
       },
       "SystemSettings": {
@@ -4767,13 +4909,13 @@
         ]
       },
       "post": {
-        "description": "Create a new candidate record.",
+        "description": "Create a new candidate record. WS-E.7: source_url (public http(s)\nURL) and lawful_basis are required \u2014 SOP \u00a72 \"geen bron-URL = geen\ncontact\".",
         "operationId": "create_candidate_api_candidates_post",
         "requestBody": {
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/CandidateCreate"
+                "$ref": "#/components/schemas/CandidateSourceCreate"
               }
             }
           },
@@ -6272,6 +6414,51 @@
         ]
       }
     },
+    "/api/v1/admin/gdpr/erase": {
+      "post": {
+        "description": "Art. 17 for people who were only ever sourced (LinkedIn/GitHub/\nreferral/meetup/Apollo), never registered a portal account. Same\nerase_person() routine as self-service erasure.\n\nGuard: erasing an admin account (any matching users row with\nrole='admin'), or the calling admin's own account, through this\nendpoint would delete platform-admin access as a side effect of what\nlooks like a routine PII-erasure request. Refuse unless the caller\nexplicitly opts in with confirm=true.",
+        "operationId": "admin_erase_person_api_v1_admin_gdpr_erase_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdminEraseRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Admin Erase Person",
+        "tags": [
+          "gdpr-admin"
+        ]
+      }
+    },
     "/api/v1/admin/health": {
       "get": {
         "description": "Detailed health: database, OpenRouter/Apollo config status, and live\nrow counts (candidates_count, open_jobs). Read-only, so not audit-logged.",
@@ -7034,6 +7221,109 @@
         "summary": "Update System Settings",
         "tags": [
           "admin-portal"
+        ]
+      }
+    },
+    "/api/v1/admin/suppression": {
+      "get": {
+        "description": "Hashes + domains only \u2014 never plaintext e-mail addresses.",
+        "operationId": "list_suppression_api_v1_admin_suppression_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "maximum": 500,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Suppression",
+        "tags": [
+          "suppression"
+        ]
+      },
+      "post": {
+        "description": "SOP \u00a73.3 \u2014 a STOP reply (or equivalent) goes on the suppression\nlist within 24h, and every active draft addressed to that person is\nwithdrawn immediately (outreach_drafts stays draft-only either way \u2014\nthis only ever moves a draft to 'rejected', never sends).",
+        "operationId": "add_suppression_api_v1_admin_suppression_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SuppressionCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Add Suppression",
+        "tags": [
+          "suppression"
         ]
       }
     },
@@ -8901,7 +9191,7 @@
     },
     "/api/v1/gdpr/account": {
       "delete": {
-        "description": "Art. 17 \u2014 erasure. Soft-deletes the user and candidate records and\nanonymises PII. Placement/financial records are retained where legally\nrequired (fiscal retention), but no longer linked to identifiable data.",
+        "description": "Art. 17 \u2014 self-service erasure. Soft-deletes the user and candidate\nrecords and anonymises PII. Placement/financial records are retained\nwhere legally required (fiscal retention), but no longer linked to\nidentifiable data.",
         "operationId": "erase_my_account_api_v1_gdpr_account_delete",
         "responses": {
           "200": {
@@ -8926,7 +9216,7 @@
     },
     "/api/v1/gdpr/export": {
       "get": {
-        "description": "Art. 15/20 \u2014 export all personal data we hold on the requesting user.",
+        "description": "Art. 15/20 \u2014 export all personal data we hold on the requesting user.\n\nCovers the same table set erase_person() erases: users,\ncandidate_profiles, candidates, plus everything keyed off the resolved\ncandidate id (matches/saved_jobs) and off the account itself\n(outreach addressed to this email, quiz/contact submissions, prior\ndata_subject_requests).",
         "operationId": "export_my_data_api_v1_gdpr_export_get",
         "responses": {
           "200": {

@@ -21,7 +21,7 @@ import logging
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, field_validator
 
 from core.database import fetch_one, fetch_all, fetch_val, execute
 from core.deps import require_role
@@ -45,11 +45,44 @@ class ProspectCreate(BaseModel):
     source: str = "claude-leadgen"
     notes: Optional[str] = None
     status: Optional[str] = None
+    # WS-E.7, SOP §4 (Telecommunicatiewet art. 11.7): required for every
+    # prospect. source_url is the same "where did we find this contact"
+    # provenance as candidates get, but it is not itself the Telecom-wet
+    # gate — lawful_basis is (a functional business address, opt-in, or an
+    # existing relationship).
+    source_url: Optional[str] = None
+    lawful_basis: str = Field(..., pattern=r"^(zakelijk_functioneel_adres|opt_in|bestaande_relatie)$")
+
+    @field_validator("source_url")
+    @classmethod
+    def _source_url_http_only(cls, v):
+        if v is None or v.strip() == "":
+            return v
+        s = v.strip()
+        if not (s.lower().startswith("http://") or s.lower().startswith("https://")):
+            raise ValueError("source_url must be a public http:// or https:// URL (SOP §2)")
+        return s
 
 
 class ProspectUpdate(BaseModel):
     status: Optional[str] = None
     notes: Optional[str] = None
+    # WS-E.7 follow-up (security-auditor M-review): these are set at
+    # create time normally, but a prospect logged before its lawful_basis
+    # was known (or whose source_url needs correcting) can be updated here
+    # too -- required at create time (ProspectCreate), optional here.
+    lawful_basis: Optional[str] = Field(None, pattern=r"^(zakelijk_functioneel_adres|opt_in|bestaande_relatie)$")
+    source_url: Optional[str] = None
+
+    @field_validator("source_url")
+    @classmethod
+    def _source_url_http_only(cls, v):
+        if v is None or v.strip() == "":
+            return v
+        s = v.strip()
+        if not (s.lower().startswith("http://") or s.lower().startswith("https://")):
+            raise ValueError("source_url must be a public http:// or https:// URL (SOP §2)")
+        return s
 
 
 # ── Prospects ───────────────────────────────────────────────────────────
@@ -110,12 +143,14 @@ async def create_prospect(
     row = await fetch_one(
         """INSERT INTO client_prospects
            (company_name, domain, contact_name, contact_title, contact_email,
-            contact_linkedin, location, industry, source, intent_signal, status)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,COALESCE($11,'new'))
+            contact_linkedin, location, industry, source, intent_signal, status,
+            source_url, lawful_basis)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,COALESCE($11,'new'),$12,$13)
            RETURNING *""",
         payload.company, payload.website, payload.contact_name, payload.contact_title,
         payload.email, payload.linkedin_url, payload.location, payload.industry,
         payload.source, payload.notes, payload.status,
+        payload.source_url, payload.lawful_basis,
     )
 
     await execute(
@@ -143,7 +178,10 @@ async def update_prospect(
     values = []
     idx = 1
     # notes -> intent_signal (see module docstring: no dedicated notes column)
-    column_map = {"status": "status", "notes": "intent_signal"}
+    column_map = {
+        "status": "status", "notes": "intent_signal",
+        "lawful_basis": "lawful_basis", "source_url": "source_url",
+    }
     for key, val in update_dict.items():
         set_parts.append(f"{column_map[key]} = ${idx}")
         values.append(val)

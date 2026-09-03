@@ -66,17 +66,37 @@ async def hermes_webhook(request: Request):
         )
 
     if action == "candidate_found":
+        # WS-E.7, SOP §2 "geen bron-URL = geen contact" — a Hermes agent
+        # sourcing a candidate must supply the same provenance a human
+        # sourcer would log. Minimal, inline check (not routed through
+        # WebhookPayload, which owns the outer envelope shape) to keep this
+        # diff small alongside concurrent work on this router's validation
+        # model.
+        source_url = (data.get("source_url") or "").strip()
+        lawful_basis = data.get("lawful_basis")
+        if not (source_url.lower().startswith("http://") or source_url.lower().startswith("https://")):
+            raise HTTPException(
+                status_code=422,
+                detail="candidate_found requires data.source_url as a public http(s) URL (SOP §2)",
+            )
+        if lawful_basis not in ("gerechtvaardigd_belang", "opt_in_talentpool", "toestemming_referral", "portal_registratie"):
+            raise HTTPException(
+                status_code=422,
+                detail="candidate_found requires a valid data.lawful_basis (SOP §2)",
+            )
         row = await fetch_one(
             """INSERT INTO candidates
                (full_name, email, current_company, current_title, skills, source,
-                sourced_by_agent, strength_score, switch_readiness, is_passive)
-               VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+                sourced_by_agent, strength_score, switch_readiness, is_passive,
+                source_url, lawful_basis, date_found)
+               VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,COALESCE($13::date, CURRENT_DATE))
                RETURNING id""",
             data.get("name"), data.get("email"), data.get("company"),
             data.get("title"), data.get("skills", []), data.get("source", "agent"),
             agent, data.get("strength_score", 0),
             data.get("switch_readiness", "UNKNOWN"),
             data.get("is_passive", True),
+            source_url, lawful_basis, data.get("date_found"),
         )
         return {"received": True, "action": action, "candidate_id": row["id"] if row else None}
 
