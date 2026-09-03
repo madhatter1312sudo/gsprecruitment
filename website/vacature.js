@@ -51,7 +51,6 @@ function buildJobPostingLd(job) {
     hiringOrganization: {
       '@type': 'Organization',
       name: job.company_display || 'confidential',
-      sameAs: 'https://gsprecruitment.nl',
     },
     jobLocation: jobPostingLocation(job),
     directApply: true,
