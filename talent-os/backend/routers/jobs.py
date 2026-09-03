@@ -66,7 +66,7 @@ async def update_job(job_id: int, updates: JobOrderUpdate):
     set_parts = []
     values = []
     idx = 1
-    for key, val in updates.model_dump(exclude_none=True).items():
+    for key, val in updates.model_dump(exclude_unset=True).items():
         if key not in allowed:
             continue
         set_parts.append(f"{key} = ${idx}")

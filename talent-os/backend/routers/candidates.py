@@ -75,7 +75,7 @@ async def update_candidate(candidate_id: int, updates: CandidateAdminUpdate):
     set_parts = []
     values = []
     idx = 1
-    for key, val in updates.model_dump(exclude_none=True).items():
+    for key, val in updates.model_dump(exclude_unset=True).items():
         if key not in allowed_fields:
             continue
         set_parts.append(f"{key} = ${idx}")
