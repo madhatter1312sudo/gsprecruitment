@@ -12,11 +12,11 @@ const { html, raw, mount } = GSP;
 
 const Admin = {
   _data: {},
-  _currentPage: { users: 1, candidates: 1, audit: 1, outreach: 1, blog: 1 },
+  _currentPage: { users: 1, candidates: 1, audit: 1, outreach: 1, blog: 1, leads: 1 },
   // Filters passed to the load*() call that produced the currently-rendered
   // page, keyed the same as _currentPage — a data-page click re-derives the
   // page from here instead of needing a fresh closure per render.
-  _lastParams: { users: {}, candidates: {}, audit: {}, outreach: {}, blog: {} },
+  _lastParams: { users: {}, candidates: {}, audit: {}, outreach: {}, blog: {}, leads: {} },
   _pageSize: 20,
 
   /* ---- Init ---- */
@@ -1234,6 +1234,565 @@ const Admin = {
   },
 
   /* ============================================================
+     OPDRACHTGEVERS (WS-B.5)
+
+     Main has no GET /v1/admin/clients list endpoint (checked
+     talent-os/backend/routers/*.py and openapi.snapshot.json — only
+     /v1/admin/clients/{client_id}/contacts and .../{user_id}/approve
+     exist under that prefix). The roster here is therefore built
+     client-side: list users with role=client, then GET each user's detail
+     (which joins the linked `clients` row + an unfiltered job_count) and
+     dedupe by client id. A second pass hits /v1/admin/jobs?client_id=..
+     &status=open for an accurate *open* count, since the join only gives
+     every job_orders row regardless of status. This is N+1 (~2x the
+     number of client accounts) — fine for the current roster size, but a
+     real GET /v1/admin/clients?... endpoint returning company_name,
+     domain, open_job_count and primary_contact in one row would remove
+     both extra round-trips.
+
+     `erkend_referent` (recognised-sponsor / IND) is not a column on
+     `clients` (talent-os/backend/migrations/000_baseline.py) — the column
+     always renders "onbekend" per the task spec rather than guessing.
+     ============================================================ */
+  async loadClients() {
+    this.setLoading('#section-clients table tbody', 6);
+    try {
+      const res = await Auth.fetch('/v1/admin/users?role=client&limit=200');
+      if (!res) return;
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail);
+      const users = data.items || [];
+      if (!users.length) {
+        this._data.clients = [];
+        this.setEmpty('#section-clients table tbody', 6, 'Nog geen opdrachtgevers met een portal-account.');
+        return;
+      }
+
+      const details = await Promise.all(users.map(u =>
+        Auth.fetch(`/v1/admin/users/${u.id}`).then(r => (r && r.ok) ? r.json() : null).catch(() => null)
+      ));
+
+      const byClientId = new Map();
+      details.forEach(d => {
+        if (d && d.client && d.client.id != null && !byClientId.has(d.client.id)) {
+          byClientId.set(d.client.id, {
+            ...d.client,
+            job_count: d.job_count ?? 0,
+            open_jobs: null,
+            _accountName: d.full_name || '',
+            _accountEmail: d.email || '',
+          });
+        }
+      });
+      const clients = Array.from(byClientId.values());
+
+      await Promise.all(clients.map(async c => {
+        try {
+          const r = await Auth.fetch(`/v1/admin/jobs?client_id=${c.id}&status=open&limit=1`);
+          if (r && r.ok) { const jd = await r.json(); c.open_jobs = jd.total ?? 0; }
+        } catch { /* leave open_jobs null -> falls back to job_count in render */ }
+      }));
+
+      this._data.clients = clients;
+      this.renderClients(clients);
+    } catch (err) {
+      this.setLoadError('#section-clients table tbody', 6, () => this.loadClients());
+    }
+  },
+
+  renderClients(clients) {
+    const tbody = document.querySelector('#section-clients table tbody');
+    if (!tbody) return;
+    if (!clients.length) { this.setEmpty('#section-clients table tbody', 6, 'Nog geen opdrachtgevers met een portal-account.'); return; }
+    mount(tbody, html`${clients.map(c => html`
+      <tr data-action="open-client" data-id="${c.id}" style="cursor:pointer;">
+        <td style="font-weight:600;color:var(--white);">${c.company_name || 'Onbekend'}</td>
+        <td style="color:var(--navy-200);">${c.domain || '—'}</td>
+        <td class="text-center">${c.open_jobs != null ? c.open_jobs : c.job_count}</td>
+        <td style="color:var(--navy-200);">${c._accountName || c._accountEmail || '—'}</td>
+        <td><span class="badge bg-secondary-lt" title="Geen erkend-referent-veld op clients">onbekend</span></td>
+        <td class="text-end"><i class="fa-solid fa-chevron-right text-secondary"></i></td>
+      </tr>`)}`);
+  },
+
+  roleLabel(role) {
+    const map = { hiring_manager: 'Hiring manager', finance: 'Financiën', tekenbevoegd: 'Tekenbevoegd', overig: 'Overig' };
+    return map[role] || '—';
+  },
+
+  openClientDrawer(clientId) {
+    const client = (this._data.clients || []).find(c => c.id === clientId);
+    const tabs = [
+      ['contacts', 'Contacten'], ['jobs', 'Vacatures'],
+      ['activity', 'Notities/Activiteit'], ['prospects', 'Prospects'],
+    ];
+    this.openModal('clientDrawer', html`
+      <h3 style="color:var(--white);margin-bottom:4px;">${client?.company_name || 'Opdrachtgever'}</h3>
+      <div style="color:var(--navy-300);font-size:var(--font-size-sm);margin-bottom:var(--space-lg);">${client?.domain || '—'}</div>
+      <div style="display:flex;gap:4px;flex-wrap:wrap;border-bottom:1px solid rgba(74,111,159,0.2);margin-bottom:var(--space-md);padding-bottom:var(--space-sm);">
+        ${tabs.map(([key, label]) => html`
+          <button class="btn btn-sm ${key === 'contacts' ? 'btn-primary' : 'btn-ghost-secondary'}"
+            data-action="client-tab" data-client-id="${clientId}" data-tab="${key}">${label}</button>`)}
+      </div>
+      <div id="clientDrawerTabContent" style="min-height:120px;"><i class="fa-solid fa-spinner fa-spin"></i></div>
+    `, { wide: true });
+    this.switchClientTab(clientId, 'contacts');
+  },
+
+  switchClientTab(clientId, tab) {
+    document.querySelectorAll('#adminModalOverlay [data-action="client-tab"]').forEach(btn => {
+      btn.classList.toggle('btn-primary', btn.dataset.tab === tab);
+      btn.classList.toggle('btn-ghost-secondary', btn.dataset.tab !== tab);
+    });
+    const loaders = {
+      contacts: () => this.loadClientContacts(clientId),
+      jobs: () => this.loadClientJobsTab(clientId),
+      activity: () => this.loadClientActivityTab(clientId),
+      prospects: () => this.loadClientProspectsTab(clientId),
+    };
+    (loaders[tab] || loaders.contacts)();
+  },
+
+  /* ---- Contacts tab (WS-C.4 CRUD) ---- */
+  async loadClientContacts(clientId) {
+    const el = document.getElementById('clientDrawerTabContent');
+    if (!el) return;
+    mount(el, html`<i class="fa-solid fa-spinner fa-spin"></i>`);
+    try {
+      const res = await Auth.fetch(`/v1/admin/clients/${clientId}/contacts`);
+      if (!res) return;
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail);
+      this._data.clientContacts = this._data.clientContacts || {};
+      this._data.clientContacts[clientId] = data.items || [];
+      this.renderClientContacts(clientId);
+    } catch {
+      this.setContainerLoadError(el, () => this.loadClientContacts(clientId));
+    }
+  },
+
+  renderClientContacts(clientId) {
+    const el = document.getElementById('clientDrawerTabContent');
+    if (!el) return;
+    const items = (this._data.clientContacts && this._data.clientContacts[clientId]) || [];
+    mount(el, html`
+      <div style="display:flex;justify-content:flex-end;margin-bottom:var(--space-md);">
+        <button class="btn btn-sm btn-primary" data-action="client-contact-new" data-client-id="${clientId}">
+          <i class="fa-solid fa-plus"></i> Nieuw contact
+        </button>
+      </div>
+      <div id="clientContactForm"></div>
+      ${items.length ? html`
+        <div class="table-responsive">
+          <table class="table table-vcenter card-table">
+            <thead><tr><th>Naam</th><th>Rol</th><th>E-mail</th><th>Telefoon</th><th>Primair</th><th style="width:110px;">Acties</th></tr></thead>
+            <tbody>${items.map(c => html`
+              <tr>
+                <td style="color:var(--white);">${c.full_name}</td>
+                <td>${this.roleLabel(c.role)}</td>
+                <td style="color:var(--navy-200);">${c.email || '—'}</td>
+                <td style="color:var(--navy-200);">${c.phone || '—'}</td>
+                <td>${c.is_primary ? html`<span class="badge bg-yellow-lt">Primair</span>` : html`
+                  <button class="btn btn-sm btn-ghost-secondary" data-action="client-contact-make-primary" data-client-id="${clientId}" data-id="${c.id}">Maak primair</button>`}</td>
+                <td>
+                  <button class="btn btn-sm btn-ghost-secondary" data-action="client-contact-edit" data-client-id="${clientId}" data-id="${c.id}" title="Bewerken"><i class="fa-solid fa-pen"></i></button>
+                  <button class="btn btn-sm btn-ghost-secondary" data-action="client-contact-delete" data-client-id="${clientId}" data-id="${c.id}" title="Verwijderen" style="color:#f87171;"><i class="fa-solid fa-trash"></i></button>
+                </td>
+              </tr>`)}</tbody>
+          </table>
+        </div>` : html`<div style="color:var(--navy-300);padding:1rem 0;">Nog geen contacten voor deze opdrachtgever.</div>`}
+    `);
+  },
+
+  openClientContactForm(clientId, contactId) {
+    const contact = contactId
+      ? ((this._data.clientContacts?.[clientId] || []).find(c => c.id === contactId))
+      : null;
+    const formEl = document.getElementById('clientContactForm');
+    if (!formEl) return;
+    mount(formEl, html`
+      <div style="border:1px solid rgba(74,111,159,0.2);border-radius:var(--radius-md);padding:var(--space-md);margin-bottom:var(--space-md);">
+        <h4 style="color:var(--white);margin-bottom:var(--space-md);">${contact ? 'Contact bewerken' : 'Nieuw contact'}</h4>
+        <div class="form-group"><label>Naam</label><input type="text" id="ccFullName" value="${contact?.full_name || ''}"></div>
+        <div class="form-group"><label>E-mail</label><input type="email" id="ccEmail" value="${contact?.email || ''}"></div>
+        <div class="form-group"><label>Telefoon</label><input type="text" id="ccPhone" value="${contact?.phone || ''}"></div>
+        <div class="form-group">
+          <label>Rol</label>
+          <select id="ccRole">
+            <option value="">—</option>
+            ${['hiring_manager', 'finance', 'tekenbevoegd', 'overig'].map(r => html`
+              <option value="${r}" ${raw(contact?.role === r ? 'selected' : '')}>${this.roleLabel(r)}</option>`)}
+          </select>
+        </div>
+        <div class="form-group">
+          <label><input type="checkbox" id="ccPrimary" ${raw(contact?.is_primary ? 'checked' : '')}> Primair contact</label>
+        </div>
+        <div style="display:flex;gap:var(--space-md);margin-top:var(--space-md);">
+          <button class="btn btn-primary btn-sm" data-action="client-contact-save" data-client-id="${clientId}" data-id="${contactId || ''}">Opslaan</button>
+          <button class="btn btn-ghost-secondary btn-sm" data-action="client-contact-cancel" data-client-id="${clientId}">Annuleren</button>
+        </div>
+      </div>
+    `);
+  },
+
+  async saveClientContact(clientId, contactId) {
+    const payload = {
+      full_name: document.getElementById('ccFullName')?.value?.trim(),
+      email: document.getElementById('ccEmail')?.value?.trim() || null,
+      phone: document.getElementById('ccPhone')?.value?.trim() || null,
+      role: document.getElementById('ccRole')?.value || null,
+      is_primary: !!document.getElementById('ccPrimary')?.checked,
+    };
+    if (!payload.full_name) { Auth.toast('Naam is verplicht', 'error'); return; }
+    try {
+      const res = contactId
+        ? await Auth.fetch(`/v1/admin/clients/${clientId}/contacts/${contactId}`, { method: 'PUT', body: JSON.stringify(payload) })
+        : await Auth.fetch(`/v1/admin/clients/${clientId}/contacts`, { method: 'POST', body: JSON.stringify({ ...payload, lawful_basis: 'zakelijk_functioneel_adres' }) });
+      if (res?.ok) {
+        Auth.toast(contactId ? 'Contact bijgewerkt' : 'Contact toegevoegd', 'success');
+        document.getElementById('clientContactForm') && mount(document.getElementById('clientContactForm'), '');
+        await this.loadClientContacts(clientId);
+      } else {
+        const d = await res?.json().catch(() => null);
+        Auth.toast(d?.detail || 'Opslaan mislukt', 'error');
+      }
+    } catch { Auth.toast('Netwerkfout', 'error'); }
+  },
+
+  async makeClientContactPrimary(clientId, contactId) {
+    try {
+      const res = await Auth.fetch(`/v1/admin/clients/${clientId}/contacts/${contactId}`, {
+        method: 'PUT', body: JSON.stringify({ is_primary: true }),
+      });
+      if (res?.ok) { await this.loadClientContacts(clientId); }
+      else { Auth.toast('Bijwerken mislukt', 'error'); }
+    } catch { Auth.toast('Netwerkfout', 'error'); }
+  },
+
+  async deleteClientContact(clientId, contactId) {
+    if (!confirm('Dit contact verwijderen?')) return;
+    try {
+      const res = await Auth.fetch(`/v1/admin/clients/${clientId}/contacts/${contactId}`, { method: 'DELETE' });
+      if (res?.ok || res?.status === 204) {
+        Auth.toast('Contact verwijderd', 'success');
+        await this.loadClientContacts(clientId);
+      } else { Auth.toast('Verwijderen mislukt', 'error'); }
+    } catch { Auth.toast('Netwerkfout', 'error'); }
+  },
+
+  /* ---- Jobs tab (read-only, existing jobs endpoint filtered by client) ---- */
+  async loadClientJobsTab(clientId) {
+    const el = document.getElementById('clientDrawerTabContent');
+    if (!el) return;
+    mount(el, html`<i class="fa-solid fa-spinner fa-spin"></i>`);
+    try {
+      const res = await Auth.fetch(`/v1/admin/jobs?client_id=${clientId}&limit=50`);
+      if (!res) return;
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail);
+      const items = data.items || [];
+      mount(el, items.length ? html`
+        <div class="table-responsive">
+          <table class="table table-vcenter card-table">
+            <thead><tr><th>Titel</th><th>Type</th><th>Status</th><th>Sollicitaties</th></tr></thead>
+            <tbody>${items.map(j => html`
+              <tr>
+                <td style="color:var(--white);">${j.title || 'Untitled'}</td>
+                <td style="color:var(--navy-200);">${j.employment_type ? this.dienstlijnLabel(j.employment_type) : '—'}</td>
+                <td><span class="${this.badge(j.status)}">${j.status || 'draft'}</span></td>
+                <td class="text-center">${j.application_count ?? '—'}</td>
+              </tr>`)}</tbody>
+          </table>
+        </div>` : html`<div style="color:var(--navy-300);padding:1rem 0;">Nog geen vacatures voor deze opdrachtgever.</div>`);
+    } catch {
+      this.setContainerLoadError(el, () => this.loadClientJobsTab(clientId));
+    }
+  },
+
+  /* ---- Notities/Activiteit tab (WS-C.6) --
+     GET /v1/admin/activities?subject_type=client&subject_id=.. landed on
+     main after this feature was first built (migrations/028_activities.py,
+     routers/activities.py) -- read-only here, matching the task spec. */
+  activityTypeLabel(type) {
+    const map = { note: 'Notitie', call: 'Telefoongesprek', email: 'E-mail', meeting: 'Afspraak', task: 'Taak', status_change: 'Statuswijziging' };
+    return map[type] || type || '—';
+  },
+
+  async loadClientActivityTab(clientId) {
+    const el = document.getElementById('clientDrawerTabContent');
+    if (!el) return;
+    mount(el, html`<i class="fa-solid fa-spinner fa-spin"></i>`);
+    try {
+      const res = await Auth.fetch(`/v1/admin/activities?subject_type=client&subject_id=${clientId}&limit=50`);
+      if (!res) return;
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail);
+      const items = data.items || [];
+      mount(el, items.length ? html`
+        <div class="table-responsive">
+          <table class="table table-vcenter card-table">
+            <thead><tr><th>Type</th><th>Notitie</th><th>Datum</th><th>Status</th></tr></thead>
+            <tbody>${items.map(a => html`
+              <tr>
+                <td style="color:var(--white);">${this.activityTypeLabel(a.type)}</td>
+                <td style="color:var(--navy-200);">${a.body || '—'}</td>
+                <td style="color:var(--navy-200);">${this.formatDate(a.created_at)}</td>
+                <td>${a.completed_at ? html`<span class="badge bg-secondary-lt">Afgerond</span>` : (a.due_at ? html`<span class="badge bg-blue-lt">Open</span>` : '—')}</td>
+              </tr>`)}</tbody>
+          </table>
+        </div>` : html`<div style="color:var(--navy-300);padding:1rem 0;">Nog geen notities of activiteit voor deze opdrachtgever.</div>`);
+    } catch {
+      this.setContainerLoadError(el, () => this.loadClientActivityTab(clientId));
+    }
+  },
+
+  /* ---- Prospects tab (existing global prospects router, best-effort
+     matched to this client by company name -- client_prospects has no
+     client_id FK to `clients`, so this is a name search, not a join). ---- */
+  async loadClientProspectsTab(clientId) {
+    const el = document.getElementById('clientDrawerTabContent');
+    if (!el) return;
+    mount(el, html`<i class="fa-solid fa-spinner fa-spin"></i>`);
+    const client = (this._data.clients || []).find(c => c.id === clientId);
+    const search = client?.company_name || '';
+    try {
+      const qs = new URLSearchParams({ limit: '50' });
+      if (search) qs.set('search', search);
+      const res = await Auth.fetch(`/v1/admin/prospects?${qs}`);
+      if (!res) return;
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail);
+      const items = data.items || [];
+      mount(el, html`
+        <div style="color:var(--navy-300);font-size:var(--font-size-xs);margin-bottom:var(--space-sm);">
+          Gematcht op bedrijfsnaam (geen directe koppeling in de database).
+        </div>
+        ${items.length ? html`
+          <div class="table-responsive">
+            <table class="table table-vcenter card-table">
+              <thead><tr><th>Bedrijf</th><th>Contact</th><th>Functie</th><th>Status</th></tr></thead>
+              <tbody>${items.map(p => html`
+                <tr>
+                  <td style="color:var(--white);">${p.company_name || '—'}</td>
+                  <td style="color:var(--navy-200);">${p.contact_name || '—'}</td>
+                  <td style="color:var(--navy-200);">${p.contact_title || '—'}</td>
+                  <td><span class="${this.badge(p.status)}">${p.status || '—'}</span></td>
+                </tr>`)}</tbody>
+            </table>
+          </div>` : html`<div style="color:var(--navy-300);padding:1rem 0;">Geen prospects gevonden voor deze bedrijfsnaam.</div>`}
+      `);
+    } catch {
+      this.setContainerLoadError(el, () => this.loadClientProspectsTab(clientId));
+    }
+  },
+
+  /* ============================================================
+     LEADS (WS-C.10) — unified inbox: GET /v1/admin/leads across
+     contact_submissions + quiz_submissions, PATCH marks one row read.
+     ============================================================ */
+  async loadLeads(params = {}) {
+    this._lastParams.leads = params;
+    const qs = new URLSearchParams();
+    const limit = this._pageSize;
+    const offset = ((this._currentPage.leads || 1) - 1) * limit;
+    if (params.type) qs.set('type', params.type);
+    if (params.unread) qs.set('unread', 'true');
+    qs.set('limit', limit);
+    qs.set('offset', offset);
+
+    this.setLoading('#section-leads table tbody', 6);
+    try {
+      const res = await Auth.fetch(`/v1/admin/leads?${qs}`);
+      if (!res) return;
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail);
+      this._data.leads = data;
+      this.renderLeads(data);
+      this.renderPagination('leadsPagination', data.total, limit, this._currentPage.leads, 'leads');
+    } catch {
+      this.setLoadError('#section-leads table tbody', 6, () => this.loadLeads(params));
+    }
+  },
+
+  leadInterestLabel(type) {
+    const map = {
+      werving_selectie: 'Werving & selectie', detachering_internationaal: 'Detachering (internationaal)',
+      kandidaat: 'Kandidaat', overig: 'Overig',
+    };
+    return map[type] || '—';
+  },
+
+  // Dienstlijn label for a job's raw `employment_type` value -- used by the
+  // client drawer's Vacatures tab and the Rapportage breakdown so a raw
+  // enum string (or an unrecognised one) never renders straight into the
+  // UI. Unknown values fall back to the raw value itself (still escaped by
+  // html``, never raw()) rather than a silent "—", so a value this map
+  // hasn't caught up with is still visible instead of hidden.
+  dienstlijnLabel(type) {
+    const map = {
+      vast: 'Vast (werving en selectie)',
+      detachering: 'Detachering',
+      interim: 'Interim',
+      werving_selectie: 'Werving en selectie',
+      detachering_internationaal: 'Detachering (internationaal)',
+    };
+    return map[type] || type || 'onbekend';
+  },
+
+  renderLeads(data) {
+    const tbody = document.querySelector('#section-leads table tbody');
+    if (!tbody) return;
+    const items = data.items || [];
+    if (!items.length) { this.setEmpty('#section-leads table tbody', 6, 'Geen leads gevonden voor deze filters.'); return; }
+    mount(tbody, html`${items.map(l => html`
+      <tr data-action="toggle-lead-read" data-source="${l.source}" data-id="${l.id}" data-read="${l.is_read ? '1' : '0'}"
+        style="cursor:pointer;${raw(l.is_read ? '' : 'font-weight:600;')}">
+        <td><span class="badge ${l.source === 'quiz_submissions' ? 'bg-yellow-lt' : 'bg-blue-lt'}">${l.source === 'quiz_submissions' ? 'Quiz' : 'Contact'}</span></td>
+        <td style="color:var(--white);">${l.name || '—'}</td>
+        <td style="color:var(--navy-200);">${l.email || '—'}</td>
+        <td>${l.interest_type ? html`<span class="badge bg-secondary-lt">${this.leadInterestLabel(l.interest_type)}</span>` : '—'}</td>
+        <td style="color:var(--navy-200);">${this.formatDate(l.created_at)}</td>
+        <td>${l.is_read
+          ? html`<span class="badge bg-secondary-lt">Gelezen</span>`
+          : html`<span class="badge bg-green-lt">Ongelezen</span>`}</td>
+      </tr>`)}`);
+  },
+
+  async toggleLeadRead(source, leadId, currentlyRead) {
+    try {
+      const res = await Auth.fetch(`/v1/admin/leads/${source}/${leadId}`, {
+        method: 'PATCH', body: JSON.stringify({ is_read: !currentlyRead }),
+      });
+      if (res?.ok) {
+        await this.loadLeads(this._lastParams.leads || {});
+      } else {
+        Auth.toast('Bijwerken mislukt', 'error');
+      }
+    } catch { Auth.toast('Netwerkfout', 'error'); }
+  },
+
+  /* ============================================================
+     RAPPORTAGE — computed client-side from data the API already
+     returns (no invented KPIs): open jobs per dienstlijn
+     (employment_type, excluding is_demo -- the admin jobs endpoint
+     already excludes those unless include_demo=true), and leads per
+     category this week/month + total unread, from the most recent 200
+     leads (the leads endpoint has no date filter, so this is a sample,
+     called out in the UI caption rather than pretending it's exhaustive).
+     ============================================================ */
+  async loadReporting() {
+    const el = document.getElementById('reportingContent');
+    if (el) mount(el, html`<div style="text-align:center;padding:3rem;color:var(--navy-300);"><i class="fa-solid fa-spinner fa-spin"></i> Laden…</div>`);
+    try {
+      const [jobsRes, leadsRes, unreadRes] = await Promise.all([
+        Auth.fetch('/v1/admin/jobs?status=open&limit=200'),
+        Auth.fetch('/v1/admin/leads?limit=200'),
+        Auth.fetch('/v1/admin/leads?unread=true&limit=1'),
+      ]);
+      if (!jobsRes?.ok || !leadsRes?.ok) throw new Error('Failed');
+      const jobsData = await jobsRes.json();
+      const leadsData = await leadsRes.json();
+      const unreadData = unreadRes?.ok ? await unreadRes.json() : null;
+      this.renderReporting(jobsData, leadsData, unreadData);
+    } catch {
+      if (el) mount(el, html`<div style="text-align:center;padding:3rem;color:#f87171;">Rapportage kon niet geladen worden.</div>`);
+    }
+  },
+
+  renderReporting(jobsData, leadsData, unreadData) {
+    const el = document.getElementById('reportingContent');
+    if (!el) return;
+
+    const jobs = jobsData.items || [];
+    const byType = new Map();
+    jobs.forEach(j => {
+      const t = j.employment_type || 'onbekend';
+      byType.set(t, (byType.get(t) || 0) + 1);
+    });
+
+    const now = new Date();
+    const startOfWeek = new Date(now);
+    const dow = (startOfWeek.getDay() + 6) % 7; // Monday = 0
+    startOfWeek.setDate(startOfWeek.getDate() - dow);
+    startOfWeek.setHours(0, 0, 0, 0);
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+
+    const leads = leadsData.items || [];
+    const bucket = () => ({ werving_selectie: 0, detachering_internationaal: 0, kandidaat: 0, overig: 0, quiz: 0 });
+    const week = bucket();
+    const month = bucket();
+    leads.forEach(l => {
+      const created = new Date(l.created_at);
+      const key = l.interest_type || 'quiz';
+      if (created >= startOfWeek) week[key] = (week[key] || 0) + 1;
+      if (created >= startOfMonth) month[key] = (month[key] || 0) + 1;
+    });
+
+    const jobsCapNote = (jobsData.total || 0) > jobs.length ? html`<div style="color:var(--navy-300);font-size:var(--font-size-xs);margin-top:var(--space-sm);">Toont ${jobs.length} van ${jobsData.total} open vacatures.</div>` : '';
+    const leadsCapNote = (leadsData.total || 0) > leads.length ? html`<div style="color:var(--navy-300);font-size:var(--font-size-xs);margin-top:var(--space-sm);">Gebaseerd op de meest recente ${leads.length} van ${leadsData.total} leads.</div>` : '';
+
+    const rows = [
+      ['werving_selectie', 'Werving & selectie'], ['detachering_internationaal', 'Detachering (internationaal)'],
+      ['kandidaat', 'Kandidaat'], ['overig', 'Overig'], ['quiz', 'Quiz (geen categorie)'],
+    ];
+
+    mount(el, html`
+      <div class="row row-deck row-cards mb-4">
+        <div class="col-sm-4">
+          <div class="card card-sm"><div class="card-body">
+            <div class="subheader"><i class="fa-solid fa-briefcase me-1"></i>Open vacatures</div>
+            <div class="h1 mb-0">${jobs.length}</div>
+          </div></div>
+        </div>
+        <div class="col-sm-4">
+          <div class="card card-sm"><div class="card-body">
+            <div class="subheader"><i class="fa-solid fa-envelope me-1"></i>Leads ongelezen</div>
+            <div class="h1 mb-0">${unreadData ? (unreadData.total ?? 0) : '—'}</div>
+          </div></div>
+        </div>
+        <div class="col-sm-4">
+          <div class="card card-sm"><div class="card-body">
+            <div class="subheader"><i class="fa-regular fa-calendar me-1"></i>Leads deze week</div>
+            <div class="h1 mb-0">${Object.values(week).reduce((a, b) => a + b, 0)}</div>
+          </div></div>
+        </div>
+      </div>
+
+      <div class="row row-cards">
+        <div class="col-lg-6">
+          <div class="card">
+            <div class="card-header"><h3 class="card-title"><i class="fa-solid fa-layer-group text-primary me-2"></i>Open vacatures per dienstlijn</h3></div>
+            <div class="card-body">
+              ${byType.size ? html`<table class="table table-vcenter card-table">
+                <tbody>${Array.from(byType.entries()).map(([t, n]) => html`
+                  <tr><td style="color:var(--navy-200);">${this.dienstlijnLabel(t)}</td><td class="text-end" style="color:var(--white);font-weight:600;">${n}</td></tr>`)}</tbody>
+              </table>` : html`<div style="color:var(--navy-300);">Geen open vacatures.</div>`}
+              ${jobsCapNote}
+            </div>
+          </div>
+        </div>
+        <div class="col-lg-6">
+          <div class="card">
+            <div class="card-header"><h3 class="card-title"><i class="fa-solid fa-chart-column text-primary me-2"></i>Leads per categorie</h3></div>
+            <div class="card-body">
+              <table class="table table-vcenter card-table">
+                <thead><tr><th>Categorie</th><th class="text-end">Deze week</th><th class="text-end">Deze maand</th></tr></thead>
+                <tbody>${rows.map(([key, label]) => html`
+                  <tr>
+                    <td style="color:var(--navy-200);">${label}</td>
+                    <td class="text-end" style="color:var(--white);">${week[key] || 0}</td>
+                    <td class="text-end" style="color:var(--white);">${month[key] || 0}</td>
+                  </tr>`)}</tbody>
+              </table>
+              ${leadsCapNote}
+            </div>
+          </div>
+        </div>
+      </div>
+    `);
+  },
+
+  /* ============================================================
      PAGINATION
      ============================================================ */
   // `section` is one of the _currentPage/_lastParams keys (users, candidates,
@@ -1271,6 +1830,7 @@ const Admin = {
     const loaders = {
       users: 'loadUsers', candidates: 'loadCandidates',
       outreach: 'loadOutreach', blog: 'loadBlog', audit: 'loadAuditLog',
+      leads: 'loadLeads',
     };
     const fn = loaders[section];
     if (!fn || !Number.isFinite(page) || page < 1) return;
@@ -1284,7 +1844,10 @@ const Admin = {
   // `bodyHtml` is always an html``/raw() RawHtml result from the caller —
   // never renamed to `html`, which would shadow the module-level html``
   // tag this method sits alongside.
-  openModal(id, bodyHtml) {
+  // `opts.wide` widens the panel (760px vs the 520px default) for content
+  // that needs more room -- the client detail drawer's tabs (WS-B.5), which
+  // reuse this same modal overlay rather than a separate drawer component.
+  openModal(id, bodyHtml, opts = {}) {
     let overlay = document.getElementById('adminModalOverlay');
     if (!overlay) {
       overlay = document.createElement('div');
@@ -1293,8 +1856,9 @@ const Admin = {
       overlay.addEventListener('click', e => { if (e.target === overlay) this.closeModal(); });
       document.body.appendChild(overlay);
     }
+    const maxWidth = opts.wide ? '760px' : '520px';
     mount(overlay, html`
-      <div style="background:var(--navy-900);border:1px solid rgba(74,111,159,0.2);border-radius:var(--radius-xl);padding:var(--space-2xl);max-width:520px;width:100%;max-height:80vh;overflow-y:auto;position:relative;">
+      <div style="background:var(--navy-900);border:1px solid rgba(74,111,159,0.2);border-radius:var(--radius-xl);padding:var(--space-2xl);max-width:${maxWidth};width:100%;max-height:80vh;overflow-y:auto;position:relative;">
         <button data-action="close-modal" style="position:absolute;top:1rem;right:1rem;background:none;border:none;color:var(--navy-200);cursor:pointer;font-size:1.2rem;">
           <i class="fa-solid fa-xmark"></i>
         </button>
@@ -1342,6 +1906,24 @@ const Admin = {
     if (jobStatusFilter) jobStatusFilter.addEventListener('change', e => {
       const v = e.target.value;
       this.loadJobs({ status: ['open','closed','draft'].includes(v) ? v : '' });
+    });
+
+    const leadTypeFilter = document.getElementById('leadTypeFilter');
+    if (leadTypeFilter) leadTypeFilter.addEventListener('change', e => {
+      this._currentPage.leads = 1;
+      this.loadLeads({
+        type: e.target.value || undefined,
+        unread: document.getElementById('leadUnreadFilter')?.checked || undefined,
+      });
+    });
+
+    const leadUnreadFilter = document.getElementById('leadUnreadFilter');
+    if (leadUnreadFilter) leadUnreadFilter.addEventListener('change', e => {
+      this._currentPage.leads = 1;
+      this.loadLeads({
+        type: document.getElementById('leadTypeFilter')?.value || undefined,
+        unread: e.target.checked || undefined,
+      });
     });
 
     document.addEventListener('click', () => this.closeMenus());
@@ -1435,6 +2017,35 @@ const Admin = {
         break;
       case 'close-modal':
         this.closeModal();
+        break;
+      case 'open-client':
+        this.openClientDrawer(Number(id));
+        break;
+      case 'client-tab':
+        this.switchClientTab(Number(el.dataset.clientId), el.dataset.tab);
+        break;
+      case 'client-contact-new':
+        this.openClientContactForm(Number(el.dataset.clientId), null);
+        break;
+      case 'client-contact-edit':
+        this.openClientContactForm(Number(el.dataset.clientId), Number(id));
+        break;
+      case 'client-contact-cancel': {
+        const formEl = document.getElementById('clientContactForm');
+        if (formEl) mount(formEl, '');
+        break;
+      }
+      case 'client-contact-save':
+        this.saveClientContact(Number(el.dataset.clientId), id ? Number(id) : null);
+        break;
+      case 'client-contact-make-primary':
+        this.makeClientContactPrimary(Number(el.dataset.clientId), Number(id));
+        break;
+      case 'client-contact-delete':
+        this.deleteClientContact(Number(el.dataset.clientId), Number(id));
+        break;
+      case 'toggle-lead-read':
+        this.toggleLeadRead(el.dataset.source, Number(id), el.dataset.read === '1');
         break;
     }
   },

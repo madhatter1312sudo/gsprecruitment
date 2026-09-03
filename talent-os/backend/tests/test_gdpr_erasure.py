@@ -150,6 +150,16 @@ EXPECTED_CANDIDATE_PROFILE_COLUMNS = [
     "salary_expectation_min", "salary_expectation_max",
 ]
 
+# WS-C.7 (migrations/029_placements.py): immigratiestatus columns on
+# candidates -- must be nulled by the same UPDATE candidates statement
+# erase_person() issues for every other candidates.* PII column, since
+# they fall under the same 7-year placed-candidate retention floor
+# (core/retention.py) rather than being retained separately.
+EXPECTED_CANDIDATE_IMMIGRATION_COLUMNS = [
+    "nationality", "needs_work_permit", "kennismigrant_status",
+    "ruling_30pct_status", "ind_case_number",
+]
+
 
 def test_erase_person_touches_every_required_table(fake_db):
     import routers.gdpr as gdpr
@@ -174,6 +184,20 @@ def test_erase_person_touches_every_required_table(fake_db):
     missing_cols = [c for c in EXPECTED_CANDIDATE_PROFILE_COLUMNS if c not in profile_sql]
     assert not missing_cols, (
         f"UPDATE candidate_profiles never clears: {missing_cols}\n\nSQL:\n{profile_sql}"
+    )
+
+    candidates_updates = [
+        sql for sql, _args in fake_db.statements
+        if sql.strip().startswith("UPDATE candidates SET")
+    ]
+    assert candidates_updates, "expected an UPDATE candidates statement"
+    candidates_sql = "\n".join(candidates_updates)
+    missing_immigration_cols = [
+        c for c in EXPECTED_CANDIDATE_IMMIGRATION_COLUMNS if c not in candidates_sql
+    ]
+    assert not missing_immigration_cols, (
+        f"UPDATE candidates never clears the WS-C.7 immigratiestatus columns: "
+        f"{missing_immigration_cols}\n\nSQL:\n{candidates_sql}"
     )
 
 

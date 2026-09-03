@@ -313,7 +313,9 @@ async def erase_person(email: str, actor_id: Optional[int] = None, reason: str =
     and POST /api/v1/admin/gdpr/erase (admin, for sourced persons with no
     portal account).
 
-    Tables touched: candidates (full PII set), candidate_profiles (phone,
+    Tables touched: candidates (full PII set, including the WS-C.7
+    immigratiestatus columns -- nationality, needs_work_permit,
+    kennismigrant_status, ruling_30pct_status, ind_case_number), candidate_profiles (phone,
     linkedin_url, github_url, portfolio_url, current_company,
     current_title, location, education, salary fields, cv), users,
     push_tokens, quiz_submissions, contact_submissions, outreach_drafts,
@@ -375,12 +377,20 @@ async def erase_person(email: str, actor_id: Optional[int] = None, reason: str =
     # (uq_candidates_email, users.email UNIQUE) — per-row placeholders via
     # _anonymize_by_id avoid a duplicate-key violation if more than one
     # row happens to match.
+    # WS-C.7 (migrations/029_placements.py): nationality/needs_work_permit/
+    # kennismigrant_status/ruling_30pct_status/ind_case_number fall under
+    # the same 7-year "geplaatste kandidaat" retention floor as the rest of
+    # a placed candidate's PII (core/retention.py) -- they exist only to
+    # support a placement, so they're nulled here alongside every other
+    # candidates.* PII column, not retained separately.
     await _anonymize_by_id(
         "SELECT id FROM candidates WHERE LOWER(email) = $1",
         """UPDATE candidates SET
              full_name = 'Erased', email = $2, phone = NULL, linkedin_url = NULL,
              github_url = NULL, portfolio_url = NULL, cv_text = NULL, cv_file_path = NULL,
-             education = NULL, deleted_at = NOW(), consent_withdrawn_at = COALESCE(consent_withdrawn_at, NOW())
+             education = NULL, nationality = NULL, needs_work_permit = NULL,
+             kennismigrant_status = NULL, ruling_30pct_status = NULL, ind_case_number = NULL,
+             deleted_at = NOW(), consent_withdrawn_at = COALESCE(consent_withdrawn_at, NOW())
            WHERE id = $1""",
         email_norm, email_hash,
     )
@@ -394,7 +404,9 @@ async def erase_person(email: str, actor_id: Optional[int] = None, reason: str =
             """UPDATE candidates SET
                  full_name = 'Erased', email = $2, phone = NULL, linkedin_url = NULL,
                  github_url = NULL, portfolio_url = NULL, cv_text = NULL, cv_file_path = NULL,
-                 education = NULL, deleted_at = NOW(), consent_withdrawn_at = COALESCE(consent_withdrawn_at, NOW())
+                 education = NULL, nationality = NULL, needs_work_permit = NULL,
+                 kennismigrant_status = NULL, ruling_30pct_status = NULL, ind_case_number = NULL,
+                 deleted_at = NOW(), consent_withdrawn_at = COALESCE(consent_withdrawn_at, NOW())
                WHERE id = $1""",
             extra_ids, email_hash,
         )

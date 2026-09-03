@@ -130,10 +130,12 @@
         <div class="text-secondary text-uppercase px-3 pt-3 pb-1 fw-bold" style="font-size:10px;letter-spacing:.1em;">Jobs</div>
         <ul class="navbar-nav">
           <li class="nav-item"><a class="nav-link" href="#" data-section="jobs"><span class="nav-link-icon"><i class="fa-solid fa-briefcase"></i></span><span class="nav-link-title">All Jobs</span></a></li>
+          <li class="nav-item"><a class="nav-link" href="#" data-section="clients"><span class="nav-link-icon"><i class="fa-regular fa-building"></i></span><span class="nav-link-title">Opdrachtgevers</span></a></li>
         </ul>
 
         <div class="text-secondary text-uppercase px-3 pt-3 pb-1 fw-bold" style="font-size:10px;letter-spacing:.1em;">Growth</div>
         <ul class="navbar-nav">
+          <li class="nav-item"><a class="nav-link" href="#" data-section="leads"><span class="nav-link-icon"><i class="fa-solid fa-inbox"></i></span><span class="nav-link-title">Leads</span></a></li>
           <li class="nav-item"><a class="nav-link" href="#" data-section="outreach"><span class="nav-link-icon"><i class="fa-regular fa-paper-plane"></i></span><span class="nav-link-title">Outreach</span></a></li>
           <li class="nav-item"><a class="nav-link" href="#" data-section="blog"><span class="nav-link-icon"><i class="fa-regular fa-newspaper"></i></span><span class="nav-link-title">Blog</span></a></li>
         </ul>
@@ -141,6 +143,7 @@
         <div class="text-secondary text-uppercase px-3 pt-3 pb-1 fw-bold" style="font-size:10px;letter-spacing:.1em;">Insights</div>
         <ul class="navbar-nav">
           <li class="nav-item"><a class="nav-link" href="#" data-section="analytics"><span class="nav-link-icon"><i class="fa-solid fa-chart-line"></i></span><span class="nav-link-title">Analytics</span></a></li>
+          <li class="nav-item"><a class="nav-link" href="#" data-section="reporting"><span class="nav-link-icon"><i class="fa-solid fa-chart-column"></i></span><span class="nav-link-title">Rapportage</span></a></li>
           <li class="nav-item"><a class="nav-link" href="#" data-section="audit"><span class="nav-link-icon"><i class="fa-solid fa-clock-rotate-left"></i></span><span class="nav-link-title">Audit Log</span></a></li>
         </ul>
 
@@ -367,6 +370,75 @@
           </div>
         </section>
 
+        <!-- ==================== OPDRACHTGEVERS (WS-B.5) ====================
+             No GET /v1/admin/clients list endpoint exists on main -- the
+             roster is built client-side from /v1/admin/users?role=client
+             (see Admin.loadClients() in js/admin.js for the exact fetch
+             sequence and why). Row click opens a tabbed detail drawer
+             (contacten / vacatures / notities-activiteit / prospects). -->
+        <section class="portal-section" id="section-clients">
+          <div class="alert alert-info d-flex align-items-center mb-3" role="alert">
+            <i class="fa-solid fa-circle-info me-2"></i>
+            <div>Erkend-referent-status wordt niet bijgehouden in de database — de kolom toont daarom altijd "onbekend".</div>
+          </div>
+          <div class="card">
+            <div class="table-responsive">
+              <table class="table table-vcenter card-table">
+                <thead>
+                  <tr>
+                    <th>Bedrijf</th>
+                    <th>Domein</th>
+                    <th class="text-center">Open vacatures</th>
+                    <th>Primair contact</th>
+                    <th>Erkend referent</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody><tr><td colspan="6" class="text-center text-secondary py-4"><i class="fa-solid fa-spinner fa-spin"></i></td></tr></tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
+        <!-- ==================== LEADS (WS-C.10) ==================== -->
+        <section class="portal-section" id="section-leads">
+          <div class="card">
+            <div class="card-body border-bottom py-3">
+              <div class="d-flex gap-2 flex-wrap align-items-center">
+                <select class="form-select" style="max-width:240px;" id="leadTypeFilter">
+                  <option value="">Alle categorieën</option>
+                  <option value="werving_selectie">Werving & selectie</option>
+                  <option value="detachering_internationaal">Detachering (internationaal)</option>
+                  <option value="kandidaat">Kandidaat</option>
+                  <option value="overig">Overig</option>
+                </select>
+                <label class="form-check" style="margin-bottom:0;">
+                  <input class="form-check-input" type="checkbox" id="leadUnreadFilter">
+                  <span class="form-check-label">Alleen ongelezen</span>
+                </label>
+              </div>
+            </div>
+            <div class="table-responsive">
+              <table class="table table-vcenter card-table">
+                <thead>
+                  <tr>
+                    <th>Bron</th>
+                    <th>Naam</th>
+                    <th>E-mail</th>
+                    <th>Categorie</th>
+                    <th>Ontvangen</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody><tr><td colspan="6" class="text-center text-secondary py-4"><i class="fa-solid fa-spinner fa-spin"></i></td></tr></tbody>
+              </table>
+            </div>
+            <div class="card-footer d-flex justify-content-center">
+              <div class="pagination-wrap" id="leadsPagination"></div>
+            </div>
+          </div>
+        </section>
+
         <!-- ==================== OUTREACH ==================== -->
         <section class="portal-section" id="section-outreach">
           <div class="card">
@@ -558,6 +630,16 @@
             <div class="card-footer d-flex justify-content-center">
               <div class="pagination-wrap" id="auditPagination"></div>
             </div>
+          </div>
+        </section>
+
+        <!-- ==================== RAPPORTAGE ====================
+             Every figure here comes straight from data the API already
+             returns (open jobs by employment_type, leads by interest_type
+             / created_at) — no invented KPIs. See Admin.loadReporting(). -->
+        <section class="portal-section" id="section-reporting">
+          <div id="reportingContent">
+            <div style="text-align:center;padding:3rem;color:var(--navy-300);"><i class="fa-solid fa-spinner fa-spin"></i> Laden…</div>
           </div>
         </section>
 
