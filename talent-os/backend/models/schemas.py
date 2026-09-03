@@ -787,6 +787,47 @@ class ClientContactResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
+# ── WS-B.5: Admin clients list/detail (migrations/031) ───────────────────
+
+class ClientPrimaryContact(BaseModel):
+    full_name: str
+    email: Optional[str] = None
+    role: Optional[str] = None
+
+
+class ClientListItem(BaseModel):
+    id: int
+    company_name: str
+    domain: Optional[str] = None
+    industry: Optional[str] = None
+    erkend_referent: str = "onbekend"
+    open_job_count: int = 0
+    primary_contact: Optional[ClientPrimaryContact] = None
+    created_at: datetime
+
+
+class ClientDetail(BaseModel):
+    id: int
+    company_name: str
+    domain: Optional[str] = None
+    industry: Optional[str] = None
+    location: Optional[str] = None
+    erkend_referent: str = "onbekend"
+    notes: Optional[str] = None
+    open_job_count: int = 0
+    contacts: List[ClientContactResponse] = []
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+
+
+class ClientAdminUpdate(BaseModel):
+    company_name: Optional[str] = Field(None, min_length=1, max_length=255)
+    domain: Optional[str] = Field(None, max_length=255)
+    industry: Optional[str] = Field(None, max_length=255)
+    erkend_referent: Optional[str] = Field(None, pattern=r"^(ja|nee|onbekend)$")
+    notes: Optional[str] = None
+
+
 # ── WS-C.5: Pipeline Stage History ───────────────────────────────────────
 
 class PipelineStageUpdate(BaseModel):
