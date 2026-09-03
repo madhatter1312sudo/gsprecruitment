@@ -43,7 +43,10 @@ jobs:
 
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          # WS-E.9: pinned identically to deploy.yml and the Dockerfile
+          # (python:3.12-slim) so CI tests the same interpreter version
+          # that actually runs in production.
+          python-version: "3.12"
           cache: "pip"
           cache-dependency-path: talent-os/backend/requirements.txt
 
@@ -107,3 +110,109 @@ jobs:
 
       - name: Unit tests
         run: npm test -- --ci
+
+  pip-audit:
+    name: Backend dependency audit (pip-audit)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          # Pinned identically to the backend job / deploy.yml / Dockerfile.
+          python-version: "3.12"
+          cache: "pip"
+          cache-dependency-path: talent-os/backend/requirements.txt
+
+      - name: Install pip-audit
+        run: pip install -r talent-os/backend/requirements-dev.txt
+
+      # Audits requirements.txt (the human-edited version-range source),
+      # not requirements.lock -- auditing the lock would only ever catch a
+      # vuln at the moment it was last regenerated; auditing the ranges
+      # catches one that gets discovered later against a version this repo
+      # would still happily resolve to today. Known/accepted findings go in
+      # talent-os/backend/.pip-audit-ignore (documented there, empty by
+      # default) rather than being silently ignored inline.
+      - name: pip-audit
+        working-directory: talent-os/backend
+        run: |
+          ignore_args=()
+          if [ -f .pip-audit-ignore ]; then
+            while IFS= read -r id; do
+              [ -z "$id" ] && continue
+              case "$id" in \#*) continue ;; esac
+              ignore_args+=(--ignore-vuln "$id")
+            done < .pip-audit-ignore
+          fi
+          pip-audit -r requirements.txt "${ignore_args[@]}"
+
+  gitleaks:
+    name: Secret scan (gitleaks)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # gitleaks/gitleaks-action needs no license for public and personal
+      # (non-org) repositories -- only GitHub organizations need a
+      # GITLEAKS_LICENSE secret. This repo is a personal account repo, so
+      # none is configured here; add GITLEAKS_LICENSE as an env var below
+      # if it's ever transferred into an org.
+      - name: gitleaks
+        uses: gitleaks/gitleaks-action@v3.0.0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_ENABLE_SUMMARY: "true"
+
+  web:
+    name: Website (static checks + CSP)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Syntax-check every website JS file
+        run: |
+          status=0
+          while IFS= read -r -d '' f; do
+            node --check "$f" || status=1
+          done < <(find website -name '*.js' -print0)
+          exit $status
+
+      - name: Only web asset extensions land under website/
+        run: python3 scripts/check_website_extensions.py
+
+      - name: DOM-XSS static sink check
+        run: python3 scripts/xss_static_check.py
+
+      - name: CSP coverage check
+        run: python3 scripts/verify_csp_coverage.py
+
+      # Pinned to 1.61.0 -- the newest pip `playwright` release at time of
+      # writing; app/package.json pins @playwright/test to ^1.61.1 (npm has
+      # a 1.61.1 patch the pip package does not yet mirror). Same Chromium
+      # build either way; revisit this pin alongside app/'s next time both
+      # are bumped.
+      #
+      # This step + the check below take ~1-2 minutes (browser download +
+      # 21-page headless run) — noticeably slower than the rest of this
+      # workflow but still well under CI's per-job budget, so it stays
+      # inline here rather than as a separate scheduled workflow. If it
+      # ever becomes a real bottleneck, split it into its own
+      # workflow_dispatch/schedule-triggered job.
+      - name: Install Playwright + Chromium
+        run: |
+          pip install playwright==1.61.0
+          python3 -m playwright install --with-deps chromium
+
+      - name: CSP / console-error browser check
+        run: python3 scripts/csp_violation_check.py

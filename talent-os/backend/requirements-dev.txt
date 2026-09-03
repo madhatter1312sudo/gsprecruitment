@@ -1,0 +1,9 @@
+# Talent OS — Backend dev/CI-only dependencies.
+# NOT installed in the production image (Dockerfile only installs
+# requirements.lock, generated from requirements.txt) -- this file exists
+# so CI's pip-audit job doesn't bloat the runtime image with a scanner.
+#
+# Install alongside requirements.txt for local dev:
+#   pip install -r requirements.txt -r requirements-dev.txt
+
+pip-audit>=2.7.0,<3.0.0

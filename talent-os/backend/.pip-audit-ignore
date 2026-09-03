@@ -1,0 +1,22 @@
+# pip-audit ignore list (WS-E.9, .github/workflows/ci.yml job `pip-audit`).
+#
+# Format: one advisory ID per line (e.g. GHSA-xxxx-xxxx-xxxx or
+# PYSEC-xxxx-xxxx), nothing else on the line. Blank lines and lines
+# starting with `#` are ignored. CI reads this file and passes each ID as
+# `--ignore-vuln <ID>` to pip-audit.
+#
+# Every entry MUST have a comment block above it explaining: which
+# package/advisory, why it's safe to skip right now (not exploitable in
+# our usage, no fix released, etc.), and when to revisit. Do not add an
+# entry just to make CI pass -- fix the dependency instead unless there is
+# a real reason not to.
+
+# ecdsa (transitive dependency of python-jose) -- pure-Python ECDSA
+# signing/verification isn't constant-time (Minerva-class timing side
+# channel). Upstream (tlsfuzzer/python-ecdsa) has stated this is a
+# won't-fix: https://github.com/tlsfuzzer/python-ecdsa/issues/262. Not
+# exploitable here -- JWT_ALGORITHM is hardcoded to HS256 everywhere in
+# this codebase (core/config.py, core/security.py), so the ES*/ECDSA code
+# path in python-jose/ecdsa is never executed. Revisit only if the JWT
+# algorithm is ever changed to an ES* variant.
+PYSEC-2026-1325

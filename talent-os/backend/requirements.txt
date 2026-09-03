@@ -14,8 +14,15 @@ asyncpg>=0.29.0,<1.0.0
 httpx>=0.26.0,<1.0.0
 
 # Auth
-passlib[bcrypt]>=1.7.4,<2.0.0
-python-jose[cryptography]>=3.3.0,<4.0.0
+# passlib[bcrypt] removed (WS-E.9): core/security.py hashes directly with
+# bcrypt (see its "direct bcrypt, no passlib" comment) and nothing else in
+# the codebase imports passlib -- it was a dead transitive dependency that
+# also dragged in an unmaintained passlib release. bcrypt is now a direct,
+# explicit dependency instead of riding along inside passlib[bcrypt].
+bcrypt>=4.1.0,<5.0.0
+# python-jose CVE-2024-33663 (algorithm confusion) / CVE-2024-33664 (DoS
+# via crafted JWE) are fixed in 3.4.0+.
+python-jose[cryptography]>=3.4.0,<4.0.0
 slowapi>=0.1.9,<1.0.0
 email-validator>=2.0.0,<3.0.0
 
@@ -26,7 +33,9 @@ pyotp==2.9.0
 qrcode==7.4.2
 
 # File uploads
-python-multipart>=0.0.9,<1.0.0
+# python-multipart CVE-2024-53981 (ReDoS on malformed multipart boundaries)
+# is fixed in 0.0.18+.
+python-multipart>=0.0.18,<1.0.0
 
 # Object storage (Cloudflare R2, S3-compatible) for CV files
 boto3>=1.34.0,<2.0.0
@@ -38,5 +47,12 @@ apscheduler>=3.10,<4.0.0
 google-auth>=2.29.0,<3.0.0
 google-auth-oauthlib>=1.2.0,<2.0.0
 
+# Error monitoring (WS-E.9). sentry_sdk.init() is never called unless
+# SENTRY_DSN is set (core/monitoring.py) -- when it is, send_default_pii is
+# forced off and candidate/client PII is scrubbed via a before_send hook.
+# See core/config.py / .env.example.
+sentry-sdk[fastapi]==2.19.2
+
 # Testing (CI only, not needed at runtime)
-pytest>=8.0.0,<9.0.0
+# >=9.0.3 for PYSEC-2026-1845.
+pytest>=9.0.3,<10.0.0
