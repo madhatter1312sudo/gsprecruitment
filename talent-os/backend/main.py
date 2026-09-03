@@ -9,8 +9,10 @@ API key authentication on all data endpoints.
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.openapi.docs import get_redoc_html, get_swagger_ui_html
+from fastapi.responses import JSONResponse
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
@@ -18,6 +20,7 @@ from slowapi.util import get_remote_address
 
 from core.config import settings
 from core.database import close_pool
+from core.deps import require_role
 from services.scheduler import start_scheduler, shutdown_scheduler
 
 
@@ -51,11 +54,17 @@ async def lifespan(app: FastAPI):
 
 
 # ── App ─────────────────────────────────────────────────────────────────
+# /docs, /redoc and /openapi.json exposed the full route map (incl. the
+# admin surface) to anyone, unauthenticated. Disable FastAPI's built-in
+# public routes here and re-add them below gated behind an admin JWT.
 app = FastAPI(
     title="Talent OS — Hermes Recruitment Engine",
     description="Multi-agent recruitment platform. PostgreSQL + asyncpg + Celery + Next.js.",
     version="1.0.0",
     lifespan=lifespan,
+    docs_url=None,
+    redoc_url=None,
+    openapi_url=None,
 )
 
 # Limiter — rate limiting across all endpoints
@@ -111,6 +120,26 @@ app.include_router(outreach_router)
 app.include_router(blog_admin_router)
 app.include_router(mobile_router)
 app.include_router(prospects_router)
+
+
+# ── Admin-gated API docs ───────────────────────────────────────────────
+# Same JSON check_api_contract.py and CI use offline (via `import main` +
+# app.openapi()) -- this just serves that same document, and the two
+# rendered UIs on top of it, only to an authenticated admin.
+
+@app.get("/openapi.json", include_in_schema=False)
+async def get_openapi_schema(_admin: dict = Depends(require_role("admin"))):
+    return JSONResponse(app.openapi())
+
+
+@app.get("/docs", include_in_schema=False)
+async def get_docs(_admin: dict = Depends(require_role("admin"))):
+    return get_swagger_ui_html(openapi_url="/openapi.json", title=f"{app.title} — Swagger UI")
+
+
+@app.get("/redoc", include_in_schema=False)
+async def get_redoc(_admin: dict = Depends(require_role("admin"))):
+    return get_redoc_html(openapi_url="/openapi.json", title=f"{app.title} — ReDoc")
 
 
 # ── Entry Point ─────────────────────────────────────────────────────────

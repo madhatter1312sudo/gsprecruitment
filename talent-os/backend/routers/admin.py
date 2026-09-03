@@ -11,12 +11,26 @@ from core.security import create_access_token
 from models.schemas import (
     AdminDashboard, AdminUserUpdate, AdminJobUpdate, AdminAnalytics,
     AuditLogEntry, ContentItem, ContentUpdate, SystemSettings, SystemSettingsUpdate,
+    HealthResponse,
 )
+from routers.health import get_health_detail
 from typing import Optional, List
 from datetime import timedelta
 import asyncio
 
 router = APIRouter(prefix="/api/v1/admin", tags=["admin-portal"])
+
+
+# ── Health (detail) ─────────────────────────────────────────────────────
+# GET /health stays public but minimal (status/version/database) for the
+# uptime monitor; row counts and vendor/integration status live here,
+# behind an admin JWT (WS-C.3a).
+
+@router.get("/health", response_model=HealthResponse)
+async def get_admin_health(current_user: dict = Depends(require_role("admin"))):
+    """Detailed health: database, OpenRouter/Apollo config status, and live
+    row counts (candidates_count, open_jobs). Read-only, so not audit-logged."""
+    return await get_health_detail()
 
 
 # ── Dashboard ───────────────────────────────────────────────────────────

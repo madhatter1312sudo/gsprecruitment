@@ -359,14 +359,25 @@ async def start_scheduler() -> None:
         _lock_conn = None
         return
 
-    scheduler.add_job(
-        apollo_search_and_sync, CronTrigger(hour=6, minute=0),
-        id="apollo_search_and_sync", replace_existing=True,
-    )
-    scheduler.add_job(
-        apollo_enrich_batch, CronTrigger(hour=6, minute=30),
-        id="apollo_enrich_batch", replace_existing=True,
-    )
+    # Apollo sourcing/enrichment jobs are off by default (settings.apollo_sync_enabled,
+    # core/config.py) -- they are not even registered with APScheduler unless
+    # explicitly enabled via env. The per-run system_settings.apollo_sync_enabled
+    # DB flag (_flag_enabled, checked inside each job) is a secondary, admin-editable
+    # switch on top of this, not a substitute for it.
+    apollo_jobs_registered = 0
+    if settings.apollo_sync_enabled:
+        scheduler.add_job(
+            apollo_search_and_sync, CronTrigger(hour=6, minute=0),
+            id="apollo_search_and_sync", replace_existing=True,
+        )
+        scheduler.add_job(
+            apollo_enrich_batch, CronTrigger(hour=6, minute=30),
+            id="apollo_enrich_batch", replace_existing=True,
+        )
+        apollo_jobs_registered = 2
+    else:
+        logger.info("scheduler: apollo_sync_enabled=false, not registering Apollo jobs")
+
     scheduler.add_job(
         matching, CronTrigger(hour=7, minute=0),
         id="matching", replace_existing=True,
@@ -381,7 +392,10 @@ async def start_scheduler() -> None:
     )
 
     scheduler.start()
-    logger.info("scheduler: started with 4 daily jobs + 1 weekly job (Europe/Amsterdam)")
+    logger.info(
+        "scheduler: started with %s daily jobs + 1 weekly job (Europe/Amsterdam)",
+        2 + apollo_jobs_registered,
+    )
 
 
 async def shutdown_scheduler() -> None:

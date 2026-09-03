@@ -135,8 +135,15 @@ async def login(request: Request, data: UserLogin):
 # ── Refresh ─────────────────────────────────────────────────────────────
 
 @router.post("/refresh", response_model=TokenResponse)
-async def refresh_token(data: dict):
-    """Issue a new access token using an existing valid token."""
+@limiter.limit("10/minute")
+async def refresh_token(request: Request, data: dict):
+    """Issue a new access token using an existing valid token.
+
+    Rejects tokens carrying an `impersonator` claim -- an admin
+    impersonation token must stay short-lived and never be silently
+    extended into a fresh, long-lived session (see routers/admin.py
+    impersonate_user).
+    """
     token = data.get("refresh_token") or data.get("access_token")
     if not token:
         raise HTTPException(status_code=400, detail="No token provided")
@@ -145,7 +152,17 @@ async def refresh_token(data: dict):
     if payload is None:
         raise HTTPException(status_code=401, detail="Invalid or expired token")
 
-    user_id = payload.get("sub")
+    if payload.get("impersonator"):
+        raise HTTPException(status_code=401, detail="Impersonation tokens cannot be refreshed")
+
+    # python-jose forces 'sub' to a string on encode (see
+    # create_access_token); the users.id column is an integer, so this must
+    # be cast back before querying or asyncpg raises (was a bare 500).
+    try:
+        user_id = int(payload.get("sub"))
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=401, detail="Invalid token payload")
+
     user = await fetch_one(
         "SELECT id, email, full_name, role, is_verified FROM users WHERE id = $1 AND deleted_at IS NULL",
         user_id,
