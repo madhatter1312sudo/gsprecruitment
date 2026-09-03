@@ -809,13 +809,6 @@ info@gsprecruitment.nl
         json.dumps({"client_id": client["id"], "existing_user": False}),
     )
 
-    # NOTE (WS-C.2): the plaintext temporary_password used to be returned in
-    # this response body, which is a credential leak to anything that can
-    # read API responses/logs. We still generate it server-side so the
-    # invited account is usable today, but we no longer hand it back over
-    # the wire. Trade-off: there is currently no way for the invitee to
-    # learn this password — WS-E.3 replaces this whole flow with an
-    # email-delivered set-password link instead of a server-generated one.
     return {
         "message": "Team member invited successfully. A set-password link "
                     "was e-mailed to them; the account activates once they "
