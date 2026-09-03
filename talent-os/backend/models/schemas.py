@@ -609,6 +609,20 @@ class SiteContentResponse(BaseModel):
 
 LEAD_INTEREST_TYPES = ("werving_selectie", "detachering_internationaal", "kandidaat", "overig")
 
+# WS-C.10 code-review follow-up: website/contact.html's <select> sent
+# these three values (candidate/client/partner) before this PR's fix --
+# and quiz submissions (website/script.js) hardcoded 'candidate' -- so any
+# in-flight/cached page, or a request replayed from history, can still
+# arrive with one of these for a while after the site itself is fixed.
+# Same remap as migrations/026_leads_interest_type.py's UPDATEs, kept in
+# sync deliberately: candidate -> kandidaat, client -> werving_selectie,
+# partner -> overig.
+_LEGACY_INTEREST_TYPE_MAP = {
+    "candidate": "kandidaat",
+    "client": "werving_selectie",
+    "partner": "overig",
+}
+
 
 class LeadSubmit(BaseModel):
     name: str = Field(..., min_length=1)
@@ -628,9 +642,12 @@ class LeadSubmit(BaseModel):
         """WS-C.10: contact_submissions.interest_type is CHECK'd to
         LEAD_INTEREST_TYPES (migrations/026_leads_interest_type.py) -- the
         migration maps existing NULL/unknown rows to 'overig' at the DB
-        level, and this validator does the same at the API boundary so a
-        caller sending an empty string or an unrecognised value never
-        reaches the INSERT with something the CHECK would reject."""
+        level (plus the three legacy values below), and this validator
+        does the same at the API boundary so a caller sending an empty
+        string, a legacy value, or an unrecognised value never reaches
+        the INSERT with something the CHECK would reject."""
+        if v in _LEGACY_INTEREST_TYPE_MAP:
+            return _LEGACY_INTEREST_TYPE_MAP[v]
         if v is None or v.strip() == "" or v not in LEAD_INTEREST_TYPES:
             return "overig"
         return v

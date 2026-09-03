@@ -7,10 +7,16 @@ always been a free-text VARCHAR(100) -- routers/public.py's submit_lead()
 writes whatever LeadSubmit.interest_type the caller sends, unvalidated.
 This migration:
 
-  1. Normalises every existing row: NULL or any value outside the
-     four-value set below becomes 'overig' -- run *before* the CHECK is
-     added, so the ALTER never aborts on legacy/free-text data (there is
-     no way to know up front what stray values are already in prod).
+  1. Normalises every existing row. Three legacy values that
+     website/contact.html's select actually sent before this migration
+     (`candidate`, `client`, `partner` -- see routers/public.py's
+     submit_lead()/models/schemas.py's old LeadSubmit, no validation) are
+     remapped to their nearest canonical value first: candidate ->
+     kandidaat, client -> werving_selectie, partner -> overig. Everything
+     else (NULL, or any other stray value already in prod -- e.g. the
+     contact form's now-retired `uitzenden`/`detacheren`/`zzp_bemiddeling`
+     options) becomes 'overig'. All of this runs *before* the CHECK is
+     added, so the ALTER never aborts on legacy/free-text data.
   2. Sets a NOT NULL DEFAULT 'overig' and a CHECK on the four-value set
      (werving_selectie | detachering_internationaal | kandidaat | overig)
      -- models/schemas.py's LeadSubmit validator normalises the same way
@@ -41,8 +47,11 @@ from _runner import run_migration  # noqa: E402
 VERSION = "026_leads_interest_type"
 
 MIGRATION_SQL = """
+UPDATE contact_submissions SET interest_type = 'kandidaat' WHERE interest_type = 'candidate';
+UPDATE contact_submissions SET interest_type = 'werving_selectie' WHERE interest_type = 'client';
 UPDATE contact_submissions SET interest_type = 'overig'
-WHERE interest_type IS NULL
+WHERE interest_type = 'partner'
+   OR interest_type IS NULL
    OR interest_type NOT IN ('werving_selectie','detachering_internationaal','kandidaat','overig');
 
 ALTER TABLE contact_submissions ALTER COLUMN interest_type SET DEFAULT 'overig';

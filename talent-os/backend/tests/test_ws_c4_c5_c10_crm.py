@@ -98,6 +98,21 @@ def test_lead_submit_blank_interest_type_becomes_overig():
     assert lead.interest_type == "overig"
 
 
+# ── Code-review follow-up: legacy interest_type values website/contact.html
+#    and website/script.js actually sent (candidate|client|partner) before
+#    this PR's fix must remap to their nearest canonical value, not fall
+#    through to the generic "unrecognised -> overig" bucket ──────────────
+
+@pytest.mark.parametrize("legacy_value,expected", [
+    ("candidate", "kandidaat"),
+    ("client", "werving_selectie"),
+    ("partner", "overig"),
+])
+def test_lead_submit_remaps_legacy_interest_type(legacy_value, expected):
+    lead = LeadSubmit(name="A", email="a@example.com", message="hi", interest_type=legacy_value)
+    assert lead.interest_type == expected
+
+
 def test_lead_read_update_requires_bool():
     with pytest.raises(ValidationError):
         LeadReadUpdate(is_read=["not", "a", "bool"])  # type: ignore[arg-type]
@@ -142,7 +157,7 @@ def test_025_pipeline_stage_history_migration_idempotent():
 def test_026_leads_interest_type_migration_normalises_before_check():
     mod = _load_migration("026_leads_interest_type.py")
     sql = mod.MIGRATION_SQL
-    normalize_idx = sql.index("UPDATE contact_submissions SET interest_type = 'overig'")
+    normalize_idx = sql.index("UPDATE contact_submissions SET interest_type = 'kandidaat'")
     check_idx = sql.index("ADD CONSTRAINT chk_contact_submissions_interest_type")
     assert normalize_idx < check_idx, "existing rows must be normalised before the CHECK is added"
     assert "DROP CONSTRAINT IF EXISTS chk_contact_submissions_interest_type" in sql
@@ -152,6 +167,21 @@ def test_026_leads_interest_type_migration_normalises_before_check():
     assert "contact_submissions ADD COLUMN IF NOT EXISTS is_read" in sql
     assert "DO $$" not in sql
     assert "CREATE UNIQUE INDEX" not in sql
+
+
+def test_026_leads_interest_type_migration_remaps_legacy_values_before_catchall():
+    """Code-review follow-up: website/contact.html sent candidate|client|
+    partner before this PR's fix -- the migration must remap those to
+    their nearest canonical value (not the generic 'overig' catch-all)
+    for existing rows, and that remap must run before the catch-all UPDATE
+    so it isn't clobbered."""
+    mod = _load_migration("026_leads_interest_type.py")
+    sql = mod.MIGRATION_SQL
+    candidate_idx = sql.index("UPDATE contact_submissions SET interest_type = 'kandidaat' WHERE interest_type = 'candidate'")
+    client_idx = sql.index("UPDATE contact_submissions SET interest_type = 'werving_selectie' WHERE interest_type = 'client'")
+    catchall_idx = sql.index("WHERE interest_type = 'partner'")
+    assert candidate_idx < catchall_idx
+    assert client_idx < catchall_idx
 
 
 # ── services/telegram.py: no-op without env vars, never raises ──────────
