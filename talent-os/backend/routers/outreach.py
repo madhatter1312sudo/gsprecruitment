@@ -68,6 +68,7 @@ REFUSAL_RECIPIENT_SUPPRESSED = (409, "recipient_suppressed")
 REFUSAL_PROSPECT_NO_LAWFUL_BASIS = (409, "prospect_missing_lawful_basis")
 REFUSAL_CANDIDATE_NO_SPEC_CONSENT = (409, "candidate_missing_spec_consent")
 REFUSAL_CANDIDATE_NOT_FOUND = (404, "candidate_not_found")
+REFUSAL_PROSPECT_NOT_FOUND = (404, "prospect_not_found")
 REFUSAL_UNKNOWN_TARGET_TYPE = (422, "unknown_target_type")
 REFUSAL_CANDIDATE_MISSING_PROVENANCE = (409, "candidate_missing_provenance")
 
@@ -134,6 +135,9 @@ async def _draft_refusal(draft: dict):
         prospect = await fetch_one(
             "SELECT lawful_basis, opt_out_at FROM client_prospects WHERE id = $1", draft.get("target_id"),
         )
+        if not prospect:
+            status_code, code = REFUSAL_PROSPECT_NOT_FOUND
+            return status_code, code, "Draft references a client_prospect that does not exist — refusing to send."
         if prospect:
             if prospect["opt_out_at"]:
                 status_code, code = REFUSAL_RECIPIENT_OPTED_OUT
