@@ -73,9 +73,34 @@ jobs:
           rsync -avz docker-compose.yml \
             "${VPS_USER}@${VPS_HOST}:${VPS_PATH}/docker-compose.yml"
 
+      # WS-A.7: website/sitemap.xml is generated, not hand-maintained --
+      # regenerate it on every deploy (static pages + live vacatures from
+      # the public jobs API + website/blog/posts.json) so it never drifts.
+      # Commits straight to main (checkout keeps the default GITHUB_TOKEN
+      # credentials, so this push works without extra setup) only when the
+      # file actually changed, which is what triggers the Cloudflare Pages
+      # auto-deploy in the next step. --offline is NOT used here: a jobs
+      # API failure only drops job URLs from the sitemap (the script warns
+      # and falls back), it never fails this step.
+      - name: Regenerate website/sitemap.xml
+        run: |
+          python3 scripts/generate_sitemap.py
+          if ! git diff --quiet -- website/sitemap.xml; then
+            git config user.name "gsp-ops-bot"
+            git config user.email "ops@gsprecruitment.nl"
+            git add website/sitemap.xml
+            git commit -m "chore: regenerate sitemap.xml [skip ci]"
+            git push origin HEAD:main
+          else
+            echo "sitemap.xml unchanged -- nothing to commit"
+          fi
+
       - name: Sync website (frontend) to Cloudflare via git push
         run: |
-          # The frontend is on Cloudflare Pages, which auto-deploys from this repo
+          # The frontend is on Cloudflare Pages, which auto-deploys from this repo.
+          # The commit above (if the sitemap changed) already triggered that
+          # deploy; this step is a no-op when the sitemap was unchanged, since
+          # Cloudflare Pages already deployed from the push that ran this workflow.
           echo "Frontend is auto-deployed by Cloudflare Pages from this repository"
 
       - name: Tag current image for rollback before replacing it
