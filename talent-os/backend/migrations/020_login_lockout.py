@@ -7,9 +7,18 @@ Adds to `users`:
     password checks against this account (routers/auth.py login()). Reset
     to 0 on a successful login, and by change-password / reset-password /
     set-password (a fresh password shouldn't inherit a stale failure
-    streak). See routers/auth.py's _register_failed_login for the sliding
-    -window logic that increments this (there is deliberately no separate
-    last-failed-attempt column -- see that function's docstring).
+    streak). See routers/auth.py's _register_failed_login for the
+    sliding-window logic that increments this.
+  - last_failed_login_at TIMESTAMPTZ               — when the current
+    failure streak's most recent attempt happened; _register_failed_login
+    both reads it (to decide reset-vs-increment against the 15-minute
+    window) and overwrites it with NOW() in the same UPDATE. Deliberately
+    its own column, NOT the shared `updated_at` -- an unrelated write to
+    the same user row (a profile edit, an admin PUT
+    /api/v1/admin/users/{id}, a client approval, ...) must never nudge
+    the lockout window. Cleared back to NULL alongside
+    failed_login_count/locked_until on a successful login, an admin
+    unlock, or any password change.
   - locked_until TIMESTAMPTZ                       — set once
     failed_login_count hits the threshold (10) within the window (15
     minutes); login() returns the same generic 401 as a wrong password
@@ -27,7 +36,7 @@ Adds to `users`:
     nothing to compare against, so no token is rejected on that basis
     alone (see core/deps._token_predates_password_change).
 
-No backfill needed: all three columns default to an inert "not locked /
+No backfill needed: all four columns default to an inert "not locked /
 never failed / no known change time" state that is exactly correct for
 every existing row -- there is nothing to compute from other columns
 (unlike migration 017's is_verified/role-derived backfills).
@@ -47,6 +56,7 @@ VERSION = "020_login_lockout"
 
 MIGRATION_SQL = """
 ALTER TABLE users ADD COLUMN IF NOT EXISTS failed_login_count INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS last_failed_login_at TIMESTAMPTZ;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS locked_until TIMESTAMPTZ;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS password_changed_at TIMESTAMPTZ;
 CREATE INDEX IF NOT EXISTS idx_users_locked_until ON users(locked_until) WHERE locked_until IS NOT NULL;

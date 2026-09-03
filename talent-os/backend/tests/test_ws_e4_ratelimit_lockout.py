@@ -121,20 +121,22 @@ class _FakeUsersDB:
     def __init__(self, **row):
         row.setdefault("failed_login_count", 0)
         row.setdefault("locked_until", None)
-        row.setdefault("updated_at", None)
+        row.setdefault("last_failed_login_at", None)
         self.row = row
 
     async def fetch_one(self, sql, *args):
         sql_u = sql.upper()
         if "UPDATE USERS" in sql_u and "FAILED_LOGIN_COUNT = CASE" in sql_u:
+            assert "LAST_FAILED_LOGIN_AT" in sql_u, "window must key off last_failed_login_at, not updated_at"
+            assert "UPDATED_AT" not in sql_u, "lockout window must not touch/depend on updated_at"
             window_ok = (
-                self.row["updated_at"] is not None
-                and self.row["updated_at"] >= datetime.now(timezone.utc) - timedelta(minutes=15)
+                self.row["last_failed_login_at"] is not None
+                and self.row["last_failed_login_at"] >= datetime.now(timezone.utc) - timedelta(minutes=15)
             )
             self.row["failed_login_count"] = (
                 self.row["failed_login_count"] + 1 if window_ok else 1
             )
-            self.row["updated_at"] = datetime.now(timezone.utc)
+            self.row["last_failed_login_at"] = datetime.now(timezone.utc)
             return {"failed_login_count": self.row["failed_login_count"]}
         raise AssertionError(f"unexpected fetch_one in test stub: {sql}")
 
@@ -142,9 +144,10 @@ class _FakeUsersDB:
         sql_u = sql.upper()
         if "SET LOCKED_UNTIL = NOW() + INTERVAL '15 MINUTES'" in sql_u:
             self.row["locked_until"] = datetime.now(timezone.utc) + timedelta(minutes=15)
-        elif "FAILED_LOGIN_COUNT = 0, LOCKED_UNTIL = NULL" in sql_u:
+        elif "FAILED_LOGIN_COUNT = 0" in sql_u and "LOCKED_UNTIL = NULL" in sql_u:
             self.row["failed_login_count"] = 0
             self.row["locked_until"] = None
+            self.row["last_failed_login_at"] = None
         else:
             raise AssertionError(f"unexpected execute in test stub: {sql}")
         return "UPDATE 1"
@@ -181,7 +184,7 @@ def test_register_failed_login_locks_after_threshold(fake_db):
 
 def test_register_failed_login_resets_streak_outside_window(fake_db):
     fake_db.row["failed_login_count"] = 9
-    fake_db.row["updated_at"] = datetime.now(timezone.utc) - timedelta(minutes=20)
+    fake_db.row["last_failed_login_at"] = datetime.now(timezone.utc) - timedelta(minutes=20)
     asyncio.run(auth_router._register_failed_login(fake_db.row))
     # The previous streak is outside the 15-minute window, so this failure
     # restarts the counter at 1 rather than reaching 10 and locking.
@@ -191,10 +194,22 @@ def test_register_failed_login_resets_streak_outside_window(fake_db):
 
 def test_register_failed_login_continues_streak_inside_window(fake_db):
     fake_db.row["failed_login_count"] = 9
-    fake_db.row["updated_at"] = datetime.now(timezone.utc) - timedelta(minutes=5)
+    fake_db.row["last_failed_login_at"] = datetime.now(timezone.utc) - timedelta(minutes=5)
     asyncio.run(auth_router._register_failed_login(fake_db.row))
     assert fake_db.row["failed_login_count"] == 10
     assert fake_db.row["locked_until"] is not None
+
+
+def test_register_failed_login_window_not_keyed_to_updated_at(fake_db):
+    """Regression guard: an unrelated write to the row (a profile edit, an
+    admin update, ...) refreshes updated_at but must never affect the
+    lockout window -- only last_failed_login_at does."""
+    fake_db.row["failed_login_count"] = 9
+    fake_db.row["last_failed_login_at"] = datetime.now(timezone.utc) - timedelta(minutes=20)
+    fake_db.row["updated_at"] = datetime.now(timezone.utc)  # fresh, but irrelevant
+    asyncio.run(auth_router._register_failed_login(fake_db.row))
+    assert fake_db.row["failed_login_count"] == 1
+    assert fake_db.row["locked_until"] is None
 
 
 def test_login_threshold_and_window_constants():
@@ -300,15 +315,24 @@ def _load_migration_020():
     return mod
 
 
-def test_migration_020_adds_all_three_columns():
+def test_migration_020_adds_all_four_columns():
     sql = _load_migration_020().MIGRATION_SQL
     for column in (
         "failed_login_count INTEGER NOT NULL DEFAULT 0",
+        "last_failed_login_at TIMESTAMPTZ",
         "locked_until TIMESTAMPTZ",
         "password_changed_at TIMESTAMPTZ",
     ):
         assert column in sql, f"migration 020 must add {column}"
         assert f"ADD COLUMN IF NOT EXISTS {column.split()[0]}" in sql
+
+
+def test_migration_020_lockout_window_column_is_dedicated_not_updated_at():
+    """Regression guard: the lockout window must be its own column, not
+    an ALTER/backfill that repurposes the shared updated_at column."""
+    sql = _load_migration_020().MIGRATION_SQL
+    assert "last_failed_login_at" in sql
+    assert "updated_at" not in sql
 
 
 def test_migration_020_is_idempotent():
@@ -335,7 +359,7 @@ def test_migration_020_version_matches_filename():
 def test_endpoint_rate_limits_match_masterplan():
     import inspect
 
-    assert '@limiter.limit("10/minute")' in inspect.getsource(auth_router.login)
+    assert '@limiter.limit("5/minute")' in inspect.getsource(auth_router.login)
     assert '@limiter.limit("30/minute")' in inspect.getsource(auth_router.refresh_token)
     assert '@limiter.limit("20/minute")' in inspect.getsource(auth_router.verify_email_hashed)
     assert '@limiter.limit("10/minute")' in inspect.getsource(auth_router.set_password)

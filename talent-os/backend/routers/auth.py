@@ -191,28 +191,23 @@ async def _register_failed_login(user: dict) -> None:
     the account for LOCKOUT_DURATION_MINUTES once it hits the threshold
     within the FAILED_LOGIN_WINDOW_MINUTES window.
 
-    WS-E.4 deliberately adds no dedicated `last_failed_login_at` column
-    (only failed_login_count/locked_until/password_changed_at, per the
-    migration) -- the sliding window is instead tracked off the existing
-    `updated_at` column, which this same UPDATE also refreshes: if the
-    row's last update was more than FAILED_LOGIN_WINDOW_MINUTES ago the
-    counter restarts at 1, otherwise it increments. This is a deliberately
-    "minimal" approximation (per the masterplan item's own name) -- an
-    unrelated admin edit to the same user row (e.g. PUT
-    /api/v1/admin/users/{id}) also refreshes updated_at and so can nudge
-    the window, but that only ever shifts the count *reset* point, it
-    never lets more than FAILED_LOGIN_LOCKOUT_THRESHOLD failures in a row
-    slip through un-locked. A real last-failed-attempt column would be a
-    straightforward follow-up if this proves too imprecise in practice.
+    The sliding window is tracked off its own dedicated
+    `last_failed_login_at` column (migrations/020_login_lockout.py), not
+    the shared `updated_at` column -- an unrelated write to the same user
+    row (a profile edit, an admin PUT /api/v1/admin/users/{id}, an
+    approval, ...) must never nudge the lockout window. This UPDATE both
+    reads the previous `last_failed_login_at` (to decide reset-vs-
+    increment) and immediately overwrites it with NOW() in one statement.
     """
     row = await fetch_one(
         """UPDATE users
            SET failed_login_count = CASE
-                   WHEN updated_at IS NULL OR updated_at < NOW() - INTERVAL '15 minutes'
+                   WHEN last_failed_login_at IS NULL
+                        OR last_failed_login_at < NOW() - INTERVAL '15 minutes'
                        THEN 1
                        ELSE failed_login_count + 1
                END,
-               updated_at = NOW()
+               last_failed_login_at = NOW()
            WHERE id = $1
            RETURNING failed_login_count""",
         user["id"],
@@ -225,7 +220,7 @@ async def _register_failed_login(user: dict) -> None:
 
 
 @router.post("/login", response_model=TokenResponse)
-@limiter.limit("10/minute")
+@limiter.limit("5/minute")
 async def login(request: Request, data: UserLogin):
     """Authenticate a user and return a JWT token.
 
@@ -256,7 +251,7 @@ async def login(request: Request, data: UserLogin):
 
     if user["failed_login_count"] or user["locked_until"]:
         await execute(
-            "UPDATE users SET failed_login_count = 0, locked_until = NULL WHERE id = $1",
+            "UPDATE users SET failed_login_count = 0, locked_until = NULL, last_failed_login_at = NULL WHERE id = $1",
             user["id"],
         )
 
@@ -406,7 +401,7 @@ async def set_password(request: Request, data: SetPasswordRequest):
            SET password_hash = $1, is_verified = TRUE, email_verified_at = NOW(),
                verification_token_hash = NULL, verification_sent_at = NULL,
                password_changed_at = NOW(), failed_login_count = 0, locked_until = NULL,
-               updated_at = NOW()
+               last_failed_login_at = NULL, updated_at = NOW()
            WHERE id = $2""",
         new_hash, user["id"],
     )
@@ -475,7 +470,7 @@ async def reset_password(request: Request, data: ResetPasswordRequest):
         """UPDATE users
            SET password_hash = $1, reset_token = NULL, reset_token_expires_at = NULL,
                password_changed_at = NOW(), failed_login_count = 0, locked_until = NULL,
-               updated_at = NOW()
+               last_failed_login_at = NULL, updated_at = NOW()
            WHERE id = $2""",
         new_hash, user["id"],
     )
@@ -555,7 +550,8 @@ async def change_password(
     await execute(
         """UPDATE users
            SET password_hash = $1, password_changed_at = NOW(),
-               failed_login_count = 0, locked_until = NULL, updated_at = NOW()
+               failed_login_count = 0, locked_until = NULL, last_failed_login_at = NULL,
+               updated_at = NOW()
            WHERE id = $2""",
         new_hash, current_user["id"],
     )

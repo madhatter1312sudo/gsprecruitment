@@ -261,7 +261,7 @@ async def unlock_user(
     valid (unlocking is not a password reset)."""
     row = await fetch_one(
         """UPDATE users
-           SET failed_login_count = 0, locked_until = NULL
+           SET failed_login_count = 0, locked_until = NULL, last_failed_login_at = NULL
            WHERE id = $1 AND deleted_at IS NULL
            RETURNING id, email, failed_login_count, locked_until""",
         user_id,
