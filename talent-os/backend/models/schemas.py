@@ -2,6 +2,7 @@
 from pydantic import BaseModel, EmailStr, Field, field_validator
 from typing import Optional, List, Any, Literal
 from datetime import datetime, date
+from decimal import Decimal
 
 
 # ── Auth / Users ─────────────────────────────────────────────────────────
@@ -785,11 +786,60 @@ class PipelineStageHistoryItem(BaseModel):
 # nothing built on top of these models is published to the public site or
 # the client portal (routers/placements.py is admin-only). See
 # migrations/029_placements.py and core/margin.py for the full rationale.
+#
+# security-auditor follow-up (M2 WS-C.7 FIX FIRST, MEDIUM #2/#3): every
+# money/rate field is Decimal, not float -- floats can silently carry NaN/
+# inf and lose precision on read-modify-write; Decimal with
+# allow_inf_nan=False rejects both at the API boundary (422), matching
+# each column's own NUMERIC(precision,scale) bound from
+# migrations/029_placements.py so a value pydantic accepts can never
+# overflow the column at insert time.
 
 _PLACEMENT_TYPES = r"^(werving_selectie|detachering)$"
 _BILLING_BASES = r"^(vast_maandbedrag|per_uur)$"
 _FEE_TYPES = r"^(percentage|vast)$"
 _PLACEMENT_STATUSES = r"^(concept|actief|beeindigd|geannuleerd)$"
+
+
+def _money_field() -> Any:
+    """NUMERIC(10,2) columns (hourly_bill_rate, monthly_purchase_price,
+    fee_amount): non-negative, 2 decimal places, capped at the column's
+    max (8 integer digits + 2 decimal = 99999999.99), no NaN/Infinity."""
+    return Field(
+        None, ge=0, le=Decimal("99999999.99"), decimal_places=2, allow_inf_nan=False,
+    )
+
+
+def _eor_cost_factor_field() -> Any:
+    """NUMERIC(6,4): non-negative, 4 decimal places, capped at 99.9999."""
+    return Field(
+        None, ge=0, le=Decimal("99.9999"), decimal_places=4, allow_inf_nan=False,
+    )
+
+
+def _fee_percentage_field() -> Any:
+    """NUMERIC(5,2): a percentage, so also capped at 100 (not just the
+    column's raw 999.99 headroom)."""
+    return Field(
+        None, ge=0, le=Decimal("100"), decimal_places=2, allow_inf_nan=False,
+    )
+
+
+def _expected_billable_hours_field() -> Any:
+    """NUMERIC(6,2): non-negative, 2 decimal places, capped at 9999.99."""
+    return Field(
+        None, ge=0, le=Decimal("9999.99"), decimal_places=2, allow_inf_nan=False,
+    )
+
+
+class OneOffCost(BaseModel):
+    """One ad-hoc one-off cost line item inside placements.one_off_costs
+    (jsonb). extra='forbid' so an arbitrary/unexpected key never silently
+    rides along into the stored jsonb array."""
+    model_config = {"extra": "forbid"}
+
+    label: str = Field(..., min_length=1, max_length=120)
+    amount: Decimal = Field(..., ge=0, decimal_places=2, allow_inf_nan=False)
 
 
 class PlacementCreate(BaseModel):
@@ -799,16 +849,16 @@ class PlacementCreate(BaseModel):
     placement_type: str = Field(..., pattern=_PLACEMENT_TYPES)
     start_date: Optional[date] = None
     end_date: Optional[date] = None
-    hourly_bill_rate: Optional[float] = None
-    monthly_purchase_price: Optional[float] = None
+    hourly_bill_rate: Optional[Decimal] = _money_field()
+    monthly_purchase_price: Optional[Decimal] = _money_field()
     eor_partner: Optional[str] = None
-    eor_cost_factor: Optional[float] = None
+    eor_cost_factor: Optional[Decimal] = _eor_cost_factor_field()
     billing_basis: Optional[str] = Field(None, pattern=_BILLING_BASES)
-    expected_billable_hours: Optional[float] = None
+    expected_billable_hours: Optional[Decimal] = _expected_billable_hours_field()
     fee_type: Optional[str] = Field(None, pattern=_FEE_TYPES)
-    fee_percentage: Optional[float] = None
-    fee_amount: Optional[float] = None
-    one_off_costs: List[dict] = []
+    fee_percentage: Optional[Decimal] = _fee_percentage_field()
+    fee_amount: Optional[Decimal] = _money_field()
+    one_off_costs: List[OneOffCost] = []
     status: str = Field("concept", pattern=_PLACEMENT_STATUSES)
     notes: Optional[str] = None
 
@@ -816,16 +866,16 @@ class PlacementCreate(BaseModel):
 class PlacementUpdate(BaseModel):
     start_date: Optional[date] = None
     end_date: Optional[date] = None
-    hourly_bill_rate: Optional[float] = None
-    monthly_purchase_price: Optional[float] = None
+    hourly_bill_rate: Optional[Decimal] = _money_field()
+    monthly_purchase_price: Optional[Decimal] = _money_field()
     eor_partner: Optional[str] = None
-    eor_cost_factor: Optional[float] = None
+    eor_cost_factor: Optional[Decimal] = _eor_cost_factor_field()
     billing_basis: Optional[str] = Field(None, pattern=_BILLING_BASES)
-    expected_billable_hours: Optional[float] = None
+    expected_billable_hours: Optional[Decimal] = _expected_billable_hours_field()
     fee_type: Optional[str] = Field(None, pattern=_FEE_TYPES)
-    fee_percentage: Optional[float] = None
-    fee_amount: Optional[float] = None
-    one_off_costs: Optional[List[dict]] = None
+    fee_percentage: Optional[Decimal] = _fee_percentage_field()
+    fee_amount: Optional[Decimal] = _money_field()
+    one_off_costs: Optional[List[OneOffCost]] = None
     notes: Optional[str] = None
 
 
@@ -841,16 +891,16 @@ class PlacementResponse(BaseModel):
     placement_type: str
     start_date: Optional[date] = None
     end_date: Optional[date] = None
-    hourly_bill_rate: Optional[float] = None
-    monthly_purchase_price: Optional[float] = None
+    hourly_bill_rate: Optional[Decimal] = None
+    monthly_purchase_price: Optional[Decimal] = None
     eor_partner: Optional[str] = None
-    eor_cost_factor: Optional[float] = None
+    eor_cost_factor: Optional[Decimal] = None
     billing_basis: Optional[str] = None
-    expected_billable_hours: Optional[float] = None
+    expected_billable_hours: Optional[Decimal] = None
     fee_type: Optional[str] = None
-    fee_percentage: Optional[float] = None
-    fee_amount: Optional[float] = None
-    one_off_costs: List[dict] = []
+    fee_percentage: Optional[Decimal] = None
+    fee_amount: Optional[Decimal] = None
+    one_off_costs: List[OneOffCost] = []
     status: str
     notes: Optional[str] = None
     created_by: Optional[int] = None

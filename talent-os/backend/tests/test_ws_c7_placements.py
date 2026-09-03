@@ -22,7 +22,7 @@ import pytest
 from pydantic import ValidationError
 
 from core.margin import compute_margin
-from models.schemas import PlacementCreate, PlacementUpdate, PlacementStatusUpdate
+from models.schemas import PlacementCreate, PlacementUpdate, PlacementStatusUpdate, OneOffCost
 from routers.placements import validate_status_transition
 from fastapi import HTTPException
 
@@ -255,14 +255,26 @@ def test_placements_migration_one_off_costs_defaults_to_empty_jsonb_array():
 # ── Router: audit_log + one_off_costs jsonb coercion ──────────────────────
 
 class _FakeDB:
-    def __init__(self, placement_row=None):
+    def __init__(self, placement_row=None, candidate_exists=True, client_exists=True, job_row=(1, 1)):
         self.placement_row = placement_row
+        # job_row = (job_id, job's client_id), or None if the job doesn't exist
+        self.job_row = job_row
+        self.candidate_exists = candidate_exists
+        self.client_exists = client_exists
         self.statements = []
 
     async def fetch_one(self, sql, *args):
         self.statements.append((sql, args))
         if "INSERT INTO placements" in sql or "UPDATE placements SET" in sql or "FROM placements WHERE id" in sql:
             return self.placement_row
+        if sql.strip().startswith("SELECT id FROM candidates WHERE"):
+            return {"id": args[0]} if self.candidate_exists else None
+        if sql.strip().startswith("SELECT id FROM clients WHERE"):
+            return {"id": args[0]} if self.client_exists else None
+        if sql.strip().startswith("SELECT id, client_id FROM job_orders WHERE"):
+            if self.job_row is None:
+                return None
+            return {"id": self.job_row[0], "client_id": self.job_row[1]}
         return None
 
     async def fetch_all(self, sql, *args):
@@ -319,3 +331,247 @@ def test_status_change_endpoint_rejects_invalid_transition(monkeypatch):
             1, PlacementStatusUpdate(status="beeindigd"), current_user={"id": 5, "role": "admin"},
         ))
     assert exc_info.value.status_code == 422
+
+
+def test_create_placement_validates_candidate_exists(monkeypatch):
+    import routers.placements as placements
+
+    db = _FakeDB(placement_row=_row(), candidate_exists=False)
+    monkeypatch.setattr(placements, "fetch_one", db.fetch_one)
+    monkeypatch.setattr(placements, "fetch_all", db.fetch_all)
+    monkeypatch.setattr(placements, "execute", db.execute)
+
+    payload = PlacementCreate(candidate_id=999, job_id=1, client_id=1, placement_type="detachering")
+    with pytest.raises(HTTPException) as exc_info:
+        asyncio.run(placements.create_placement(payload, current_user={"id": 5, "role": "admin"}))
+    assert exc_info.value.status_code == 422
+    assert "candidate_id" in exc_info.value.detail
+
+
+def test_create_placement_validates_client_exists(monkeypatch):
+    import routers.placements as placements
+
+    db = _FakeDB(placement_row=_row(), client_exists=False)
+    monkeypatch.setattr(placements, "fetch_one", db.fetch_one)
+    monkeypatch.setattr(placements, "fetch_all", db.fetch_all)
+    monkeypatch.setattr(placements, "execute", db.execute)
+
+    payload = PlacementCreate(candidate_id=1, job_id=1, client_id=999, placement_type="detachering")
+    with pytest.raises(HTTPException) as exc_info:
+        asyncio.run(placements.create_placement(payload, current_user={"id": 5, "role": "admin"}))
+    assert exc_info.value.status_code == 422
+    assert "client_id" in exc_info.value.detail
+
+
+def test_create_placement_validates_job_exists(monkeypatch):
+    import routers.placements as placements
+
+    db = _FakeDB(placement_row=_row(), job_row=None)
+    monkeypatch.setattr(placements, "fetch_one", db.fetch_one)
+    monkeypatch.setattr(placements, "fetch_all", db.fetch_all)
+    monkeypatch.setattr(placements, "execute", db.execute)
+
+    payload = PlacementCreate(candidate_id=1, job_id=999, client_id=1, placement_type="detachering")
+    with pytest.raises(HTTPException) as exc_info:
+        asyncio.run(placements.create_placement(payload, current_user={"id": 5, "role": "admin"}))
+    assert exc_info.value.status_code == 422
+    assert "job_id" in exc_info.value.detail
+
+
+def test_create_placement_validates_job_belongs_to_client(monkeypatch):
+    """job_id exists but is attached to a different client -- must be a
+    422, not a bare 500 from the FK constraint at INSERT time."""
+    import routers.placements as placements
+
+    db = _FakeDB(placement_row=_row(), job_row=(1, 42))  # job's real client_id is 42
+    monkeypatch.setattr(placements, "fetch_one", db.fetch_one)
+    monkeypatch.setattr(placements, "fetch_all", db.fetch_all)
+    monkeypatch.setattr(placements, "execute", db.execute)
+
+    payload = PlacementCreate(candidate_id=1, job_id=1, client_id=1, placement_type="detachering")
+    with pytest.raises(HTTPException) as exc_info:
+        asyncio.run(placements.create_placement(payload, current_user={"id": 5, "role": "admin"}))
+    assert exc_info.value.status_code == 422
+    assert "job_id" in exc_info.value.detail
+
+
+def test_list_placements_total_is_a_real_count_not_page_length(monkeypatch):
+    """total must reflect COUNT(*) over the whole filtered set, not just
+    the length of the one page of rows returned -- these only coincide
+    when the filtered set fits inside a single page."""
+    import routers.placements as placements
+
+    class _CountFakeDB(_FakeDB):
+        async def fetch_val(self, sql, *args):
+            self.statements.append((sql, args))
+            return 137  # far more rows than the page below
+
+        async def fetch_all(self, sql, *args):
+            self.statements.append((sql, args))
+            if "FROM placements WHERE" in sql:
+                return [_row(id=1), _row(id=2)]
+            return []
+
+    db = _CountFakeDB()
+    monkeypatch.setattr(placements, "fetch_one", db.fetch_one)
+    monkeypatch.setattr(placements, "fetch_all", db.fetch_all)
+    monkeypatch.setattr(placements, "fetch_val", db.fetch_val)
+    monkeypatch.setattr(placements, "execute", db.execute)
+
+    result = asyncio.run(placements.list_placements(
+        status=None, candidate_id=None, job_id=None, client_id=None,
+        limit=2, offset=0, current_user={"id": 5, "role": "admin"},
+    ))
+    assert result["total"] == 137
+    assert len(result["items"]) == 2
+
+
+# ── Money-field validation: NaN/inf/negative/over-precision -> 422 ────────
+
+@pytest.mark.parametrize("field,bad_value", [
+    ("hourly_bill_rate", "nan"),
+    ("hourly_bill_rate", "inf"),
+    ("hourly_bill_rate", "-1"),
+    ("monthly_purchase_price", "nan"),
+    ("monthly_purchase_price", "-5.00"),
+    ("fee_amount", "Infinity"),
+    ("fee_amount", "-0.01"),
+])
+def test_placement_create_rejects_bad_money_values(field, bad_value):
+    kwargs = dict(candidate_id=1, job_id=1, client_id=1, placement_type="detachering")
+    kwargs[field] = bad_value
+    with pytest.raises(ValidationError):
+        PlacementCreate(**kwargs)
+
+
+def test_placement_create_rejects_money_value_over_the_column_cap():
+    with pytest.raises(ValidationError):
+        PlacementCreate(candidate_id=1, job_id=1, client_id=1, placement_type="detachering",
+                         hourly_bill_rate="100000000.00")
+
+
+def test_placement_create_accepts_money_value_at_the_column_cap():
+    p = PlacementCreate(candidate_id=1, job_id=1, client_id=1, placement_type="detachering",
+                         hourly_bill_rate="99999999.99")
+    assert p.hourly_bill_rate == Decimal("99999999.99")
+
+
+@pytest.mark.parametrize("bad_value", ["nan", "-1", "100.0001"])
+def test_placement_create_rejects_bad_eor_cost_factor(bad_value):
+    with pytest.raises(ValidationError):
+        PlacementCreate(candidate_id=1, job_id=1, client_id=1, placement_type="detachering",
+                         eor_cost_factor=bad_value)
+
+
+def test_placement_create_accepts_eor_cost_factor_at_the_cap():
+    p = PlacementCreate(candidate_id=1, job_id=1, client_id=1, placement_type="detachering",
+                         eor_cost_factor="99.9999")
+    assert p.eor_cost_factor == Decimal("99.9999")
+
+
+@pytest.mark.parametrize("bad_value", ["nan", "-1", "100.01", "101"])
+def test_placement_create_rejects_fee_percentage_over_100(bad_value):
+    with pytest.raises(ValidationError):
+        PlacementCreate(candidate_id=1, job_id=1, client_id=1, placement_type="werving_selectie",
+                         fee_percentage=bad_value)
+
+
+def test_placement_create_accepts_fee_percentage_at_100():
+    p = PlacementCreate(candidate_id=1, job_id=1, client_id=1, placement_type="werving_selectie",
+                         fee_percentage="100")
+    assert p.fee_percentage == Decimal("100")
+
+
+@pytest.mark.parametrize("bad_value", ["nan", "-1", "10000.00"])
+def test_placement_create_rejects_bad_expected_billable_hours(bad_value):
+    with pytest.raises(ValidationError):
+        PlacementCreate(candidate_id=1, job_id=1, client_id=1, placement_type="detachering",
+                         expected_billable_hours=bad_value)
+
+
+def test_placement_create_accepts_expected_billable_hours_at_the_cap():
+    p = PlacementCreate(candidate_id=1, job_id=1, client_id=1, placement_type="detachering",
+                         expected_billable_hours="9999.99")
+    assert p.expected_billable_hours == Decimal("9999.99")
+
+
+# ── OneOffCost: extra="forbid" ─────────────────────────────────────────
+
+def test_one_off_cost_accepts_label_and_amount():
+    c = OneOffCost(label="Relocation", amount="1500.00")
+    assert c.label == "Relocation"
+    assert c.amount == Decimal("1500.00")
+
+
+def test_one_off_cost_rejects_arbitrary_extra_keys():
+    with pytest.raises(ValidationError):
+        OneOffCost(label="Relocation", amount="1500.00", currency="EUR")
+
+
+def test_one_off_cost_rejects_negative_amount():
+    with pytest.raises(ValidationError):
+        OneOffCost(label="Relocation", amount="-1")
+
+
+def test_one_off_cost_rejects_nan_amount():
+    with pytest.raises(ValidationError):
+        OneOffCost(label="Relocation", amount="nan")
+
+
+def test_one_off_cost_rejects_empty_label():
+    with pytest.raises(ValidationError):
+        OneOffCost(label="", amount="1")
+
+
+def test_placement_create_rejects_one_off_cost_with_extra_key():
+    with pytest.raises(ValidationError):
+        PlacementCreate(
+            candidate_id=1, job_id=1, client_id=1, placement_type="detachering",
+            one_off_costs=[{"label": "Visa fee", "amount": "350.00", "vendor": "IND"}],
+        )
+
+
+def test_placement_create_accepts_valid_one_off_costs():
+    p = PlacementCreate(
+        candidate_id=1, job_id=1, client_id=1, placement_type="detachering",
+        one_off_costs=[{"label": "Visa fee", "amount": "350.00"}],
+    )
+    assert p.one_off_costs == [OneOffCost(label="Visa fee", amount="350.00")]
+
+
+# ── Every placements route requires admin (require_role dependency) ──────
+
+def test_every_placements_route_requires_admin():
+    import inspect
+    import routers.placements as placements
+
+    for route in placements.router.routes:
+        params = inspect.signature(route.endpoint).parameters
+        assert "current_user" in params, f"{route.path} has no current_user dependency"
+        default = params["current_user"].default
+        # Depends(require_role("admin")) -- inspect the wrapped dependency
+        # callable's closure for the role tuple require_role() curries in.
+        dep_callable = default.dependency
+        closure_cells = dep_callable.__closure__ or ()
+        role_args = [c.cell_contents for c in closure_cells if c.cell_contents == ("admin",)]
+        assert role_args, (
+            f"{route.path} current_user dependency is not require_role('admin') only: "
+            f"closure contents were {[c.cell_contents for c in closure_cells]}"
+        )
+
+
+# ── GDPR self-export covers the five immigration columns ─────────────────
+
+def test_self_export_candidate_query_is_select_star_so_it_carries_new_columns():
+    """routers/gdpr.py's export_my_data() reads the candidate row with a
+    bare `SELECT *`, not an explicit column list -- regression guard that
+    this stays true, since an explicit list would silently drop the five
+    WS-C.7 immigratiestatus columns (nationality, needs_work_permit,
+    kennismigrant_status, ruling_30pct_status, ind_case_number) from a
+    person's Art. 15/20 export without any test noticing."""
+    import inspect
+    import routers.gdpr as gdpr
+
+    source = inspect.getsource(gdpr.export_my_data)
+    assert 'SELECT * FROM candidates WHERE id = $1 AND deleted_at IS NULL' in source
+    assert 'SELECT * FROM candidates WHERE LOWER(email) = LOWER($1) AND deleted_at IS NULL' in source

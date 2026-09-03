@@ -17,17 +17,29 @@ Any other transition (including no-op same-status "changes" and leaving
 a terminal state) is rejected with 422. Every create/update/status-change/
 soft-delete writes to audit_log, JSON-serialized (json.dumps + ::jsonb --
 see commit 72b4bcd on why a raw dict crashes it).
+
+Security-auditor follow-up (M2 WS-C.7 FIX FIRST):
+  - create_placement validates candidate_id/client_id exist and job_id
+    belongs to client_id *before* the INSERT, so a bad reference is a
+    422 with a clear detail instead of a 500 from the FK constraint.
+  - list_placements' `total` is a real COUNT(*) over the filtered set,
+    not len(the one page of rows) -- those only match by coincidence
+    when a filter returns <= limit rows.
+  - Every response is validated/serialized through PlacementResponse
+    (money fields as Decimal, one_off_costs as OneOffCost) rather than
+    handing the raw asyncpg row dict straight back.
 """
 import json
 import logging
+from decimal import Decimal
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
-from core.database import fetch_one, fetch_all, execute
+from core.database import fetch_one, fetch_all, fetch_val, execute
 from core.deps import require_role
 from core.margin import compute_margin
-from models.schemas import PlacementCreate, PlacementUpdate, PlacementStatusUpdate
+from models.schemas import PlacementCreate, PlacementUpdate, PlacementStatusUpdate, PlacementResponse
 
 logger = logging.getLogger("talent_os.placements")
 
@@ -73,6 +85,15 @@ def _coerce_one_off_costs(row: dict) -> dict:
     return row
 
 
+def _serialize_one_off_costs(items) -> str:
+    """json.dumps()'d list of OneOffCost.model_dump(mode='json') dicts --
+    never a raw pydantic object or Decimal handed straight to json.dumps
+    (Decimal isn't JSON-serializable on its own; mode='json' turns it into
+    a string first). Matches the house rule (commit 72b4bcd): jsonb
+    columns are always json.dumps()'d before writing."""
+    return json.dumps([item.model_dump(mode="json") for item in items])
+
+
 async def _audit(action: str, actor_id: int, target_id: Optional[int], changes: dict) -> None:
     await execute(
         "INSERT INTO audit_log (action, actor_id, target_type, target_id, changes) "
@@ -81,7 +102,7 @@ async def _audit(action: str, actor_id: int, target_id: Optional[int], changes: 
     )
 
 
-async def _get_placement_or_404(placement_id: int) -> dict:
+async def _get_placement_row_or_404(placement_id: int) -> dict:
     row = await fetch_one(
         "SELECT * FROM placements WHERE id = $1 AND deleted_at IS NULL",
         placement_id,
@@ -89,6 +110,34 @@ async def _get_placement_or_404(placement_id: int) -> dict:
     if not row:
         raise HTTPException(status_code=404, detail="Placement not found")
     return _coerce_one_off_costs(row)
+
+
+async def _validate_references(candidate_id: int, job_id: int, client_id: int) -> None:
+    """422 (not a bare 500 from the FK constraint) when a referenced
+    candidate/client doesn't exist, or the job doesn't exist / doesn't
+    belong to the given client."""
+    candidate = await fetch_one(
+        "SELECT id FROM candidates WHERE id = $1 AND deleted_at IS NULL", candidate_id,
+    )
+    if not candidate:
+        raise HTTPException(status_code=422, detail=f"candidate_id {candidate_id} does not exist")
+
+    client = await fetch_one(
+        "SELECT id FROM clients WHERE id = $1 AND deleted_at IS NULL", client_id,
+    )
+    if not client:
+        raise HTTPException(status_code=422, detail=f"client_id {client_id} does not exist")
+
+    job = await fetch_one(
+        "SELECT id, client_id FROM job_orders WHERE id = $1 AND deleted_at IS NULL", job_id,
+    )
+    if not job:
+        raise HTTPException(status_code=422, detail=f"job_id {job_id} does not exist")
+    if job["client_id"] != client_id:
+        raise HTTPException(
+            status_code=422,
+            detail=f"job_id {job_id} belongs to client_id {job['client_id']}, not {client_id}",
+        )
 
 
 # ── CRUD ───────────────────────────────────────────────────────────────
@@ -104,34 +153,41 @@ async def list_placements(
     current_user: dict = Depends(require_role("admin")),
 ):
     conditions = ["deleted_at IS NULL"]
-    args = []
+    filter_args = []
     for col, val in (("status", status), ("candidate_id", candidate_id),
                       ("job_id", job_id), ("client_id", client_id)):
         if val is not None:
-            args.append(val)
-            conditions.append(f"{col} = ${len(args)}")
-    args.extend([limit, offset])
+            filter_args.append(val)
+            conditions.append(f"{col} = ${len(filter_args)}")
+    where_clause = " AND ".join(conditions)
+
+    total = await fetch_val(f"SELECT COUNT(*) FROM placements WHERE {where_clause}", *filter_args)
+
+    page_args = list(filter_args) + [limit, offset]
     rows = await fetch_all(
-        f"""SELECT * FROM placements WHERE {' AND '.join(conditions)}
-            ORDER BY created_at DESC LIMIT ${len(args) - 1} OFFSET ${len(args)}""",
-        *args,
+        f"""SELECT * FROM placements WHERE {where_clause}
+            ORDER BY created_at DESC LIMIT ${len(page_args) - 1} OFFSET ${len(page_args)}""",
+        *page_args,
     )
-    return {"items": [_coerce_one_off_costs(r) for r in rows], "total": len(rows)}
+    items = [PlacementResponse.model_validate(_coerce_one_off_costs(r)) for r in rows]
+    return {"items": items, "total": total}
 
 
-@router.get("/{placement_id}")
+@router.get("/{placement_id}", response_model=PlacementResponse)
 async def get_placement(
     placement_id: int,
     current_user: dict = Depends(require_role("admin")),
 ):
-    return await _get_placement_or_404(placement_id)
+    return await _get_placement_row_or_404(placement_id)
 
 
-@router.post("", status_code=201)
+@router.post("", status_code=201, response_model=PlacementResponse)
 async def create_placement(
     payload: PlacementCreate,
     current_user: dict = Depends(require_role("admin")),
 ):
+    await _validate_references(payload.candidate_id, payload.job_id, payload.client_id)
+
     row = await fetch_one(
         """INSERT INTO placements
            (candidate_id, job_id, client_id, placement_type, start_date, end_date,
@@ -145,7 +201,7 @@ async def create_placement(
         payload.start_date, payload.end_date, payload.hourly_bill_rate,
         payload.monthly_purchase_price, payload.eor_partner, payload.eor_cost_factor,
         payload.billing_basis, payload.expected_billable_hours, payload.fee_type,
-        payload.fee_percentage, payload.fee_amount, json.dumps(payload.one_off_costs),
+        payload.fee_percentage, payload.fee_amount, _serialize_one_off_costs(payload.one_off_costs),
         payload.status, payload.notes, current_user["id"],
     )
 
@@ -153,20 +209,20 @@ async def create_placement(
     return _coerce_one_off_costs(row)
 
 
-@router.patch("/{placement_id}")
+@router.patch("/{placement_id}", response_model=PlacementResponse)
 async def update_placement(
     placement_id: int,
     updates: PlacementUpdate,
     current_user: dict = Depends(require_role("admin")),
 ):
-    await _get_placement_or_404(placement_id)
+    await _get_placement_row_or_404(placement_id)
 
     update_dict = updates.model_dump(exclude_unset=True)
     if not update_dict:
         raise HTTPException(status_code=400, detail="No fields to update")
 
     if "one_off_costs" in update_dict:
-        update_dict["one_off_costs"] = json.dumps(update_dict["one_off_costs"])
+        update_dict["one_off_costs"] = _serialize_one_off_costs(updates.one_off_costs)
 
     set_parts = []
     values = []
@@ -197,7 +253,7 @@ async def update_placement(
     return _coerce_one_off_costs(row)
 
 
-@router.post("/{placement_id}/status")
+@router.post("/{placement_id}/status", response_model=PlacementResponse)
 async def update_placement_status(
     placement_id: int,
     payload: PlacementStatusUpdate,
@@ -206,7 +262,7 @@ async def update_placement_status(
     """Transition a placement's status. Validated against the fixed
     concept -> actief -> beeindigd (+ geannuleerd from concept/actief)
     graph before the write; see validate_status_transition()."""
-    existing = await _get_placement_or_404(placement_id)
+    existing = await _get_placement_row_or_404(placement_id)
     validate_status_transition(existing["status"], payload.status)
 
     row = await fetch_one(
@@ -251,17 +307,19 @@ async def delete_placement(
 @router.get("/{placement_id}/margin")
 async def get_placement_margin(
     placement_id: int,
-    gross_monthly_salary: Optional[float] = Query(
-        None, description="Detachering cost input: gross monthly salary, used with "
-                           "eor_cost_factor when monthly_purchase_price isn't set directly."),
-    annual_salary: Optional[float] = Query(
-        None, description="Werving & selectie fee input: annual salary the "
-                           "fee_percentage is applied to."),
+    gross_monthly_salary: Optional[Decimal] = Query(
+        None, ge=0, le=Decimal("99999999.99"), decimal_places=2, allow_inf_nan=False,
+        description="Detachering cost input: gross monthly salary, used with "
+                    "eor_cost_factor when monthly_purchase_price isn't set directly."),
+    annual_salary: Optional[Decimal] = Query(
+        None, ge=0, le=Decimal("99999999.99"), decimal_places=2, allow_inf_nan=False,
+        description="Werving & selectie fee input: annual salary the "
+                    "fee_percentage is applied to."),
     current_user: dict = Depends(require_role("admin")),
 ):
     """PROVISIONAL -- see core/margin.py. Not published anywhere; owner
     sign-off required before any figure this returns is treated as final."""
-    placement = await _get_placement_or_404(placement_id)
+    placement = await _get_placement_row_or_404(placement_id)
     return compute_margin(
         placement,
         gross_monthly_salary=gross_monthly_salary,
