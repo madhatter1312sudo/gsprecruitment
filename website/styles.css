@@ -113,6 +113,24 @@ body {
   overflow-x: hidden;
 }
 
+/* ── Keyboard focus (WS-A.8) ────────────────────────────────
+   Site-wide :focus-visible ring so keyboard/switch users always get a
+   visible outline, without adding one to a plain mouse click. Individual
+   components (inputs, quiz options, ...) already set their own focus
+   ring above this via :focus + box-shadow: var(--gold-glow) -- this is
+   the fallback for every interactive element that doesn't. */
+a:focus-visible,
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2px solid var(--gold);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 4px var(--gold-glow);
+  border-radius: var(--radius-xs);
+}
+
 /* ── Typography ─────────────────────────────────────────── */
 h1 { font-family: var(--font-display); font-size: clamp(2.5rem, 5vw, 3.9rem); line-height: 1.08; font-weight: 500; letter-spacing: -0.005em; }
 h2 { font-family: var(--font-display); font-size: clamp(1.7rem, 3vw, 2.5rem); line-height: 1.15; font-weight: 500; letter-spacing: -0.005em; margin-bottom: 12px; }

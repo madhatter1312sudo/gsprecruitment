@@ -13,7 +13,10 @@ localStorage first so Auth.requireAuth() lets the page's real JS run
 instead of immediately redirecting to the public site.
 
 Usage: python3 scripts/csp_violation_check.py
-Exits non-zero if any page reports a CSP violation or a page/console error.
+Add --warnings (WS-A.8) to also fail on any console.warn() across every
+page, not just console.error() -- the "zero console warnings" pass.
+Exits non-zero if any page reports a CSP violation or a page/console error
+(or, with --warnings, a warning).
 
 Known sandbox limitation: cdnjs.cloudflare.com can be blocked from this
 environment's outbound network. A failed *network request* to an allowed
@@ -22,6 +25,13 @@ fonts.googleapis.com) is NOT a CSP violation -- CSP only blocks otherwise
 per policy, it doesn't guarantee the request succeeds -- so those are
 logged as warnings, not failures. Only actual `securitypolicyviolation`
 events and unrelated console errors fail the run.
+
+Known --warnings-only sandbox artifact: this same aborted-external-network
+setup makes script.js's own console.warn('[Jobs] API fetch failed', ...)
+(kandidaten.html, vacatures.html) fire, because those pages' fetch() calls
+to api.gsprecruitment.nl can never succeed here. In production the API
+call succeeds and the warning never fires; this is not a regression from
+the branch being tested, and matches the network_warnings caveat above.
 """
 import http.server
 import pathlib
@@ -115,6 +125,13 @@ def seed_auth(page, role):
 
 
 def main():
+    # WS-A.8: --warnings additionally fails the run on any console.warn()
+    # (not just console.error()) across every page -- the "zero console
+    # warnings" evidence for that item. Off by default so this script's
+    # existing CSP-violation/error-only contract (used elsewhere, e.g. CI)
+    # doesn't change shape for callers that don't pass it.
+    check_warnings = "--warnings" in sys.argv
+
     try:
         from playwright.sync_api import sync_playwright
     except ImportError:
@@ -187,8 +204,17 @@ def main():
             page_console_errors = []
 
             def on_console(msg, rel=rel):
-                if msg.type == "error":
+                if msg.type == "error" or (check_warnings and msg.type == "warning"):
                     text = msg.text
+                    if msg.type == "warning":
+                        # Google Fonts' own stylesheet emits this on some
+                        # Chromium builds for a preload it decides not to
+                        # use immediately -- not something this repo's
+                        # markup controls, and not a real coverage gap.
+                        if "was preloaded" in text and "was not used" in text:
+                            return
+                        page_console_errors.append(f"warning: {text}")
+                        return
                     # Benign in a bare `python -m http.server` sandbox: no
                     # favicon route, and any real backend call to
                     # api.gsprecruitment.nl can't succeed from here. Neither
@@ -292,17 +318,18 @@ def main():
 
     print(f"\nPages checked: {len(pages)}")
     print(f"CSP violations: {len(violations)}")
-    print(f"Console/page errors: {len(console_errors)}")
+    print(f"Console/page errors{' + warnings' if check_warnings else ''}: {len(console_errors)}")
     if network_warnings:
         print(f"Non-violation network failures to allowed CDN hosts (sandbox network, not a CSP problem): {len(network_warnings)}")
         for rel, url in network_warnings:
             print(f"  {rel}: {url}")
 
     if violations or console_errors:
-        print("\nFAIL: CSP violations and/or console errors found.")
+        print("\nFAIL: CSP violations and/or console errors" + (" or warnings" if check_warnings else "") + " found.")
         sys.exit(1)
 
-    print("\nPASS: zero CSP violations and zero console/page errors across all pages.")
+    suffix = ", warnings," if check_warnings else ""
+    print(f"\nPASS: zero CSP violations and zero console/page errors{suffix} across all pages.")
 
 
 if __name__ == "__main__":

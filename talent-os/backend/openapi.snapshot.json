@@ -1769,6 +1769,152 @@
         "title": "ClientAnalytics",
         "type": "object"
       },
+      "ClientContactCreate": {
+        "properties": {
+          "email": {
+            "anyOf": [
+              {
+                "format": "email",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email"
+          },
+          "full_name": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Full Name",
+            "type": "string"
+          },
+          "is_primary": {
+            "default": false,
+            "title": "Is Primary",
+            "type": "boolean"
+          },
+          "lawful_basis": {
+            "anyOf": [
+              {
+                "pattern": "^(zakelijk_functioneel_adres|opt_in|bestaande_relatie)$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lawful Basis"
+          },
+          "phone": {
+            "anyOf": [
+              {
+                "maxLength": 50,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Phone"
+          },
+          "role": {
+            "anyOf": [
+              {
+                "pattern": "^(hiring_manager|finance|tekenbevoegd|overig)$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Role"
+          }
+        },
+        "required": [
+          "full_name"
+        ],
+        "title": "ClientContactCreate",
+        "type": "object"
+      },
+      "ClientContactUpdate": {
+        "properties": {
+          "email": {
+            "anyOf": [
+              {
+                "format": "email",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email"
+          },
+          "full_name": {
+            "anyOf": [
+              {
+                "maxLength": 255,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Full Name"
+          },
+          "is_primary": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is Primary"
+          },
+          "lawful_basis": {
+            "anyOf": [
+              {
+                "pattern": "^(zakelijk_functioneel_adres|opt_in|bestaande_relatie)$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lawful Basis"
+          },
+          "phone": {
+            "anyOf": [
+              {
+                "maxLength": 50,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Phone"
+          },
+          "role": {
+            "anyOf": [
+              {
+                "pattern": "^(hiring_manager|finance|tekenbevoegd|overig)$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Role"
+          }
+        },
+        "title": "ClientContactUpdate",
+        "type": "object"
+      },
       "ClientDashboard": {
         "properties": {
           "active_jobs": {
@@ -2681,6 +2827,19 @@
         "title": "JobOrderUpdate",
         "type": "object"
       },
+      "LeadReadUpdate": {
+        "properties": {
+          "is_read": {
+            "title": "Is Read",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "is_read"
+        ],
+        "title": "LeadReadUpdate",
+        "type": "object"
+      },
       "LeadSubmit": {
         "properties": {
           "company": {
@@ -3075,6 +3234,21 @@
           "job_id"
         ],
         "title": "PipelineAdd",
+        "type": "object"
+      },
+      "PipelineStageUpdate": {
+        "properties": {
+          "stage": {
+            "maxLength": 50,
+            "minLength": 1,
+            "title": "Stage",
+            "type": "string"
+          }
+        },
+        "required": [
+          "stage"
+        ],
+        "title": "PipelineStageUpdate",
         "type": "object"
       },
       "ProspectCreate": {
@@ -6321,6 +6495,217 @@
         ]
       }
     },
+    "/api/v1/admin/clients/{client_id}/contacts": {
+      "get": {
+        "description": "List a client's contacts (excludes soft-deleted rows).",
+        "operationId": "list_client_contacts_api_v1_admin_clients__client_id__contacts_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "client_id",
+            "required": true,
+            "schema": {
+              "title": "Client Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Client Contacts",
+        "tags": [
+          "client-contacts-admin"
+        ]
+      },
+      "post": {
+        "operationId": "create_client_contact_api_v1_admin_clients__client_id__contacts_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "client_id",
+            "required": true,
+            "schema": {
+              "title": "Client Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClientContactCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create Client Contact",
+        "tags": [
+          "client-contacts-admin"
+        ]
+      }
+    },
+    "/api/v1/admin/clients/{client_id}/contacts/{contact_id}": {
+      "delete": {
+        "description": "Soft delete -- sets deleted_at, never a real DELETE (GDPR\nprovenance/audit-trail reasons match the rest of this codebase).",
+        "operationId": "delete_client_contact_api_v1_admin_clients__client_id__contacts__contact_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "client_id",
+            "required": true,
+            "schema": {
+              "title": "Client Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "contact_id",
+            "required": true,
+            "schema": {
+              "title": "Contact Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Delete Client Contact",
+        "tags": [
+          "client-contacts-admin"
+        ]
+      },
+      "put": {
+        "operationId": "update_client_contact_api_v1_admin_clients__client_id__contacts__contact_id__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "client_id",
+            "required": true,
+            "schema": {
+              "title": "Client Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "contact_id",
+            "required": true,
+            "schema": {
+              "title": "Contact Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClientContactUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Update Client Contact",
+        "tags": [
+          "client-contacts-admin"
+        ]
+      }
+    },
     "/api/v1/admin/clients/{user_id}/approve": {
       "post": {
         "description": "Approve a client user for candidate search/detail access.",
@@ -6735,6 +7120,162 @@
         ]
       }
     },
+    "/api/v1/admin/leads": {
+      "get": {
+        "description": "Unified leads list across contact_submissions + quiz_submissions.\n`type` filters by interest_type (contact_submissions only -- quiz_submissions\nrows never match a type filter, since they have no interest_type column).\n`unread` filters by is_read on whichever table each row is from.",
+        "operationId": "list_leads_api_v1_admin_leads_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "type",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Type"
+            }
+          },
+          {
+            "in": "query",
+            "name": "unread",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Unread"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Leads",
+        "tags": [
+          "admin-portal"
+        ]
+      }
+    },
+    "/api/v1/admin/leads/{source}/{lead_id}": {
+      "patch": {
+        "operationId": "update_lead_read_state_api_v1_admin_leads__source___lead_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "source",
+            "required": true,
+            "schema": {
+              "title": "Source",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "lead_id",
+            "required": true,
+            "schema": {
+              "title": "Lead Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LeadReadUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Update Lead Read State",
+        "tags": [
+          "admin-portal"
+        ]
+      }
+    },
     "/api/v1/admin/outreach/drafts": {
       "get": {
         "description": "List outreach drafts, optionally filtered by status.",
@@ -7045,6 +7586,106 @@
         "summary": "Run Job",
         "tags": [
           "outreach"
+        ]
+      }
+    },
+    "/api/v1/admin/pipeline/{entry_id}/history": {
+      "get": {
+        "operationId": "admin_get_pipeline_stage_history_api_v1_admin_pipeline__entry_id__history_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "entry_id",
+            "required": true,
+            "schema": {
+              "title": "Entry Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Admin Get Pipeline Stage History",
+        "tags": [
+          "admin-portal"
+        ]
+      }
+    },
+    "/api/v1/admin/pipeline/{entry_id}/stage": {
+      "patch": {
+        "operationId": "admin_update_pipeline_stage_api_v1_admin_pipeline__entry_id__stage_patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "entry_id",
+            "required": true,
+            "schema": {
+              "title": "Entry Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PipelineStageUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Admin Update Pipeline Stage",
+        "tags": [
+          "admin-portal"
         ]
       }
     },
@@ -8739,6 +9380,31 @@
         ]
       }
     },
+    "/api/v1/client/contacts": {
+      "get": {
+        "description": "A client sees only its own contacts -- client_id is resolved from\nthe caller's own user_clients row, never taken from the request.",
+        "operationId": "list_own_client_contacts_api_v1_client_contacts_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Own Client Contacts",
+        "tags": [
+          "client-contacts-portal"
+        ]
+      }
+    },
     "/api/v1/client/dashboard": {
       "get": {
         "description": "Get client dashboard stats.",
@@ -9253,6 +9919,108 @@
           }
         ],
         "summary": "Add To Pipeline",
+        "tags": [
+          "client-portal"
+        ]
+      }
+    },
+    "/api/v1/client/pipeline/{entry_id}/history": {
+      "get": {
+        "description": "Stage-change history for one pipeline entry -- scoped to the\nclient's own entries only.",
+        "operationId": "get_pipeline_stage_history_api_v1_client_pipeline__entry_id__history_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "entry_id",
+            "required": true,
+            "schema": {
+              "title": "Entry Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Pipeline Stage History",
+        "tags": [
+          "client-portal"
+        ]
+      }
+    },
+    "/api/v1/client/pipeline/{entry_id}/stage": {
+      "patch": {
+        "description": "Move a pipeline entry to a new stage. Scoped to the client's own\npipeline -- an entry belonging to another client 404s, same pattern as\nevery other client-portal lookup in this router.",
+        "operationId": "update_pipeline_stage_api_v1_client_pipeline__entry_id__stage_patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "entry_id",
+            "required": true,
+            "schema": {
+              "title": "Entry Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PipelineStageUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Update Pipeline Stage",
         "tags": [
           "client-portal"
         ]

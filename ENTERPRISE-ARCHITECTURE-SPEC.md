@@ -1,1198 +1,231 @@
-# GSP Recruitment — Enterprise-Grade Website Architecture Specification
+# GSP Recruitment: Enterprise Architecture Specification
 
-> **Date:** 2025-06-25  
-> **Status:** Draft v1.0  
-> **Scope:** Full-stack recruitment platform with user registration, candidate dashboard, salary benchmarking tool, and mobile-first responsive design
+> **Status:** As-built (WS-F.9, frozen to what runs on `main`)
+> **Scope:** Infrastructure, backend, database, frontend delivery and data protection for gsprecruitment.nl / api.gsprecruitment.nl
 
 ---
 
 ## Table of Contents
 
-1. [Current State Analysis](#1-current-state-analysis)
-2. [Target Architecture Overview](#2-target-architecture-overview)
-3. [Registration & Auth System](#3-registration--auth-system)
-4. [Full Candidate Journey](#4-full-candidate-journey)
-5. [Market Value Compass — Salary Benchmarking Tool](#5-market-value-compass--salary-benchmarking-tool)
-6. [Logo & Branding Concept](#6-logo--branding-concept)
-7. [Frontend Architecture](#7-frontend-architecture)
-8. [Backend Architecture (Augmented)](#8-backend-architecture-augmented)
-9. [Mobile-First Responsive Design Plan](#9-mobile-first-responsive-design-plan)
-10. [Database Schema Additions](#10-database-schema-additions)
-11. [API Route Map](#11-api-route-map)
-12. [Implementation Roadmap](#12-implementation-roadmap)
+1. [Overview](#1-overview)
+2. [Infrastructure](#2-infrastructure)
+3. [Backend (FastAPI)](#3-backend-fastapi)
+4. [Database](#4-database-postgresql-16)
+5. [Frontend delivery](#5-frontend-delivery)
+6. [Mobile app](#6-mobile-app)
+7. [Security posture](#7-security-posture)
+8. [GDPR & data protection](#8-gdpr--data-protection)
+9. [Decision log](#9-decision-log)
+10. [Appendix A: Niet vóór 3 factureerbare zetels](#appendix-a--niet-vóór-3-factureerbare-zetels)
+
+This document describes the stack as it runs today. Work that goes beyond it lives in Appendix A, not in the body: nothing in sections 1–9 below is a proposal.
 
 ---
 
-## 1. Current State Analysis
+## 1. Overview
 
-### Existing Frontend (`/website/`)
-| Asset | Lines | Notes |
-|-------|-------|-------|
-| `index.html` | 967 | Static SPA — single page, all sections in one file. EN/NL bilingual via CSS class toggle. |
-| `styles.css` | 1,767 | Mature design tokens (navy/orange palette), Inter font, CSS variables, scroll animations, responsive breakpoints at 1024px and 768px. No auth/portal styles. |
-| `script.js` | 307 | Language toggle, hamburger menu, scroll animations, contact form (POSTs to `/api/contact`), lead magnet form (POSTs to `/api/lead`). No auth logic. |
+GSP Recruitment is a faceless recruitment agency (Brainport/Eindhoven, NL) placing embedded software / C++ / mechatronics / OT-cybersecurity engineers and the testing roles around those four disciplines. The whole business runs on:
 
-### Existing Backend (`/talent-os/backend/`)
-| Module | Purpose |
-|--------|---------|
-| `FastAPI` on port 8000 | Async API server |
-| `asyncpg` pool | PostgreSQL connection, min=2 max=10 |
-| 7 routers | health, candidates, jobs, matches, apollo, webhook |
-| `X-API-Key` auth | API key in header for all data endpoints |
-| HMAC-SHA256 | Webhook signature verification |
-| Celery + Redis | Background tasks (Apollo sync, semantic matching) |
-| SMTP configured (Zoho) | Email ready but no auth email flows yet |
+| Layer | What it is |
+|---|---|
+| API | FastAPI + asyncpg, single process group, one PostgreSQL 16 instance |
+| Public site + portals | Static HTML/CSS/JS, no client framework, served by Cloudflare Workers Static Assets |
+| Admin panel | Vendored Tabler 1.4, dark navy/gold reskin, same static hosting as the site |
+| Mobile app | Expo SDK 57 / React Native (candidate app; see `app/CLAUDE.md`) |
+| Host | One Hetzner VPS running Docker Compose (postgres + backend) |
+| CDN/DNS/WAF | Cloudflare (also hosts the static site) |
+| Object storage | Cloudflare R2 (candidate CVs) |
+| CI/CD | GitHub Actions: `ci.yml` (tests, contract check, OpenAPI snapshot), `deploy.yml` (rsync + SSH deploy to the VPS on push to `main`) |
 
-### Existing Database (PostgreSQL 16)
-7 tables already defined: `clients`, `job_orders`, `candidates`, `matches`, `outreach_campaigns`, `outreach_messages`, `hiring_signals`, `salary_benchmarks`, `skill_gaps`, `referral_graph`, `data_subject_requests`, `model_feedback`.
-
-**MISSING:** Users table, roles, sessions, refresh tokens, email verification, password reset, candidate profiles linked to auth.
+There is no background task queue, no server-side rendering framework, and no second application server. One backend process serves every router; one Postgres instance holds every table.
 
 ---
 
-## 2. Target Architecture Overview
+## 2. Infrastructure
 
-```
-┌─────────────────────────────────────────────────────────────────────┐
-│                          CLOUDFLARE                                │
-│  DNS, DDoS protection, CDN (gsptalent.com, api.gsptalent.com)     │
-└──────────────────────────┬──────────────────────────────────────────┘
-                           │
-┌──────────────────────────▼──────────────────────────────────────────┐
-│                     REVERSE PROXY (Caddy)                           │
-│  /api/* → backend:8000  │  /* → static SPA or Next.js              │
-│  /ws/*  → backend:8000  │  Auto-TLS, HTTP/3                        │
-└──────────────────────────┬──────────────────────────────────────────┘
-                           │
-           ┌───────────────┼───────────────┐
-           │               │               │
-┌──────────▼──────────┐ ┌──▼──────────┐ ┌──▼──────────┐
-│   PUBLIC SITE       │ │   API       │ │   DASHBOARD │
-│  (static/Next.js)   │ │   backend   │ │  (Next.js)  │
-│  / → Landing        │ │  :8000      │ │  /dashboard │
-│  /jobs              │ │  FastAPI    │ │  /profile   │
-│  /salary-compass    │ │             │ │  /matches   │
-│  /register          │ │  asyncpg    │ │  /settings  │
-│  /login             │ │  Celery     │ │             │
-└─────────────────────┘ └──────┬──────┘ └─────────────┘
-                               │
-                    ┌──────────▼──────────┐
-                    │     PostgreSQL       │
-                    │  (asyncpg pool)      │
-                    │  + Redis (Celery)    │
-                    └─────────────────────┘
-```
+### 2.1 What's actually deployed
 
-### Key Architectural Decisions
+The **root `docker-compose.yml`** is the file GitHub Actions rsyncs to the VPS and the file that runs in production. It defines exactly two services:
 
-1. **SPA → Next.js migration** for SSR/SSG on public pages, client routing on dashboard
-2. **JWT + refresh token auth** instead of API-key-only (reserve API keys for machine-to-machine)
-3. **Dual-mode auth**: session-based (browser cookies) + JWT bearer (mobile/app)
-4. **No model hosting** — all AI/LLM via OpenRouter (existing decision, maintained)
-5. **Celery** for async: email sending, CV parsing, salary data refresh, Apollo sync
+- `postgres` (`postgres:16-alpine`), bound to `127.0.0.1:5432`, credentials from `talent-os/.env` + `talent-os/postgres.env` (both gitignored, `postgres.env` layered on top so DB credentials can be rotated/audited independently of the rest of `.env`)
+- `backend` (built from `talent-os/backend` via `talent-os/Dockerfile`), bound to `127.0.0.1:8000`
+
+Both carry JSON-file log rotation (5 × 20 MB) and a memory limit (`postgres` 4G, `backend` 2G). There is no reverse-proxy, task-queue, or cache service in this file: nothing beyond postgres and the API process runs in production.
+
+**`talent-os/docker-compose.yml`, `talent-os/nginx.conf`** describe a fuller reference stack (postgres, backend, a reverse proxy, and the task-queue/cache pair named in Appendix A) that predates the current setup. It is kept in the repo for reference but **is not deployed**: no host runs it, no workflow syncs it. Do not treat its presence as evidence that those extra services exist in production; the root `docker-compose.yml` above is the source of truth for what's live. Reconciling or removing the unused reference file is a housekeeping item, not a spec change.
+
+TLS termination and the public-facing reverse proxy in front of `127.0.0.1:8000` for `api.gsprecruitment.nl` are configured directly on the VPS host, outside this repo (no Caddyfile or nginx config for it is checked in). An operator changing that layer works on the VPS itself, not from a file in this repository.
+
+### 2.2 Deploy pipeline (`.github/workflows/deploy.yml`)
+
+On every push to `main`, after `ci.yml`'s test job passes:
+
+1. `rsync` syncs `talent-os/` (excluding `.env`, `__pycache__`, `*.pyc`) and the root `docker-compose.yml` to the VPS over SSH (key: repo secret `VPS_SSH_PRIVATE_KEY`; host/user/path: repo variables `VPS_HOST`/`VPS_USER`/`VPS_PATH`, falling back to the current production values if unset).
+2. `postgres.env` is generated from `.env` on the VPS if it doesn't already exist (idempotent, never overwrites, never prints a secret).
+3. The current `backend` image is tagged `:previous` for rollback, then `docker compose up -d --build backend` rebuilds and restarts it.
+4. Every file in `migrations/0*.py` (000 first, then in filename order) runs via `docker compose run --rm --no-deps backend`, i.e. a fresh one-off container from the just-built image: not `exec` against the restarted service, so a broken image fails the deploy here instead of silently skipping migrations. Each migration is self-tracking (`schema_migrations`, see §4.2) and a no-op if already applied.
+5. A health check hits `GET /health` on the VPS (`127.0.0.1:8000`, no WAF in the way at that hop).
+6. On success, the image is also tagged with the deploy's git SHA and old SHA-tagged images beyond the 5 most recent are pruned.
+7. On failure, the backend is rolled back to the `:previous` image tag and restarted automatically.
+
+Concurrency is serialized (`group: deploy-production, cancel-in-progress: false`) so two merges in quick succession queue instead of racing on the VPS.
+
+The site ("frontend") is not part of this SSH deploy: Cloudflare auto-deploys `website/` from the repo per `wrangler.jsonc` (§5). `deploy.yml`'s "Sync website" step is a no-op comment left in place as a marker of that split, not a real deploy step.
+
+`scripts/deploy.sh` is the same rsync-and-SSH sequence runnable by hand from an operator machine that already has `VPS_SSH_PRIVATE_KEY`'s private half at a local path; it is a manual fallback for the same pipeline, not a second, different deploy path. `start.sh` / `stop.sh` / `update.sh` are VPS-local convenience wrappers around `docker compose up -d` / `down` / `pull && up -d --build`.
+
+### 2.3 Object storage: R2
+
+CVs are stored in a Cloudflare R2 bucket (`gsp`), configured via `R2_ENDPOINT`/`R2_ACCESS_KEY_ID`/`R2_SECRET_ACCESS_KEY`/`R2_BUCKET` env vars written onto the VPS by the one-off, re-runnable `r2-setup.yml` workflow. `talent-os/scripts/migrate_cv_to_r2.py` moved surviving local CV files into the bucket (dry-run by default). CV files are not stored on the backend container's local disk in normal operation.
 
 ---
 
-## 3. Registration & Auth System
+## 3. Backend (FastAPI)
 
-### 3.1 User Types (Roles)
+`talent-os/backend/main.py` builds one FastAPI app and mounts these routers (all under `/api` unless noted):
 
-| Role | Description | Permissions |
-|------|-------------|-------------|
-| `candidate` | Job seeker | Register, view matches, update profile, use salary compass, apply to jobs |
-| `client` | Hiring company | Post jobs, view candidate matches, manage team |
-| `admin` | GSP internal | Full access, manage users, view analytics, configuration |
-| `superadmin` | System owner | Everything + infra config, billing, audit logs |
+`health`, `auth`, `mfa`, `candidates`, `jobs` (+ `public_jobs_router`), `matches`, `apollo`, `webhook`, `candidate` (candidate portal), `client` (client portal), `admin` (admin portal), `public`, `gdpr` (+ `admin_router`, `suppression_router`), `outreach`, `blog_admin`, `retention_admin` (+ `apollo_pool_router`), `mobile`, `prospects`.
 
-### 3.2 Auth Flow (JWT + Refresh Tokens)
+Runs as `settings.backend_workers` (4) separate uvicorn worker processes: relevant to §3.2 below, since in-memory state is per-process, not shared.
 
-```
-┌──────────┐     ┌──────────┐     ┌──────────┐     ┌──────────┐
-│  Visitor │     │   API    │     │   DB     │     │   Email  │
-└────┬─────┘     └────┬─────┘     └────┬─────┘     └────┬─────┘
-     │                │                │                │
-     │  POST /auth/register            │                │
-     │────────────────►│                │                │
-     │                 │ INSERT users   │                │
-     │                 │───────────────►│                │
-     │                 │ (status='pending')             │
-     │                 │                │                │
-     │  201 Created    │                │                │
-     │◄────────────────│                │                │
-     │                 │                │                │
-     │  ── email verification ──        │                │
-     │                 │  SEND email    │                │
-     │                 │────────────────────────────────►│
-     │                 │                │                │
-     │                 │                │    Email with  │
-     │                 │                │  verify token  │
-     │                 │                │◄────────────────│
-     │                 │                │                │
-     │  GET /auth/verify?token=xxx      │                │
-     │────────────────►│                │                │
-     │                 │ UPDATE status  │                │
-     │                 │ = 'active'     │                │
-     │                 │───────────────►│                │
-     │  redirect /login │               │                │
-     │◄────────────────│                │                │
-     │                 │                │                │
-     │  POST /auth/login (email+pass)   │                │
-     │────────────────►│                │                │
-     │                 │ VERIFY creds   │                │
-     │                 │───────────────►│                │
-     │  200 + JWT      │                │                │
-     │ + refresh_token │                │                │
-     │◄────────────────│                │                │
-```
+### 3.1 Auth model
 
-### 3.3 Token Structure
+Two schemes, matching the existing house rule (`X-API-Key` for machine endpoints, Bearer JWT for the admin surface), extended with real user auth:
 
-```json
+| Surface | Auth |
+|---|---|
+| `/api/candidates*`, `/api/jobs`, `/api/matches*` | `X-API-Key` header |
+| `/api/v1/admin/*` | Bearer JWT, obtained from `POST /api/auth/login` |
+| `/api/public/jobs`, `/api/v1/public/blog` | none (public) |
+| Candidate / client portals | Bearer JWT issued at registration or login |
+
+Auth router (`routers/auth.py`) covers: register, login, JWT refresh, email verification (tokens: `secrets.token_urlsafe`, only their SHA-256 hash stored, 24h TTL), password reset/forgot, change/set password, profile read/update, and Google sign-in (`/api/auth/google/login` + `/api/auth/google/callback`, reusing the same Google Cloud OAuth client already configured for transactional email). There is no LinkedIn OAuth backend flow: the LinkedIn button present in the registration UI is not wired to a token exchange.
+
+Every auth-adjacent route is rate-limited through a single shared `slowapi` `Limiter` (`core/ratelimit.py`): one instance imported everywhere, so a client can't dodge the cap by mixing endpoints. That limiter's storage is in-memory per worker process (no shared external backend), so a nominal "10/minute" limit is enforced as up to "10 × 4 workers per minute" in the worst case today; this is a known, documented ceiling, not a bug to silently work around.
+
+Failed logins are tracked and lock the account after repeated failures (`migrations/020_login_lockout.py`).
+
+### 3.2 Admin MFA (WS-E.12)
+
+`routers/mfa.py` adds TOTP-based multi-factor auth **for the `admin` role only** (`migrations/021_admin_mfa.py`): setup (provisions a secret + QR payload), enable, disable, status, verify (second factor at login), and single-use recovery codes. Every enable/disable/recovery action is written to the audit log. This is built and live today: it is not a future item and does not belong in Appendix A.
+
+A separate origin for the admin panel (WS-E.13) is planned but not yet built; the admin panel is currently served from the same static site as the public pages, gated by the JWT + MFA login flow above, not by network separation. Like MFA, this is a near-term, scoped item and is not filed under Appendix A.
+
+---
+
+## 4. Database (PostgreSQL 16)
+
+One instance, one schema, `asyncpg` connection pool (min 2 / max 10).
+
+### 4.1 Core tables
+
+`users`, `clients`, `job_orders`, `candidates`, `matches`, `outreach_campaigns`, `outreach_messages`, `hiring_signals`, `salary_benchmarks`, `skill_gaps`, `referral_graph`, `data_subject_requests`, `model_feedback`, `client_prospects`, plus the portal/blog/audit tables added along the way (see §4.2).
+
+### 4.2 Migrations
+
+`talent-os/backend/migrations/` holds `000_baseline.py` through `022_apollo_pool_flag.py`, run via `_runner.py`'s pattern: every migration records itself in `schema_migrations` and is a no-op on re-run, so the full sequence executes unconditionally on every deploy (§2.2 step 4): there is no separate "pending migrations" check to get out of sync with.
+
+| Range | What it added |
+|---|---|
+| 000 | Baseline schema |
+| 001–002 | Users, portal tables |
+| 003 | `schema_migrations` self-tracking |
+| 004–006 | Token expiry fix, performance indexes, redundant-index cleanup |
+| 007–009 | CV file path, outreach subject, salary benchmark seed data |
+| 010–012 | Outreach drafts, blog posts, mobile/growth tables |
+| 013–016 | Email null-distinctness, prospect/company index, salary benchmark natural key, job order columns |
+| 017 | Email verification |
+| 018 | GDPR provenance + opt-out columns |
+| 019 | Production schema alignment |
+| 020 | Login lockout |
+| 021 | Admin MFA |
+| 022 | Apollo pool flag |
+
+CI (`ci.yml`) regenerates `openapi.snapshot.json` from the live FastAPI app on every push and fails if it drifts from the committed copy, and runs `scripts/check_api_contract.py` (static regex check of frontend calls against backend routes): both catch a router/schema change without a matching doc update before it reaches `main`.
+
+---
+
+## 5. Frontend delivery
+
+`wrangler.jsonc` configures Cloudflare **Workers Static Assets** (not Cloudflare Pages, not a framework build) to serve the `website/` directory as-is:
+
+```jsonc
 {
-  "access_token": {
-    "token": "eyJhbGciOiJIUzI1NiIs...",
-    "expires_in": 1800,
-    "type": "Bearer"
-  },
-  "refresh_token": {
-    "token": "dGhpcyBpcyBh...",
-    "expires_in": 604800,
-    "type": "Refresh"
-  },
-  "user": {
-    "id": 42,
-    "email": "candidate@example.com",
-    "role": "candidate",
-    "full_name": "Jan de Vries",
-    "email_verified": true,
-    "profile_complete": 35
-  }
+  "name": "gsprecruitment",
+  "assets": { "directory": "website" }
 }
 ```
 
-### 3.4 Auth Endpoints
+No bundler, no SSR/SSG, no client framework: every page is hand-authored HTML/CSS/JS. `website/_headers` sets security headers (HSTS, `X-Content-Type-Options`, `X-Frame-Options`, `Permissions-Policy`, and an enforced Content-Security-Policy) for every path, per the [Workers Static Assets `_headers` convention](https://developers.cloudflare.com/workers/static-assets/headers/). The CSP is enforced (not report-only) as of the M1 inline-script/attribute cleanup; a matching `Content-Security-Policy-Report-Only` header is kept one release longer as a safety net.
 
-| Method | Path | Purpose |
-|--------|------|---------|
-| `POST` | `/auth/register` | Create account (candidate or client) |
-| `POST` | `/auth/login` | Email + password → JWT pair |
-| `POST` | `/auth/refresh` | Refresh token → new JWT pair |
-| `POST` | `/auth/logout` | Invalidate refresh token (server-side) |
-| `GET` | `/auth/verify` | Email verification (token in query) |
-| `POST` | `/auth/resend-verify` | Resend verification email |
-| `POST` | `/auth/forgot-password` | Send reset link |
-| `POST` | `/auth/reset-password` | Reset with token |
-| `GET` | `/auth/me` | Current user profile |
-| `PATCH` | `/auth/me` | Update profile |
-| `DELETE` | `/auth/me` | Anonymize/delete (GDPR) |
-
-### 3.5 Registration Form Fields
-
-**Candidate Registration:**
-- Email (required, unique, verified)
-- Password (min 8 chars, must have uppercase + number)
-- Full name (required)
-- Phone (optional)
-- LinkedIn URL (optional)
-- Primary skills (multi-select: Embedded, C++, Mechatronics, Cybersecurity, Motion Control, Other)
-- Years of experience (optional)
-- Current location (required — region filter for Brainport)
-- Work authorization (EU citizen / EU work permit / Need visa)
-- Consent: GDPR data processing (required)
-- Consent: salary data contribution (optional)
-- reCAPTCHA v3 (passive, no checkbox)
-
-**Client Registration:**
-- Company name (required)
-- Company email domain (required, verified)
-- Password (same rules)
-- Full name (required)
-- Job title (required)
-- Company size (select)
-- LinkedIn company URL (optional)
-- Industry focus (multi-select)
-- GDPR consent (required)
-- reCAPTCHA v3
-
-### 3.6 Password Policy
-
-- Minimum 8 characters, maximum 128
-- Must contain: 1 uppercase, 1 lowercase, 1 digit
-- Optional: 1 special character
-- Bcrypt (cost factor 12)
-- Rate limit: 5 attempts per 15 min per email
-- Lockout after 10 failed attempts (24h or email reset)
-
-### 3.7 Session Management
-
-- Access token: 30 min (short-lived, in-memory or httpOnly cookie)
-- Refresh token: 7 days (httpOnly cookie, `Secure`, `SameSite=Strict`)
-- Refresh token rotation: each refresh issues a new refresh token, old one invalidated
-- Server-side blocklist for logout (Redis, TTL = max token lifetime)
-- Concurrent sessions: limit 5 per user (enforce via session table)
+The public site, candidate portal, client portal and admin panel are four separate static surfaces under `website/`, each with its own hash-routed single-page navigation (`window.location.hash`, no client-side router library): see `SITE-DESIGN-SPEC.md` for the page-by-page breakdown.
 
 ---
 
-## 4. Full Candidate Journey
+## 6. Mobile app
 
-```
-VISITOR ──► REGISTER ──► VERIFY ──► ONBOARD ──► EXPLORE ──► GET MATCHED ──► APPLY ──► PLACED ──► ALUMNI
-  │           │            │          │            │            │             │          │          │
-  ▼           ▼            ▼          ▼            ▼            ▼             ▼          ▼          ▼
-Landing    Create       Email     Profile    Job Board    AI Matching    Submit    Offer     Alumni
-Page       Account      Verify    Wizard     + Salary    + Warm Intro   App       Accepted  Network
-                                    │         Compass                                       │
-                                    ▼                                                     ▼
-                              CV Upload                                              Retention
-                              Skill Test                                             Check-ins
-                              Preferences                                           Referrals
-```
-
-### Phase 1: Visitor → Registered (`~2 min`)
-1. Lands on `gsptalent.com`
-2. Clicks "Register" or "Get Started" (from hero, salary CTA, or any CTAs)
-3. Sees role selection screen: *"I'm a Candidate"* vs *"I'm an Employer"*
-4. Fills registration form (see §3.5)
-5. Submit → 201 Created → "Check your email" screen
-6. Email sent with verification link (expires 24h)
-
-### Phase 2: Verified → Onboarded (`~5 min`)
-7. Clicks verification link → status becomes `active`
-8. Redirected to `/onboard` (multi-step wizard):
-
-   **Step 1 — Profile Basics**
-   - Profile photo upload (optional)
-   - Professional headline (e.g. "Senior Embedded Engineer at ASML")
-   - Bio/summary (200-500 chars)
-
-   **Step 2 — Skills & Experience**
-   - Skill tags (from predefined list + custom)
-   - Years of experience per skill domain
-   - Upload CV (PDF/DOCX → AI-extracted via OpenRouter)
-   - GitHub/Portfolio URL
-
-   **Step 3 — Preferences**
-   - Job type: perm / contract / both
-   - Salary range (min/max slider)
-   - Location preference: Eindhoven / Remote / Hybrid
-   - Willing to relocate: Yes/No
-   - Company size preference (startup / scale-up / enterprise)
-   - Industry focus
-
-   **Step 4 — Market Value Compass** (see §5)
-   - See your estimated market value
-   - Option to contribute anonymized salary data to improve benchmarks
-
-   **Step 5 — Ready**
-   - Dashboard preview
-   - "Notify me about matching roles" toggle
-   - WhatsApp opt-in for quick notifications
-
-9. Welcome email with onboarding summary sent
-
-### Phase 3: Onboarded → Matched (`ongoing`)
-10. Dashboard shows:
-    - **Match score** (0-100%) for active job orders
-    - **Recent matches** sorted by score, with role, company, location
-    - **Market Value Compass** snapshot (your value vs market)
-    - **Application tracker** (applied / in review / interview / offer)
-    - **Upcoming interviews** calendar
-    - **Skill gap analysis** (X skill missing for Y top role)
-11. AI matching runs daily (Celery task):
-    - Semantic similarity between candidate profile + CV and open job orders
-    - Combined score: skills match (60%) + experience (20%) + cultural indicators (10%) + location (10%)
-12. High-scoring matches → Warm Introduction via Gijs (human touchpoint)
-13. Candidate receives email/notification: *"Gijs knows the hiring manager at [Company] — interested?"*
-
-### Phase 4: Matched → Applied → Interviewing
-14. Candidate expresses interest → application submitted
-15. GSP reviews → warm introduction made
-16. Status updates in dashboard: `applied` → `intro_made` → `interview_scheduled` → `interview_complete` → `offer` → `accepted` → `placed`
-17. Each status change triggers notification (email + in-app toast)
-
-### Phase 5: Placed → Alumni
-18. Candidate accepted offer → `placed` status
-19. **12-month retention tracking** (check-ins at month 1, 3, 6, 12)
-20. Alumni network: referral rewards, salary data contribution, mentor matching
-21. GDPR data retention: candidate data kept for 2 years post-placement unless withdrawn
+`app/` is an Expo SDK 57 / React Native candidate app; see `app/CLAUDE.md` for its own architecture notes. It talks to the same FastAPI backend via the `mobile` router.
 
 ---
 
-## 5. Market Value Compass — Salary Benchmarking Tool
+## 7. Security posture
 
-### 5.1 Overview
-An interactive salary benchmarking widget that combines GSP's proprietary data with real-time market intelligence. Serves as a **lead magnet** and **engagement driver** for registered candidates.
-
-### 5.2 Visual Mockup
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│  🔶 MARKET VALUE COMPASS                                     │
-│  Know your worth in Brainport Eindhoven                      │
-│                                                              │
-│  ┌──────────────────────────────────────────────────────┐   │
-│  │  ROLE           │  Senior Embedded Engineer           │   │
-│  ├──────────────────────────────────────────────────────┤   │
-│  │  EXPERIENCE     │  [━━━━━━━●━━━━━━━━━━] 7 years      │   │
-│  ├──────────────────────────────────────────────────────┤   │
-│  │  SKILLS         │  [C++] [RTOS] [ARM] [FPGA] [+add] │   │
-│  ├──────────────────────────────────────────────────────┤   │
-│  │  LOCATION       │  [▼ Eindhoven region ▼]            │   │
-│  └──────────────────────────────────────────────────────┘   │
-│                                                              │
-│  ┌──────────────────────────────┐ ┌──────────────────────┐  │
-│  │  YOUR ESTIMATED VALUE        │ │  MARKET RANGE        │  │
-│  │  €78,500 - €95,000 / year   │ │  €55K ─●──€100K      │  │
-│  │                              │ │        ↑ YOU         │  │
-│  │  P75 percentile             │ │  ┌──────┬──────┐     │  │
-│  │  Above market median (+12%) │ │  │ P25  │ P75  │     │  │
-│  └──────────────────────────────┘ │  │€55K  │€85K  │     │  │
-│                                    │  ├──────┼──────┤     │  │
-│                                    │  │ P50  │ P90  │     │  │
-│                                    │  │€70K  │€100K │     │  │
-│                                    │  └──────┴──────┘     │  │
-│                                    └──────────────────────┘  │
-│                                                              │
-│  ┌──────────────────────────────────────────────────────┐   │
-│  │  🔍 BREAKDOWN BY FACTOR                              │   │
-│  │                                                      │   │
-│  │  Base Salary      ████████████████░░░  78%  €70K     │   │
-│  │  Bonus            ██████████░░░░░░░░  52%  €8K      │   │
-│  │  Stock/Options    ███████░░░░░░░░░░░  38%  €5K      │   │
-│  │  Benefits         ████████████░░░░░░  62%  €12K     │   │
-│  │                                        ──────────    │   │
-│  │  Total Estimated                          €95K       │   │
-│  └──────────────────────────────────────────────────────┘   │
-│                                                              │
-│  ┌──────────────────────────────────────────────────────┐   │
-│  │  📈 MARKET TRENDS                                    │   │
-│  │                                                      │   │
-│  │  Salary growth YoY: +5.2%  ▲                         │   │
-│  │  Demand index: 78/100 (High) 🔥                      │   │
-│  │  Time-to-hire avg: 42 days ⏱                        │   │
-│  └──────────────────────────────────────────────────────┘   │
-│                                                              │
-│  📥 [Download Full Report (PDF)]  🔗 [Compare with Others]  │
-│                                                              │
-│  *Powered by GSP Recruitment data + aggregated anonymized   │
-│   contributions from 150+ placements in Brainport*          │
-└─────────────────────────────────────────────────────────────┘
-```
-
-### 5.3 Functional Requirements
-
-| Feature | Priority | Description |
-|---------|----------|-------------|
-| Role selector | P0 | Dropdown with 20+ tech roles (embedded, C++, mechatronics, cybersecurity, motion control) |
-| Experience slider | P0 | 0-20+ years, updates chart in real-time |
-| Skills tag input | P0 | Multi-select from domain skills, affects estimate |
-| Location selector | P0 | Brainport sub-regions (Eindhoven, Veldhoven, Helmond, Best, Son, etc.) |
-| Salary gauge | P0 | Animated gauge showing user's estimated value vs market percentiles |
-| Breakdown chart | P0 | Bar chart showing base + bonus + equity + benefits |
-| Market trends | P1 | YoY growth, demand index, time-to-hire from GSP proprietary data |
-| Download PDF | P1 | Generate branded PDF report |
-| Compare | P2 | Compare two roles or two experience levels side-by-side |
-| Historical view | P2 | Trend line showing salary changes over past 3 years |
-| Anonymized submit | P2 | Contribute your salary data to improve benchmarks (opt-in, GDPR-compliant) |
-
-### 5.4 Data Sources
-
-| Source | Type | Freshness |
-|--------|------|-----------|
-| GSP placement data (150+ placements) | Proprietary | Real-time |
-| `salary_benchmarks` table | Database | Updated weekly via Celery task |
-| External APIs (levels.fyi, Glassdoor) | Aggregated | Monthly refresh |
-| User-contributed anonymous data | Crowdsourced | Real-time (with validation) |
-| Apollo.io market intelligence | Enriched | Weekly |
-
-### 5.5 Backend Implementation
-
-New router: `/api/salary-compass/`
-
-| Method | Path | Purpose |
-|--------|------|---------|
-| `GET` | `/api/salary-compass/roles` | List available roles with seniority levels |
-| `POST` | `/api/salary-compass/estimate` | Calculate estimate based on role/exp/skills/location |
-| `POST` | `/api/salary-compass/contribute` | Anonymous salary data contribution |
-| `GET` | `/api/salary-compass/trends` | Market trend data |
-| `GET` | `/api/salary-compass/report` | Generate PDF report |
-
-### 5.6 Algorithm (Pseudo)
-
-```python
-async def estimate_market_value(role, experience, skills, location):
-    baseline = await fetch_baseline(role, seniority_level(experience))
-    
-    skill_bonus = sum(skill_premium[s] for s in skills if s in skill_premium)
-    location_factor = location_multiplier[location]  # Brainport premium vs national
-    experience_curve = logistic_growth(experience, midpoint=5, max_multiplier=1.4)
-    
-    estimated_min = baseline.p50 * experience_curve + skill_bonus * 0.7
-    estimated_max = baseline.p75 * experience_curve * 1.1 + skill_bonus * 1.3
-    
-    return {
-        "estimated_range": (round(estimated_min, -3), round(estimated_max, -3)),
-        "p25": baseline.p25,
-        "p50": baseline.p50,
-        "p75": baseline.p75,
-        "p90": baseline.p90,
-        "confidence": compute_confidence(baseline.sample_size, skills_match),
-        "breakdown": compute_breakdown(estimated_min, estimated_max, role),
-        "trends": market_trends[role]
-    }
-```
+- **Secrets**: API key, JWT secret, DB credentials, SMTP, R2, Google OAuth, webhook secret: all environment variables (`talent-os/.env`, `talent-os/postgres.env`, both gitignored), never committed, never logged.
+- **WAF**: production rejects requests without a real `User-Agent` in front of `api.gsprecruitment.nl`: probes and scripts must send one (`curl -H "User-Agent: gsp-ops" ...`).
+- **Rate limiting**: shared `slowapi` limiter (§3.1) on auth-adjacent routes.
+- **Login lockout**: account lock after repeated failed logins (§3.1).
+- **Admin MFA**: TOTP + recovery codes, admin role only (§3.2).
+- **Webhook verification**: HMAC-SHA256 signature check on inbound webhooks.
+- **CSP**: enforced, `script-src`/`style-src` restricted to `'self'` plus a short CDN allowlist; no inline script anywhere in `website/**/*.html`.
+- **Transport**: HSTS with `includeSubDomains` on the static site; Postgres and the backend port are bound to `127.0.0.1` on the VPS, not exposed publicly except through whatever reverse proxy/TLS termination the host runs (§2.1).
 
 ---
 
-## 6. Logo & Branding Concept
+## 8. GDPR & data protection
 
-### 6.1 Challenge
-Current Drive access has `drive.file` scope — can only see files created by the app, not manually uploaded logo files. Need to generate concepts that can be executed with available tools or sourced externally.
+Full detail lives in `docs/VERWERKINGSREGISTER.md` (processing register, LIA, DPIA-light) and `docs/SOURCING-SOP.md`; this section is the pointer, not a duplicate.
 
-### 6.2 Brand DNA
-| Attribute | Expression |
-|-----------|------------|
-| **Premium** | Clean, minimal, not loud |
-| **Tech** | Precision-engineering aesthetic — think ASML, Prodrive |
-| **Human** | Warmth through orange accent, not cold blue corporate |
-| **Brainport** | Regional pride, innovation hub |
-| **Founder-led** | Personal, boutique, not mass-market |
-
-### 6.3 Logo Concept Recommendation
-
-**Primary Concept: "The Compass G"** (Recommended)
-
-```
-         ┌─────────────┐
-         │    ▲         │
-         │   / \        │
-         │  / G \       │
-         │ /     \      │
-         │└───────┘     │
-         │    ▲         │
-         │    █         │
-         └─────────────┘
-```
-
-- A letter "G" stylized as a compass needle pointing Northeast (Brainport direction from center of Netherlands)
-- Orange gradient (same as current `#f97316`) for the G/needle
-- Dark navy background (current `#0a1628`)
-- Clean, sans-serif "GSP Recruitment" in Inter Bold beside it
-- Secondary line: "Tech Talent · Brainport"
-
-**Why compass:**
-- Aligns with "Market Value Compass" feature
-- Suggests guidance, direction, career navigation
-- Points to Brainport (literal geographic reference)
-- Minimal, scalable to favicon size
-
-**Alternative: "The Circuit G"**
-- Letter G formed by stylized PCB trace corners (90° angles)
-- Orange lines on dark background
-- Appeals to embedded/IoT/electronics talent demographic
-
-**Alternative: "The Bridge G"**
-- G formed by two interlocking brackets `[ ]` suggesting connection
-- Top bracket orange, bottom bracket navy
-- Represents "connecting talent to opportunity"
-
-### 6.4 Color Palette (Maintain existing)
-
-| Token | Hex | Usage |
-|-------|-----|-------|
-| `--orange-500` | `#f97316` | Primary accent, CTAs, highlights |
-| `--navy-900` | `#060d1a` | Hero backgrounds, footer |
-| `--navy-800` | `#0a1628` | Section backgrounds |
-| `--navy-700` | `#0f1d35` | Card backgrounds, alt sections |
-| `--white` | `#ffffff` | Primary text |
-| `--navy-200` | `#7fa0c9` | Secondary text |
-| WhatsApp Green | `#25D366` | WhatsApp float (existing) |
-
-### 6.5 Implementation Path (since Drive access is limited)
-
-1. **Generate SVG logo programmatically** using the compass-G concept — can be done with inline SVG in code
-2. **Use an SVG-to-favicon pipeline** — the existing data:image/svg+xml favicon already works
-3. **Commission a designer** via Fiverr/99Designs (~€200-500) for final polished version
-4. **Temporary fallback**: The current `logo-icon` with gradient "G" is clean and professional — it works as a placeholder while Drive access is resolved
+- **Processing register (art. 30 AVG)**: `docs/VERWERKINGSREGISTER.md` §1: activities, legal basis, recipients, retention, security measures.
+- **Data subject rights**: `routers/gdpr.py`: `GET /api/gdpr/export` (self-service export), `POST /api/gdpr/withdraw-consent`, `DELETE /api/gdpr/account` (self-service erasure), `POST` on `admin_router` for an admin-initiated erasure of a person across every table (`erase_person`), all logged to `data_subject_requests`.
+- **Suppression list**: `suppression_router` (`POST`/`GET`): an opt-out/do-not-contact list separate from deletion, so a "STOP" reply keeps someone off future outreach even after their active record is gone.
+- **Retention table**: single source of truth is `talent-os/backend/core/retention.py`; `docs/VERWERKINGSREGISTER.md` §1.4 and `docs/SOURCING-SOP.md` are generated copies of the same table, checked against the code by `tests/test_retention.py`. A daily purge job (`services/scheduler.py::run_retention_purge()`, apscheduler, 04:00 Europe/Amsterdam) applies it, using the same `erase_person` logic as a manual request. The purge job exists but defaults to **off** (`RETENTION_PURGE_ENABLED=false`); a real run can also be triggered by hand via `POST /api/v1/admin/retention/run` (a non-dry-run requires `confirm:"PURGE"`).
+- **Sourced-data safeguards**: Art. 14 notice text, source-URL provenance requirement, and the 3-month no-response retention window for sourced prospects are enforced in the outreach draft flow (`docs/SOURCING-SOP.md`, `docs/VERWERKINGSREGISTER.md` §2–4): outreach stays draft-only, a human sends.
 
 ---
 
-## 7. Frontend Architecture
+## 9. Decision log
 
-### 7.1 Technology Stack
-
-| Layer | Technology | Rationale |
-|-------|-----------|-----------|
-| Framework | **Next.js 15** (App Router) | SSR for SEO, API routes, middleware for auth |
-| Language | TypeScript | Type safety, better DX |
-| Styling | **Tailwind CSS v4** + CSS Variables | Utility-first, consistent with existing design tokens |
-| State | React Context + React Query (TanStack Query) | Server state management, caching |
-| Forms | React Hook Form + Zod | Performant forms with validation |
-| Auth | next-auth (Auth.js) v5 | Social + credentials, battle-tested |
-| Charts | Recharts or Chart.js | Salary compass visualizations |
-| Animation | Framer Motion | Page transitions, scroll animations |
-| Email templates | React Email | Type-safe email components |
-| PWA | next-pwa | Offline-capable, installable |
-
-### 7.2 Page Structure
-
-```
-/ (public)
-├── page.tsx                    # Landing page (from current index.html)
-├── jobs/page.tsx               # Public job listings (SSR)
-├── jobs/[id]/page.tsx          # Job detail (SSR)
-├── salary-compass/page.tsx     # Market Value Compass (public teaser)
-├── register/page.tsx           # Registration (role selection)
-├── register/candidate/page.tsx # Candidate form
-├── register/client/page.tsx    # Employer form
-├── login/page.tsx              # Login
-├── forgot-password/page.tsx    # Password reset
-├── verify/page.tsx             # Email verification result
-├── privacy/page.tsx            # Privacy policy
-├── cookies/page.tsx            # Cookie policy
-
-/dashboard (protected)
-├── layout.tsx                  # Dashboard layout (sidebar + header)
-├── page.tsx                    # Overview — match score, recent activity
-├── profile/page.tsx            # View/edit profile
-├── profile/cv/page.tsx         # CV upload & parsing
-├── profile/skills/page.tsx     # Skills assessment
-├── matches/page.tsx            # All matches with filters
-├── matches/[id]/page.tsx       # Match detail
-├── applications/page.tsx       # Application tracker
-├── compass/page.tsx            # Full Market Value Compass (authenticated)
-├── messages/page.tsx           # Messages from GSP (future)
-├── settings/page.tsx           # Account, notifications, GDPR
-├── settings/security/page.tsx  # Password change, 2FA
-├── settings/notifications/page.tsx  # Email/SMS preferences
-
-/admin (protected, admin only)
-├── layout.tsx
-├── page.tsx                    # Dashboard — KPIs
-├── candidates/page.tsx         # Candidate management
-├── jobs/page.tsx               # Job order management
-├── matches/page.tsx            # Match review & approval
-├── salary-data/page.tsx        # Salary benchmark management
-├── analytics/page.tsx          # Platform analytics
-├── users/page.tsx              # User management
-├── settings/page.tsx           # System configuration
-```
-
-### 7.3 Component Tree (Key Components)
-
-```
-<App>
-  <AuthProvider>
-    <QueryClientProvider>
-      <ThemeProvider>  <!-- EN/NL + dark theme -->
-        <Router>
-          <PublicLayout>           <!-- Landing, Jobs, etc. -->
-            <Header />             <!-- Nav, lang toggle, auth state -->
-            <Hero />
-            <ServicesSection />
-            <SalaryCompassTeaser />  <!-- Public version, limited data -->
-            <Footer />
-          </PublicLayout>
-
-          <DashboardLayout>        <!-- Authenticated -->
-            <DashboardSidebar />   <!-- Nav links, user info -->
-            <DashboardHeader />    <!-- Search, notifications, avatar -->
-            <Breadcrumbs />
-            <DashboardContent />   <!-- Varies by route -->
-            <NotificationToast />
-          </DashboardLayout>
-
-          <SalaryCompass>          <!-- Used in public teaser + dashboard -->
-            <RoleSelector />
-            <ExperienceSlider />
-            <SkillTags />
-            <LocationSelect />
-            <SalaryGauge />        <!-- Animated SVG gauge -->
-            <PercentileChart />    <!-- Bar chart with P25-P90 -->
-            <BreakdownChart />     <!-- Stacked bar: base + bonus + equity -->
-            <MarketTrends />       <!-- YoY growth, demand index -->
-            <ContributeModal />    <!-- Optional data contribution -->
-            <DownloadReportButton />
-          </SalaryCompass>
-        </Router>
-      </ThemeProvider>
-    </QueryClientProvider>
-  </AuthProvider>
-</App>
-```
-
-### 7.4 Frontend Auth Middleware (Next.js)
-
-```typescript
-// middleware.ts
-export { auth as middleware } from "@/auth"
-
-export const config = {
-  matcher: [
-    "/dashboard/:path*",
-    "/admin/:path*",
-    "/api/protected/:path*",
-  ]
-}
-```
+| # | Decision | Why | Status |
+|---|---|---|---|
+| 1 | Static site, no frontend framework | Four hand-authored surfaces (site/candidate/client/admin), no build step, ships on Cloudflare Workers Static Assets with zero server cost | As-built |
+| 2 | JWT auth for portals, `X-API-Key` kept for machine endpoints | Matches existing API-key contract for integrations while adding real user sessions | As-built |
+| 3 | No task queue or cache service | Nothing today needs async background processing; the fuller reference compose file (Appendix A names the services it adds) was never brought up in production | As-built |
+| 4 | Single VPS, Docker Compose, no orchestrator | Two services (postgres, backend), rsync+SSH deploy is simple and reversible | As-built |
+| 5 | Migrations self-track and re-run unconditionally on every deploy | No separate "pending migrations" state to drift from what's actually applied | As-built |
+| 6 | R2 for CV storage, not local disk | Survives container/VPS rebuilds; no local-disk backup gap | As-built |
+| 7 | Admin MFA (TOTP), admin role only | Highest-privilege accounts get a second factor first (WS-E.12) | As-built |
+| 8 | Separate admin origin | Reduces blast radius of a static-site compromise on the admin surface | Planned (WS-E.13), not yet built |
+| 9 | Outreach is draft-only | A human sends every message; nothing auto-sends | As-built |
 
 ---
 
-## 8. Backend Architecture (Augmented)
+## Appendix A: Niet vóór 3 factureerbare zetels
 
-### 8.1 New Python Modules
+The items below go beyond what's described in sections 1–9. None of them run in production, and none are scheduled. They stay here as a record of ideas that were drafted before the stack above was frozen to as-built, not as a commitment or a roadmap with dates. Building any of them is a decision the owner makes once revenue supports it: not before 3 billable seats (contractors placed and invoiced).
 
-| Module | Purpose |
-|--------|---------|
-| `routers/auth.py` | Registration, login, token management |
-| `routers/salary_compass.py` | Market Value Compass endpoints |
-| `routers/dashboard.py` | Aggregated dashboard data |
-| `routers/profile.py` | Candidate profile CRUD |
-| `routers/admin.py` | Admin-only management endpoints |
-| `services/auth_service.py` | JWT creation/validation, password hashing, email verification |
-| `services/email_service.py` | Email sending (Zoho SMTP) with templates |
-| `services/salary_service.py` | Salary estimation algorithm |
-| `models/auth_models.py` | Pydantic schemas for auth |
-| `core/jwt.py` | JWT encode/decode/refresh utilities |
-| `tasks/email_tasks.py` | Celery tasks for async email sending |
-
-### 8.2 Auth Router Details
-
-```python
-# routers/auth.py — Outline
-router = APIRouter(prefix="/auth", tags=["auth"])
-
-@router.post("/register")
-async def register(data: RegisterRequest, request: Request):
-    """Create user account, send verification email."""
-    # 1. Validate input (email unique, password strength)
-    # 2. Hash password (bcrypt, cost=12)
-    # 3. Insert into users table (status='pending')
-    # 4. Generate verification token (JWT, expires 24h)
-    # 5. Send verification email (async via Celery)
-    # 6. Return 201 + user info (no token yet)
-
-@router.post("/login")
-async def login(data: LoginRequest, response: Response):
-    """Authenticate user, set httpOnly cookies."""
-    # 1. Look up user by email
-    # 2. Verify password with bcrypt
-    # 3. Check account status (active, locked, pending)
-    # 4. Generate access + refresh tokens
-    # 5. Set httpOnly cookies + return user data
-    # 6. Remove old sessions if > 5 concurrent
-
-@router.post("/refresh")
-async def refresh(request: Request, response: Response):
-    """Refresh access token using refresh token."""
-    # 1. Extract refresh token from httpOnly cookie
-    # 2. Validate and decode
-    # 3. Check not on blocklist (Redis)
-    # 4. Issue new access + refresh tokens
-    # 5. Invalidate old refresh token (rotation)
-
-@router.post("/logout")
-async def logout(request: Request, response: Response):
-    """Invalidate all tokens for user."""
-    # 1. Add refresh token to Redis blocklist (TTL = remaining lifetime)
-    # 2. Delete session record
-    # 3. Clear cookies
-
-@router.get("/verify")
-async def verify_email(token: str):
-    """Verify email address via token."""
-    # 1. Decode and validate verification token
-    # 2. Update user status to 'active'
-    # 3. Return success page redirect
-
-@router.post("/forgot-password")
-async def forgot_password(data: ForgotPasswordRequest):
-    """Send password reset email."""
-    # 1. Look up user by email (don't reveal if exists)
-    # 2. Generate reset token (JWT, expires 1h)
-    # 3. Send reset email (async)
-    # 4. Always return 200 (security: don't reveal email existence)
-
-@router.post("/reset-password")
-async def reset_password(data: ResetPasswordRequest):
-    """Reset password with token."""
-    # 1. Decode and validate reset token
-    # 2. Hash new password
-    # 3. Update user record
-    # 4. Invalidate all sessions
-```
-
-### 8.3 Email Service
-
-```python
-# services/email_service.py — Outline
-class EmailService:
-    def __init__(self):
-        self.smtp = aiosmtplib  # Async SMTP via Zoho
-
-    async def send_verification(self, to_email: str, name: str, token: str):
-        """Send email verification with link."""
-        template = render_template("verify-email", {
-            "name": name,
-            "link": f"https://gsptalent.com/verify?token={token}",
-            "expires_hours": 24
-        })
-        await self._send(to_email, "Verify your GSP Recruitment account", template)
-
-    async def send_welcome(self, to_email: str, name: str):
-        """Send welcome email after verification."""
-        template = render_template("welcome", {
-            "name": name,
-            "dashboard_link": "https://gsptalent.com/dashboard"
-        })
-        await self._send(to_email, "Welcome to GSP Recruitment!", template)
-
-    async def send_password_reset(self, to_email: str, name: str, token: str):
-        """Send password reset link."""
-        template = render_template("reset-password", {
-            "name": name,
-            "link": f"https://gsptalent.com/reset-password?token={token}",
-            "expires_hours": 1
-        })
-        await self._send(to_email, "Reset your GSP Recruitment password", template)
-
-    async def send_match_alert(self, to_email: str, name: str, matches: list):
-        """Send daily/weekly match digest."""
-        template = render_template("match-alert", {
-            "name": name,
-            "matches": matches,
-            "dashboard_link": "https://gsptalent.com/dashboard/matches"
-        })
-        await self._send(to_email, "New job matches for you!", template)
-```
-
-### 8.4 Existing Backend Enhancement Requirements
-
-| Current | Enhancement Needed |
-|---------|-------------------|
-| API key only auth | Add JWT auth middleware (dual-mode: API key OR JWT) |
-| No user table | Add `users` table + role-based access control |
-| Contact form POSTs to `/api/contact` | Add contact router (currently only frontend code) |
-| Lead form POSTs to `/api/lead` | Add lead capture router |
-| No session management | Add Redis session store + refresh token rotation |
-| No email verification flow | Add verification tokens + Celery email tasks |
-| Static CORS origins | Add dynamic origin checking for auth cookies |
-| No rate limiting | Add `slowapi` middleware for auth endpoints |
+- **Next.js** (or any SSR/SSG framework) for the public site or portals, replacing the current static HTML/CSS/JS
+- **Celery + Redis** for background/async work (AI matching runs, CV parsing, salary data refresh, Apollo sync)
+- **PWA / service worker / offline support** for the site or portals
+- **Page builder / CMS** for non-blog page content, testimonials, or case studies
+- **`superadmin` role** and separate infra/billing/audit-config surface beyond the current `admin` role
+- **Market Value Compass**: an interactive, authenticated salary-benchmarking tool with chart visualisation and PDF export, distinct from the static salary table that exists today
+- **Retained search** as a service line/workflow
+- **ML-based match scoring** (as opposed to the existing rule/keyword matching)
+- **Multilingual CMS** beyond the current hand-maintained EN/NL toggle on static pages
+- LinkedIn OAuth login (a LinkedIn button exists in the registration UI today with no backend flow behind it: wiring it up, or removing the button, is an open item but not itself part of this list's scope)
+- Client-portal analytics/reporting, team/sub-user management, and billing self-service
+- A dedicated candidate/client mobile experience beyond the current Expo app's scope
 
 ---
 
-## 9. Mobile-First Responsive Design Plan
-
-### 9.1 Breakpoint Strategy (Maintain Current + Expand)
-
-| Name | Width | Layout | Notes |
-|------|-------|--------|-------|
-| **Phone** | < 480px | Single column, stacked cards | Smallest screens (iPhone SE) |
-| **Phone+** | 481-768px | Single column, wider cards | Most common mobile |
-| **Tablet** | 769-1024px | 2-column grid, visible sidebar | iPads, small laptops |
-| **Desktop** | 1025-1440px | Multi-column, full layout | Current default |
-| **Wide** | > 1440px | Max-width 1200px, centered | Large monitors |
-
-### 9.2 Responsive Dashboard Layout
-
-```
-PHONE (< 768px)                       TABLET (769-1024px)
-┌─────────────────┐                  ┌──────────┬──────────────┐
-│ 🔶 GSP  ☰      │  ← hamburger    │ Logo     │ 🔍  Notif  👤│
-├─────────────────┤                  ├──────────┴──────────────┤
-│ 📊 Dashboard    │                  │                         │
-│                 │                  │ 📊 Welcome, Jan!       │
-│ Match Score     │                  │ ┌─────┬─────┬─────┐    │
-│ ████████░░ 82%  │                  │ │82%  │3 New│2 Int│    │
-│                 │                  │ │Match│Jobs │views│    │
-│ Recent Matches  │                  │ └─────┴─────┴─────┘    │
-│ ┌─────────────┐ │                  │                         │
-│ │ Sr. Embedded│ │                  │ Recent Matches...      │
-│ │ ASML  92%   │ │                  │ ┌───────────────────┐  │
-│ └─────────────┘ │                  │ │Sr. Embedded @ ASML│  │
-│ ┌─────────────┐ │                  │ │Score: 92%  Apply→│  │
-│ │ C++ Engineer│ │                  │ └───────────────────┘  │
-│ │VDL ETG  88% │ │                  │                         │
-│ └─────────────┘ │                  │ [Bottom Nav]            │
-│                 │                  │ 🏠 🔍 📋 👤            │
-│ [Bottom Nav]    │                  │                         │
-│ 🏠 🔍 📋 👤    │                  └─────────────────────────┘
-└─────────────────┘
-```
-
-### 9.3 Key Mobile UX Decisions
-
-| Element | Implementation |
-|---------|---------------|
-| Navigation | Bottom tab bar (5 icons: Home, Search, Matches, Profile, Settings) on mobile |
-| Sidebar | Off-canvas drawer (slide from left) on mobile, permanent on desktop |
-| Tables | Horizontal scroll with sticky first column on salary table |
-| Charts | Responsive SVG (viewport-aware sizing) for salary compass |
-| Forms | Stacked fields (no multi-column rows on mobile) |
-| Buttons | Full-width CTAs on mobile, inline on desktop |
-| Filter bars | Collapsible accordion filters on mobile, inline on desktop |
-| Modals | Full-screen bottom sheets on mobile, centered overlay on desktop |
-| Notifications | Toast at top on mobile (not obstructing bottom nav), bottom-right on desktop |
-
-### 9.4 Salary Compass Responsive
-
-```
-MOBILE                                          DESKTOP
-┌─────────────────────────┐                    ┌─────────────────────────────────────┐
-│ 🔶 Market Value Compass │                    │ 🔶 Market Value Compass              │
-│                         │                    │                                     │
-│ [Role ▼]                │                    │ [Role ▼]  [Exp ●━━━━━]  [Skills +]  │
-│ [Exp ●━━━━━━━]          │                    │                                     │
-│ [Skills: C++, RTOS +]   │                    │ ┌─────────────────┐ ┌─────────────┐ │
-│                         │                    │ │ €78K - €95K     │ │  P25 P50    │ │
-│ ┌─────────────────┐     │                    │ │ Your Estimate   │ │  P75  P90   │ │
-│ │ €78K - €95K     │     │                    │ └─────────────────┘ └─────────────┘ │
-│ │ Your Estimate   │     │                    │                                     │
-│ └─────────────────┘     │                    │ ┌─── Breakdown ──────────────────┐  │
-│                         │                    │ │ Base ■■■■■■■■■■░░░  €70K      │  │
-│ ┌─── Breakdown ──────┐  │                    │ │ Bonus ■■■■■■░░░░░░  €8K       │  │
-│ │ Base  ■■■■■■■  €70K│  │                    │ └───────────────────────────────┘  │
-│ │ Bonus ■■■■    €8K  │  │                    │                                     │
-│ └────────────────────┘  │                    │ 📈 Trends  📥 Download             │
-│                         │                    └─────────────────────────────────────┘
-│ 📥 Download Report      │
-└─────────────────────────┘
-```
-
-### 9.5 CSS Architecture (Migration from current to Tailwind)
-
-**Phase 1 (Hybrid):**
-- Keep existing `styles.css` design tokens as CSS variables
-- Add Tailwind utility classes for new dashboard components
-- Use `@apply` in component CSS to reference existing tokens
-
-**Phase 2 (Full Migration):**
-- Migrate design tokens to `tailwind.config.ts`
-- Convert section-by-section from CSS to Tailwind
-- Remove `styles.css` once all sections migrated
-
-**Critical to preserve:**
-- All existing design tokens (navy palette, orange accent, spacing, radius, shadows)
-- Intersection Observer scroll animations
-- Language toggle mechanism (EN/NL)
-- Responsive breakpoints
-
----
-
-## 10. Database Schema Additions
-
-### 10.1 New Table: `users`
-
-```sql
-CREATE TABLE IF NOT EXISTS users (
-    id              SERIAL PRIMARY KEY,
-    email           VARCHAR(255) NOT NULL UNIQUE,
-    password_hash   VARCHAR(255) NOT NULL,
-    full_name       VARCHAR(255) NOT NULL,
-    role            VARCHAR(50) NOT NULL DEFAULT 'candidate'
-                    CHECK (role IN ('candidate', 'client', 'admin', 'superadmin')),
-    status          VARCHAR(50) NOT NULL DEFAULT 'pending'
-                    CHECK (status IN ('pending', 'active', 'suspended', 'locked', 'deleted')),
-    
-    -- Profile fields
-    phone           VARCHAR(50),
-    avatar_url      VARCHAR(500),
-    linkedin_url    VARCHAR(500),
-    location        VARCHAR(255),
-    
-    -- Candidate-specific (nullable for clients)
-    headline        VARCHAR(255),
-    bio             TEXT,
-    years_experience DECIMAL(4,1),
-    skills          TEXT[],
-    languages       TEXT[],
-    education       TEXT,
-    cv_file_path    VARCHAR(500),
-    cv_text         TEXT,
-    job_type_pref   VARCHAR(50),
-    salary_min      INTEGER,
-    salary_max      INTEGER,
-    location_pref   VARCHAR(50),
-    willing_relocate BOOLEAN DEFAULT FALSE,
-    
-    -- Client-specific (nullable for candidates)
-    company_name    VARCHAR(255),
-    company_domain  VARCHAR(255),
-    company_size    VARCHAR(50),
-    job_title       VARCHAR(255),
-    
-    -- Auth & security
-    email_verified  BOOLEAN DEFAULT FALSE,
-    email_verified_at TIMESTAMP,
-    two_factor_enabled BOOLEAN DEFAULT FALSE,
-    last_login_at   TIMESTAMP,
-    failed_login_attempts INTEGER DEFAULT 0,
-    locked_until    TIMESTAMP,
-    
-    -- Notifications
-    email_notifications BOOLEAN DEFAULT TRUE,
-    whatsapp_opt_in     BOOLEAN DEFAULT FALSE,
-    whatsapp_number     VARCHAR(50),
-    
-    -- GDPR
-    consent_granted_at      TIMESTAMP,
-    consent_withdrawn_at    TIMESTAMP,
-    data_retention_until    TIMESTAMP,
-    deleted_at              TIMESTAMP,
-    
-    -- Timestamps
-    created_at  TIMESTAMP DEFAULT NOW(),
-    updated_at  TIMESTAMP DEFAULT NOW()
-);
-
--- Indexes
-CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
-CREATE INDEX IF NOT EXISTS idx_users_role ON users(role);
-CREATE INDEX IF NOT EXISTS idx_users_status ON users(status);
-CREATE INDEX IF NOT EXISTS idx_users_company ON users(company_name);
-CREATE INDEX IF NOT EXISTS idx_users_skills ON users USING GIN(skills);
-```
-
-### 10.2 New Table: `sessions`
-
-```sql
-CREATE TABLE IF NOT EXISTS sessions (
-    id              SERIAL PRIMARY KEY,
-    user_id         INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    refresh_token_hash VARCHAR(255) NOT NULL,
-    user_agent      VARCHAR(500),
-    ip_address      VARCHAR(45),
-    expires_at      TIMESTAMP NOT NULL,
-    revoked_at      TIMESTAMP,
-    created_at      TIMESTAMP DEFAULT NOW()
-);
-
-CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
-CREATE INDEX IF NOT EXISTS idx_sessions_token ON sessions(refresh_token_hash);
-```
-
-### 10.3 New Table: `email_verification_tokens`
-
-```sql
-CREATE TABLE IF NOT EXISTS email_verification_tokens (
-    id              SERIAL PRIMARY KEY,
-    user_id         INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    token_hash      VARCHAR(255) NOT NULL UNIQUE,
-    type            VARCHAR(50) NOT NULL
-                    CHECK (type IN ('verify_email', 'reset_password', 'change_email')),
-    expires_at      TIMESTAMP NOT NULL,
-    used_at         TIMESTAMP,
-    created_at      TIMESTAMP DEFAULT NOW()
-);
-
-CREATE INDEX IF NOT EXISTS idx_verification_tokens_user ON email_verification_tokens(user_id);
-CREATE INDEX IF NOT EXISTS idx_verification_tokens_hash ON email_verification_tokens(token_hash);
-```
-
-### 10.4 New Table: `salary_contributions`
-
-```sql
-CREATE TABLE IF NOT EXISTS salary_contributions (
-    id              SERIAL PRIMARY KEY,
-    user_id         INTEGER REFERENCES users(id) ON DELETE SET NULL,
-    role_title      VARCHAR(255) NOT NULL,
-    seniority       VARCHAR(50),
-    years_experience DECIMAL(4,1),
-    location        VARCHAR(255),
-    base_salary     INTEGER NOT NULL,
-    bonus           INTEGER DEFAULT 0,
-    stock_options   INTEGER DEFAULT 0,
-    benefits_value  INTEGER DEFAULT 0,
-    currency        VARCHAR(3) DEFAULT 'EUR',
-    is_anonymous    BOOLEAN DEFAULT TRUE,
-    validated       BOOLEAN DEFAULT FALSE,
-    created_at      TIMESTAMP DEFAULT NOW()
-);
-
-CREATE INDEX IF NOT EXISTS idx_salary_contrib_role ON salary_contributions(role_title);
-```
-
-### 10.5 Existing Schema Updates
-
-| Table | Addition |
-|-------|----------|
-| `candidates` | Add `user_id INTEGER REFERENCES users(id)` — link to auth user |
-| `clients` | Add `user_id INTEGER REFERENCES users(id)` — link to auth user |
-| `candidates` | Add `profile_complete DECIMAL(3,1) DEFAULT 0` — onboarding progress % |
-| `candidates` | Add `onboarding_step INTEGER DEFAULT 0` — current wizard step |
-| `job_orders` | Add `created_by INTEGER REFERENCES users(id)` — who posted it |
-
----
-
-## 11. API Route Map
-
-### 11.1 Public Routes (No Auth)
-
-| Method | Path | Description |
-|--------|------|-------------|
-| `GET` | `/health` | System health (existing) |
-| `GET` | `/api/public/jobs` | Public job listings |
-| `GET` | `/api/public/jobs/{id}` | Public job detail |
-| `GET` | `/api/public/salary-compass/roles` | Available roles for compass |
-| `POST` | `/api/public/salary-compass/estimate` | Public estimate (limited data) |
-| `POST` | `/api/public/lead` | Lead capture (existing) |
-| `POST` | `/api/public/contact` | Contact form (existing frontend code, needs backend) |
-
-### 11.2 Auth Routes (No Auth Required)
-
-| Method | Path | Description |
-|--------|------|-------------|
-| `POST` | `/auth/register` | Register |
-| `POST` | `/auth/login` | Login |
-| `POST` | `/auth/refresh` | Refresh tokens |
-| `POST` | `/auth/logout` | Logout |
-| `GET` | `/auth/verify` | Verify email |
-| `POST` | `/auth/resend-verify` | Resend verification |
-| `POST` | `/auth/forgot-password` | Forgot password |
-| `POST` | `/auth/reset-password` | Reset password |
-
-### 11.3 Protected Routes (JWT Required)
-
-| Method | Path | Role | Description |
-|--------|------|------|-------------|
-| `GET` | `/auth/me` | Any | Current user profile |
-| `PATCH` | `/auth/me` | Any | Update profile |
-| `DELETE` | `/auth/me` | Any | Delete account (GDPR) |
-| `GET` | `/api/dashboard/overview` | Any | Dashboard aggregated data |
-| `GET` | `/api/dashboard/matches` | candidate | My matches |
-| `GET` | `/api/dashboard/applications` | candidate | Application tracker |
-| `POST` | `/api/dashboard/apply/{job_id}` | candidate | Apply to job |
-| `GET` | `/api/profile` | candidate | Full profile |
-| `PATCH` | `/api/profile` | candidate | Update profile |
-| `POST` | `/api/profile/cv` | candidate | Upload CV |
-| `GET` | `/api/profile/onboarding` | candidate | Get onboarding step |
-| `PATCH` | `/api/profile/onboarding` | candidate | Update onboarding step |
-| `GET` | `/api/salary-compass/estimate` | candidate | Full estimate (authenticated) |
-| `POST` | `/api/salary-compass/contribute` | candidate | Contribute salary data |
-| `GET` | `/api/salary-compass/report` | candidate | Download PDF report |
-| `GET` | `/api/candidates` | admin | List candidates (existing) |
-| `POST` | `/api/candidates` | admin | Create candidate (existing) |
-| `GET` | `/api/jobs` | client | List my jobs (existing) |
-| `POST` | `/api/jobs` | client | Create job (existing) |
-| `GET` | `/api/matches` | client | View matches (existing) |
-
-### 11.4 Admin Routes (admin/superadmin Only)
-
-| Method | Path | Description |
-|--------|------|-------------|
-| `GET` | `/api/admin/users` | List all users |
-| `PATCH` | `/api/admin/users/{id}` | Update user role/status |
-| `DELETE` | `/api/admin/users/{id}` | Delete/suspend user |
-| `GET` | `/api/admin/analytics/summary` | Platform analytics |
-| `GET` | `/api/admin/analytics/registrations` | Registration trends |
-| `GET` | `/api/admin/analytics/placements` | Placement metrics |
-| `GET` | `/api/admin/salary-data` | Manage benchmarks |
-| `PUT` | `/api/admin/salary-data` | Update benchmark |
-| `POST` | `/api/admin/salary-data/refresh` | Trigger refresh |
-
----
-
-## 12. Implementation Roadmap
-
-### Phase 1: Foundation (Weeks 1-2)
-**Goal:** Auth system working, database migrated
-
-- [ ] Add `users`, `sessions`, `email_verification_tokens`, `salary_contributions` tables
-- [ ] Implement `core/jwt.py` — JWT encode/decode/refresh
-- [ ] Implement `services/auth_service.py` — registration, login, password hashing
-- [ ] Implement `routers/auth.py` — all auth endpoints
-- [ ] Implement `services/email_service.py` — async SMTP via Zoho
-- [ ] Implement `tasks/email_tasks.py` — Celery tasks for email sending
-- [ ] Add rate limiting middleware (`slowapi`)
-- [ ] Add existing candidate/client link to `user_id`
-
-### Phase 2: Frontend Auth (Weeks 2-3)
-**Goal:** Users can register, verify, login, see dashboard
-
-- [ ] Set up Next.js 15 project with App Router
-- [ ] Implement `next-auth` v5 configuration
-- [ ] Build registration pages (role selection, candidate form, client form)
-- [ ] Build login page
-- [ ] Build email verification page
-- [ ] Build forgot/reset password pages
-- [ ] Build dashboard layout (sidebar, header, responsive bottom nav)
-- [ ] Build dashboard overview page
-- [ ] Implement auth middleware and route protection
-
-### Phase 3: Candidate Journey (Weeks 3-5)
-**Goal:** Full candidate flow from registration to matched
-
-- [ ] Build onboarding wizard (5 steps, with progress indicator)
-- [ ] Build profile page (view/edit)
-- [ ] Build CV upload (PDF/DOCX parsing via OpenRouter)
-- [ ] Build match display with score visualization
-- [ ] Build application tracker with status badges
-- [ ] Implement notification system (email + in-app)
-- [ ] Build settings pages (account, security, notifications)
-
-### Phase 4: Market Value Compass (Weeks 4-6)
-**Goal:** Salary benchmarking tool fully functional
-
-- [ ] Implement `routers/salary_compass.py` (all endpoints)
-- [ ] Implement `services/salary_service.py` (estimation algorithm)
-- [ ] Populate `salary_benchmarks` table with initial data (150+ placements)
-- [ ] Build SalaryGauge component (animated SVG)
-- [ ] Build PercentileChart component (Recharts bar chart)
-- [ ] Build BreakdownChart component (stacked bar)
-- [ ] Build MarketTrends component
-- [ ] Build public teaser version (limited data, lead capture)
-- [ ] Build full authenticated version
-- [ ] Build PDF report generation
-- [ ] Build data contribution modal (with GDPR consent)
-
-### Phase 5: Admin & Polish (Weeks 5-7)
-**Goal:** Admin panel, responsive optimization, launch readiness
-
-- [ ] Build admin dashboard (user management, analytics)
-- [ ] Build admin salary data management
-- [ ] Responsive audit: test all pages at 320px, 480px, 768px, 1024px, 1440px
-- [ ] Performance optimization (Lighthouse score > 90)
-- [ ] SEO audit (meta tags, structured data, sitemap)
-- [ ] Security audit (OWASP Top 10)
-- [ ] Final logo integration (SVG logo component)
-- [ ] GDPR compliance review
-- [ ] Load testing (100 concurrent users)
-
-### Phase 6: Launch (Week 8)
-- [ ] DNS configuration (gsptalent.com, api.gsptalent.com)
-- [ ] SSL/TLS via Caddy auto-cert
-- [ ] Database migration on production
-- [ ] Smoke tests
-- [ ] Monitoring setup (Prometheus metrics exist)
-- [ ] Go live
-
----
-
-## Appendix A: Key Design Decisions Log
-
-| # | Decision | Rationale | Date |
-|---|----------|-----------|------|
-| 1 | JWT over session-only | SPA-friendly, mobile/API support | 2025-06-25 |
-| 2 | httpOnly cookies over localStorage | XSS protection for auth tokens | 2025-06-25 |
-| 3 | Refresh token rotation | Mitigate token theft impact | 2025-06-25 |
-| 4 | Next.js over pure SPA | SEO for public pages, middleware for auth | 2025-06-25 |
-| 5 | Tailwind over pure CSS | Faster component development, consistency | 2025-06-25 |
-| 6 | Phase-based CSS migration | Unblocked development, no rewrite risk | 2025-06-25 |
-| 7 | SVG logo over raster | Scalable, small footprint, animatable | 2025-06-25 |
-| 8 | Async email via Celery | Non-blocking during registration | 2025-06-25 |
-| 9 | Salary data as lead magnet | Drives registrations, creates stickiness | 2025-06-25 |
-| 10 | Bottom nav on mobile | Thumb-friendly, follows material design patterns | 2025-06-25 |
-
-## Appendix B: Risk Register
-
-| Risk | Impact | Likelihood | Mitigation |
-|------|--------|------------|------------|
-| Google Drive scope (`drive.file`) can't see uploaded logos | Medium | High | Generate SVG programmatically as fallback; commission external designer |
-| Email deliverability (Zoho SMTP) for verification emails | High | Medium | SPF/DKIM/DMARC setup; monitoring via Postmark alternative |
-| Slow salary compass queries on large dataset | Medium | Low | Materialized view for benchmarks; Redis caching |
-| Rate limiting blocking legitimate users | Medium | Low | Tiered limits (auth: 5/min, data: 60/min, public: 120/min) |
-| GDPR data export requests manual effort | Medium | Low | Automated CSV export endpoint; data_subject_requests table already exists |
-
----
-
-*End of Architecture Specification v1.0*
+*End of specification.*

@@ -32,8 +32,8 @@
 <link rel="preload" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" as="style" crossorigin>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Newsreader:opsz,wght@6..72,400;6..72,500;6..72,600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+<link href="https://fonts.googleapis.com/css2?family=Newsreader:opsz,wght@6..72,400;6..72,500;6..72,600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" crossorigin>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" crossorigin>
 <link rel="stylesheet" href="styles.css">
 </head>
 <body>
@@ -109,12 +109,10 @@
           <input type="text" name="company" placeholder="Company Name" data-lang-en="Company Name" data-lang-nl="Bedrijfsnaam">
           <select name="interest" required data-lang-en="I am a..." data-lang-nl="Ik ben een...">
             <option value="" disabled selected data-lang-en="I am a..." data-lang-nl="Ik ben een...">I am a...</option>
-            <option value="candidate" data-lang-en="Candidate looking for a role" data-lang-nl="Kandidaat op zoek naar een rol">Candidate looking for a role</option>
-            <option value="client" data-lang-en="Company looking to hire" data-lang-nl="Bedrijf dat wil aannemen">Company looking to hire</option>
-            <option value="uitzenden" data-lang-en="Company, interested in staffing (uitzenden)" data-lang-nl="Bedrijf, geïnteresseerd in uitzenden">Company, interested in staffing (uitzenden)</option>
-            <option value="detacheren" data-lang-en="Company, interested in secondment (detacheren)" data-lang-nl="Bedrijf, geïnteresseerd in detacheren">Company, interested in secondment (detacheren)</option>
-            <option value="zzp_bemiddeling" data-lang-en="Company, interested in freelance placement (zzp)" data-lang-nl="Bedrijf, geïnteresseerd in zzp-bemiddeling">Company, interested in freelance placement (zzp)</option>
-            <option value="partner" data-lang-en="Partner / Collaboration" data-lang-nl="Partner / Samenwerking">Partner / Collaboration</option>
+            <option value="werving_selectie" data-lang-en="I am hiring: permanent recruitment" data-lang-nl="Ik zoek personeel: werving en selectie">I am hiring: permanent recruitment</option>
+            <option value="detachering_internationaal" data-lang-en="I am hiring: temporary staffing, secondment or freelance placement" data-lang-nl="Ik zoek personeel: uitzenden, detacheren of zzp-bemiddeling">I am hiring: temporary staffing, secondment or freelance placement</option>
+            <option value="kandidaat" data-lang-en="I am looking for a job" data-lang-nl="Ik zoek een baan">I am looking for a job</option>
+            <option value="overig" data-lang-en="Other" data-lang-nl="Anders">Other</option>
           </select>
           <textarea name="message" placeholder="Tell us about yourself or your hiring needs *" data-lang-en="Tell us about yourself or your hiring needs *" data-lang-nl="Vertel ons over jezelf of je wervingsbehoeften *" required></textarea>
           <label class="gdpr-checkbox">
