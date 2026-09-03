@@ -124,7 +124,10 @@ async def apollo_search_and_sync() -> dict:
                         "apollo", "scheduler-apollo-sync", True,
                     )
                 except Exception:
-                    logger.exception("apollo_search_and_sync: insert failed for %s", email)
+                    logger.exception(
+                        "apollo_search_and_sync: insert failed for apollo person %s",
+                        person.get("id"),
+                    )
                     continue
 
                 if row:

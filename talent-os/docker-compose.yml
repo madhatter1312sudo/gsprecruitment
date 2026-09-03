@@ -12,6 +12,18 @@
 # on the actual host).
 # Memory limits ensure stability on 32GB VPS.
 # ALL AI/LLM calls go through OpenRouter. NO models hosted in any container.
+#
+# WS-E.6 (2026-09-03): postgres's POSTGRES_PASSWORD used to come from
+# ${POSTGRES_PASSWORD} (interpolated from this directory's .env at
+# compose-parse time). It now comes from ./postgres.env via env_file
+# instead (see talent-os/postgres.env.example) -- `required: false` so this
+# still-undeployed reference file keeps parsing even before that file
+# exists. backend/celery-worker/celery-beat below are untouched: they keep
+# reading POSTGRES_PASSWORD the same way as before, so their env contract
+# doesn't change (CLAUDE.md: change all three or none).
+#
+# Also added: JSON-file log rotation (max 5 x 20 MB per container) on
+# postgres and backend, matching the root docker-compose.yml.
 version: "3.8"
 
 services:
@@ -28,7 +40,14 @@ services:
     environment:
       POSTGRES_DB: recruitment_db
       POSTGRES_USER: talentos_admin
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    env_file:
+      - path: ./postgres.env
+        required: false
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./scripts/init_db.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
@@ -89,6 +108,11 @@ services:
       JWT_SECRET: ${JWT_SECRET}
       CORS_ORIGINS: "http://localhost:3000"
       LOG_LEVEL: INFO
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
     depends_on:
       postgres:
         condition: service_healthy

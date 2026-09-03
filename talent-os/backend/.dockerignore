@@ -1,0 +1,35 @@
+# Talent OS backend — build context excludes (WS-E.6).
+# Dockerfile does `COPY . .` from this directory (talent-os/backend) --
+# keep anything that isn't needed to run the API out of the image.
+#
+# migrations/ is intentionally NOT excluded: deploy.yml runs
+# `docker compose run ... backend sh -c 'for f in migrations/0*.py; ...'`
+# against the built image, so it has to ship in the image.
+
+# Tests (not run inside the container -- CI runs pytest directly)
+tests/
+test_*.py
+*_test.py
+
+# Python bytecode / caches
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Local env / secrets -- never bake into the image
+.env
+.env.*
+!.env.example
+
+# Docs -- not needed to run the API
+*.md
+
+# VCS / editor / OS cruft
+.git/
+.gitignore
+.vscode/
+.idea/
+.DS_Store
