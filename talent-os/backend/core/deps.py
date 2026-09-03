@@ -45,7 +45,8 @@ async def get_current_user(
         )
 
     user = await fetch_one(
-        "SELECT id, email, full_name, role, is_verified, created_at, updated_at "
+        "SELECT id, email, full_name, role, is_verified, email_verified_at, "
+        "approved_by_admin_at, created_at, updated_at "
         "FROM users WHERE id = $1 AND deleted_at IS NULL",
         user_id,
     )
@@ -56,6 +57,31 @@ async def get_current_user(
         )
 
     return user
+
+
+async def get_verified_user(current_user: dict = Depends(get_current_user)) -> dict:
+    """Like get_current_user, but additionally requires a confirmed e-mail
+    (WS-E.2). Use this instead of get_current_user for any candidate- or
+    client-portal endpoint that reads/writes personal data or lazily
+    creates the linked `candidates`/`clients` row -- an unverified user
+    must never reach those, so e.g. routers/candidate.py's
+    _get_candidate_id() never runs (and never creates a `candidates` row)
+    before the owning account has confirmed its e-mail.
+
+    /api/auth/me and /api/auth/resend-verification intentionally keep
+    using get_current_user directly -- an unverified user still needs to
+    read their own status and ask for a new verification link.
+    """
+    if not current_user.get("is_verified"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=(
+                "Please confirm your e-mail address before continuing. "
+                "Check your inbox for the verification link, or request a "
+                "new one via POST /api/auth/resend-verification."
+            ),
+        )
+    return current_user
 
 
 async def get_optional_user(
@@ -77,7 +103,8 @@ async def get_optional_user(
         return None
 
     return await fetch_one(
-        "SELECT id, email, full_name, role, is_verified, created_at, updated_at "
+        "SELECT id, email, full_name, role, is_verified, email_verified_at, "
+        "approved_by_admin_at, created_at, updated_at "
         "FROM users WHERE id = $1 AND deleted_at IS NULL",
         user_id,
     )
@@ -96,6 +123,22 @@ def require_role(*allowed_roles: str):
             ...
     """
     async def role_checker(current_user: dict = Depends(get_current_user)) -> dict:
+        if current_user["role"] not in allowed_roles:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Role '{current_user['role']}' not allowed. Requires one of: {', '.join(allowed_roles)}",
+            )
+        return current_user
+    return role_checker
+
+
+def require_verified_role(*allowed_roles: str):
+    """Like require_role, but additionally requires a confirmed e-mail
+    (WS-E.2) -- see get_verified_user. Used by the client-portal router
+    (routers/client.py) so an unverified client account can never reach
+    dashboard/jobs/candidates/pipeline/team endpoints, only /api/auth/me
+    and /api/auth/resend-verification."""
+    async def role_checker(current_user: dict = Depends(get_verified_user)) -> dict:
         if current_user["role"] not in allowed_roles:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,

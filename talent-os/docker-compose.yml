@@ -3,15 +3,31 @@
 # This is NOT the file running in production -- that's /docker-compose.yml
 # at the repo root (rsynced to the VPS by .github/workflows/deploy.yml),
 # which only runs postgres+backend. This full-stack version (postgres+
-# redis+backend+celery-worker+celery-beat+nginx) is kept as a reference
-# for standing up the AI matching / Apollo auto-sourcing background
-# tasks (talent-os/backend/tasks/), which are currently unbuilt/inactive
-# in production. If that feature gets greenlit, this is the starting
-# point -- but it will need a review pass first (memory limits assume a
-# 32GB VPS; production is smaller, and nginx here duplicates Caddy's job
-# on the actual host).
+# backend+nginx) was kept as a reference for standing up the AI matching /
+# Apollo auto-sourcing background jobs as Celery tasks -- that plan was
+# dropped (WS-C.3b, 2026-09-03): talent-os/backend/tasks/ (the Celery
+# worker/beat code) was unused dead code -- nothing imported it, and it
+# referenced a `settings.celery_result_backend` that did not even exist in
+# core/config.py -- so it and the redis/celery-worker/celery-beat services
+# that only existed to run it were removed rather than fixed. The
+# equivalent work (services/scheduler.py) already runs as plain asyncio
+# background jobs inside the FastAPI process, no broker needed. If a real
+# task queue is ever needed again, start from scratch rather than reviving
+# this.
 # Memory limits ensure stability on 32GB VPS.
 # ALL AI/LLM calls go through OpenRouter. NO models hosted in any container.
+#
+# WS-E.6 (2026-09-03): postgres's POSTGRES_PASSWORD used to come from
+# ${POSTGRES_PASSWORD} (interpolated from this directory's .env at
+# compose-parse time). It now comes from ./postgres.env via env_file
+# instead (see talent-os/postgres.env.example) -- `required: false` so this
+# still-undeployed reference file keeps parsing even before that file
+# exists. backend/celery-worker/celery-beat below are untouched: they keep
+# reading POSTGRES_PASSWORD the same way as before, so their env contract
+# doesn't change (CLAUDE.md: change all three or none).
+#
+# Also added: JSON-file log rotation (max 5 x 20 MB per container) on
+# postgres and backend, matching the root docker-compose.yml.
 version: "3.8"
 
 services:
@@ -28,7 +44,14 @@ services:
     environment:
       POSTGRES_DB: recruitment_db
       POSTGRES_USER: talentos_admin
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    env_file:
+      - path: ./postgres.env
+        required: false
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./scripts/init_db.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
@@ -38,26 +61,6 @@ services:
       test: ["CMD-SHELL", "pg_isready -U talentos_admin -d recruitment_db"]
       interval: 10s
       timeout: 5s
-      retries: 5
-
-  # ── Redis (Celery broker + cache) ──────────────────────────────────────
-  redis:
-    image: redis:7-alpine
-    container_name: talentos-redis
-    restart: unless-stopped
-    deploy:
-      resources:
-        limits:
-          memory: 512M
-          cpus: "1"
-    ports:
-      - "127.0.0.1:6379:6379"
-    volumes:
-      - redis_data:/data
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
-      timeout: 3s
       retries: 5
 
   # ── FastAPI Backend ────────────────────────────────────────────────────
@@ -78,7 +81,6 @@ services:
       POSTGRES_DB: recruitment_db
       POSTGRES_USER: talentos_write
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      REDIS_HOST: redis
       API_KEY: ${API_KEY}
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY}
       APOLLO_API_KEY: ${APOLLO_API_KEY}
@@ -89,74 +91,16 @@ services:
       JWT_SECRET: ${JWT_SECRET}
       CORS_ORIGINS: "http://localhost:3000"
       LOG_LEVEL: INFO
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
     depends_on:
       postgres:
-        condition: service_healthy
-      redis:
         condition: service_healthy
     ports:
       - "127.0.0.1:8000:8000"
-
-  # ── Celery Worker ──────────────────────────────────────────────────────
-  celery-worker:
-    build:
-      context: ./backend
-      dockerfile: ../Dockerfile
-    container_name: talentos-celery
-    restart: unless-stopped
-    deploy:
-      resources:
-        limits:
-          memory: 2G
-          cpus: "2"
-    environment:
-      POSTGRES_HOST: postgres
-      POSTGRES_PORT: 5432
-      POSTGRES_DB: recruitment_db
-      POSTGRES_USER: talentos_write
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      REDIS_HOST: redis
-      API_KEY: ${API_KEY}
-      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY}
-      APOLLO_API_KEY: ${APOLLO_API_KEY}
-      CELERY_BROKER_URL: redis://redis:6379/0
-      CELERY_RESULT_BACKEND: redis://redis:6379/0
-      JWT_SECRET: ${JWT_SECRET}
-      CELERY_CONCURRENCY: "2"
-      LOG_LEVEL: INFO
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    command: celery -A tasks.celery_app worker --loglevel=info --concurrency=2
-
-  # ── Celery Beat (scheduler) ────────────────────────────────────────────
-  celery-beat:
-    build:
-      context: ./backend
-      dockerfile: ../Dockerfile
-    container_name: talentos-celery-beat
-    restart: unless-stopped
-    deploy:
-      resources:
-        limits:
-          memory: 256M
-          cpus: "0.5"
-    environment:
-      POSTGRES_HOST: postgres
-      REDIS_HOST: redis
-      API_KEY: ${API_KEY}
-      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY}
-      APOLLO_API_KEY: ${APOLLO_API_KEY}
-      JWT_SECRET: ${JWT_SECRET}
-      CELERY_BROKER_URL: redis://redis:6379/0
-      CELERY_RESULT_BACKEND: redis://redis:6379/0
-      LOG_LEVEL: INFO
-    depends_on:
-      redis:
-        condition: service_healthy
-    command: celery -A tasks.celery_app beat --loglevel=info
 
   # ── Nginx Reverse Proxy ────────────────────────────────────────────────
   nginx:
@@ -179,4 +123,3 @@ services:
 
 volumes:
   postgres_data:
-  redis_data:

@@ -238,7 +238,10 @@ async def harvest_candidates() -> dict:
                             linkedin_url, skills, "apollo_bulk", apollo_ref, "harvest-apollo-bulk", True,
                         )
                     except Exception:
-                        logger.exception("harvest_candidates: insert failed for %s", full_name)
+                        logger.exception(
+                            "harvest_candidates: insert failed for apollo person %s",
+                            person.get("id"),
+                        )
                         continue
 
                     if row:

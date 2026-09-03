@@ -77,7 +77,7 @@ Eén bewaartabel, identiek in code (purge-job) en op `privacy.html`:
 | Referral | zoals gesourcet (3 maanden na `date_found` zonder reactie); herkomst = referrer | zie §1.3 |
 | Leads/quiz | 12 maanden | |
 | Geplaatste kandidaat (contract- en factuurdata) | 7 jaar | fiscale bewaarplicht |
-| Logs | 30 dagen | |
+| Logs | 30 dagen (doel) | vandaag: max 5×20 MB per container, rotatie, geen vaste tijd (Docker json-file `max-size`/`max-file`, WS-E.6) |
 
 Uitvoering: de apscheduler purge-job (WS-E.8) verwijdert of anonimiseert bij het verstrijken van de termijn volgens dezelfde `erase_person`-logica als een handmatig verzoek (WS-E.7). De drie rijen "Prospect die wel reageert", "Actief portalaccount zonder sollicitatie" en "Referral" zijn aannames uit de SOP (af3af81); de eigenaar bevestigt of wijzigt ze in WS-E.8 (§6.4). Vandaag bestaat er **geen** purge-job: niets wordt automatisch verwijderd, en `rejected_at`, `date_found`, `consent_talentpool_until` bestaan nog niet als kolommen. De 14.687 Apollo-rijen vallen niet onder deze tabel; daarvoor geldt alleen §5.7.
 

@@ -41,7 +41,7 @@ async def get_admin_dashboard(current_user: dict = Depends(require_role("admin")
     stats = AdminDashboard()
     total_users, active_jobs, registered_candidates, active_clients, placements_this_week = await asyncio.gather(
         fetch_val("SELECT COUNT(*) FROM users WHERE deleted_at IS NULL"),
-        fetch_val("SELECT COUNT(*) FROM job_orders WHERE status = 'open' AND deleted_at IS NULL"),
+        fetch_val("SELECT COUNT(*) FROM job_orders WHERE status = 'open' AND deleted_at IS NULL AND is_demo = false"),
         fetch_val("SELECT COUNT(*) FROM users WHERE role = 'candidate' AND deleted_at IS NULL"),
         fetch_val("SELECT COUNT(*) FROM clients WHERE deleted_at IS NULL"),
         fetch_val(
@@ -255,15 +255,19 @@ async def impersonate_user(
 async def list_all_jobs(
     status: Optional[str] = Query(None),
     client_id: Optional[int] = Query(None),
+    include_demo: bool = Query(False, description="Include is_demo=true seed/placeholder jobs (default excludes them)."),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
     current_user: dict = Depends(require_role("admin")),
 ):
-    """List all jobs cross-client."""
+    """List all jobs cross-client. Excludes is_demo jobs (migrations/012's
+    6 seed vacancies) unless include_demo=true is explicitly passed."""
     conditions = ["j.deleted_at IS NULL"]
     params = []
     idx = 1
 
+    if not include_demo:
+        conditions.append("j.is_demo = false")
     if status:
         conditions.append(f"j.status = ${idx}")
         params.append(status)
@@ -303,6 +307,8 @@ async def update_any_job(
     allowed = {
         "status", "title", "department", "seniority", "description",
         "requirements", "fee_percentage", "urgency",
+        # WS-C.15 / WS-A.5 (migrations/016_job_orders_columns.py)
+        "city", "company_display", "employment_type", "sponsorship_possible",
     }
 
     update_dict = updates.model_dump(exclude_none=True)
@@ -552,8 +558,8 @@ async def get_platform_analytics(current_user: dict = Depends(require_role("admi
                FROM users WHERE deleted_at IS NULL AND created_at >= NOW() - INTERVAL '12 months'
                GROUP BY month ORDER BY month""",
         ),
-        fetch_val("SELECT COUNT(*) FROM job_orders WHERE deleted_at IS NULL"),
-        fetch_val("SELECT COUNT(*) FROM job_orders WHERE filled_at IS NOT NULL AND deleted_at IS NULL"),
+        fetch_val("SELECT COUNT(*) FROM job_orders WHERE deleted_at IS NULL AND is_demo = false"),
+        fetch_val("SELECT COUNT(*) FROM job_orders WHERE filled_at IS NOT NULL AND deleted_at IS NULL AND is_demo = false"),
         fetch_val("SELECT COUNT(*) FROM clients WHERE deleted_at IS NULL"),
         fetch_val(
             """SELECT COUNT(*) FROM (
@@ -703,3 +709,43 @@ async def update_system_settings(
     )
 
     return {"message": "Settings updated", "keys_updated": updated}
+
+
+# ── Client Approval (WS-E.2) ─────────────────────────────────────────────
+# routers/client.py's _require_candidate_access gate: a client user must be
+# e-mail-verified (WS-E.2) *and* explicitly approved here before any
+# candidate-search/detail endpoint lets them through.
+
+@router.post("/clients/{user_id}/approve")
+async def approve_client(
+    user_id: int,
+    current_user: dict = Depends(require_role("admin")),
+):
+    """Approve a client user for candidate search/detail access."""
+    target = await fetch_one(
+        "SELECT id, email, role FROM users WHERE id = $1 AND deleted_at IS NULL",
+        user_id,
+    )
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found")
+    if target["role"] != "client":
+        raise HTTPException(
+            status_code=400,
+            detail="Only client-role users can be approved for candidate access",
+        )
+
+    row = await fetch_one(
+        """UPDATE users
+           SET approved_by_admin_at = NOW(), approved_by_admin_id = $1, updated_at = NOW()
+           WHERE id = $2
+           RETURNING id, email, full_name, role, approved_by_admin_at, approved_by_admin_id""",
+        current_user["id"], user_id,
+    )
+
+    # Audit log
+    await execute(
+        "INSERT INTO audit_log (action, actor_id, target_type, target_id, changes) VALUES ($1, $2, $3, $4, $5::jsonb)",
+        "client_approve", current_user["id"], "user", user_id, json.dumps({"approved_email": target["email"]}),
+    )
+
+    return row

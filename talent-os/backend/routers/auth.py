@@ -5,13 +5,13 @@ password reset, profile read/update. Rate-limited.
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import RedirectResponse
 from core.database import fetch_one, fetch_all, execute
-from core.security import hash_password, verify_password, create_access_token, decode_token
+from core.security import hash_password, verify_password, create_access_token, decode_token, hash_token
 from core.deps import get_current_user, get_optional_user, require_role
 from core.config import settings
 from models.schemas import (
     UserRegister, UserLogin, TokenResponse, UserResponse, UserUpdate,
     ForgotPasswordRequest, ResetPasswordRequest, VerifyEmailRequest,
-    ChangePasswordRequest,
+    ResendVerificationRequest, SetPasswordRequest, ChangePasswordRequest,
 )
 from services.email_service import email_service
 from typing import Optional
@@ -40,6 +40,64 @@ async def _get_user_by_email(email: str) -> Optional[dict]:
         "SELECT * FROM users WHERE email = $1 AND deleted_at IS NULL",
         email.lower().strip(),
     )
+
+
+# WS-E.2: verification / set-password tokens (secrets.token_urlsafe, only
+# their sha256 hash ever stored -- see core.security.hash_token) are valid
+# for this long from users.verification_sent_at.
+VERIFICATION_TOKEN_TTL_HOURS = 24
+
+
+async def _issue_verification_token(user_id: int) -> str:
+    """Generate a fresh one-time token, store only its hash + issue time,
+    and return the raw token for the caller to put in an outbound e-mail.
+    Used by register, resend-verification, and (indirectly, via the same
+    column) WS-E.3's team-invite set-password flow in routers/client.py."""
+    token = secrets.token_urlsafe(32)
+    await execute(
+        "UPDATE users SET verification_token_hash = $1, verification_sent_at = NOW() WHERE id = $2",
+        hash_token(token), user_id,
+    )
+    return token
+
+
+async def _send_verification_email(user: dict, token: str) -> None:
+    link = f"https://gsprecruitment.nl/verify?token={token}"
+    body = f"""Beste {user['full_name']},
+
+Bedankt voor je registratie bij GSP Recruitment. Bevestig je e-mailadres via onderstaande link:
+{link}
+
+Deze link is {VERIFICATION_TOKEN_TTL_HOURS} uur geldig.
+
+Heb je dit account niet aangemaakt? Dan kun je dit bericht negeren.
+
+Met vriendelijke groet,
+GSP Recruitment
+info@gsprecruitment.nl
+
+---
+
+Dear {user['full_name']},
+
+Thank you for registering with GSP Recruitment. Please confirm your e-mail address via the link below:
+{link}
+
+This link is valid for {VERIFICATION_TOKEN_TTL_HOURS} hours.
+
+Didn't create this account? You can ignore this message.
+
+Kind regards,
+GSP Recruitment
+info@gsprecruitment.nl
+"""
+    sent = await email_service.send_email(
+        to_email=user["email"],
+        subject="Bevestig je e-mailadres — GSP Recruitment",
+        body_text=body,
+    )
+    if not sent:
+        logger.warning(f"Failed to send verification email to {user['email']}")
 
 
 def _build_token_response(user: dict) -> dict:
@@ -77,15 +135,17 @@ async def register(request: Request, data: UserRegister):
             detail="An account with this email already exists",
         )
 
-    verification_token = secrets.token_urlsafe(32)
     password_hash = hash_password(data.password)
 
+    # WS-E.2: created unverified (is_verified defaults to FALSE on the
+    # table); the verification token is issued and hashed via
+    # _issue_verification_token right after insert, once we have the id.
     user = await fetch_one(
         """INSERT INTO users
-           (email, password_hash, full_name, role, verification_token)
-           VALUES ($1, $2, $3, $4, $5)
+           (email, password_hash, full_name, role)
+           VALUES ($1, $2, $3, $4)
            RETURNING id, email, full_name, role, is_verified, created_at, updated_at""",
-        email, password_hash, data.full_name, data.role, verification_token,
+        email, password_hash, data.full_name, data.role,
     )
     if not user:
         raise HTTPException(status_code=500, detail="Failed to create user")
@@ -110,6 +170,9 @@ async def register(request: Request, data: UserRegister):
                 "INSERT INTO user_clients (user_id, client_id) VALUES ($1, $2) ON CONFLICT DO NOTHING",
                 user["id"], client["id"],
             )
+
+    verification_token = await _issue_verification_token(user["id"])
+    await _send_verification_email(user, verification_token)
 
     return _build_token_response(user)
 
@@ -173,11 +236,18 @@ async def refresh_token(request: Request, data: dict):
     return _build_token_response(user)
 
 
-# ── Verify Email ────────────────────────────────────────────────────────
+# ── Verify Email (legacy) ──────────────────────────────────────────────
+# Pre-WS-E.2 flow: a plaintext token in the users.verification_token
+# column. WS-E.2's register() no longer writes that column (only the
+# hashed users.verification_token_hash below), so this route is dead in
+# practice going forward -- kept, unmodified, only so an already-issued
+# pre-WS-E.2 link (if any is still outstanding) keeps working rather than
+# being pulled out from under someone mid-flight. New code should use
+# POST /api/auth/verify-email instead.
 
 @router.post("/verify")
 async def verify_email(data: VerifyEmailRequest):
-    """Verify a user's email address using their verification token."""
+    """Verify a user's email address using their (legacy, plaintext) verification token."""
     user = await fetch_one(
         "SELECT id FROM users WHERE verification_token = $1 AND is_verified = FALSE AND deleted_at IS NULL",
         data.token,
@@ -186,10 +256,91 @@ async def verify_email(data: VerifyEmailRequest):
         raise HTTPException(status_code=400, detail="Invalid or expired verification token")
 
     await execute(
-        "UPDATE users SET is_verified = TRUE, verification_token = NULL WHERE id = $1",
+        "UPDATE users SET is_verified = TRUE, email_verified_at = NOW(), verification_token = NULL WHERE id = $1",
         user["id"],
     )
     return {"message": "Email verified successfully"}
+
+
+# ── Verify Email (WS-E.2) ───────────────────────────────────────────────
+# Hashed-token flow: register()/resend-verification() only ever store
+# sha256(token) in verification_token_hash, so this looks up by that hash
+# and additionally enforces the 24h TTL from verification_sent_at.
+
+@router.post("/verify-email")
+async def verify_email_hashed(data: VerifyEmailRequest):
+    """Verify a user's email address using their WS-E.2 (hashed) verification token."""
+    user = await fetch_one(
+        """SELECT id FROM users
+           WHERE verification_token_hash = $1
+             AND verification_sent_at > NOW() - INTERVAL '24 hours'
+             AND deleted_at IS NULL""",
+        hash_token(data.token),
+    )
+    if not user:
+        raise HTTPException(status_code=400, detail="Invalid or expired verification token")
+
+    await execute(
+        """UPDATE users
+           SET is_verified = TRUE, email_verified_at = NOW(),
+               verification_token_hash = NULL, verification_sent_at = NULL
+           WHERE id = $1""",
+        user["id"],
+    )
+    return {"message": "Email verified successfully"}
+
+
+# ── Resend Verification (WS-E.2) ────────────────────────────────────────
+
+@router.post("/resend-verification")
+@limiter.limit("3/hour")
+async def resend_verification(request: Request, data: ResendVerificationRequest):
+    """Re-issue a verification token and e-mail it.
+
+    Always returns 200 with the same generic message regardless of
+    whether the e-mail exists or is already verified -- same
+    no-enumeration pattern as forgot_password() below.
+    """
+    email = data.email.lower().strip()
+    user = await fetch_one(
+        "SELECT id, email, full_name, is_verified FROM users WHERE email = $1 AND deleted_at IS NULL",
+        email,
+    )
+    if user and not user["is_verified"]:
+        token = await _issue_verification_token(user["id"])
+        await _send_verification_email(user, token)
+
+    return {"message": "If that email exists and is not yet verified, a new verification link has been sent"}
+
+
+# ── Set Password (WS-E.3 team invite) ───────────────────────────────────
+
+@router.post("/set-password")
+@limiter.limit("5/minute")
+async def set_password(request: Request, data: SetPasswordRequest):
+    """Consume a one-time set-password token (team invite, WS-E.3): sets
+    the invitee's own password and marks the e-mail verified in the same
+    step -- the invite never contained a password, only this link."""
+    user = await fetch_one(
+        """SELECT id FROM users
+           WHERE verification_token_hash = $1
+             AND verification_sent_at > NOW() - INTERVAL '24 hours'
+             AND deleted_at IS NULL""",
+        hash_token(data.token),
+    )
+    if not user:
+        raise HTTPException(status_code=400, detail="Invalid or expired set-password link")
+
+    new_hash = hash_password(data.new_password)
+    await execute(
+        """UPDATE users
+           SET password_hash = $1, is_verified = TRUE, email_verified_at = NOW(),
+               verification_token_hash = NULL, verification_sent_at = NULL,
+               updated_at = NOW()
+           WHERE id = $2""",
+        new_hash, user["id"],
+    )
+    return {"message": "Password set successfully. You can now sign in."}
 
 
 # ── Forgot Password ─────────────────────────────────────────────────────
@@ -231,7 +382,7 @@ info@gsprecruitment.nl
 """,
     )
     if not email_sent:
-        logger.warning(f"Failed to send password reset email to {email}")
+        logger.warning(f"Failed to send password reset email for user_id={user['id']}")
 
     return {"message": "If that email exists, a reset link has been sent"}
 
@@ -339,6 +490,23 @@ async def change_password(
 # Cloud Console. Uses the standard Authorization Code flow with a
 # short-lived signed cookie for CSRF (`state`) protection, since there's no
 # server-side session store to keep state in otherwise.
+#
+# WS-E.3 finding: the successful branch used to redirect with the freshly
+# issued JWT as a `?google_auth=<jwt>` QUERY-STRING parameter. A query
+# string is sent to the server in the request line (nginx/access logs,
+# any CDN/WAF logging, browser history) and in the Referer header of the
+# very next request the page makes -- so that access token was leaking to
+# every one of those. Error codes (`?google_auth_error=...`) are not
+# secret and stay in the query string unchanged. The token itself now
+# goes in the URL FRAGMENT (`#google_auth=<jwt>`) instead: fragments are
+# never sent to the server by the browser (not in the request line, not
+# in Referer), so this closes that leak with no extra round trip. An
+# alternative (a one-time code exchanged via POST) would remove the token
+# from the URL bar entirely too, but needs a new short-lived code table +
+# exchange endpoint; the fragment fix is the minimal change that actually
+# stops the leak website/script.js's own comment on this flow already
+# flagged. website/script.js's handleGoogleAuthCallback() reads
+# window.location.hash instead of .search for this one param accordingly.
 
 GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
@@ -440,6 +608,7 @@ async def google_callback(
         )
 
     token_response = _build_token_response(user)
-    response = RedirectResponse(f"{FRONTEND_URL}/?google_auth={token_response['access_token']}")
+    # Fragment, not query string -- see the module-level comment above.
+    response = RedirectResponse(f"{FRONTEND_URL}/#google_auth={token_response['access_token']}")
     response.delete_cookie("google_oauth_state")
     return response
