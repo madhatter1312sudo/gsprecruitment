@@ -62,19 +62,22 @@ def start_server(port):
 
 # ---- Fake data (example.com/example.invalid — no real PII) ---------------
 
-CLIENT_USERS = [
-    {"id": 101, "full_name": "Client Contact One", "email": "client1@example.com",
-     "role": "client", "is_verified": True, "created_at": "2026-01-01T00:00:00Z"},
-    {"id": 102, "full_name": "Client Contact Two", "email": "client2@example.com",
-     "role": "client", "is_verified": True, "created_at": "2026-01-01T00:00:00Z"},
+# GET /v1/admin/clients (routers/clients_admin.py, WS-B.2 follow-up) --
+# open_job_count/primary_contact come from the endpoint's own LEFT JOIN
+# LATERAL, erkend_referent/notes from migrations/031. `notes` mutates in
+# place on a successful PATCH (below) so the Info-tab save round-trip can
+# be asserted against it.
+CLIENTS = [
+    {"id": 1, "company_name": "Example Engineering B.V.", "domain": "example-engineering.example.com",
+     "industry": "embedded", "erkend_referent": "ja", "notes": "", "location": "Eindhoven",
+     "open_job_count": 1,
+     "primary_contact": {"full_name": "Primary Contact", "email": "primary@example.com", "role": "hiring_manager"},
+     "created_at": "2026-01-01T00:00:00Z", "updated_at": "2026-01-01T00:00:00Z"},
+    {"id": 2, "company_name": "Example Mechatronics B.V.", "domain": "example-mechatronics.example.com",
+     "industry": "mechatronics", "erkend_referent": "onbekend", "notes": "", "location": "Veldhoven",
+     "open_job_count": 0, "primary_contact": None,
+     "created_at": "2026-01-01T00:00:00Z", "updated_at": "2026-01-01T00:00:00Z"},
 ]
-
-CLIENTS_BY_USER = {
-    101: {"id": 1, "company_name": "Example Engineering B.V.", "domain": "example-engineering.example.com",
-          "industry": "embedded", "location": "Eindhoven", "account_status": "active"},
-    102: {"id": 2, "company_name": "Example Mechatronics B.V.", "domain": "example-mechatronics.example.com",
-          "industry": "mechatronics", "location": "Veldhoven", "account_status": "active"},
-}
 
 CONTACTS_BY_CLIENT = {
     1: [
@@ -144,23 +147,51 @@ def route_admin_api(route, request):
         json_response({"items": [], "total": 0})
         return
 
-    # ---- Users list / detail (Opdrachtgevers roster source) ----
+    # ---- Users list / detail (unrelated to the Opdrachtgevers roster
+    #      since routers/clients_admin.py replaced the /users?role=client
+    #      derivation -- kept only in case another section/check needs it) --
     if path == "/api/v1/admin/users" and method == "GET":
-        if qs.get("role", [None])[0] == "client":
-            json_response({"items": CLIENT_USERS, "total": len(CLIENT_USERS), "limit": 200, "offset": 0})
-            return
         json_response({"items": [], "total": 0})
         return
     m = re.match(r"^/api/v1/admin/users/(\d+)$", path)
     if m and method == "GET":
-        uid = int(m.group(1))
-        base = next((u for u in CLIENT_USERS if u["id"] == uid), None)
-        client = CLIENTS_BY_USER.get(uid)
-        if base and client:
-            job_count = len(JOBS_BY_CLIENT.get(client["id"], []))
-            json_response({**base, "client": client, "job_count": job_count})
-            return
         json_response({"detail": "Not found"}, status=404)
+        return
+
+    # ---- Clients (Opdrachtgevers roster + detail drawer's Info tab,
+    #      routers/clients_admin.py, WS-B.2 follow-up) ----
+    if path == "/api/v1/admin/clients" and method == "GET":
+        rows = CLIENTS
+        search = (qs.get("search", [""])[0] or "").lower()
+        if search:
+            rows = [c for c in rows if search in c["company_name"].lower() or search in (c["domain"] or "").lower()]
+        json_response({"items": rows, "total": len(rows), "page": qint(qs, "page", 1), "limit": qint(qs, "limit", 50)})
+        return
+    m = re.match(r"^/api/v1/admin/clients/(\d+)$", path)
+    if m and method == "GET":
+        cid = int(m.group(1))
+        client = next((c for c in CLIENTS if c["id"] == cid), None)
+        if not client:
+            json_response({"detail": "Client not found"}, status=404)
+            return
+        detail = {**client, "contacts": CONTACTS_BY_CLIENT.get(cid, [])}
+        json_response(detail)
+        return
+    if m and method == "PATCH":
+        cid = int(m.group(1))
+        client = next((c for c in CLIENTS if c["id"] == cid), None)
+        if not client:
+            json_response({"detail": "Client not found"}, status=404)
+            return
+        body = json.loads(request.post_data or "{}")
+        for key in ("company_name", "domain", "industry", "erkend_referent", "notes"):
+            if key in body:
+                client[key] = body[key]
+        json_response({
+            "id": client["id"], "company_name": client["company_name"], "domain": client["domain"],
+            "industry": client["industry"], "erkend_referent": client["erkend_referent"],
+            "notes": client["notes"], "updated_at": "2026-01-01T00:00:00Z",
+        })
         return
 
     # ---- Jobs (open-count pass, client jobs tab, reporting) ----
@@ -306,22 +337,55 @@ def main():
         page.click('.nav-link[data-section="clients"]')
         page.wait_for_timeout(700)
         rows = page.eval_on_selector_all('#section-clients table tbody tr', "els => els.length")
-        if rows != len(CLIENTS_BY_USER):
-            failures.append(f"clients: list rendered {rows} rows, expected {len(CLIENTS_BY_USER)}")
+        if rows != len(CLIENTS):
+            failures.append(f"clients: list rendered {rows} rows, expected {len(CLIENTS)}")
         first_row_text = page.eval_on_selector('#section-clients table tbody tr', "el => el.textContent")
-        if first_row_text and "onbekend" not in first_row_text.lower():
-            failures.append("clients: erkend-referent column did not render 'onbekend'")
+        # CLIENTS[0].erkend_referent == "ja" -- the roster must show the
+        # real per-client value from the API, not a hardcoded "onbekend"
+        # placeholder (that was the pre-WS-B.2-follow-up behavior).
+        if first_row_text and "Ja" not in first_row_text:
+            failures.append(f"clients: erkend-referent column did not render 'Ja' for client 1 — got: {first_row_text!r}")
+        if first_row_text and "Primary Contact" not in first_row_text:
+            failures.append(f"clients: primary_contact column did not render — got: {first_row_text!r}")
 
         page.click('#section-clients table tbody tr')
         page.wait_for_timeout(600)
         if page.query_selector('#clientDrawerTabContent') is None:
             failures.append("clients: detail drawer did not open")
         else:
-            contacts_text = page.eval_on_selector('#clientDrawerTabContent', "el => el.textContent")
-            if not contacts_text or "Primary Contact" not in contacts_text:
-                failures.append(f"clients: contacten tab did not render seeded contact — got: {contacts_text!r}")
+            # Info tab (default on open): erkend_referent select + notes
+            # textarea, editable via PATCH /v1/admin/clients/{id}.
+            if page.query_selector('#clientInfoErkendReferent') is None:
+                failures.append("clients: info tab did not render the erkend_referent select")
+            selected = page.eval_on_selector('#clientInfoErkendReferent', "el => el.value")
+            if selected != "ja":
+                failures.append(f"clients: info tab select did not default to the client's erkend_referent ('ja') — got {selected!r}")
+
+            page.select_option('#clientInfoErkendReferent', 'nee')
+            page.fill('#clientInfoNotes', 'Playwright test note')
+            page.click('[data-action="save-client-info"]')
+            page.wait_for_timeout(500)
+            toast_texts = page.eval_on_selector_all(
+                ".toast-container .toast span:last-child", "els => els.map(e => e.textContent)"
+            )
+            if not any("Opgeslagen" in t for t in toast_texts):
+                failures.append(f"clients: info tab save did not show a success toast — got {toast_texts!r}")
+            if CLIENTS[0]["erkend_referent"] != "nee" or CLIENTS[0]["notes"] != "Playwright test note":
+                failures.append(
+                    f"clients: PATCH did not persist erkend_referent/notes — server state: "
+                    f"{CLIENTS[0]['erkend_referent']!r}/{CLIENTS[0]['notes']!r}"
+                )
+            # Roster badge must reflect the edit without a full reload.
+            page.click('[data-action="close-modal"]')
+            page.wait_for_timeout(300)
+            roster_text = page.eval_on_selector('#section-clients table tbody tr', "el => el.textContent") or ""
+            if "Nee" not in roster_text:
+                failures.append(f"clients: roster badge did not update after saving erkend_referent — got: {roster_text!r}")
+            page.click('#section-clients table tbody tr')
+            page.wait_for_timeout(500)
 
             for tab, expect in [
+                ("contacts", "Primary Contact"),
                 ("jobs", "Embedded Software Engineer"),
                 ("activity", "Belde over nieuwe vacature"),
                 ("prospects", "Prospect Contact"),
