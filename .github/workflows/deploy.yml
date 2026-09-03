@@ -76,17 +76,24 @@ jobs:
           "
 
       - name: Run database migrations
-        # WS-C.1: every migrations/0*.py (000_baseline.py first, then
-        # 001-014 in filename order) applied inside the backend container,
-        # which already carries the right POSTGRES_* env (talent-os/.env
-        # via env_file) and the asyncpg dependency. Each migration tracks
+        # WS-C.1: every migrations/0*.py (000_baseline.py first, then the
+        # rest in filename order) applied against the freshly built image
+        # from `docker compose run --rm`, NOT `docker compose exec` on the
+        # already-restarted `backend` service -- `exec` requires that
+        # service container to be up and healthy, so a crash-looping
+        # backend (e.g. this exact build is broken) would silently skip
+        # migrations and only fail later, opaquely, at the health check.
+        # `run --rm --no-deps` starts a fresh one-off container from the
+        # same image, independent of the restarted service's state, so a
+        # bad image fails loudly right here instead. --no-deps: postgres
+        # is already up from the previous step. Each migration tracks
         # itself in schema_migrations and is a no-op if already applied
         # (migrations/_runner.py), so running the full set on every deploy
         # is safe.
         run: |
           ssh gsp@188.245.254.248 "
             cd /home/gsp/projects/gsp-recruitment && \
-            docker compose exec -T backend sh -c 'for f in migrations/0*.py; do echo Running \$f; python \$f || exit 1; done'
+            docker compose run --rm -T --no-deps backend sh -c 'for f in migrations/0*.py; do echo Running \$f; python \$f || exit 1; done'
           "
 
       - name: Health check

@@ -67,10 +67,11 @@ candidates — routers/candidates.py (CandidateCreate INSERT: full_name,
   sourced_by_agent, strength_score, switch_readiness); services/harvest.py
   (source_url — Apollo person-id provenance, source='apollo_bulk');
   services/scheduler.py (source='apollo', ON CONFLICT (email) DO NOTHING
-  → candidates.email needs a unique index, added here as
-  idx_candidates_email_unique — migrations/013 separately adds its own
-  named uq_candidates_email constraint with NULLS DISTINCT explicit,
-  which coexists fine); routers/gdpr.py (consent_withdrawn_at,
+  → candidates.email needs a unique index for that to work, which
+  migrations/013_email_nulls_distinct.py provides right after this
+  baseline runs, as uq_candidates_email UNIQUE NULLS DISTINCT (email) —
+  not duplicated here, see the comment above CREATE TABLE candidates);
+  routers/gdpr.py (consent_withdrawn_at,
   cv_file_path nulled on erasure, deleted_at); routers/admin.py UNION CTE
   (deleted_at, created_at, updated_at all read).
 
@@ -114,10 +115,9 @@ outreach_messages — routers/outreach.py:196 (recipient_email, subject,
 
 salary_benchmarks — migrations/009 (role_title, seniority, location,
   currency, p25, p50, p75, p90, sample_size, source; `ON CONFLICT DO
-  NOTHING` bare, with no explicit target, only actually dedupes rows if
-  a unique constraint exists on the natural key — added here as
-  a unique INDEX on (role_title, seniority, location), the obvious natural key for
-  that seed data; flagged for owner confirmation against the real dump).
+  NOTHING` bare, with no explicit target — only actually dedupes rows once
+  migrations/015_salary_benchmarks_natural_key.py's unique index exists;
+  see that file for why the dedupe-then-index logic does not live here).
 
 hiring_signals — routers/webhook.py:82 (company_name, domain,
   signal_type, signal_text, signal_date, confidence, source_url,
@@ -202,23 +202,12 @@ CREATE INDEX IF NOT EXISTS idx_candidates_created ON candidates(created_at DESC)
 CREATE INDEX IF NOT EXISTS idx_candidates_deleted_at ON candidates(deleted_at);
 CREATE INDEX IF NOT EXISTS idx_candidates_source_url ON candidates(source_url) WHERE source_url IS NOT NULL;
 
--- A plain unique INDEX, not a named constraint: migrations/_runner.py's
--- run_migration() splits each migration's SQL on a literal semicolon
--- character, which would mangle a `DO $$ ... END $$` block's internal
--- semicolons -- so idempotent "add this constraint if missing" logic has
--- to stay a single statement here (this comment avoids writing a literal
--- semicolon for the same reason -- one here would wrongly split this
--- comment away from the CREATE UNIQUE INDEX statement below it). This
--- still gives candidates.email the uniqueness migrations/002
--- (saved_jobs/pipeline_entries) and services/scheduler.py's
--- `ON CONFLICT (email) DO NOTHING` need. migrations/013_email_nulls_
--- distinct.py then runs its own DROP CONSTRAINT IF EXISTS uq_candidates_
--- email / ADD CONSTRAINT ... UNIQUE NULLS DISTINCT (email) as two
--- top-level statements (each safely self-contained) -- that ADD
--- CONSTRAINT creates its own backing index alongside this one. Postgres
--- allows more than one unique index on the same single column, so both
--- coexist harmlessly rather than conflicting.
-CREATE UNIQUE INDEX IF NOT EXISTS idx_candidates_email_unique ON candidates(email);
+-- No unique index/constraint on candidates.email is created here on
+-- purpose: migrations/013_email_nulls_distinct.py (which runs right
+-- after this baseline in every deployment) is the sole owner of that --
+-- it creates uq_candidates_email UNIQUE NULLS DISTINCT (email). Adding a
+-- second one here would double the write cost of every candidate insert/
+-- update forever, for no benefit (code review, WS-C.1 follow-up).
 
 -- ── job_orders ───────────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS job_orders (
@@ -267,7 +256,11 @@ CREATE TABLE IF NOT EXISTS matches (
     UNIQUE (candidate_id, job_id)
 );
 
-CREATE INDEX IF NOT EXISTS idx_matches_candidate ON matches(candidate_id);
+-- No idx_matches_candidate here: migrations/006_drop_redundant_indexes.py
+-- deliberately drops it in favor of migrations/005's composite
+-- idx_matches_candidate_status(candidate_id, status), which is a strict
+-- superset -- creating it in 000 would just have 006 delete it again on
+-- every fresh deploy (code review, WS-C.1 follow-up).
 CREATE INDEX IF NOT EXISTS idx_matches_job ON matches(job_id);
 CREATE INDEX IF NOT EXISTS idx_matches_status ON matches(status);
 CREATE INDEX IF NOT EXISTS idx_matches_score ON matches(match_score DESC);
@@ -306,10 +299,16 @@ CREATE INDEX IF NOT EXISTS idx_outreach_messages_campaign ON outreach_messages(c
 CREATE INDEX IF NOT EXISTS idx_outreach_messages_status ON outreach_messages(status);
 
 -- ── salary_benchmarks ────────────────────────────────────────────────────
--- migrations/009_salary_benchmarks_seed.py does `ON CONFLICT DO NOTHING`
--- with no explicit target. The natural key implied by that seed data is
--- (role_title, seniority, location), added below as a unique index so
--- the seed is actually idempotent on rerun, not just silently duplicating.
+-- Deliberately no unique index/constraint on the natural key here (code
+-- review, WS-C.1 follow-up): this table already exists in production,
+-- and migrations/009_salary_benchmarks_seed.py's bare `ON CONFLICT DO
+-- NOTHING` has already been run there without one -- possibly more than
+-- once -- so production may already hold duplicate rows on
+-- (role_title, seniority, location). Adding a unique index here in 000
+-- would fail outright on that duplicate data and abort every deploy.
+-- migrations/015_salary_benchmarks_natural_key.py handles this properly:
+-- it dedupes first, then creates the index, as two ordered top-level
+-- statements running strictly after this table already exists.
 CREATE TABLE IF NOT EXISTS salary_benchmarks (
     id              SERIAL PRIMARY KEY,
     role_title      VARCHAR(255) NOT NULL,
@@ -325,15 +324,10 @@ CREATE TABLE IF NOT EXISTS salary_benchmarks (
     created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
--- Unique INDEX rather than a named ADD CONSTRAINT, for the same reason as
--- idx_candidates_email_unique above -- run_migration() splits on a
--- literal semicolon character, which a `DO $$ ... END $$` block's
--- internal semicolons would break (and which a literal semicolon in this
--- very comment would too, so none appear here).
-CREATE UNIQUE INDEX IF NOT EXISTS idx_salary_benchmarks_natural_key
-    ON salary_benchmarks(role_title, seniority, location);
-
-CREATE INDEX IF NOT EXISTS idx_salary_benchmarks_role ON salary_benchmarks(role_title);
+-- No idx_salary_benchmarks_role here: migrations/006_drop_redundant_
+-- indexes.py deliberately drops it as a duplicate of migrations/005's
+-- idx_salary_benchmarks_role_title(role_title) -- creating it in 000
+-- would just have 006 delete it again on every fresh deploy.
 
 -- ── hiring_signals ───────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS hiring_signals (

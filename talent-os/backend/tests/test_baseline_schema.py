@@ -285,3 +285,67 @@ def test_matches_has_a_unique_index_for_the_on_conflict_upsert():
             )
             return
     raise AssertionError("000_baseline.py not found")
+
+
+def _get_baseline_sql() -> str:
+    for fname, sql in _load_migration_sql_files():
+        if fname == "000_baseline.py":
+            return sql
+    raise AssertionError("000_baseline.py not found")
+
+
+# Names migrations/006_drop_redundant_indexes.py deliberately DROPs
+# (superseded by composite/duplicate indexes migrations/005 already
+# creates). Regression guard for the code-review finding on WS-C.1:
+# 000_baseline.py had briefly recreated one of these plus a brand-new
+# `CREATE UNIQUE INDEX ... idx_salary_benchmarks_natural_key` that ran
+# unconditionally against production's already-existing, already-seeded
+# salary_benchmarks table -- failing outright on duplicate rows from a
+# repeated migrations/009 seed and aborting every deploy. Any unique
+# index belongs in its own migration (see
+# migrations/015_salary_benchmarks_natural_key.py), not in the structural
+# baseline, which must stay safe to run against a live, already-populated
+# production database with no assumptions about the shape of existing
+# data.
+_DROPPED_BY_006 = {"idx_salary_benchmarks_role", "idx_matches_candidate"}
+
+
+def test_baseline_creates_no_unique_indexes():
+    """000_baseline.py must stay strictly structural: no CREATE UNIQUE
+    INDEX statement of its own. A unique index/constraint can fail
+    outright against existing, already-populated production data (unlike
+    every other statement in this file, which is a plain CREATE TABLE/
+    INDEX IF NOT EXISTS or ADD COLUMN IF NOT EXISTS -- safe no-ops on a
+    table/column that's already there). Any future unique index belongs
+    in its own dedicated migration, applied after 000, that can dedupe
+    first if the table might already hold data."""
+    sql = _get_baseline_sql()
+    assert "CREATE UNIQUE INDEX" not in sql.upper(), (
+        "000_baseline.py must not create any unique index directly -- "
+        "put it in its own migration (dedupe first if the table could "
+        "already have data), applied after 000. See "
+        "migrations/015_salary_benchmarks_natural_key.py for the pattern."
+    )
+
+
+def test_baseline_does_not_recreate_indexes_006_drops():
+    """000_baseline.py must not CREATE any index that
+    migrations/006_drop_redundant_indexes.py deliberately DROPs
+    (idx_salary_benchmarks_role, idx_matches_candidate) -- recreating one
+    in 000 would just have 006 delete it again on every fresh deploy, and
+    reintroduces the exact redundant-index cost 006 was written to
+    remove."""
+    sql = _get_baseline_sql()
+    # Match only an actual `CREATE INDEX ... <name> ON` statement creating
+    # that exact index name -- not a bare substring match, which would
+    # also fire on this file's own explanatory prose (e.g. "No
+    # idx_matches_candidate here: ...") that deliberately mentions these
+    # names to document why they're absent.
+    created_index_names = set(
+        re.findall(r"CREATE(?:\s+UNIQUE)?\s+INDEX(?:\s+IF NOT EXISTS)?\s+(\w+)\s+ON", sql, re.IGNORECASE)
+    )
+    hits = sorted(_DROPPED_BY_006 & created_index_names)
+    assert not hits, (
+        f"000_baseline.py recreates {hits}, which migrations/006_drop_"
+        f"redundant_indexes.py deliberately drops"
+    )
