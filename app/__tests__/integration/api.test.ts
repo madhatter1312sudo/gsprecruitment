@@ -79,13 +79,19 @@ describe('GSP Recruitment API integration (real network)', () => {
     accessToken = data.access_token; // use the freshest token for the rest of the suite
   });
 
-  test('GET public/jobs returns at least 6 open jobs', async () => {
+  // The public board excludes the 6 is_demo seed vacancies from
+  // migrations/012 (WS-C.15, routers/jobs.py list_public_jobs), so an empty
+  // list is a legitimate production state when no real job order is open.
+  // Assert the contract -- 200, an array, and a well-shaped row when there
+  // is one -- rather than a row count that depends on the sales pipeline.
+  test('GET public/jobs returns a well-formed list of open jobs', async () => {
     const res = await api('/public/jobs');
     expect(res.status).toBe(200);
     const jobs = await res.json();
     expect(Array.isArray(jobs)).toBe(true);
-    expect(jobs.length).toBeGreaterThanOrEqual(6);
-    expect(jobs[0]).toEqual(expect.objectContaining({ id: expect.any(Number), title: expect.any(String) }));
+    for (const job of jobs) {
+      expect(job).toEqual(expect.objectContaining({ id: expect.any(Number), title: expect.any(String) }));
+    }
   });
 
   test('GET public/quiz returns 12 balanced items with no answer key leaked', async () => {
