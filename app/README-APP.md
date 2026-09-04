@@ -75,11 +75,28 @@ Playwright (Chromium, headless) driving the real static web export
 production API; since its CORS allow-list covers the real site origins and
 not `localhost`, `e2e/fixtures.ts` intercepts `api.gsprecruitment.nl`
 requests and re-fulfills them with an `access-control-allow-origin` header
-(a test-harness shim only — it doesn't change what the app sends). Covers:
-the jobs feed rendering 6 jobs and opening a job detail screen, the quiz
-flow from start through all 12 (randomized-pool) questions to a rendered
-tier badge, and login-screen validation states. Install the browser once
-with `npx playwright install chromium` if it isn't cached yet.
+(a test-harness shim only — it doesn't change what the app sends).
+
+One endpoint is the deliberate exception: `GET /api/public/jobs`. Since
+WS-C.15 the public board excludes the 6 `is_demo` seed rows from
+migrations/012 (`routers/jobs.py` `list_public_jobs`), and production
+currently has no real open job order, so the live endpoint returns `[]`. A
+feed test hitting the real endpoint would assert on the sales pipeline (is
+there an open opdracht today?) instead of on the app, so
+`e2e/landing.spec.ts` uses the `testWithMockJobs` / `testWithEmptyJobs`
+fixtures from `e2e/fixtures.ts`, which stub only that one request with a
+fixed, clearly fictional job list (`MOCK_JOBS`, shaped exactly like a real
+row per `PUBLIC_JOB_COLUMNS`/`_public_job_row`, `company_display:
+"confidential"` throughout) or an empty list — every other request (login,
+quiz, salary, ...) still goes to the real API through the general shim,
+which is the actual value of this suite.
+
+Covers: the jobs feed rendering the stubbed jobs and opening a job detail
+screen, the empty-jobs state (shows `jobs.empty` copy, no crash/stuck
+loading state), the quiz flow from start through all 12 (randomized-pool)
+questions to a rendered tier badge, and login-screen validation states.
+Install the browser once with `npx playwright install chromium` if it
+isn't cached yet.
 
 Manual smoke test checklist for anything the automated suites don't cover
 (native-only flows — CV upload, share sheet, push, EAS builds):
