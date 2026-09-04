@@ -44,7 +44,7 @@ jobs:
   ops:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Setup SSH
         run: |
@@ -74,7 +74,7 @@ jobs:
 
       - name: Upload schema artifact
         if: inputs.action == 'schema-dump'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: prod-schema
           path: out/schema.sql

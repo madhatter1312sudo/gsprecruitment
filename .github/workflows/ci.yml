@@ -39,9 +39,9 @@ jobs:
       POSTGRES_USER: mig
       POSTGRES_PASSWORD: ci-test-password
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           # WS-E.9: pinned identically to deploy.yml and the Dockerfile
           # (python:3.12-slim) so CI tests the same interpreter version
@@ -94,9 +94,9 @@ jobs:
       run:
         working-directory: app
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: "20"
           cache: "npm"
@@ -115,9 +115,9 @@ jobs:
     name: Backend dependency audit (pip-audit)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           # Pinned identically to the backend job / deploy.yml / Dockerfile.
           python-version: "3.12"
@@ -160,9 +160,9 @@ jobs:
     name: Lockfile matches requirements.txt
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           # Pinned identically to the backend job / deploy.yml / Dockerfile.
           python-version: "3.12"
@@ -198,7 +198,7 @@ jobs:
     name: Secret scan (gitleaks)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
@@ -221,13 +221,13 @@ jobs:
     name: Website (static checks + CSP)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: "20"
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
