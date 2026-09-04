@@ -2,10 +2,10 @@
 # ALL AI/LLM calls go through OpenRouter. NO models hosted on VPS.
 
 # Core
-fastapi>=0.110.0,<1.0.0
+fastapi>=0.141.1,<1.0.0
 uvicorn[standard]>=0.27.0,<1.0.0
 pydantic>=2.5.0,<3.0.0
-pydantic-settings>=2.0.0,<3.0.0
+pydantic-settings>=2.15.0,<3.0.0
 
 # Database
 asyncpg>=0.29.0,<1.0.0
@@ -23,13 +23,13 @@ bcrypt>=4.1.0,<5.0.0
 # python-jose CVE-2024-33663 (algorithm confusion) / CVE-2024-33664 (DoS
 # via crafted JWE) are fixed in 3.4.0+.
 python-jose[cryptography]>=3.4.0,<4.0.0
-slowapi>=0.1.9,<1.0.0
+slowapi>=0.1.10,<1.0.0
 email-validator>=2.0.0,<3.0.0
 
 # MFA (WS-E.12, admin TOTP): pyotp for TOTP generation/verification,
 # qrcode for its QR matrix builder only (core/mfa.py renders the matrix
 # as an inline SVG itself -- no PIL/image backend used or installed).
-pyotp==2.9.0
+pyotp==2.10.0
 qrcode==7.4.2
 
 # File uploads
@@ -45,13 +45,13 @@ apscheduler>=3.10,<4.0.0
 
 # Google API (for Gmail OAuth email sending)
 google-auth>=2.29.0,<3.0.0
-google-auth-oauthlib>=1.2.0,<2.0.0
+google-auth-oauthlib>=1.4.1,<2.0.0
 
 # Error monitoring (WS-E.9). sentry_sdk.init() is never called unless
 # SENTRY_DSN is set (core/monitoring.py) -- when it is, send_default_pii is
 # forced off and candidate/client PII is scrubbed via a before_send hook.
 # See core/config.py / .env.example.
-sentry-sdk[fastapi]==2.19.2
+sentry-sdk[fastapi]==2.68.1
 
 # Testing (CI only, not needed at runtime)
 # >=9.0.3 for PYSEC-2026-1845.
