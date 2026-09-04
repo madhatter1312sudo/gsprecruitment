@@ -17,6 +17,34 @@ De repo bevat bewust geen Expo- of Google-credentials. Log lokaal in met
 je eigen account; er wordt niets van de repo naar Expo/Google gestuurd
 buiten de broncode.
 
+## Stap 0: begin vandaag, want twee dingen hebben doorlooptijd
+
+Deze twee bepalen of een releasedatum haalbaar is. Ze staan bewust vóór
+het stappenplan, want wie ze pas in de Play Console tegenkomt, is te laat.
+
+**1. Twaalf testers, veertien aaneengesloten dagen.** Een persoonlijk
+Play Console-account dat na 13 november 2023 is aangemaakt, krijgt pas
+toegang tot productie na een closed test met minimaal twaalf testers die
+veertien aaneengesloten dagen ingeschreven staan. Opt een tester uit en
+weer in, dan begint zijn telling opnieuw. Daarna volgt nog de aanvraag
+voor productietoegang, die tot zeven dagen duurt, en pas daarna de
+gebruikelijke review. Werf die twaalf mensen dus nu, parallel aan al het
+andere, en niet nadat de store listing klaar is. Een organisatieaccount
+kent deze eis niet; controleer in de Play Console welk type account je
+hebt voordat je op deze doorlooptijd plant.
+
+**2. Echte vacatures in productie.** De publieke vacaturelijst sluit de
+zes demo-vacatures uit migratie 012 uit
+(`talent-os/backend/routers/jobs.py`, `list_public_jobs`). Staat er geen
+echte opdracht open, dan geeft `GET /api/public/jobs` een lege lijst en
+ziet de reviewer van Google een leeg hoofdscherm. Dat valt onder Google's
+eis van minimale functionaliteit en is een reele afwijzingsgrond. Zorg
+dat er drie tot vijf echte, niet-demo vacatures met status `open` in
+productie staan voordat je de app indient, en ook al tijdens de closed
+test, zodat de testers iets te zien krijgen. Anoniem mag: een vacature
+zonder `company_display` toont "confidential", precies zoals het
+gezichtsloze model bedoelt.
+
 ## De definitieve package-naam
 
 `android.package` in `app/app.json` staat op **`nl.gsprecruitment.app`**.
@@ -85,7 +113,10 @@ Twee routes, kies er één:
 - **Handmatig** (eerste keer aanbevolen): download de `.aab` na de build
   (link staat in de `eas build`-output of op expo.dev/accounts/.../builds)
   en upload hem zelf in de Play Console onder **Release → Testing →
-  Interne test** (of **Productie**, als je meteen live wilt).
+  Gesloten test**. Bij een persoonlijk account is dat geen keuze maar de
+  verplichte route: zie stap 0. De veertien dagen gaan lopen zodra de
+  twaalf testers zijn ingeschreven, dus upload hier zo vroeg mogelijk,
+  ook als de store listing nog niet af is.
 - **Automatisch** via EAS, nadat je eenmalig een service-account hebt
   aangemaakt in de Play Console (**Setup → API access** → service-account
   JSON downloaden, rechten geven als "Release manager" of hoger):
@@ -98,6 +129,17 @@ Twee routes, kies er één:
   onthoudt dat daarna in je EAS-projectconfiguratie (niet in deze repo).
 
 **4. Play Console-formulieren invullen (verplicht vóór publicatie):**
+
+Controleer eerst dat er drie tot vijf echte, niet-demo vacatures met
+status `open` in productie staan (stap 0, punt 2). Een reviewer die een
+leeg hoofdscherm ziet, kan de app afwijzen op minimale functionaliteit.
+Snel te controleren:
+
+```sh
+curl -s -H "User-Agent: gsp-ops" https://api.gsprecruitment.nl/api/public/jobs
+```
+
+Een lege lijst `[]` betekent: nog niet indienen.
 
 Dit zijn Play Console-schermen, geen commando's: content rating
 (vragenlijst), data safety-formulier (welke gegevens de app verzamelt),
