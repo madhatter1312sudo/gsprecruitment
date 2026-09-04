@@ -28,7 +28,7 @@ Kant-en-klare afbeeldingen staan in `store/play/` (zie sectie 6).
 
 ### Volledige beschrijving (max 4000 tekens)
 
-**Nederlands (1893 tekens):**
+**Nederlands (1892 tekens):**
 
 ```
 GSP Recruitment bemiddelt in embedded software, mechatronica en besturingssoftware, en OT-cybersecurity in de Brainport-regio (Eindhoven en omgeving). Met deze app volg je het hele traject vanaf je telefoon.
@@ -48,7 +48,7 @@ SKILLSQUIZ MET SALARISINDICATIE
 Doe de korte skillsquiz over embedded software, security en cloud/devops en krijg een niveau-indicatie plus, als je bent ingelogd, een salarisindicatie op basis van functie, senioriteit en regio.
 
 JE PROFIEL EN GEGEVENS
-Vul je profiel aan met werkervaring, vaardigheden en salarisverwachting. Bekijk, exporteer of verwijder je gegevens vanuit het profielscherm — dat kan altijd, zonder tussenkomst.
+Vul je profiel aan met werkervaring, vaardigheden en salarisverwachting. Bekijk, exporteer of verwijder je gegevens vanuit het profielscherm. Dat kan altijd, zonder tussenkomst.
 
 Voor wie
 Voor software-, embedded- en mechatronica-engineers en OT-cybersecurityspecialisten die op zoek zijn naar een volgende stap in de Brainport-regio.
@@ -59,7 +59,7 @@ GSP Recruitment is een gezichtsloos, onafhankelijk wervingsbureau: geen naam- en
 De app is Nederlands/Engels omschakelbaar en werkt op elk moment als vertrekpunt naar een gesprek met GSP Recruitment over een concrete vacature.
 ```
 
-**English (1796 characters):**
+**English (1799 characters):**
 
 ```
 GSP Recruitment places embedded software, mechatronics and control software, and OT cybersecurity engineers in the Brainport region (Eindhoven, the Netherlands). This app lets you follow the whole process from your phone.
@@ -76,7 +76,7 @@ TRACK YOUR MATCHES AND APPLICATIONS
 See which vacancies fit your profile and follow the status of each application, from received through interview to offer.
 
 SKILLS QUIZ WITH SALARY INDICATION
-Take the short skills quiz on embedded software, security and cloud/devops and get a level indication, plus — when signed in — a salary indication based on role, seniority and region.
+Take the short skills quiz on embedded software, security and cloud/devops and get a level indication, and when you are signed in a salary indication based on role, seniority and region.
 
 YOUR PROFILE AND DATA
 Fill in your profile with work experience, skills and salary expectations. View, export or delete your data from the profile screen at any time, with no need to contact anyone first.
@@ -143,6 +143,7 @@ waarvoor gebruikt?
 |---|---|---|---|---|---|
 | **Naam** | Ja | Nee | Verplicht (registratie) | Accountfunctionaliteit | `register(email, password, full_name)` — `api.ts` regel 285-290; `CandidateProfile.full_name` — regel 209 |
 | **E-mailadres** | Ja | Nee | Verplicht (registratie/login) | Accountfunctionaliteit, inloggen | `login`/`register` — `api.ts` regel 281-290 |
+| **E-mailadres bij de quiz (los van het account)** | Ja | Nee | Optioneel | De quizuitslag naar de deelnemer kunnen sturen | `submitQuiz(payload: { answers, email? })` — `api.ts` regel 356-361. Het veld wordt alleen meegestuurd als de gebruiker het zelf invult; wie is ingelogd, gebruikt het accountadres |
 | **Telefoonnummer** | Ja | Nee | Optioneel (profielveld) | Accountfunctionaliteit | `CandidateProfile.phone`, `CandidateProfileUpdate` — regel 210, 234 |
 | **Adres/locatie (tekstveld, geen GPS)** | Ja | Nee | Optioneel (profielveld) | Matching met vacatures | `CandidateProfile.location`, `willing_to_relocate` — regel 216-217. Dit is een door de gebruiker getypt tekstveld, **geen** precieze of grove GPS-locatie — de app vraagt geen locatie-permissie (zie `docs/APP-RELEASE.md` "Android-permissies": geen `android.permissions`-lijst) |
 | **Wachtwoord/inloggegevens** | Ja | Nee | Verplicht | Accountfunctionaliteit | `login`/`register` body — regel 281-290; opslag lokaal via `expo-secure-store` (plugin in `app.json`) |

@@ -100,11 +100,26 @@ Twee routes, kies er één:
 **4. Play Console-formulieren invullen (verplicht vóór publicatie):**
 
 Dit zijn Play Console-schermen, geen commando's: content rating
-(vragenlijst), data safety-formulier (welke gegevens de app verzamelt —
-zie hieronder), doelgroep, privacy policy-URL, store listing (screenshots,
-beschrijving NL + EN, iconen — de assets in `app/assets/` zijn al
-1024×1024 en geschikt). Reken op een eerste review van Google van enkele
-dagen tot een week; plan dit ruim vóór 30 september in.
+(vragenlijst), data safety-formulier (welke gegevens de app verzamelt),
+doelgroep, privacy policy-URL en de store listing (screenshots,
+beschrijving NL en EN, iconen).
+
+**Alles wat je in deze schermen moet invullen of uploaden staat kant en
+klaar in `docs/PLAY-STORE-LISTING.md`**: de beschrijvingen in beide talen
+binnen de tekenlimieten, de antwoorden op het data safety-formulier met
+per regel de plek in de code waar dat uit blijkt, de verwachte content
+rating en de stappen voor het reviewer-testaccount.
+
+Gebruik voor de store listing de bestanden in `store/play/`, niet die in
+`app/assets/`. Het icoon in `app/assets/icon.png` is 1024x1024 met een
+alfakanaal en dient als app-icoon in de build zelf; Play weigert
+transparantie in het store-icoon en wil daar exact 512x512 zonder
+alfakanaal. Daarvoor staat `store/play/icon-512.png` klaar, samen met
+`store/play/feature-graphic-1024x500.png`. Schermafbeeldingen moet je nog
+zelf maken, zie de assets-checklist in `docs/PLAY-STORE-LISTING.md`.
+
+Reken op een eerste review van Google van enkele dagen tot een week; plan
+dit ruim voor 30 september in.
 
 ## Android-permissies
 

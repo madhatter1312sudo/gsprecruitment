@@ -28,7 +28,11 @@ const PUBLIC_JOBS_URL = 'https://api.gsprecruitment.nl/api/public/jobs';
 
 /** Shaped exactly like a row `_public_job_row()` returns: every
  * `PUBLIC_JOB_COLUMNS` field, with `company_display` already normalized to
- * "confidential" the way GSP's faceless-agency rows always render. */
+ * "confidential" the way GSP's faceless-agency rows always render, and
+ * `employment_type` drawn from the values the CHECK constraint in
+ * `migrations/016_job_orders_columns.py` actually allows ('vast' |
+ * 'detachering' | 'interim'), so a screen that starts rendering this field
+ * is exercised against a value production can really return. */
 export const MOCK_JOBS = [
   {
     id: 900001,
@@ -47,7 +51,7 @@ export const MOCK_JOBS = [
     urgency: 'normal',
     created_at: '2026-08-01T09:00:00Z',
     company_display: 'confidential',
-    employment_type: 'permanent',
+    employment_type: 'vast',
     sponsorship_possible: false,
   },
   {
@@ -67,7 +71,7 @@ export const MOCK_JOBS = [
     urgency: 'high',
     created_at: '2026-08-05T09:00:00Z',
     company_display: 'confidential',
-    employment_type: 'permanent',
+    employment_type: 'detachering',
     sponsorship_possible: true,
   },
   {
@@ -87,7 +91,7 @@ export const MOCK_JOBS = [
     urgency: 'normal',
     created_at: '2026-08-10T09:00:00Z',
     company_display: 'confidential',
-    employment_type: 'contract',
+    employment_type: 'interim',
     sponsorship_possible: false,
   },
 ];
