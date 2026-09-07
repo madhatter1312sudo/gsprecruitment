@@ -1429,6 +1429,347 @@
         "title": "CandidateProfileUpdate",
         "type": "object"
       },
+      "CandidatePublicResponse": {
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "current_company": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Company"
+          },
+          "current_title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Title"
+          },
+          "cv_file_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cv File Path"
+          },
+          "date_found": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Date Found"
+          },
+          "education": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Education"
+          },
+          "email": {
+            "anyOf": [
+              {
+                "maxLength": 255,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email"
+          },
+          "full_name": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Full Name",
+            "type": "string"
+          },
+          "github_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Github Url"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "is_passive": {
+            "default": true,
+            "title": "Is Passive",
+            "type": "boolean"
+          },
+          "languages": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Languages",
+            "type": "array"
+          },
+          "lawful_basis": {
+            "anyOf": [
+              {
+                "pattern": "^(gerechtvaardigd_belang|opt_in_talentpool|toestemming_referral|portal_registratie)$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lawful Basis"
+          },
+          "linkedin_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Linkedin Url"
+          },
+          "location": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Location"
+          },
+          "notice_period_days": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notice Period Days"
+          },
+          "phone": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Phone"
+          },
+          "portfolio_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Portfolio Url"
+          },
+          "quality_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Quality Score"
+          },
+          "salary_expectation_max": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Salary Expectation Max"
+          },
+          "salary_expectation_min": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Salary Expectation Min"
+          },
+          "screening_notes": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Screening Notes"
+          },
+          "screening_score": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Screening Score"
+          },
+          "skills": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Skills",
+            "type": "array"
+          },
+          "source": {
+            "default": "apollo",
+            "title": "Source",
+            "type": "string"
+          },
+          "source_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Url"
+          },
+          "sourced_by_agent": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sourced By Agent"
+          },
+          "status": {
+            "default": "sourced",
+            "title": "Status",
+            "type": "string"
+          },
+          "strength_score": {
+            "anyOf": [
+              {
+                "maximum": 10.0,
+                "minimum": 1.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Strength Score"
+          },
+          "switch_readiness": {
+            "anyOf": [
+              {
+                "pattern": "^(LOW|MEDIUM|HIGH|ACTIVE)$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Switch Readiness"
+          },
+          "tags": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Tags",
+            "type": "array"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          },
+          "willing_to_relocate": {
+            "default": false,
+            "title": "Willing To Relocate",
+            "type": "boolean"
+          },
+          "years_experience": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Years Experience"
+          }
+        },
+        "required": [
+          "id",
+          "full_name",
+          "created_at"
+        ],
+        "title": "CandidatePublicResponse",
+        "type": "object"
+      },
       "CandidateResponse": {
         "properties": {
           "created_at": {
@@ -6242,7 +6583,7 @@
     },
     "/api/candidates": {
       "get": {
-        "description": "List candidates with optional status filter and pagination.\nSoft-deleted rows and rows with withdrawn consent are excluded, and\ncv_text is never selected (FIX 2 -- see _CANDIDATE_LIST_COLUMNS).",
+        "description": "List candidates with optional status filter and pagination.\nSoft-deleted rows and rows with withdrawn consent are excluded, and\ncv_text is never selected (FIX 2 -- see _CANDIDATE_PUBLIC_COLUMNS).",
         "operationId": "list_candidates_api_candidates_get",
         "parameters": [
           {
@@ -6293,7 +6634,7 @@
               "application/json": {
                 "schema": {
                   "items": {
-                    "$ref": "#/components/schemas/CandidateResponse"
+                    "$ref": "#/components/schemas/CandidatePublicResponse"
                   },
                   "title": "Response List Candidates Api Candidates Get",
                   "type": "array"
@@ -6371,7 +6712,7 @@
     },
     "/api/candidates/{candidate_id}": {
       "get": {
-        "description": "Get a single candidate by ID. Soft-deleted rows and rows with\nwithdrawn consent are excluded, and cv_text is never selected\n(FIX 2 -- see _CANDIDATE_LIST_COLUMNS).",
+        "description": "Get a single candidate by ID. Soft-deleted rows and rows with\nwithdrawn consent are excluded, and cv_text is never selected\n(FIX 2 -- see _CANDIDATE_PUBLIC_COLUMNS).",
         "operationId": "get_candidate_api_candidates__candidate_id__get",
         "parameters": [
           {
@@ -6389,7 +6730,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/CandidateResponse"
+                  "$ref": "#/components/schemas/CandidatePublicResponse"
                 }
               }
             },
@@ -6417,7 +6758,7 @@
         ]
       },
       "patch": {
-        "description": "Partial update of a candidate record.",
+        "description": "Partial update of a candidate record. Soft-deleted rows and rows\nwith withdrawn consent are excluded (same guard as GET), and cv_text\nis never returned (FIX 2 follow-up, chief-of-staff ai-pseudonimisering\nbranch): this endpoint used `RETURNING *` with only `WHERE id = $n`,\nso a PATCH (e.g. the status/screening_score update the external\nroutines use) on a withdrawn-consent or soft-deleted row both\nmutated it and handed back full_name/email/phone/cv_text -- the exact\nleak GET was closed against, reachable via a different verb. cv_text\nis excluded here even though allowed_fields never includes it, because\nRETURNING * still selects the column regardless of what was written.",
         "operationId": "update_candidate_api_candidates__candidate_id__patch",
         "parameters": [
           {
@@ -6445,7 +6786,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/CandidateResponse"
+                  "$ref": "#/components/schemas/CandidatePublicResponse"
                 }
               }
             },
@@ -6800,7 +7141,7 @@
         ]
       },
       "post": {
-        "description": "Create/upsert a match. Lets an external agent (e.g. a Claude cloud\nagent doing matching) write results directly, instead of the in-backend\nOpenRouter matcher in _run_matching_for_job. Same upsert semantics as\nthat job. `rationale` is accepted but not persisted \u2014 no column for it\nyet.",
+        "description": "Create/upsert a match. Lets an external agent (e.g. a Claude cloud\nagent doing matching) write results directly, instead of the in-backend\nOpenRouter matcher in _run_matching_for_job. Same upsert semantics as\nthat job. `rationale` is accepted but not persisted \u2014 no column for it\nyet.\n\nFIX 1 (chief-of-staff, ai-pseudonimisering branch): this endpoint used\nto only check `deleted_at IS NULL` on the candidate, so any caller with\nthe shared X-API-Key could create a match for an arbitrary\ncandidate_id -- including withdrawn-consent rows and the purchased\nApollo pool -- and then read the name back via\nGET /api/matches/job/{job_id}. Give it the same eligibility check as\n_run_matching_for_job / candidates_for_job.",
         "operationId": "create_match_api_matches_post",
         "requestBody": {
           "content": {
@@ -6903,7 +7244,7 @@
     },
     "/api/matches/job/{job_id}": {
       "get": {
-        "description": "Get all matches for a specific job, sorted by score.",
+        "description": "Get all matches for a specific job, sorted by score.\n\nFIX 1 (chief-of-staff, ai-pseudonimisering branch): unlike\ncandidates-for-job (a bulk shortlisting endpoint an external agent uses\nover the whole active pool, which is why that one deliberately omits\nfull_name), this endpoint returns matches that already exist for one\njob -- rows a human recruiter created or confirmed in order to decide\nwho to draft outreach for. That is a legitimate, narrow, per-decision\nreason to need the name, so full_name stays here. What it must not do\nis what it did before: return a match (and the name behind it) for a\ncandidate who was soft-deleted, withdrew consent, or never had a valid\nlawful basis in the first place -- previously the only guard was\n`deleted_at IS NULL` on create_match's own INSERT, so any candidate_id\ncould be matched and then read back by name through this endpoint.\nGate it exactly like matching itself (_consent_gate_sql).",
         "operationId": "get_job_matches_api_matches_job__job_id__get",
         "parameters": [
           {
