@@ -102,7 +102,10 @@
 
 /* ── Reset ──────────────────────────────────────────────── */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-html { scroll-behavior: smooth; font-size: 16px; -webkit-text-size-adjust: 100%; }
+html { scroll-behavior: smooth; font-size: 16px; -webkit-text-size-adjust: 100%; scroll-padding-top: 96px; }
+/* Anchor targets land clear of the 76px fixed header (.header), not tucked
+   under it — applies to every #id on the site, not just a hand-picked few. */
+[id] { scroll-margin-top: 96px; }
 body {
   font-family: var(--font);
   color: var(--text);
