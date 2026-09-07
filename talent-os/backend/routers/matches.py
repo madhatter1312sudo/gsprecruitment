@@ -15,6 +15,28 @@ logger = logging.getLogger("talent_os.matches")
 router = APIRouter(prefix="/api/matches", tags=["matches"], dependencies=[Depends(verify_api_key)])
 
 
+def _consent_gate_sql(prefix: str = "") -> str:
+    """FIX 3 (chief-of-staff, ai-pseudonimisering branch): the matching gate
+    used to accept `source_url OR lawful_basis = 'opt_in_talentpool'`
+    without checking whether that talentpool consent was still valid --
+    routers/outreach.py's send-time gate (_draft_refusal) already refuses
+    an expired/never-set consent_talentpool_until outright (WS-C.17,
+    SOP §1.5), so matching was strictly wider than sending: someone whose
+    consent had lapsed stayed matchable (and, via POST /api/matches,
+    readable back by name through GET /api/matches/job/{job_id}).
+    This mirrors outreach.py's gate exactly (minus the Art.14-notice check,
+    which only applies to a drafted message body, not to matching):
+    opt_in_talentpool requires a still-valid consent_talentpool_until;
+    every other basis requires a public http(s) source_url on file."""
+    p = prefix
+    return (
+        f"({p}lawful_basis = 'opt_in_talentpool' AND {p}consent_talentpool_until IS NOT NULL "
+        f"AND {p}consent_talentpool_until > NOW()) "
+        f"OR ({p}lawful_basis IS NOT NULL AND {p}lawful_basis != 'opt_in_talentpool' "
+        f"AND {p}source_url ~* '^https?://')"
+    )
+
+
 async def _run_matching_for_job(job_id: int) -> None:
     """Embed the job against all active candidates and upsert match rows.
     Runs in a FastAPI background task — no Celery/Redis required."""
@@ -31,12 +53,14 @@ async def _run_matching_for_job(job_id: int) -> None:
 
         # See the FIX 1 note in candidates_for_job() below for why
         # talentpool opt-ins (no source_url, lawful_basis=
-        # 'opt_in_talentpool') get the same exception here.
+        # 'opt_in_talentpool') get the same exception here, and the FIX 3
+        # note on _consent_gate_sql() for why that exception now also
+        # requires a still-valid consent_talentpool_until.
         candidates = await fetch_all(
-            "SELECT id, full_name, current_title, education, years_experience, skills "
-            "FROM candidates "
-            "WHERE deleted_at IS NULL AND consent_withdrawn_at IS NULL "
-            "AND (source_url ~* '^https?://' OR lawful_basis = 'opt_in_talentpool')",
+            f"SELECT id, full_name, current_title, education, years_experience, skills "
+            f"FROM candidates "
+            f"WHERE deleted_at IS NULL AND consent_withdrawn_at IS NULL "
+            f"AND ({_consent_gate_sql()})",
         )
         if not candidates:
             logger.info("matching: no candidates to match for job %s", job_id)
@@ -94,9 +118,19 @@ async def create_match(payload: MatchCreate):
     agent doing matching) write results directly, instead of the in-backend
     OpenRouter matcher in _run_matching_for_job. Same upsert semantics as
     that job. `rationale` is accepted but not persisted — no column for it
-    yet."""
+    yet.
+
+    FIX 1 (chief-of-staff, ai-pseudonimisering branch): this endpoint used
+    to only check `deleted_at IS NULL` on the candidate, so any caller with
+    the shared X-API-Key could create a match for an arbitrary
+    candidate_id -- including withdrawn-consent rows and the purchased
+    Apollo pool -- and then read the name back via
+    GET /api/matches/job/{job_id}. Give it the same eligibility check as
+    _run_matching_for_job / candidates_for_job."""
     candidate = await fetch_one(
-        "SELECT id FROM candidates WHERE id = $1 AND deleted_at IS NULL", payload.candidate_id,
+        f"SELECT id FROM candidates WHERE id = $1 AND deleted_at IS NULL "
+        f"AND consent_withdrawn_at IS NULL AND ({_consent_gate_sql()})",
+        payload.candidate_id,
     )
     if not candidate:
         raise HTTPException(status_code=400, detail=f"Candidate {payload.candidate_id} not found")
@@ -176,7 +210,7 @@ async def candidates_for_job(job_id: int, limit: int = Query(30, ge=1, le=100)):
     # with the same opt_in_talentpool exception routers/outreach.py's
     # _draft_refusal() already relies on (WS-C.17 / SOP §1.5).
     rows = await fetch_all(
-        """SELECT * FROM (
+        f"""SELECT * FROM (
                SELECT c.id, c.current_title, c.current_company, c.skills,
                       c.location, c.years_experience, c.updated_at,
                       ts_rank(to_tsvector('dutch', coalesce(c.current_title, '')),
@@ -185,7 +219,7 @@ async def candidates_for_job(job_id: int, limit: int = Query(30, ge=1, le=100)):
                       (SELECT COUNT(*) FROM unnest(c.skills) s WHERE lower(s) = ANY($2::text[])) AS skill_matches
                FROM candidates c
                WHERE c.deleted_at IS NULL AND c.consent_withdrawn_at IS NULL
-                 AND (c.source_url ~* '^https?://' OR c.lawful_basis = 'opt_in_talentpool')
+                 AND ({_consent_gate_sql("c.")})
            ) ranked
            ORDER BY (title_rank + cv_rank + skill_matches * 0.05) DESC, updated_at DESC NULLS LAST
            LIMIT $3""",
@@ -251,12 +285,28 @@ async def get_match(match_id: int):
 
 @router.get("/job/{job_id}")
 async def get_job_matches(job_id: int, min_score: float = Query(0, ge=0, le=100)):
-    """Get all matches for a specific job, sorted by score."""
+    """Get all matches for a specific job, sorted by score.
+
+    FIX 1 (chief-of-staff, ai-pseudonimisering branch): unlike
+    candidates-for-job (a bulk shortlisting endpoint an external agent uses
+    over the whole active pool, which is why that one deliberately omits
+    full_name), this endpoint returns matches that already exist for one
+    job -- rows a human recruiter created or confirmed in order to decide
+    who to draft outreach for. That is a legitimate, narrow, per-decision
+    reason to need the name, so full_name stays here. What it must not do
+    is what it did before: return a match (and the name behind it) for a
+    candidate who was soft-deleted, withdrew consent, or never had a valid
+    lawful basis in the first place -- previously the only guard was
+    `deleted_at IS NULL` on create_match's own INSERT, so any candidate_id
+    could be matched and then read back by name through this endpoint.
+    Gate it exactly like matching itself (_consent_gate_sql)."""
     rows = await fetch_all(
-        "SELECT m.*, c.full_name, c.current_title, c.current_company "
-        "FROM matches m JOIN candidates c ON m.candidate_id = c.id "
-        "WHERE m.job_id = $1 AND m.match_score >= $2 "
-        "ORDER BY m.match_score DESC",
+        f"SELECT m.*, c.full_name, c.current_title, c.current_company "
+        f"FROM matches m JOIN candidates c ON m.candidate_id = c.id "
+        f"WHERE m.job_id = $1 AND m.match_score >= $2 "
+        f"AND c.deleted_at IS NULL AND c.consent_withdrawn_at IS NULL "
+        f"AND ({_consent_gate_sql('c.')}) "
+        f"ORDER BY m.match_score DESC",
         job_id, min_score,
     )
     return rows
