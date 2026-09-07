@@ -29,11 +29,14 @@ async def _run_matching_for_job(job_id: int) -> None:
             logger.warning("matching: job %s not found", job_id)
             return
 
+        # See the FIX 1 note in candidates_for_job() below for why
+        # talentpool opt-ins (no source_url, lawful_basis=
+        # 'opt_in_talentpool') get the same exception here.
         candidates = await fetch_all(
             "SELECT id, full_name, current_title, education, years_experience, skills "
             "FROM candidates "
             "WHERE deleted_at IS NULL AND consent_withdrawn_at IS NULL "
-            "AND source_url ~* '^https?://'",
+            "AND (source_url ~* '^https?://' OR lawful_basis = 'opt_in_talentpool')",
         )
         if not candidates:
             logger.info("matching: no candidates to match for job %s", job_id)
@@ -159,6 +162,19 @@ async def candidates_for_job(job_id: int, limit: int = Query(30, ge=1, le=100)):
     # where empty skills[]/cv_text rows lived — the remaining pool is mostly
     # rows with real profile text, but current_title is still ranked
     # primarily since it's the one field guaranteed to be populated.
+    # FIX (chief-of-staff, ai-pseudonimisering FIX 1): a talentpool opt-in
+    # row never gets a source_url (routers/public.py's confirm_talentpool_
+    # optin() only sets lawful_basis='opt_in_talentpool') so the bare
+    # source_url check silently dropped exactly the group with the
+    # strongest legal basis. `pool_origin` (migration 022) was considered
+    # instead, but services/harvest.py and services/scheduler.py's Apollo
+    # INSERTs never set pool_origin themselves -- it is only backfilled for
+    # rows that existed when 022 ran -- so a `pool_origin IS DISTINCT FROM
+    # 'apollo'` filter would silently let every *new* Apollo row straight
+    # into matching (NULL is distinct from 'apollo'), which is worse than
+    # today's bug. source_url stays the Apollo-pool signal; we widen it
+    # with the same opt_in_talentpool exception routers/outreach.py's
+    # _draft_refusal() already relies on (WS-C.17 / SOP §1.5).
     rows = await fetch_all(
         """SELECT * FROM (
                SELECT c.id, c.current_title, c.current_company, c.skills,
@@ -169,7 +185,7 @@ async def candidates_for_job(job_id: int, limit: int = Query(30, ge=1, le=100)):
                       (SELECT COUNT(*) FROM unnest(c.skills) s WHERE lower(s) = ANY($2::text[])) AS skill_matches
                FROM candidates c
                WHERE c.deleted_at IS NULL AND c.consent_withdrawn_at IS NULL
-                 AND c.source_url ~* '^https?://'
+                 AND (c.source_url ~* '^https?://' OR c.lawful_basis = 'opt_in_talentpool')
            ) ranked
            ORDER BY (title_rank + cv_rank + skill_matches * 0.05) DESC, updated_at DESC NULLS LAST
            LIMIT $3""",
