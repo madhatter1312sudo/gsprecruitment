@@ -109,8 +109,10 @@ async def update_candidate(candidate_id: int, updates: CandidateAdminUpdate):
     routines use) on a withdrawn-consent or soft-deleted row both
     mutated it and handed back full_name/email/phone/cv_text -- the exact
     leak GET was closed against, reachable via a different verb. cv_text
-    is excluded here even though allowed_fields never includes it, because
-    RETURNING * still selects the column regardless of what was written."""
+    is excluded here even though allowed_fields never includes it: the
+    explicit RETURNING column list means the database never hands the
+    column to the application in the first place, so the response model is
+    a second layer rather than the only one."""
     # Build dynamic SET clause safely
     allowed_fields = {
         "status", "screening_score", "screening_notes", "quality_score",
@@ -133,7 +135,7 @@ async def update_candidate(candidate_id: int, updates: CandidateAdminUpdate):
     sql = (
         f"UPDATE candidates SET {', '.join(set_parts)} "
         f"WHERE id = ${idx} AND deleted_at IS NULL AND consent_withdrawn_at IS NULL "
-        f"RETURNING *"
+        f"RETURNING {_CANDIDATE_PUBLIC_COLUMNS}"
     )
     row = await fetch_one(sql, *values)
     if not row:

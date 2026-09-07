@@ -6758,7 +6758,7 @@
         ]
       },
       "patch": {
-        "description": "Partial update of a candidate record. Soft-deleted rows and rows\nwith withdrawn consent are excluded (same guard as GET), and cv_text\nis never returned (FIX 2 follow-up, chief-of-staff ai-pseudonimisering\nbranch): this endpoint used `RETURNING *` with only `WHERE id = $n`,\nso a PATCH (e.g. the status/screening_score update the external\nroutines use) on a withdrawn-consent or soft-deleted row both\nmutated it and handed back full_name/email/phone/cv_text -- the exact\nleak GET was closed against, reachable via a different verb. cv_text\nis excluded here even though allowed_fields never includes it, because\nRETURNING * still selects the column regardless of what was written.",
+        "description": "Partial update of a candidate record. Soft-deleted rows and rows\nwith withdrawn consent are excluded (same guard as GET), and cv_text\nis never returned (FIX 2 follow-up, chief-of-staff ai-pseudonimisering\nbranch): this endpoint used `RETURNING *` with only `WHERE id = $n`,\nso a PATCH (e.g. the status/screening_score update the external\nroutines use) on a withdrawn-consent or soft-deleted row both\nmutated it and handed back full_name/email/phone/cv_text -- the exact\nleak GET was closed against, reachable via a different verb. cv_text\nis excluded here even though allowed_fields never includes it: the\nexplicit RETURNING column list means the database never hands the\ncolumn to the application in the first place, so the response model is\na second layer rather than the only one.",
         "operationId": "update_candidate_api_candidates__candidate_id__patch",
         "parameters": [
           {
