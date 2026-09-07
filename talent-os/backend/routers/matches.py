@@ -5,6 +5,7 @@ import logging
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from core.database import fetch_all, fetch_one, execute
+from core.privacy import pseudonymize_cv_text
 from core.security import verify_api_key
 from services.matcher import EmbeddingMatcher
 from models.schemas import MatchCreate
@@ -118,7 +119,20 @@ async def create_match(payload: MatchCreate):
 async def candidates_for_job(job_id: int, limit: int = Query(30, ge=1, le=100)):
     """Cheap keyword-overlap prefilter — NO AI, NO OpenRouter. Ranks active
     candidates against a job's title/requirements so an external agent (e.g.
-    a Claude cloud agent) can shortlist without pulling all candidates."""
+    a Claude cloud agent) can shortlist without pulling all candidates.
+
+    Security-audit follow-up (finding 3): this is a third pipe of raw
+    cv_text to an external agent that the OpenRouter pseudonymisation work
+    (VERWERKINGSREGISTER.md §1.3) never covered — cv_excerpt below now runs
+    through the same pseudonymize_cv_text() as services/matcher.py's
+    embedding input. full_name is still returned deliberately: this
+    endpoint exists precisely so the calling agent can shortlist and write
+    matches back keyed on candidate_id, but list_matches()/get_match() below
+    never return a name at all, and grepping website/admin/ and app/ turns
+    up no screen that calls this endpoint or reads its full_name — nothing
+    that currently depends on it — so removing it would only reduce this
+    endpoint's own exposure, not fix a real consumer. Left in place with the
+    residual risk noted rather than dropped silently."""
     job = await fetch_one(
         "SELECT id, title, description, requirements FROM job_orders "
         "WHERE id = $1 AND deleted_at IS NULL", job_id,
@@ -169,7 +183,7 @@ async def candidates_for_job(job_id: int, limit: int = Query(30, ge=1, le=100)):
             "skills": r["skills"] or [],
             "location": r["location"],
             "years_experience": float(r["years_experience"]) if r["years_experience"] is not None else None,
-            "cv_excerpt": (r["cv_text"] or "")[:500],
+            "cv_excerpt": pseudonymize_cv_text(r["cv_text"], r["full_name"])[:500],
             "cv_rank": float(r["cv_rank"]),
             "skill_matches": r["skill_matches"],
         }

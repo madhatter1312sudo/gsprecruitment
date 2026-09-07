@@ -29,6 +29,7 @@ only spent on the cheaper mixed_people/search endpoint.
 """
 import json
 import logging
+import re
 import time
 from typing import Any, Dict, Optional
 
@@ -935,6 +936,51 @@ async def _draft_candidate_outreach() -> Dict[str, int]:
     return {"considered": len(candidates), "drafted": drafted}
 
 
+# security-audit follow-up (finding 5): _draft_prospect_outreach() sent
+# company_name + the prospect's exact contact_title + industry to
+# OpenRouter in one prompt. That combination is re-identifying for a small
+# company -- "CTO at a 40-person SME in Eindhoven" is one specific person --
+# even though none of the three fields is sensitive in isolation. Of the
+# audit's two options (generalise the title, or drop the company name and
+# keep only the industry), this generalises the title: company_name is what
+# _build_user_prompt() actually uses to personalise the opener ("at
+# <company>, we noticed you're hiring...") and is the one piece of this
+# B2B outreach that makes it read as researched rather than a form letter;
+# dropping it would make every draft materially worse for a small gain,
+# since "hiring manager at Acme BV" is far less narrowing than "CTO at
+# Acme BV, semiconductor industry" once combined with public headcount
+# data. Collapsing contact_title to one of a handful of broad categories
+# removes the specific-role signal that does most of the re-identifying
+# work while keeping the context useful for drafting.
+_TITLE_CATEGORY_KEYWORDS = (
+    ("senior executive", frozenset((
+        "ceo", "cto", "coo", "cfo", "founder", "oprichter", "eigenaar",
+        "owner", "director", "directeur",
+    ))),
+    ("engineering leadership", frozenset((
+        "engineering", "technical", "technology", "development", "product",
+        "techniek", "technisch",
+    ))),
+    ("HR/talent leadership", frozenset((
+        "hr", "recruiter", "recruitment", "talent", "people",
+        "personeelszaken",
+    ))),
+)
+
+
+def _generalize_contact_title(contact_title: Optional[str]) -> str:
+    """Collapse a specific job title into a broad hiring-role category --
+    see the module-level comment above _draft_prospect_outreach() for why.
+    Word-boundary matching, not a naive substring check: "coo" as a plain
+    substring would otherwise also match inside "coordinator"."""
+    title = (contact_title or "").lower()
+    words = set(re.findall(r"[a-z]+", title))
+    for category, keywords in _TITLE_CATEGORY_KEYWORDS:
+        if words & set(keywords):
+            return category
+    return "hiring manager"
+
+
 async def _draft_prospect_outreach() -> Dict[str, int]:
     """Up to DRAFT_PROSPECT_CAP drafts for freshly-harvested client
     prospects. Bulk harvest never enriches emails, so most prospects have
@@ -961,7 +1007,7 @@ async def _draft_prospect_outreach() -> Dict[str, int]:
     drafted = 0
     for row in prospects:
         try:
-            role_label = row["contact_title"] or "engineering leadership"
+            role_label = _generalize_contact_title(row["contact_title"])
             industry_clause = f", in the {row['industry']} industry" if row["industry"] else ""
             notes = (
                 f"This is business development outreach to a potential hiring "

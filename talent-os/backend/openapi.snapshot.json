@@ -6845,7 +6845,7 @@
     },
     "/api/matches/candidates-for-job/{job_id}": {
       "get": {
-        "description": "Cheap keyword-overlap prefilter \u2014 NO AI, NO OpenRouter. Ranks active\ncandidates against a job's title/requirements so an external agent (e.g.\na Claude cloud agent) can shortlist without pulling all candidates.",
+        "description": "Cheap keyword-overlap prefilter \u2014 NO AI, NO OpenRouter. Ranks active\ncandidates against a job's title/requirements so an external agent (e.g.\na Claude cloud agent) can shortlist without pulling all candidates.\n\nSecurity-audit follow-up (finding 3): this is a third pipe of raw\ncv_text to an external agent that the OpenRouter pseudonymisation work\n(VERWERKINGSREGISTER.md \u00a71.3) never covered \u2014 cv_excerpt below now runs\nthrough the same pseudonymize_cv_text() as services/matcher.py's\nembedding input. full_name is still returned deliberately: this\nendpoint exists precisely so the calling agent can shortlist and write\nmatches back keyed on candidate_id, but list_matches()/get_match() below\nnever return a name at all, and grepping website/admin/ and app/ turns\nup no screen that calls this endpoint or reads its full_name \u2014 nothing\nthat currently depends on it \u2014 so removing it would only reduce this\nendpoint's own exposure, not fix a real consumer. Left in place with the\nresidual risk noted rather than dropped silently.",
         "operationId": "candidates_for_job_api_matches_candidates_for_job__job_id__get",
         "parameters": [
           {

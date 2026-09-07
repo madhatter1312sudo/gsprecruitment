@@ -134,32 +134,67 @@ def test_missing_name_english_fallback(fake_client):
     assert "there" in draft["body"]
 
 
-# ── mangled/mixed-case placeholder variants also get caught ───────────────
+# ── security-audit follow-up (finding 4): a mangled/translated token is no
+# longer "repaired" by a loose pattern match -- draft_email() now requires
+# the *exact* placeholder exactly once, and refuses (raises) otherwise.
+# These three tests used to assert that a bracket/bare-word/mixed-case
+# variant got silently substituted; that leniency is exactly what let a
+# model-mangled token (e.g. a translated "{{ONTVANGER_NAAM}}") slip through
+# undetected. Inverted per the audit: any of these must now fail closed.
 
-def test_bracket_variant_placeholder_is_also_replaced(fake_client):
+def test_bracket_variant_placeholder_is_refused_not_repaired(fake_client):
     _set_model_reply("Beste [RECIPIENT_NAME], welkom.")
-    draft = asyncio.run(outreach_ai.draft_email(
-        target={"name": "Jan de Vries"}, context={}, language="nl",
-    ))
-    assert "[RECIPIENT_NAME]" not in draft["body"]
-    assert "Jan de Vries" in draft["body"]
+    with pytest.raises(outreach_ai.DraftGenerationError):
+        asyncio.run(outreach_ai.draft_email(
+            target={"name": "Jan de Vries"}, context={}, language="nl",
+        ))
 
 
-def test_bare_word_placeholder_variant_is_also_replaced(fake_client):
+def test_bare_word_placeholder_variant_is_refused_not_repaired(fake_client):
     _set_model_reply("Beste recipient_name, welkom.")
-    draft = asyncio.run(outreach_ai.draft_email(
-        target={"name": "Jan de Vries"}, context={}, language="nl",
-    ))
-    assert "recipient_name" not in draft["body"].lower()
+    with pytest.raises(outreach_ai.DraftGenerationError):
+        asyncio.run(outreach_ai.draft_email(
+            target={"name": "Jan de Vries"}, context={}, language="nl",
+        ))
 
 
-def test_mixed_case_braces_variant_is_also_replaced(fake_client):
+def test_mixed_case_braces_variant_is_refused_not_repaired(fake_client):
     _set_model_reply("Beste {{ Recipient_Name }}, welkom.")
-    draft = asyncio.run(outreach_ai.draft_email(
-        target={"name": "Jan de Vries"}, context={}, language="nl",
-    ))
-    assert "recipient_name" not in draft["body"].lower()
-    assert "Jan de Vries" in draft["body"]
+    with pytest.raises(outreach_ai.DraftGenerationError):
+        asyncio.run(outreach_ai.draft_email(
+            target={"name": "Jan de Vries"}, context={}, language="nl",
+        ))
+
+
+def test_translated_token_is_refused(fake_client):
+    # The concrete scenario finding 4 names: the model translates the token
+    # into something _PLACEHOLDER_LEAK_RE's literal "recipient_name" match
+    # would never recognise. The exact-count check in draft_email() catches
+    # this regardless -- zero occurrences of the real token is still "not
+    # exactly one".
+    _set_model_reply("Beste {{ONTVANGER_NAAM}}, welkom.")
+    with pytest.raises(outreach_ai.DraftGenerationError):
+        asyncio.run(outreach_ai.draft_email(
+            target={"name": "Jan de Vries"}, context={}, language="nl",
+        ))
+
+
+def test_missing_placeholder_entirely_is_refused(fake_client):
+    _set_model_reply("Beste, welkom bij GSP Recruitment.")
+    with pytest.raises(outreach_ai.DraftGenerationError):
+        asyncio.run(outreach_ai.draft_email(
+            target={"name": "Jan de Vries"}, context={}, language="nl",
+        ))
+
+
+def test_placeholder_used_twice_is_refused(fake_client):
+    _set_model_reply(
+        f"Beste {outreach_ai.NAME_PLACEHOLDER}, nogmaals {outreach_ai.NAME_PLACEHOLDER}."
+    )
+    with pytest.raises(outreach_ai.DraftGenerationError):
+        asyncio.run(outreach_ai.draft_email(
+            target={"name": "Jan de Vries"}, context={}, language="nl",
+        ))
 
 
 # ── contains_placeholder_leak(): the storage/approval fail-closed check ───
@@ -183,3 +218,22 @@ def test_contains_placeholder_leak_checks_every_argument():
 
 def test_contains_placeholder_leak_handles_none_args():
     assert outreach_ai.contains_placeholder_leak(None, "clean") is False
+
+
+def test_contains_placeholder_leak_true_for_a_translated_or_mangled_token():
+    # security-audit follow-up (finding 4): a generic {{...}} shape is
+    # caught even when its contents don't spell "recipient_name" at all.
+    assert outreach_ai.contains_placeholder_leak("Beste {{ONTVANGER_NAAM}},") is True
+    assert outreach_ai.contains_placeholder_leak("Dear {{ RECIPIENT NAME }},") is True
+
+
+# ── security-audit follow-up (finding 9): a name with a backslash must
+# never trip re.sub's backreference syntax ─────────────────────────────────
+
+def test_fill_recipient_name_handles_a_backslash_in_the_name():
+    text = f"Beste {outreach_ai.NAME_PLACEHOLDER},"
+    # re.sub(pattern, name, text) would raise re.error on the "\1" below
+    # (interpreted as a backreference); the lambda-based substitution must
+    # not raise, and must insert the name literally.
+    out = outreach_ai._fill_recipient_name(text, r"Jan \1 de Vries")
+    assert out == "Beste Jan \\1 de Vries,"

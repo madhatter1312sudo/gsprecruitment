@@ -68,36 +68,63 @@ def _build_user_prompt(target: Dict[str, Any], context: Dict[str, Any], language
     return "\n".join(lines)
 
 
-# Matches the token in any form a model might mangle it into: the exact
-# braces, a bracket variant, or just the bare word — case-insensitive.
-# This is the one regex both _fill_recipient_name() (always substitutes)
-# and contains_placeholder_leak() (the storage/approval fail-closed check
-# in routers/outreach.py) are built on, so they can never disagree about
-# what counts as "leaked".
+class DraftGenerationError(RuntimeError):
+    """Raised by draft_email() when the model's response can't be trusted
+    to have used the name placeholder correctly (security-audit follow-up,
+    finding 4). Callers (harvest.py, scheduler.py) already wrap draft_email()
+    in a broad try/except per candidate/prospect and skip that one row on
+    any exception, so this fits the existing "skip and log" flow without
+    further changes there."""
+
+
+# Matches the *literal* placeholder token and a couple of trivially mangled
+# variants (brackets, stray whitespace, wrong case) of that exact string.
+# Used only by contains_placeholder_leak() (the storage/approval fail-closed
+# check) — draft_email() itself no longer relies on this to "repair" a
+# mangled token (see finding 4 below); it requires the exact token.
 _PLACEHOLDER_LEAK_RE = re.compile(
     r"\{\{\s*recipient_name\s*\}\}|\[\s*recipient_name\s*\]|recipient_name",
     re.IGNORECASE,
 )
 
+# Generic "any {{...}} template token" detector — security-audit follow-up
+# (finding 4): _PLACEHOLDER_LEAK_RE only recognises the literal string
+# "recipient_name" in some shape. A model that translates or otherwise
+# mangles the token into something else entirely (e.g. "{{ONTVANGER_NAAM}}",
+# "{{ RECIPIENT NAME }}") slips straight past it. This catches *any*
+# double-curly-brace token shape as a second, positive-shaped check at the
+# storage/approval boundary — it is deliberately broad (any content between
+# the braces) since the whole point is to catch content we didn't expect.
+_TEMPLATE_TOKEN_RE = re.compile(r"\{\{[^}]{0,40}\}\}")
+
 
 def _fill_recipient_name(text: str, name: str) -> str:
-    """Replace the AI-facing name placeholder with the real recipient name,
-    locally, after the model has already returned its text. Covers the
-    exact token plus mangled variants (see _PLACEHOLDER_LEAK_RE) so a
-    placeholder can never survive into the returned draft."""
+    """Replace the *exact* AI-facing name placeholder with the real
+    recipient name, locally, after the model has already returned its
+    text. draft_email() only ever calls this once it has confirmed the
+    exact token appears exactly once (see finding 4) — this function no
+    longer tries to repair a mangled variant itself. Uses a replacement
+    function rather than a template string so a name containing a
+    backslash (or a `\\g<...>` look-alike) can never trip re.sub's
+    backreference syntax (finding 9)."""
     if not text:
         return text
-    return _PLACEHOLDER_LEAK_RE.sub(name, text)
+    return re.compile(re.escape(NAME_PLACEHOLDER)).sub(lambda _m: name, text)
 
 
 def contains_placeholder_leak(*texts: Optional[str]) -> bool:
     """True if any given string still contains the name placeholder in any
-    recognisable form. draft_email() always substitutes it before
-    returning (see _fill_recipient_name()) — this is the shared fail-closed
-    check callers use before a draft is ever stored or approved, in case a
+    recognisable form, OR any generic {{...}} template token at all (see
+    _TEMPLATE_TOKEN_RE — finding 4). draft_email() itself now refuses to
+    return a draft unless the exact placeholder was used exactly once (so
+    it should never trip this check); this is the shared fail-closed check
+    callers use before a draft is ever stored or approved, in case a
     future prompt change or an unrelated draft source (e.g. the external
     POST /drafts endpoint) lets one slip through."""
-    return any(_PLACEHOLDER_LEAK_RE.search(t or "") for t in texts)
+    return any(
+        _PLACEHOLDER_LEAK_RE.search(t or "") or _TEMPLATE_TOKEN_RE.search(t or "")
+        for t in texts
+    )
 
 
 def _parse_json_response(raw: str) -> Dict[str, str]:
@@ -172,6 +199,26 @@ async def draft_email(
         raw_content = ""
 
     parsed = _parse_json_response(raw_content or "")
+
+    # security-audit follow-up (finding 4): positive check, before the
+    # substitution, rather than the old fail-open pattern-match-and-hope.
+    # If the model didn't use the exact placeholder exactly once, we can no
+    # longer tell whether it omitted the greeting, invented a name, or used
+    # a mangled/translated token our regex wouldn't recognise -- any of
+    # which would otherwise ship an email with the wrong (or no, or a
+    # literal template-token) greeting. Refuse outright instead of guessing.
+    token_count = parsed["subject"].count(NAME_PLACEHOLDER) + parsed["body"].count(NAME_PLACEHOLDER)
+    if token_count != 1:
+        logger.error(
+            "outreach_ai: model response used the name placeholder %s time(s) "
+            "(expected exactly 1) -- refusing to draft. subject=%r body=%r",
+            token_count, parsed.get("subject"), parsed.get("body"),
+        )
+        raise DraftGenerationError(
+            f"Model response contained the name placeholder {token_count} "
+            "time(s), expected exactly 1"
+        )
+
     parsed["subject"] = _fill_recipient_name(parsed["subject"], fill_name)
     parsed["body"] = _fill_recipient_name(parsed["body"], fill_name)
     return parsed
