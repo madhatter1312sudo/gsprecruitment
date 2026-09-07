@@ -79,6 +79,16 @@ const GSP_WHATSAPP = '31617913965';
     enBtn?.addEventListener('click', () => setLang('en'));
     nlBtn?.addEventListener('click', () => setLang('nl'));
     setLang(currentLang);
+
+    // The browser resolves a #hash target during initial navigation, while
+    // the other language's block is still visible (the page markup starts
+    // in NL, see html[data-lang] in styles.css), so a same-language link
+    // can land the reader at the top of the page instead of the anchor.
+    // Re-target the scroll now that setLang() above has fixed visibility.
+    if (location.hash) {
+      const target = document.getElementById(location.hash.slice(1));
+      if (target) target.scrollIntoView();
+    }
   }
 
   // ── Preloader ──────────────────────────────────────────
