@@ -5,7 +5,6 @@ import logging
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from core.database import fetch_all, fetch_one, execute
-from core.privacy import pseudonymize_cv_text
 from core.security import verify_api_key
 from services.matcher import EmbeddingMatcher
 from models.schemas import MatchCreate
@@ -31,8 +30,10 @@ async def _run_matching_for_job(job_id: int) -> None:
             return
 
         candidates = await fetch_all(
-            "SELECT id, full_name, current_title, cv_text, skills FROM candidates "
-            "WHERE deleted_at IS NULL AND consent_withdrawn_at IS NULL",
+            "SELECT id, full_name, current_title, education, years_experience, skills "
+            "FROM candidates "
+            "WHERE deleted_at IS NULL AND consent_withdrawn_at IS NULL "
+            "AND source_url ~* '^https?://'",
         )
         if not candidates:
             logger.info("matching: no candidates to match for job %s", job_id)
@@ -121,18 +122,16 @@ async def candidates_for_job(job_id: int, limit: int = Query(30, ge=1, le=100)):
     candidates against a job's title/requirements so an external agent (e.g.
     a Claude cloud agent) can shortlist without pulling all candidates.
 
-    Security-audit follow-up (finding 3): this is a third pipe of raw
-    cv_text to an external agent that the OpenRouter pseudonymisation work
-    (VERWERKINGSREGISTER.md §1.3) never covered — cv_excerpt below now runs
-    through the same pseudonymize_cv_text() as services/matcher.py's
-    embedding input. full_name is still returned deliberately: this
-    endpoint exists precisely so the calling agent can shortlist and write
-    matches back keyed on candidate_id, but list_matches()/get_match() below
-    never return a name at all, and grepping website/admin/ and app/ turns
-    up no screen that calls this endpoint or reads its full_name — nothing
-    that currently depends on it — so removing it would only reduce this
-    endpoint's own exposure, not fix a real consumer. Left in place with the
-    residual risk noted rather than dropped silently."""
+    Deliberately returns no name and no CV text (VERWERKINGSREGISTER.md
+    §2.6 measure A3): round two of the privacy audit found that
+    regex-cleaning free CV text cannot be made reliably sound (addresses
+    without a recognised street-type suffix, foreign addresses, non-ISO
+    dates all survived), so the fix is not sending it at all rather than
+    cleaning it harder. `id` (the candidate's id, i.e. `candidate_id`),
+    `current_title`, `skills`, `location` and `current_company` are enough
+    for an external agent to shortlist and write matches back with
+    `POST /api/matches` keyed on `candidate_id` — it never needs the
+    person's name or CV prose to do that."""
     job = await fetch_one(
         "SELECT id, title, description, requirements FROM job_orders "
         "WHERE id = $1 AND deleted_at IS NULL", job_id,
@@ -152,22 +151,25 @@ async def candidates_for_job(job_id: int, limit: int = Query(30, ge=1, le=100)):
 
     # Rank on the existing `cv_search` tsvector (GIN-indexed, dutch stemmed)
     # plus a bonus for skills[] overlap with the job's keyword tokens
-    # (also GIN-indexed) — no AI/embeddings involved.
-    # NOTE: the Apollo-bulk candidate pool has empty skills[] and cv_text, so
-    # cv_search/skills ranking scores 0 for nearly everyone. current_title is the
-    # one populated free-text signal, so we rank primarily on it (falling back to
-    # cv_search + skills bonus where they do exist). A hard tsvector filter would
-    # return nothing for such candidates, so we rank-and-limit instead of filtering.
+    # (also GIN-indexed) — no AI/embeddings involved. cv_search still feeds
+    # the ranking score (cv_rank) even though cv_text itself is never
+    # returned below.
+    # NOTE: the source_url filter below (VERWERKINGSREGISTER.md rij 1, §2.6
+    # measure A1) excludes the whole Apollo-bulk pool, which is also most of
+    # where empty skills[]/cv_text rows lived — the remaining pool is mostly
+    # rows with real profile text, but current_title is still ranked
+    # primarily since it's the one field guaranteed to be populated.
     rows = await fetch_all(
         """SELECT * FROM (
-               SELECT c.id, c.full_name, c.current_title, c.current_company, c.skills,
-                      c.location, c.years_experience, c.cv_text, c.updated_at,
+               SELECT c.id, c.current_title, c.current_company, c.skills,
+                      c.location, c.years_experience, c.updated_at,
                       ts_rank(to_tsvector('dutch', coalesce(c.current_title, '')),
                               plainto_tsquery('dutch', $1)) AS title_rank,
                       ts_rank(c.cv_search, plainto_tsquery('dutch', $1)) AS cv_rank,
                       (SELECT COUNT(*) FROM unnest(c.skills) s WHERE lower(s) = ANY($2::text[])) AS skill_matches
                FROM candidates c
                WHERE c.deleted_at IS NULL AND c.consent_withdrawn_at IS NULL
+                 AND c.source_url ~* '^https?://'
            ) ranked
            ORDER BY (title_rank + cv_rank + skill_matches * 0.05) DESC, updated_at DESC NULLS LAST
            LIMIT $3""",
@@ -177,13 +179,11 @@ async def candidates_for_job(job_id: int, limit: int = Query(30, ge=1, le=100)):
     return [
         {
             "id": r["id"],
-            "full_name": r["full_name"],
             "current_title": r["current_title"],
             "current_company": r["current_company"],
             "skills": r["skills"] or [],
             "location": r["location"],
             "years_experience": float(r["years_experience"]) if r["years_experience"] is not None else None,
-            "cv_excerpt": pseudonymize_cv_text(r["cv_text"], r["full_name"])[:500],
             "cv_rank": float(r["cv_rank"]),
             "skill_matches": r["skill_matches"],
         }

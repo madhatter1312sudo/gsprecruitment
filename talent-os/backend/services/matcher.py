@@ -5,7 +5,6 @@ NO local models on VPS. All embedding calls go through OpenRouter.
 import httpx
 from typing import List, Dict, Any, Optional
 from core.config import settings
-from core.privacy import pseudonymize_cv_text
 
 
 class EmbeddingMatcher:
@@ -66,21 +65,23 @@ class EmbeddingMatcher:
         if not candidates:
             return []
 
-        # Build candidate texts
+        # Build candidate texts — structured fields only, no free CV text.
+        # Round two of the privacy audit found that regex-cleaning free-text
+        # CVs cannot be made reliably sound (addresses without a recognised
+        # street-type suffix, foreign addresses, non-ISO dates all survived
+        # pseudonymize_cv_text() in testing). VERWERKINGSREGISTER.md §2.6
+        # measure A3 now reads "no CV text to external processors" rather
+        # than "pseudonymize it first" — so cv_text never enters the
+        # embedding input at all, pseudonymized or not.
         cand_texts = []
         for c in candidates:
             # DB NULLs come through as None — never assume the defaults kick in
             title = c.get("current_title") or ""
-            # VERWERKINGSREGISTER.md §1.3 (OpenRouter): cv_text routinely
-            # carries name/e-mail/phone/URL — pseudonymize on the FULL text
-            # first (a known full_name and any e-mail/phone/URL, wherever
-            # they occur), THEN take the first 500 chars, so truncation
-            # never leaves a cut-off identifying fragment past the redaction.
-            cv = pseudonymize_cv_text(
-                c.get("cv_text"), full_name=c.get("full_name") or c.get("name")
-            )[:500]
+            education = c.get("education") or ""
+            years = c.get("years_experience")
+            experience = f"{years} jaar ervaring" if years is not None else ""
             skills = " ".join(c.get("skills") or [])
-            cand_texts.append(f"{title} {cv} {skills}")
+            cand_texts.append(f"{title} {education} {experience} {skills}".strip())
 
         # Embed in batches — the embeddings endpoint caps input arrays
         # (~2048 items) and 5k+ candidates in one request 4xx's.
