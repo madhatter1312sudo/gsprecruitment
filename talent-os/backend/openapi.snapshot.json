@@ -6242,7 +6242,7 @@
     },
     "/api/candidates": {
       "get": {
-        "description": "List candidates with optional status filter and pagination.",
+        "description": "List candidates with optional status filter and pagination.\nSoft-deleted rows and rows with withdrawn consent are excluded, and\ncv_text is never selected (FIX 2 -- see _CANDIDATE_LIST_COLUMNS).",
         "operationId": "list_candidates_api_candidates_get",
         "parameters": [
           {
@@ -6371,7 +6371,7 @@
     },
     "/api/candidates/{candidate_id}": {
       "get": {
-        "description": "Get a single candidate by ID.",
+        "description": "Get a single candidate by ID. Soft-deleted rows and rows with\nwithdrawn consent are excluded, and cv_text is never selected\n(FIX 2 -- see _CANDIDATE_LIST_COLUMNS).",
         "operationId": "get_candidate_api_candidates__candidate_id__get",
         "parameters": [
           {

@@ -9,31 +9,59 @@ from typing import Optional, List
 
 router = APIRouter(prefix="/api/candidates", tags=["candidates"], dependencies=[Depends(verify_api_key)])
 
+# FIX 2 (chief-of-staff, ai-pseudonimisering branch): GET /api/candidates
+# and GET /api/candidates/{id} sit behind the same X-API-Key the external
+# Claude routines use, and used to run `SELECT *` -- returning cv_text
+# (the branch's core claim is "no more CV text to external providers")
+# plus every future column added to candidates with no review. Explicit
+# column list, cv_text deliberately left out. Keep in sync with
+# CandidateResponse (models/schemas.py) minus cv_text.
+_CANDIDATE_LIST_COLUMNS = """id, full_name, email, phone, linkedin_url, github_url, portfolio_url,
+    current_company, current_title, location, willing_to_relocate,
+    salary_expectation_min, salary_expectation_max, notice_period_days,
+    years_experience, skills, languages, education,
+    source, source_url, lawful_basis, date_found, sourced_by_agent,
+    strength_score, switch_readiness, tags, status, is_passive,
+    screening_score, screening_notes, quality_score, cv_file_path,
+    created_at, updated_at"""
 
-@router.get("", response_model=List[CandidateResponse])
+
+@router.get("", response_model=List[CandidateResponse], response_model_exclude={"__all__": {"cv_text"}})
 async def list_candidates(
     status: Optional[str] = Query(None, description="Filter by status"),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
 ):
-    """List candidates with optional status filter and pagination."""
+    """List candidates with optional status filter and pagination.
+    Soft-deleted rows and rows with withdrawn consent are excluded, and
+    cv_text is never selected (FIX 2 -- see _CANDIDATE_LIST_COLUMNS)."""
     if status:
         rows = await fetch_all(
-            "SELECT * FROM candidates WHERE status = $1 ORDER BY created_at DESC LIMIT $2 OFFSET $3",
+            f"SELECT {_CANDIDATE_LIST_COLUMNS} FROM candidates "
+            "WHERE status = $1 AND deleted_at IS NULL AND consent_withdrawn_at IS NULL "
+            "ORDER BY created_at DESC LIMIT $2 OFFSET $3",
             status, limit, offset,
         )
     else:
         rows = await fetch_all(
-            "SELECT * FROM candidates ORDER BY created_at DESC LIMIT $1 OFFSET $2",
+            f"SELECT {_CANDIDATE_LIST_COLUMNS} FROM candidates "
+            "WHERE deleted_at IS NULL AND consent_withdrawn_at IS NULL "
+            "ORDER BY created_at DESC LIMIT $1 OFFSET $2",
             limit, offset,
         )
     return rows
 
 
-@router.get("/{candidate_id}", response_model=CandidateResponse)
+@router.get("/{candidate_id}", response_model=CandidateResponse, response_model_exclude={"cv_text"})
 async def get_candidate(candidate_id: int):
-    """Get a single candidate by ID."""
-    row = await fetch_one("SELECT * FROM candidates WHERE id = $1", candidate_id)
+    """Get a single candidate by ID. Soft-deleted rows and rows with
+    withdrawn consent are excluded, and cv_text is never selected
+    (FIX 2 -- see _CANDIDATE_LIST_COLUMNS)."""
+    row = await fetch_one(
+        f"SELECT {_CANDIDATE_LIST_COLUMNS} FROM candidates "
+        "WHERE id = $1 AND deleted_at IS NULL AND consent_withdrawn_at IS NULL",
+        candidate_id,
+    )
     if not row:
         raise HTTPException(status_code=404, detail="Candidate not found")
     return row
