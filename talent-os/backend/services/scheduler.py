@@ -251,6 +251,13 @@ async def draft_outreach() -> dict:
     )
 
     drafted = 0
+    # FIX 5 (chief-of-staff, ai-pseudonimisering branch): a row the model
+    # structurally refuses (leaked placeholder, or draft_email() itself
+    # raising DraftGenerationError) used to disappear into a log line with
+    # no signal in the returned dict -- if the model started mangling the
+    # placeholder on every row, drafted would silently drop to zero with
+    # nothing distinguishing "nothing to draft" from "everything refused".
+    refused = 0
     for row in candidates:
         try:
             draft = await outreach_ai.draft_email(
@@ -270,6 +277,7 @@ async def draft_outreach() -> dict:
                     "draft_outreach: refusing to store draft with leaked name "
                     "placeholder for candidate %s / job %s", row["candidate_id"], row["job_id"],
                 )
+                refused += 1
                 continue
             await execute(
                 """INSERT INTO outreach_drafts
@@ -281,13 +289,22 @@ async def draft_outreach() -> dict:
                 draft["subject"], draft["body"], settings.openrouter_chat_model,
             )
             drafted += 1
+        except outreach_ai.DraftGenerationError:
+            logger.error(
+                "draft_outreach: model refused to draft (placeholder used the "
+                "wrong number of times) for candidate %s / job %s",
+                row["candidate_id"], row["job_id"],
+            )
+            refused += 1
+            continue
         except Exception:
             logger.exception("draft_outreach: failed for candidate %s / job %s",
                               row["candidate_id"], row["job_id"])
             continue
 
-    logger.info("draft_outreach: candidates_considered=%s drafted=%s", len(candidates), drafted)
-    return {"status": "success", "considered": len(candidates), "drafted": drafted}
+    logger.info("draft_outreach: candidates_considered=%s drafted=%s refused=%s",
+                 len(candidates), drafted, refused)
+    return {"status": "success", "considered": len(candidates), "drafted": drafted, "refused": refused}
 
 
 # ── Job 5: Weekly (Mon 05:00) — Draft a blog post ───────────────────────

@@ -899,6 +899,10 @@ async def _draft_candidate_outreach() -> Dict[str, int]:
     )
 
     drafted = 0
+    # FIX 5 (chief-of-staff, ai-pseudonimisering branch): see
+    # services/scheduler.py's draft_outreach() for why a refused row needs
+    # its own counter, not just a log line.
+    refused = 0
     for row in candidates:
         try:
             draft = await outreach_ai.draft_email(
@@ -915,6 +919,7 @@ async def _draft_candidate_outreach() -> Dict[str, int]:
                     "morning_drafts: refusing to store candidate draft with leaked "
                     "name placeholder for candidate=%s job=%s", row["candidate_id"], row["job_id"],
                 )
+                refused += 1
                 continue
             await execute(
                 """INSERT INTO outreach_drafts
@@ -926,6 +931,14 @@ async def _draft_candidate_outreach() -> Dict[str, int]:
                 draft["subject"], draft["body"], settings.openrouter_chat_model,
             )
             drafted += 1
+        except outreach_ai.DraftGenerationError:
+            logger.error(
+                "morning_drafts: model refused to draft (placeholder used the "
+                "wrong number of times) for candidate=%s job=%s",
+                row["candidate_id"], row["job_id"],
+            )
+            refused += 1
+            continue
         except Exception:
             logger.exception(
                 "morning_drafts: candidate draft failed for candidate=%s job=%s",
@@ -933,7 +946,7 @@ async def _draft_candidate_outreach() -> Dict[str, int]:
             )
             continue
 
-    return {"considered": len(candidates), "drafted": drafted}
+    return {"considered": len(candidates), "drafted": drafted, "refused": refused}
 
 
 # security-audit follow-up (finding 5): _draft_prospect_outreach() sent
@@ -1005,6 +1018,10 @@ async def _draft_prospect_outreach() -> Dict[str, int]:
     )
 
     drafted = 0
+    # FIX 5 (chief-of-staff, ai-pseudonimisering branch): see
+    # services/scheduler.py's draft_outreach() for why a refused row needs
+    # its own counter, not just a log line.
+    refused = 0
     for row in prospects:
         try:
             role_label = _generalize_contact_title(row["contact_title"])
@@ -1034,6 +1051,7 @@ async def _draft_prospect_outreach() -> Dict[str, int]:
                     "morning_drafts: refusing to store prospect draft with leaked "
                     "name placeholder for prospect=%s", row["id"],
                 )
+                refused += 1
                 continue
 
             await execute(
@@ -1045,11 +1063,18 @@ async def _draft_prospect_outreach() -> Dict[str, int]:
                 row["company_name"], subject, body, settings.openrouter_chat_model,
             )
             drafted += 1
+        except outreach_ai.DraftGenerationError:
+            logger.error(
+                "morning_drafts: model refused to draft (placeholder used the "
+                "wrong number of times) for prospect=%s", row["id"],
+            )
+            refused += 1
+            continue
         except Exception:
             logger.exception("morning_drafts: prospect draft failed for prospect=%s", row["id"])
             continue
 
-    return {"considered": len(prospects), "drafted": drafted}
+    return {"considered": len(prospects), "drafted": drafted, "refused": refused}
 
 
 async def morning_drafts() -> dict:
@@ -1064,11 +1089,18 @@ async def morning_drafts() -> dict:
     candidate_result = await _draft_candidate_outreach()
     prospect_result = await _draft_prospect_outreach()
 
+    # FIX 5 (chief-of-staff, ai-pseudonimisering branch): a combined
+    # top-level `refused` so a caller (e.g. the gsp-morning-brief routine)
+    # can see the signal without adding up both sub-dicts itself.
+    refused = candidate_result.get("refused", 0) + prospect_result.get("refused", 0)
+
     logger.info(
-        "morning_drafts: candidates=%s prospects=%s", candidate_result, prospect_result
+        "morning_drafts: candidates=%s prospects=%s refused=%s",
+        candidate_result, prospect_result, refused,
     )
     return {
         "status": "success",
         "candidates": candidate_result,
         "prospects": prospect_result,
+        "refused": refused,
     }
