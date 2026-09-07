@@ -134,7 +134,7 @@ gsprecruitment.nl/
 │   ├── /contact.html
 │   ├── /vacature.html, /vacatures             Job listing + detail (pulled from /api/public/jobs)
 │   ├── /blog/*                               Blog articles (pulled from /api/v1/public/blog)
-│   ├── /privacy.html, /cookies.html, /terms.html
+│   ├── /privacy.html, /privacy-kandidaten.html, /cookies.html, /terms.html
 │   └── /404.html
 │
 ├── CANDIDATE PORTAL (authenticated, single page, hash-routed)

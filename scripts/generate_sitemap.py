@@ -58,6 +58,7 @@ STATIC_PAGES = [
     ("werkwijze", "werkwijze.html", "monthly", "0.7"),
     ("over-ons", "over-ons.html", "monthly", "0.7"),
     ("privacy", "privacy.html", "monthly", "0.3"),
+    ("privacy-kandidaten", "privacy-kandidaten.html", "monthly", "0.3"),
     ("blog/", "blog/index.html", "weekly", "0.7"),
 ]
 
