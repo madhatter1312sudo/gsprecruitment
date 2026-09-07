@@ -209,10 +209,15 @@ async def draft_email(
     # literal template-token) greeting. Refuse outright instead of guessing.
     token_count = parsed["subject"].count(NAME_PLACEHOLDER) + parsed["body"].count(NAME_PLACEHOLDER)
     if token_count != 1:
+        # chief-of-staff (ai-pseudonimisering branch, finding 9): the
+        # recipient name in `fill_name` is still a placeholder at this
+        # point, but subject/body already carry company name and job
+        # context -- logging them in full on every refusal put that in
+        # the logs. Log lengths, not content.
         logger.error(
             "outreach_ai: model response used the name placeholder %s time(s) "
-            "(expected exactly 1) -- refusing to draft. subject=%r body=%r",
-            token_count, parsed.get("subject"), parsed.get("body"),
+            "(expected exactly 1) -- refusing to draft. subject_len=%s body_len=%s",
+            token_count, len(parsed.get("subject") or ""), len(parsed.get("body") or ""),
         )
         raise DraftGenerationError(
             f"Model response contained the name placeholder {token_count} "
