@@ -5,6 +5,7 @@ NO local models on VPS. All embedding calls go through OpenRouter.
 import httpx
 from typing import List, Dict, Any, Optional
 from core.config import settings
+from core.privacy import pseudonymize_cv_text
 
 
 class EmbeddingMatcher:
@@ -70,7 +71,14 @@ class EmbeddingMatcher:
         for c in candidates:
             # DB NULLs come through as None — never assume the defaults kick in
             title = c.get("current_title") or ""
-            cv = (c.get("cv_text") or "")[:500]
+            # VERWERKINGSREGISTER.md §1.3 (OpenRouter): cv_text routinely
+            # carries name/e-mail/phone/URL — pseudonymize on the FULL text
+            # first (a known full_name and any e-mail/phone/URL, wherever
+            # they occur), THEN take the first 500 chars, so truncation
+            # never leaves a cut-off identifying fragment past the redaction.
+            cv = pseudonymize_cv_text(
+                c.get("cv_text"), full_name=c.get("full_name") or c.get("name")
+            )[:500]
             skills = " ".join(c.get("skills") or [])
             cand_texts.append(f"{title} {cv} {skills}")
 

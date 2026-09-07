@@ -909,6 +909,12 @@ async def _draft_candidate_outreach() -> Dict[str, int]:
                 },
                 language="nl",
             )
+            if outreach_ai.contains_placeholder_leak(draft["subject"], draft["body"]):
+                logger.error(
+                    "morning_drafts: refusing to store candidate draft with leaked "
+                    "name placeholder for candidate=%s job=%s", row["candidate_id"], row["job_id"],
+                )
+                continue
             await execute(
                 """INSERT INTO outreach_drafts
                    (target_type, target_id, target_email, target_name, company,
@@ -976,6 +982,13 @@ async def _draft_prospect_outreach() -> Dict[str, int]:
             body = draft["body"]
             if not row["contact_email"] and row["contact_linkedin"]:
                 body = f"{body}\n\n[LinkedIn] contact via {row['contact_linkedin']}"
+
+            if outreach_ai.contains_placeholder_leak(subject, body):
+                logger.error(
+                    "morning_drafts: refusing to store prospect draft with leaked "
+                    "name placeholder for prospect=%s", row["id"],
+                )
+                continue
 
             await execute(
                 """INSERT INTO outreach_drafts

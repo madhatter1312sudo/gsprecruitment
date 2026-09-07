@@ -455,6 +455,50 @@ def test_prospect_update_rejects_non_http_source_url():
         ProspectUpdate(source_url="javascript:alert(1)")
 
 
+# ── AI-drafting name-placeholder leak (services/outreach_ai.py) ──────────
+# The recipient's real name never goes to OpenRouter -- draft_email() only
+# ever sends NAME_PLACEHOLDER and fills the real name in locally. This is
+# the fail-closed check at the approval boundary: a draft that somehow
+# still carries the placeholder must never be approved (and, mirrored at
+# create_draft()/update_draft(), never stored either).
+
+def test_approve_refuses_draft_with_leaked_placeholder_in_body(patch_db):
+    outreach = patch_db(_FakeDB(candidate=_candidate()))
+    draft = _draft(body=f"Beste {{{{RECIPIENT_NAME}}}}, {NL_ART14}")
+    result = asyncio.run(outreach._draft_refusal(draft))
+    assert result is not None
+    status_code, code, _detail = result
+    assert (status_code, code) == outreach.REFUSAL_PLACEHOLDER_LEAK
+
+
+def test_approve_refuses_draft_with_leaked_placeholder_in_subject(patch_db):
+    outreach = patch_db(_FakeDB(candidate=_candidate()))
+    draft = _draft(body=NL_ART14, subject="Hallo RECIPIENT_NAME")
+    result = asyncio.run(outreach._draft_refusal(draft))
+    assert result is not None
+    status_code, code, _detail = result
+    assert (status_code, code) == outreach.REFUSAL_PLACEHOLDER_LEAK
+
+
+def test_approve_placeholder_check_runs_before_optout_check(patch_db):
+    """Belt-and-braces: a placeholder leak refuses even if the opt-out
+    line is also missing -- the placeholder check must not be skipped
+    just because a later check would also have refused."""
+    outreach = patch_db(_FakeDB(candidate=_candidate()))
+    draft = _draft(body="Beste {{RECIPIENT_NAME}}, geen opt-out hier.")
+    result = asyncio.run(outreach._draft_refusal(draft))
+    assert result is not None
+    status_code, code, _detail = result
+    assert (status_code, code) == outreach.REFUSAL_PLACEHOLDER_LEAK
+
+
+def test_approve_allows_a_clean_draft_with_no_placeholder(patch_db):
+    outreach = patch_db(_FakeDB(candidate=_candidate()))
+    draft = _draft(body=NL_ART14)  # already asserted clean elsewhere
+    result = asyncio.run(outreach._draft_refusal(draft))
+    assert result is None
+
+
 # ── Suppression hashing (mirrors routers/gdpr.py add_suppression) ────────
 
 def test_suppression_hash_matches_privacy_module():

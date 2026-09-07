@@ -265,6 +265,12 @@ async def draft_outreach() -> dict:
                 },
                 language="nl",
             )
+            if outreach_ai.contains_placeholder_leak(draft["subject"], draft["body"]):
+                logger.error(
+                    "draft_outreach: refusing to store draft with leaked name "
+                    "placeholder for candidate %s / job %s", row["candidate_id"], row["job_id"],
+                )
+                continue
             await execute(
                 """INSERT INTO outreach_drafts
                    (target_type, target_id, target_email, target_name, company,
