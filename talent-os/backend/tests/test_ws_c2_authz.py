@@ -69,6 +69,11 @@ def test_require_candidate_access_blocks_client():
 
 
 def test_project_candidate_public_strips_pii():
+    """No consent_spec_presentation_at on this row -- FIX 1 (chief-of-staff,
+    ai-pseudonimisering branch, ronde 5) means full_name must be withheld
+    too, not just email/phone/URLs/cv_text. See
+    test_project_candidate_public_reveals_name_after_spec_consent below
+    for the case where it is set."""
     row = {
         "id": 1,
         "full_name": "Jane Doe",
@@ -87,7 +92,6 @@ def test_project_candidate_public_strips_pii():
     projected = _project_candidate_public(row)
     assert projected == {
         "id": 1,
-        "full_name": "Jane Doe",
         "current_title": "Embedded Software Engineer",
         "current_company": "Acme BV",
         "location": "Eindhoven",
@@ -95,10 +99,30 @@ def test_project_candidate_public_strips_pii():
         "skills": [],
     }
     for leaked_field in (
-        "email", "phone", "linkedin_url", "github_url",
+        "full_name", "email", "phone", "linkedin_url", "github_url",
         "portfolio_url", "cv_text",
     ):
         assert leaked_field not in projected
+
+
+def test_project_candidate_public_reveals_name_after_spec_consent():
+    row = {
+        "id": 1, "full_name": "Jane Doe", "current_title": "Embedded Software Engineer",
+        "current_company": "Acme BV", "location": "Eindhoven", "years_experience": 6,
+        "skills": None, "consent_spec_presentation_at": "2026-08-01T00:00:00+00:00",
+        "consent_withdrawn_at": None,
+    }
+    assert _project_candidate_public(row)["full_name"] == "Jane Doe"
+
+
+def test_project_candidate_public_withdrawn_consent_overrides_spec_consent():
+    row = {
+        "id": 1, "full_name": "Jane Doe", "current_title": "Embedded Software Engineer",
+        "current_company": "Acme BV", "location": "Eindhoven", "years_experience": 6,
+        "skills": None, "consent_spec_presentation_at": "2026-08-01T00:00:00+00:00",
+        "consent_withdrawn_at": "2026-08-15T00:00:00+00:00",
+    }
+    assert "full_name" not in _project_candidate_public(row)
 
 
 def test_project_candidate_public_preserves_nonempty_skills():

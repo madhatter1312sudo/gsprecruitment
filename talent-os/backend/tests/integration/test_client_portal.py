@@ -7,6 +7,7 @@ WS-C.14 integration tests: client-portal boundaries against a real DB.
 - GET /api/v1/client/analytics -> 200
 """
 import uuid
+from datetime import datetime, timezone
 
 import pytest
 
@@ -19,6 +20,15 @@ def _insert_candidate(db_run, **overrides):
     full_name = overrides.get("full_name", "Jane Example")
     email = overrides.get("email", f"candidate-{uuid.uuid4().hex[:10]}@example.com")
     phone = overrides.get("phone", "+31 6 00000000")
+    # consent_spec_presentation_at / consent_withdrawn_at (chief-of-staff,
+    # ai-pseudonimisering branch, ronde 5, bevinding 1): both NULL by
+    # default -- a freshly-sourced candidate has not been given
+    # role-specific presentation consent yet, matching SOP §5 /
+    # privacy.html "aanvankelijk anoniem". Pass consent_spec_presentation_at
+    # explicitly to simulate a candidate the client is allowed to see by
+    # name.
+    consent_spec_presentation_at = overrides.get("consent_spec_presentation_at")
+    consent_withdrawn_at = overrides.get("consent_withdrawn_at")
     # updated_at is stamped explicitly (NOW()) to sidestep a separate
     # pre-existing bug: CandidateResponse/the candidates list serializer
     # requires a non-null updated_at, but nothing that inserts a
@@ -30,11 +40,13 @@ def _insert_candidate(db_run, **overrides):
         fetch_one,
         """INSERT INTO candidates
              (full_name, email, phone, current_title, current_company, location,
-              years_experience, skills, linkedin_url, updated_at)
+              years_experience, skills, linkedin_url, updated_at,
+              consent_spec_presentation_at, consent_withdrawn_at)
            VALUES ($1, $2, $3, 'Embedded Software Engineer', 'Acme BV', 'Eindhoven',
-                   5, ARRAY['C++', 'RTOS'], 'https://linkedin.com/in/jane-example', NOW())
+                   5, ARRAY['C++', 'RTOS'], 'https://linkedin.com/in/jane-example', NOW(),
+                   $4, $5)
            RETURNING *""",
-        full_name, email, phone,
+        full_name, email, phone, consent_spec_presentation_at, consent_withdrawn_at,
     )
 
 
@@ -97,12 +109,57 @@ def test_approved_client_sees_only_public_columns(client, make_client_user, db_r
     assert candidate["id"] in items_by_id
     item = items_by_id[candidate["id"]]
 
-    # Anonymised projection: no direct identifiers/contact channels.
-    for forbidden in ("email", "phone", "linkedin_url", "github_url", "portfolio_url", "cv_text"):
+    # Anonymised projection: no direct identifiers/contact channels, and
+    # -- FIX 1 (chief-of-staff, ai-pseudonimisering branch, ronde 5) --
+    # no full_name either, until this specific candidate has given
+    # role-specific presentation consent (consent_spec_presentation_at).
+    # privacy.html / SOP §5 promise clients see candidates "aanvankelijk
+    # anoniem (geen naam, foto of contactgegevens)"; this candidate has
+    # not consented yet, so full_name must not appear.
+    for forbidden in ("full_name", "email", "phone", "linkedin_url", "github_url", "portfolio_url", "cv_text"):
         assert forbidden not in item, f"client-facing candidate payload leaked {forbidden!r}: {item}"
 
-    for allowed in ("id", "full_name", "current_title", "current_company", "location", "years_experience", "skills"):
+    for allowed in ("id", "current_title", "current_company", "location", "years_experience", "skills"):
         assert allowed in item
+
+
+def test_approved_client_sees_full_name_after_spec_presentation_consent(client, make_client_user, db_run):
+    """The flip side of the test above: once consent_spec_presentation_at
+    is set for this specific candidate (the same column
+    routers/outreach.py's _draft_refusal() already requires before a
+    candidate may be presented to a client_prospect), full_name is
+    allowed through -- this is the one case privacy.html/SOP §5 carve out
+    ("alleen na uw expliciete toestemming voor een specifieke rol")."""
+    approved = make_client_user(approved=True)
+    candidate = _insert_candidate(db_run, consent_spec_presentation_at=datetime(2026, 8, 1, tzinfo=timezone.utc))
+
+    resp = client.get("/api/v1/client/candidates", headers=approved["headers"])
+    assert resp.status_code == 200, resp.text
+    items_by_id = {item["id"]: item for item in resp.json()["items"]}
+    assert candidate["id"] in items_by_id
+    assert items_by_id[candidate["id"]]["full_name"] == "Jane Example"
+
+
+def test_withdrawn_consent_overrides_spec_presentation_consent(client, make_client_user, db_run):
+    """A later consent_withdrawn_at must win over an earlier-granted
+    consent_spec_presentation_at -- and (FIX 1 follow-up) the candidate
+    must not appear in a fresh client search at all any more, the same
+    way matches.py and outreach.py already treat consent_withdrawn_at as
+    final."""
+    approved = make_client_user(approved=True)
+    candidate = _insert_candidate(
+        db_run,
+        consent_spec_presentation_at=datetime(2026, 8, 1, tzinfo=timezone.utc),
+        consent_withdrawn_at=datetime(2026, 8, 15, tzinfo=timezone.utc),
+    )
+
+    resp = client.get("/api/v1/client/candidates", headers=approved["headers"])
+    assert resp.status_code == 200, resp.text
+    items_by_id = {item["id"]: item for item in resp.json()["items"]}
+    assert candidate["id"] not in items_by_id
+
+    resp = client.get(f"/api/v1/client/candidates/{candidate['id']}", headers=approved["headers"])
+    assert resp.status_code == 404, resp.text
 
 
 # ── Analytics ───────────────────────────────────────────────────────────

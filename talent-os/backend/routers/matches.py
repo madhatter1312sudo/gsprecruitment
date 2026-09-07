@@ -287,21 +287,26 @@ async def get_match(match_id: int):
 async def get_job_matches(job_id: int, min_score: float = Query(0, ge=0, le=100)):
     """Get all matches for a specific job, sorted by score.
 
-    FIX 1 (chief-of-staff, ai-pseudonimisering branch): unlike
-    candidates-for-job (a bulk shortlisting endpoint an external agent uses
-    over the whole active pool, which is why that one deliberately omits
-    full_name), this endpoint returns matches that already exist for one
-    job -- rows a human recruiter created or confirmed in order to decide
-    who to draft outreach for. That is a legitimate, narrow, per-decision
-    reason to need the name, so full_name stays here. What it must not do
-    is what it did before: return a match (and the name behind it) for a
-    candidate who was soft-deleted, withdrew consent, or never had a valid
-    lawful basis in the first place -- previously the only guard was
-    `deleted_at IS NULL` on create_match's own INSERT, so any candidate_id
-    could be matched and then read back by name through this endpoint.
-    Gate it exactly like matching itself (_consent_gate_sql)."""
+    FIX 2 (chief-of-staff, ai-pseudonimisering branch, ronde 5): this
+    endpoint sits behind X-API-Key, not a client/admin JWT, so its only
+    real caller can be an external routine, not a human recruiter --
+    the earlier docstring's "a human recruiter created or confirmed [a
+    match] in order to decide who to draft outreach for" was an
+    unverified assumption. A repo-wide grep of website/ (incl.
+    website/admin/), app/, scripts/ and docs/ turns up zero call sites
+    for /api/matches (any sub-path); VERWERKINGSREGISTER.md rij 4 already
+    documents the actual consumer as the external matching routine, keyed
+    on candidate_id via candidates-for-job / POST /api/matches, which
+    never needed a name. So this endpoint gets the same treatment as
+    candidates-for-job: no full_name. A caller that needs the name for a
+    specific candidate_id it already holds can still look it up through
+    an endpoint that carries its own justification (e.g. the admin panel,
+    behind the JWT). Gate it exactly like matching itself
+    (_consent_gate_sql) -- unchanged from the previous fix: no match (or
+    anything behind it) for a candidate who was soft-deleted, withdrew
+    consent, or never had a valid lawful basis in the first place."""
     rows = await fetch_all(
-        f"SELECT m.*, c.full_name, c.current_title, c.current_company "
+        f"SELECT m.*, c.current_title, c.current_company "
         f"FROM matches m JOIN candidates c ON m.candidate_id = c.id "
         f"WHERE m.job_id = $1 AND m.match_score >= $2 "
         f"AND c.deleted_at IS NULL AND c.consent_withdrawn_at IS NULL "
