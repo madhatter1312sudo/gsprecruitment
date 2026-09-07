@@ -887,6 +887,8 @@ async def _draft_candidate_outreach() -> Dict[str, int]:
              AND j.status = 'open'
              AND j.deleted_at IS NULL
              AND c.email IS NOT NULL
+             AND c.deleted_at IS NULL
+             AND c.consent_withdrawn_at IS NULL
              AND NOT EXISTS (
                  SELECT 1 FROM outreach_drafts d
                  WHERE d.target_type = 'candidate'
@@ -903,6 +905,12 @@ async def _draft_candidate_outreach() -> Dict[str, int]:
     # services/scheduler.py's draft_outreach() for why a refused row needs
     # its own counter, not just a log line.
     refused = 0
+    # FIX 5 follow-up (chief-of-staff, ai-pseudonimisering branch): see the
+    # matching comment in services/scheduler.py's draft_outreach() -- the
+    # generic `except Exception: continue` below was not covered by
+    # refused=, so an HTTP error, unparseable model JSON, or a failing
+    # INSERT stayed invisible.
+    errors = 0
     for row in candidates:
         try:
             draft = await outreach_ai.draft_email(
@@ -944,9 +952,13 @@ async def _draft_candidate_outreach() -> Dict[str, int]:
                 "morning_drafts: candidate draft failed for candidate=%s job=%s",
                 row["candidate_id"], row["job_id"],
             )
+            errors += 1
             continue
 
-    return {"considered": len(candidates), "drafted": drafted, "refused": refused}
+    return {
+        "considered": len(candidates), "drafted": drafted,
+        "refused": refused, "errors": errors,
+    }
 
 
 # security-audit follow-up (finding 5): _draft_prospect_outreach() sent
@@ -1022,6 +1034,9 @@ async def _draft_prospect_outreach() -> Dict[str, int]:
     # services/scheduler.py's draft_outreach() for why a refused row needs
     # its own counter, not just a log line.
     refused = 0
+    # FIX 5 follow-up (chief-of-staff, ai-pseudonimisering branch): see the
+    # matching comment in _draft_candidate_outreach() above.
+    errors = 0
     for row in prospects:
         try:
             role_label = _generalize_contact_title(row["contact_title"])
@@ -1072,9 +1087,13 @@ async def _draft_prospect_outreach() -> Dict[str, int]:
             continue
         except Exception:
             logger.exception("morning_drafts: prospect draft failed for prospect=%s", row["id"])
+            errors += 1
             continue
 
-    return {"considered": len(prospects), "drafted": drafted, "refused": refused}
+    return {
+        "considered": len(prospects), "drafted": drafted,
+        "refused": refused, "errors": errors,
+    }
 
 
 async def morning_drafts() -> dict:
@@ -1090,17 +1109,28 @@ async def morning_drafts() -> dict:
     prospect_result = await _draft_prospect_outreach()
 
     # FIX 5 (chief-of-staff, ai-pseudonimisering branch): a combined
-    # top-level `refused` so a caller (e.g. the gsp-morning-brief routine)
-    # can see the signal without adding up both sub-dicts itself.
+    # top-level `refused` (and `errors`, added in the same branch) so a
+    # direct Python caller of morning_drafts() -- e.g. a test, or a future
+    # caller that awaits the coroutine itself -- doesn't have to add up
+    # both sub-dicts. Correct today, but keep in mind this dict is *not*
+    # currently visible anywhere else: POST /api/outreach/run/{job_name}
+    # (the only HTTP path that runs this job, including for the
+    # gsp-morning-brief routine) schedules it with background_tasks.add_task
+    # and answers 202 immediately, discarding the return value -- so no
+    # routine actually sees these counters yet. `refused` is also returned
+    # top-level *and* inside both sub-dicts; each is correct on its own,
+    # just don't double-count it if you're summing across this response.
     refused = candidate_result.get("refused", 0) + prospect_result.get("refused", 0)
+    errors = candidate_result.get("errors", 0) + prospect_result.get("errors", 0)
 
     logger.info(
-        "morning_drafts: candidates=%s prospects=%s refused=%s",
-        candidate_result, prospect_result, refused,
+        "morning_drafts: candidates=%s prospects=%s refused=%s errors=%s",
+        candidate_result, prospect_result, refused, errors,
     )
     return {
         "status": "success",
         "candidates": candidate_result,
         "prospects": prospect_result,
         "refused": refused,
+        "errors": errors,
     }

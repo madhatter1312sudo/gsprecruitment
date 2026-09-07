@@ -241,6 +241,8 @@ async def draft_outreach() -> dict:
              AND j.deleted_at IS NULL
              AND m.created_at >= NOW() - INTERVAL '24 hours'
              AND c.email IS NOT NULL
+             AND c.deleted_at IS NULL
+             AND c.consent_withdrawn_at IS NULL
              AND NOT EXISTS (
                  SELECT 1 FROM outreach_drafts d
                  WHERE d.target_email = c.email AND d.job_id = m.job_id
@@ -258,6 +260,16 @@ async def draft_outreach() -> dict:
     # placeholder on every row, drafted would silently drop to zero with
     # nothing distinguishing "nothing to draft" from "everything refused".
     refused = 0
+    # FIX 5 follow-up (chief-of-staff, ai-pseudonimisering branch): the
+    # generic `except Exception: continue` below swallowed everything that
+    # was NOT a recognised model refusal -- an HTTP error, unparseable JSON
+    # from the model, or a failing INSERT -- without incrementing anything.
+    # That is the same blindness refused= was added to fix: if the model
+    # started returning structurally broken JSON (a different failure mode
+    # than the placeholder-leak/DraftGenerationError cases above),
+    # drafted/refused would both stay flat while errors silently absorbed
+    # every row. errors= makes that failure mode visible in the same dict.
+    errors = 0
     for row in candidates:
         try:
             draft = await outreach_ai.draft_email(
@@ -300,11 +312,15 @@ async def draft_outreach() -> dict:
         except Exception:
             logger.exception("draft_outreach: failed for candidate %s / job %s",
                               row["candidate_id"], row["job_id"])
+            errors += 1
             continue
 
-    logger.info("draft_outreach: candidates_considered=%s drafted=%s refused=%s",
-                 len(candidates), drafted, refused)
-    return {"status": "success", "considered": len(candidates), "drafted": drafted, "refused": refused}
+    logger.info("draft_outreach: candidates_considered=%s drafted=%s refused=%s errors=%s",
+                 len(candidates), drafted, refused, errors)
+    return {
+        "status": "success", "considered": len(candidates),
+        "drafted": drafted, "refused": refused, "errors": errors,
+    }
 
 
 # ── Job 5: Weekly (Mon 05:00) — Draft a blog post ───────────────────────
