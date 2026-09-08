@@ -144,7 +144,7 @@ class AdminTalentpoolConsentUpdate(BaseModel):
         return v
 
 
-# ── Spec-presentatietoestemming (migrations/018 + 032, §6 punt 10 van
+# ── Spec-presentatietoestemming (migrations/018 + 033, §6 punt 10 van
 # docs/VERWERKINGSREGISTER.md) ────────────────────────────────────────────
 
 class AdminSpecPresentationConsentUpdate(BaseModel):
