@@ -267,12 +267,22 @@ async def login(request: Request, data: UserLogin):
     # login), in mfa_verify()/mfa_recovery() (routers/mfa.py, the
     # completion of a login that required a second factor) and in
     # google_signin() below, but never on /register (a new account isn't
-    # a login yet) or /refresh (reuses an existing session). Best-effort:
-    # a DB hiccup here must never turn a successful login into a 500.
-    try:
-        await execute("UPDATE users SET last_login_at = NOW() WHERE id = $1", user["id"])
-    except Exception:
-        logger.exception("login: failed to stamp last_login_at for user %s", user["id"])
+    # a login yet) or /refresh (reuses an existing session).
+    #
+    # FIX (security-audit FIX FIRST, retention-kolommen branch, blocking
+    # point 7): this used to swallow every exception here ("best-effort,
+    # a DB hiccup must never turn a login into a 500") -- but that silent
+    # catch was masking a missing test stub, not a real production
+    # failure mode (tests/test_ws_e12_mfa.py's
+    # test_login_issues_normal_tokens_for_admin_without_mfa only patched
+    # _get_user_by_email, leaving this UPDATE to hit the real pool; see
+    # that test's fix). A swallowed failure here is also dangerous in the
+    # wrong direction: it lets a login report success while quietly never
+    # stamping last_login_at, so a candidate who logs in every single day
+    # would still drift toward the purge window with nobody able to tell.
+    # last_login_at is a plain UPDATE on an existing row (no jsonb, no FK
+    # it could violate) -- there is no expected failure mode left to catch.
+    await execute("UPDATE users SET last_login_at = NOW() WHERE id = $1", user["id"])
 
     return _build_token_response(user)
 
@@ -731,11 +741,9 @@ async def google_callback(
             user["id"],
         )
 
-    # WS-E.8 follow-up -- see login()'s comment above.
-    try:
-        await execute("UPDATE users SET last_login_at = NOW() WHERE id = $1", user["id"])
-    except Exception:
-        logger.exception("google_signin: failed to stamp last_login_at for user %s", user["id"])
+    # WS-E.8 follow-up -- see login()'s comment above (blocking point 7:
+    # no more try/except here either).
+    await execute("UPDATE users SET last_login_at = NOW() WHERE id = $1", user["id"])
 
     token_response = _build_token_response(user)
     # Fragment, not query string -- see the module-level comment above.

@@ -72,12 +72,18 @@ async def _run_matching_for_job(job_id: int) -> None:
         )
 
         for r in results:
-            # match_score is stored on the 0–100 scale everywhere
+            # match_score is stored on the 0–100 scale everywhere.
+            # WS-E.8 follow-up (security-audit FIX FIRST, retention-kolommen
+            # branch, blocking point 1): updated_at is the anchor
+            # core/retention.py's rejected_applicant guard checks (a fresh
+            # match after a rejection must block the purge) -- it must be
+            # stamped on both the initial insert and every re-score, or the
+            # guard stays permanently NULL/dead.
             await execute(
-                """INSERT INTO matches (candidate_id, job_id, match_score, status)
-                   VALUES ($1, $2, $3, 'suggested')
+                """INSERT INTO matches (candidate_id, job_id, match_score, status, updated_at)
+                   VALUES ($1, $2, $3, 'suggested', NOW())
                    ON CONFLICT (candidate_id, job_id)
-                   DO UPDATE SET match_score = EXCLUDED.match_score
+                   DO UPDATE SET match_score = EXCLUDED.match_score, updated_at = NOW()
                    WHERE matches.status = 'suggested'""",
                 r["candidate_id"], job_id, r["match_score"],
             )
@@ -141,11 +147,16 @@ async def create_match(payload: MatchCreate):
     if not job:
         raise HTTPException(status_code=400, detail=f"Job {payload.job_id} not found")
 
+    # WS-E.8 follow-up (security-audit FIX FIRST, retention-kolommen branch,
+    # blocking point 1): same updated_at stamp as _run_matching_for_job --
+    # this is the endpoint an external agent uses to progress a match's
+    # status (e.g. off 'suggested'), which is exactly the activity
+    # core/retention.py's rejected_applicant guard needs to see.
     row = await fetch_one(
-        """INSERT INTO matches (candidate_id, job_id, match_score, status)
-           VALUES ($1, $2, $3, $4)
+        """INSERT INTO matches (candidate_id, job_id, match_score, status, updated_at)
+           VALUES ($1, $2, $3, $4, NOW())
            ON CONFLICT (candidate_id, job_id)
-           DO UPDATE SET match_score = EXCLUDED.match_score, status = EXCLUDED.status
+           DO UPDATE SET match_score = EXCLUDED.match_score, status = EXCLUDED.status, updated_at = NOW()
            WHERE matches.status = 'suggested'
            RETURNING *""",
         payload.candidate_id, payload.job_id, payload.match_score, payload.status,

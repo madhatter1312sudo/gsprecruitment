@@ -277,15 +277,32 @@ def test_prospect_responding_row_is_schema_ready_with_shared_selector():
     assert row.selector_sql is retention.PROSPECT_RESPONDING_SQL
 
 
-def test_prospect_responding_sql_guards_against_replies_and_sent_drafts():
-    """Same gap as PROSPECT_NO_RESPONSE_SQL -- status/last_contacted_at
-    alone isn't proof a prospect isn't mid-conversation."""
+def test_prospect_responding_sql_guards_against_active_clients_and_opt_out():
+    """Security-audit FIX FIRST (retention-kolommen branch, blocking
+    points 2-4): status/last_contacted_at alone used to let this row
+    anonymise a converted customer (any non-'new' status, including
+    'klant') and never terminate (no opt_out_at guard, even though
+    erase_person() sets it). The reply/sent-draft NOT EXISTS guards this
+    row used to reuse from PROSPECT_NO_RESPONSE_SQL are gone -- replied_at
+    is never written anywhere in this codebase (dead code) and the
+    sent-draft check gave permanent immunity regardless of how stale
+    last_contacted_at later became, which is already what last_contacted_at
+    itself tests for. The real, working guards now are: opt_out_at (so an
+    already-erased row drops out for good) and clients.account_status
+    (so an active client relationship is never purged, matching this
+    row's own "zolang actief" bewaartermijn)."""
     sql = retention.PROSPECT_RESPONDING_SQL
     assert "status != 'new'" in sql
     assert "last_contacted_at" in sql and "INTERVAL '12 months'" in sql
-    assert "FROM outreach_messages om" in sql and "om.replied_at IS NOT NULL" in sql
-    assert "FROM outreach_drafts od" in sql and "od.status = 'sent'" in sql
-    assert "target_type = 'client_prospect'" in sql
+    assert "opt_out_at IS NULL" in sql
+    assert "FROM clients cl" in sql and "cl.account_status = 'active'" in sql
+    assert "cl.company_name" in sql and "cp.company_name" in sql
+    # The dead/contradictory outreach guards must actually be gone, not
+    # just unused -- a regression that re-adds them re-creates the
+    # permanent-immunity bug (point 4) even if a later edit also fixes
+    # points 2/3.
+    assert "outreach_messages" not in sql
+    assert "outreach_drafts" not in sql
 
 
 def test_portal_account_inactive_row_is_schema_ready_with_shared_selector():
@@ -299,13 +316,29 @@ def test_portal_account_inactive_row_is_schema_ready_with_shared_selector():
 def test_portal_account_inactive_sql_guards_against_a_linked_candidate_with_real_signals():
     """'Actief portalaccount zonder sollicitatie' means no real engagement
     -- not merely no recent login. A candidate can be matched/piped
-    without ever logging into the portal."""
+    without ever logging into the portal.
+
+    Security-audit FIX FIRST (retention-kolommen branch, blocking point 5):
+    this used to link users -> candidates via LOWER(email) = LOWER(email),
+    which a portal account and its candidate record don't have to share
+    (a private address on the account vs. a work address on the CV).
+    routers/gdpr.py's erase_person() doesn't trust that match either --
+    it links the two via candidate_profiles.candidate_id
+    (migrations/023_candidate_profiles_candidate_id.py), the real FK, so
+    the guard now joins through that same relation instead of email."""
     sql = retention.PORTAL_ACCOUNT_INACTIVE_SQL
     assert "role = 'candidate'" in sql
     assert "last_login_at" in sql and "INTERVAL '24 months'" in sql
-    assert "FROM candidates c" in sql
+    assert "FROM candidate_profiles cpf" in sql
+    assert "JOIN candidates c ON c.id = cpf.candidate_id" in sql
+    assert "cpf.user_id = u.id" in sql
     assert "FROM matches m" in sql and "m.status <> 'suggested'" in sql
     assert "FROM pipeline_entries p" in sql
+    # The old email-based join must actually be gone -- a regression that
+    # re-adds it alongside the FK join would silently widen the guard back
+    # open for any row whose two addresses happen to match while still
+    # passing a naive "does this string appear" check.
+    assert "LOWER(c.email) = LOWER(u.email)" not in sql
 
 
 def test_sourced_no_response_query_excludes_a_candidate_with_a_progressed_match(monkeypatch):

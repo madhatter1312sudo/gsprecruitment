@@ -467,9 +467,15 @@ async def apply_to_job(
     if existing:
         raise HTTPException(status_code=409, detail="You have already applied to this job")
 
+    # WS-E.8 follow-up (security-audit FIX FIRST, retention-kolommen branch,
+    # blocking point 1): a candidate applying to another role after being
+    # rejected elsewhere is exactly the "picked back up" scenario
+    # core/retention.py's rejected_applicant guard is meant to catch --
+    # updated_at must be stamped here too, not just on the matcher/agent
+    # write paths in routers/matches.py.
     match = await fetch_one(
-        """INSERT INTO matches (candidate_id, job_id, status)
-           VALUES ($1, $2, 'applied')
+        """INSERT INTO matches (candidate_id, job_id, status, updated_at)
+           VALUES ($1, $2, 'applied', NOW())
            RETURNING *""",
         candidate_id, data.job_id,
     )

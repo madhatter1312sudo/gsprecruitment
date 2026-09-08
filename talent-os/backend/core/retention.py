@@ -57,7 +57,20 @@ TALENTPOOL_EXPIRED_SQL below.
 `last_login_at` (users) are schema_ready=True as of
 migrations/032_retention_anchor_columns.py — see REJECTED_APPLICANT_SQL,
 PROSPECT_RESPONDING_SQL and PORTAL_ACCOUNT_INACTIVE_SQL below for the
-guarded selectors and their write paths. `placed_candidate` stays
+guarded selectors and their write paths. `schema_ready=True` here means
+"the column exists and a real code path fills it going forward" — it does
+NOT mean every existing row is retroactively covered. Migration 032 is a
+plain `ADD COLUMN`, so every row that already existed when it ran got
+NULL in all three columns, and all three selectors below require
+`IS NOT NULL` on their anchor column; there is deliberately no backfill
+(guessing a historical `rejected_at`/`last_contacted_at` from a generic
+`updated_at`, or inventing a `last_login_at` no column ever recorded,
+would fabricate a date nobody actually observed). A pre-existing
+candidate/prospect/user only becomes purgeable once it next goes through
+the write path that stamps its column (see VERWERKINGSREGISTER.md §1.4's
+paragraph under this table for the same caveat, kept in sync by hand
+since it's prose, not a table cell test_retention.py parses).
+`placed_candidate` stays
 schema_ready=False: its `action` is "retain", so services/scheduler.py's
 _category_result() reports it "not_applicable" before it ever looks at
 schema_ready — this job never purges 7-year fiscal data, so a dedicated
@@ -123,9 +136,20 @@ PROSPECT_NO_RESPONSE_SQL = """
       )
       AND NOT EXISTS (
           SELECT 1 FROM outreach_drafts od
-          WHERE LOWER(od.target_email) = LOWER(cp.contact_email) AND od.target_type = 'prospect' AND od.status = 'sent'
+          WHERE LOWER(od.target_email) = LOWER(cp.contact_email) AND od.target_type = 'client_prospect' AND od.status = 'sent'
       )
 """
+# FIX (security-audit follow-up, WS-E.8 retention-kolommen branch, non-
+# blocking pre-existing bug flagged alongside the blocking ones): the
+# sent-draft guard above used to compare against
+# od.target_type = 'prospect', a value nothing in this codebase ever
+# writes -- routers/outreach.py's DraftCreate/create_draft and
+# services/scheduler.py's draft_outreach job both write
+# target_type = 'client_prospect' for this table (see
+# PROSPECT_RESPONDING_SQL's own sent-draft guard below, which already
+# had the right string). The guard above therefore never matched a real
+# row and could never protect a prospect who had a draft sent but never
+# replied -- corrected to 'client_prospect' so it actually fires.
 
 # WS-C.17 — migrations/030_talentpool_consent.py adds
 # candidates.consent_talentpool_until, so the talentpool_consent row below
@@ -172,6 +196,33 @@ TALENTPOOL_EXPIRED_SQL = """
 # the two NOT EXISTS guards additionally exclude anyone whose matches or
 # pipeline_entries were touched *after* rejected_at (picked back up for
 # another role since being rejected).
+#
+# FIX (security-audit FIX FIRST, WS-E.8 retention-kolommen branch, blocking
+# point 1): both guards used to be dead code. matches.updated_at
+# (migrations/019_prod_schema_alignment.py) was nullable with no default
+# and no write path ever touched it -- the three places that write
+# matches rows (routers/matches.py's _run_matching_for_job INSERT and
+# create_match's upsert, routers/candidate.py's apply-to-job INSERT) never
+# named the column, so `m.updated_at > c.rejected_at` was always NULL
+# (never true) and this guard could never exclude anyone. Fixed at the
+# source: all three write paths now stamp updated_at = NOW() on
+# insert/upsert (see those routers), so a fresh match created after a
+# rejection is now visible here. pipeline_entries.updated_at was only
+# half-dead -- routers/client.py's and routers/admin.py's stage-update
+# endpoints already stamped it, but the initial add-to-pipeline INSERT
+# (routers/client.py) did not, so a candidate re-piped for another role
+# right after rejection (before any stage change) still wasn't caught;
+# that INSERT now stamps updated_at = NOW() too. Separately,
+# pipeline_entries.updated_at was `TIMESTAMP` (no timezone,
+# migrations/002_portal_tables.py) while candidates.rejected_at is
+# `TIMESTAMPTZ` -- comparing them directly let the exclusion window drift
+# with the connection's session timezone. migrations/033_retention_guard_
+# fixes.py converts the column to TIMESTAMPTZ (assuming existing values
+# were written in UTC, same assumption every other NOW()-stamped column
+# here makes) so both sides of `p.updated_at > c.rejected_at` are the same
+# type. See tests/integration/test_retention_guards.py for the DB-backed
+# proof (a fresh match / a fresh pipeline entry created after rejection
+# now excludes the candidate; a rejection with neither still purges).
 REJECTED_APPLICANT_SQL = """
     SELECT id, email FROM candidates c WHERE c.status = 'rejected'
       AND c.rejected_at IS NOT NULL AND c.rejected_at <= (NOW() - INTERVAL '4 weeks')
@@ -187,26 +238,66 @@ REJECTED_APPLICANT_SQL = """
 
 # migrations/032_retention_anchor_columns.py adds
 # client_prospects.last_contacted_at, stamped whenever an admin changes a
-# prospect's status (routers/prospects.py PUT .../prospects/{id} -- per
-# that router's own docstring, client_prospects.status only ever moves by
-# manual admin action, so a status change is the one place "we had
-# contact" is recorded today) and whenever an outreach draft targeting
+# prospect's status (routers/prospects.py PUT /api/v1/admin/prospects/{id}
+# -- per that router's own docstring, client_prospects.status only ever
+# moves by manual admin action, so a status change is the one place "we
+# had contact" is recorded today) and whenever an outreach draft targeting
 # this prospect is approved/sent (routers/outreach.py approve_draft).
-# Same "status alone isn't proof of no reaction" gap PROSPECT_NO_RESPONSE_
-# SQL guards against applies here too -- reuse its two NOT EXISTS guards
-# (a reply via outreach_messages, or a sent-but-not-yet-replied draft) so
-# a prospect mid-conversation is never purged out from under an in-flight
-# thread even if last_contacted_at happens to be stale.
+#
+# FIX (security-audit FIX FIRST, WS-E.8 retention-kolommen branch, blocking
+# points 2-4): the original guard here (`cp.status != 'new'` plus the two
+# NOT EXISTS reuse of PROSPECT_NO_RESPONSE_SQL's reply/sent-draft checks)
+# had three separate problems, proven against real rows:
+#
+#   1. `status != 'new'` is not "this lead went nowhere" -- it is true for
+#      every status an admin has ever typed into ProspectUpdate.status
+#      (a free Optional[str], no enum), including a converted customer
+#      ('klant', 'gewonnen', ...). This row's own bewaartermijn says
+#      "zolang actief + 12 maanden na laatste contact" -- an active
+#      customer is exactly who must never be swept up here. Rather than
+#      guess at a closed vocabulary of "dead lead" status strings this
+#      codebase has never defined, the guard now checks the one real,
+#      already-existing signal for "this company is a live client":
+#      clients.account_status (migrations/000_baseline.py, DEFAULT
+#      'active'). A prospect whose company has an active clients row is
+#      excluded regardless of what free-text status was typed on the
+#      prospect record.
+#   2. The reply guard (`outreach_messages.replied_at IS NOT NULL`) was
+#      dead code -- nothing in this codebase ever writes replied_at, so
+#      it could never exclude anyone (see PROSPECT_NO_RESPONSE_SQL's own
+#      comment above, same column). The sent-draft guard
+#      (`outreach_drafts...status = 'sent'`) was not dead but wrong in
+#      the opposite direction: it checks *ever*, not *recently*, so
+#      anyone ever sent an approved draft became permanently immune here
+#      no matter how stale last_contacted_at later became -- while the
+#      same send also re-stamps last_contacted_at (see the migration's
+#      docstring above), so "recently contacted via outreach" is already
+#      exactly what last_contacted_at <= NOW() - 12 months tests for.
+#      Both guards are dropped: the outreach-recency protection they were
+#      trying to add is already provided by last_contacted_at itself, and
+#      neither guard was catching the thing it was supposed to catch
+#      (a reply / an active in-flight thread) without also either never
+#      firing or firing forever.
+#   3. The guard never terminated -- client_prospects has no deleted_at,
+#      and erase_person() (routers/gdpr.py) leaves this row's `status`
+#      and `last_contacted_at` in place after anonymising it, only
+#      stamping `opt_out_at`. Every daily run would therefore re-select
+#      and re-erase the same already-anonymised row. Added
+#      `cp.opt_out_at IS NULL`, the same guard PROSPECT_NO_RESPONSE_SQL
+#      already carries and the one erase_person() actually sets.
+#
+# See tests/integration/test_retention_guards.py for the DB-backed proof:
+# an active client's contact is excluded even at 'status=klant' and 13
+# months stale; an already-erased prospect (opt_out_at set) is excluded on
+# a second run; a genuinely stale, non-client, non-opted-out prospect is
+# still selected.
 PROSPECT_RESPONDING_SQL = """
     SELECT id, contact_email FROM client_prospects cp WHERE cp.status != 'new'
       AND cp.last_contacted_at IS NOT NULL AND cp.last_contacted_at <= (NOW() - INTERVAL '12 months')
+      AND cp.opt_out_at IS NULL
       AND NOT EXISTS (
-          SELECT 1 FROM outreach_messages om
-          WHERE LOWER(om.recipient_email) = LOWER(cp.contact_email) AND om.replied_at IS NOT NULL
-      )
-      AND NOT EXISTS (
-          SELECT 1 FROM outreach_drafts od
-          WHERE LOWER(od.target_email) = LOWER(cp.contact_email) AND od.target_type = 'client_prospect' AND od.status = 'sent'
+          SELECT 1 FROM clients cl
+          WHERE LOWER(cl.company_name) = LOWER(cp.company_name) AND cl.account_status = 'active'
       )
 """
 
@@ -218,14 +309,29 @@ PROSPECT_RESPONDING_SQL = """
 # that: an account with no real engagement, not merely one that hasn't
 # logged in recently -- a candidate can be actively matched/piped/
 # contacted by a recruiter without ever touching the portal, so the guard
-# below excludes any user whose linked candidates row (by e-mail) has a
-# progressed match or a pipeline entry, on top of the shared
-# reply/live-account guards the other selectors use.
+# below excludes any user whose linked candidates row has a progressed
+# match or a pipeline entry, on top of the shared reply/live-account
+# guards the other selectors use.
+#
+# FIX (security-audit FIX FIRST, WS-E.8 retention-kolommen branch, blocking
+# point 5): the guard used to link users -> candidates via
+# `LOWER(c.email) = LOWER(u.email)`. A portal account and its candidate
+# record can legitimately carry different addresses (a private address on
+# the account, a work address on the CV, or either edited independently
+# after the fact) -- routers/gdpr.py's erase_person() does not trust this
+# email match either; it links the two via
+# candidate_profiles.candidate_id (migrations/023_candidate_profiles_
+# candidate_id.py), the FK actually written whenever a portal account is
+# created/backfilled. The guard below uses that same real relation, so a
+# user whose linked candidate has an active match/pipeline entry is
+# protected even when the two email addresses differ.
 PORTAL_ACCOUNT_INACTIVE_SQL = """
     SELECT id, email FROM users u WHERE u.role = 'candidate' AND u.deleted_at IS NULL
       AND u.last_login_at IS NOT NULL AND u.last_login_at <= (NOW() - INTERVAL '24 months')
       AND NOT EXISTS (
-          SELECT 1 FROM candidates c WHERE LOWER(c.email) = LOWER(u.email)
+          SELECT 1 FROM candidate_profiles cpf
+          JOIN candidates c ON c.id = cpf.candidate_id
+          WHERE cpf.user_id = u.id
             AND (
                 EXISTS (SELECT 1 FROM matches m WHERE m.candidate_id = c.id AND m.status <> 'suggested')
                 OR EXISTS (SELECT 1 FROM pipeline_entries p WHERE p.candidate_id = c.id)

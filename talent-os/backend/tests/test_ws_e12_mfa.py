@@ -231,6 +231,17 @@ def test_login_issues_normal_tokens_for_admin_without_mfa(monkeypatch):
 
     monkeypatch.setattr(auth_router, "_get_user_by_email", fake_get_user_by_email)
 
+    # WS-E.8 follow-up (security-audit FIX FIRST, retention-kolommen
+    # branch, blocking point 7): login() now stamps last_login_at
+    # unconditionally (no try/except swallowing a real DB error), so --
+    # unlike the MFA-required test above, which returns before ever
+    # reaching that stamp -- this test must stub auth_router.execute too
+    # (same pattern as test_mfa_setup_allowed_when_not_enabled below).
+    async def fake_execute(sql, *args):
+        return "UPDATE 1"
+
+    monkeypatch.setattr(auth_router, "execute", fake_execute)
+
     r = client.post("/api/auth/login", json={
         "email": "admin2@gsprecruitment.nl",
         "password": "correct horse battery staple",
