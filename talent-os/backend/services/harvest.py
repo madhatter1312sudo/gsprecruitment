@@ -29,6 +29,7 @@ only spent on the cheaper mixed_people/search endpoint.
 """
 import json
 import logging
+import re
 import time
 from typing import Any, Dict, Optional
 
@@ -886,6 +887,8 @@ async def _draft_candidate_outreach() -> Dict[str, int]:
              AND j.status = 'open'
              AND j.deleted_at IS NULL
              AND c.email IS NOT NULL
+             AND c.deleted_at IS NULL
+             AND c.consent_withdrawn_at IS NULL
              AND NOT EXISTS (
                  SELECT 1 FROM outreach_drafts d
                  WHERE d.target_type = 'candidate'
@@ -898,6 +901,16 @@ async def _draft_candidate_outreach() -> Dict[str, int]:
     )
 
     drafted = 0
+    # FIX 5 (chief-of-staff, ai-pseudonimisering branch): see
+    # services/scheduler.py's draft_outreach() for why a refused row needs
+    # its own counter, not just a log line.
+    refused = 0
+    # FIX 5 follow-up (chief-of-staff, ai-pseudonimisering branch): see the
+    # matching comment in services/scheduler.py's draft_outreach() -- the
+    # generic `except Exception: continue` below was not covered by
+    # refused=, so an HTTP error, unparseable model JSON, or a failing
+    # INSERT stayed invisible.
+    errors = 0
     for row in candidates:
         try:
             draft = await outreach_ai.draft_email(
@@ -909,6 +922,13 @@ async def _draft_candidate_outreach() -> Dict[str, int]:
                 },
                 language="nl",
             )
+            if outreach_ai.contains_placeholder_leak(draft["subject"], draft["body"]):
+                logger.error(
+                    "morning_drafts: refusing to store candidate draft with leaked "
+                    "name placeholder for candidate=%s job=%s", row["candidate_id"], row["job_id"],
+                )
+                refused += 1
+                continue
             await execute(
                 """INSERT INTO outreach_drafts
                    (target_type, target_id, target_email, target_name, company,
@@ -919,14 +939,71 @@ async def _draft_candidate_outreach() -> Dict[str, int]:
                 draft["subject"], draft["body"], settings.openrouter_chat_model,
             )
             drafted += 1
+        except outreach_ai.DraftGenerationError:
+            logger.error(
+                "morning_drafts: model refused to draft (placeholder used the "
+                "wrong number of times) for candidate=%s job=%s",
+                row["candidate_id"], row["job_id"],
+            )
+            refused += 1
+            continue
         except Exception:
             logger.exception(
                 "morning_drafts: candidate draft failed for candidate=%s job=%s",
                 row["candidate_id"], row["job_id"],
             )
+            errors += 1
             continue
 
-    return {"considered": len(candidates), "drafted": drafted}
+    return {
+        "considered": len(candidates), "drafted": drafted,
+        "refused": refused, "errors": errors,
+    }
+
+
+# security-audit follow-up (finding 5): _draft_prospect_outreach() sent
+# company_name + the prospect's exact contact_title + industry to
+# OpenRouter in one prompt. That combination is re-identifying for a small
+# company -- "CTO at a 40-person SME in Eindhoven" is one specific person --
+# even though none of the three fields is sensitive in isolation. Of the
+# audit's two options (generalise the title, or drop the company name and
+# keep only the industry), this generalises the title: company_name is what
+# _build_user_prompt() actually uses to personalise the opener ("at
+# <company>, we noticed you're hiring...") and is the one piece of this
+# B2B outreach that makes it read as researched rather than a form letter;
+# dropping it would make every draft materially worse for a small gain,
+# since "hiring manager at Acme BV" is far less narrowing than "CTO at
+# Acme BV, semiconductor industry" once combined with public headcount
+# data. Collapsing contact_title to one of a handful of broad categories
+# removes the specific-role signal that does most of the re-identifying
+# work while keeping the context useful for drafting.
+_TITLE_CATEGORY_KEYWORDS = (
+    ("senior executive", frozenset((
+        "ceo", "cto", "coo", "cfo", "founder", "oprichter", "eigenaar",
+        "owner", "director", "directeur",
+    ))),
+    ("engineering leadership", frozenset((
+        "engineering", "technical", "technology", "development", "product",
+        "techniek", "technisch",
+    ))),
+    ("HR/talent leadership", frozenset((
+        "hr", "recruiter", "recruitment", "talent", "people",
+        "personeelszaken",
+    ))),
+)
+
+
+def _generalize_contact_title(contact_title: Optional[str]) -> str:
+    """Collapse a specific job title into a broad hiring-role category --
+    see the module-level comment above _draft_prospect_outreach() for why.
+    Word-boundary matching, not a naive substring check: "coo" as a plain
+    substring would otherwise also match inside "coordinator"."""
+    title = (contact_title or "").lower()
+    words = set(re.findall(r"[a-z]+", title))
+    for category, keywords in _TITLE_CATEGORY_KEYWORDS:
+        if words & set(keywords):
+            return category
+    return "hiring manager"
 
 
 async def _draft_prospect_outreach() -> Dict[str, int]:
@@ -953,9 +1030,16 @@ async def _draft_prospect_outreach() -> Dict[str, int]:
     )
 
     drafted = 0
+    # FIX 5 (chief-of-staff, ai-pseudonimisering branch): see
+    # services/scheduler.py's draft_outreach() for why a refused row needs
+    # its own counter, not just a log line.
+    refused = 0
+    # FIX 5 follow-up (chief-of-staff, ai-pseudonimisering branch): see the
+    # matching comment in _draft_candidate_outreach() above.
+    errors = 0
     for row in prospects:
         try:
-            role_label = row["contact_title"] or "engineering leadership"
+            role_label = _generalize_contact_title(row["contact_title"])
             industry_clause = f", in the {row['industry']} industry" if row["industry"] else ""
             notes = (
                 f"This is business development outreach to a potential hiring "
@@ -977,6 +1061,14 @@ async def _draft_prospect_outreach() -> Dict[str, int]:
             if not row["contact_email"] and row["contact_linkedin"]:
                 body = f"{body}\n\n[LinkedIn] contact via {row['contact_linkedin']}"
 
+            if outreach_ai.contains_placeholder_leak(subject, body):
+                logger.error(
+                    "morning_drafts: refusing to store prospect draft with leaked "
+                    "name placeholder for prospect=%s", row["id"],
+                )
+                refused += 1
+                continue
+
             await execute(
                 """INSERT INTO outreach_drafts
                    (target_type, target_id, target_email, target_name, company,
@@ -986,11 +1078,22 @@ async def _draft_prospect_outreach() -> Dict[str, int]:
                 row["company_name"], subject, body, settings.openrouter_chat_model,
             )
             drafted += 1
+        except outreach_ai.DraftGenerationError:
+            logger.error(
+                "morning_drafts: model refused to draft (placeholder used the "
+                "wrong number of times) for prospect=%s", row["id"],
+            )
+            refused += 1
+            continue
         except Exception:
             logger.exception("morning_drafts: prospect draft failed for prospect=%s", row["id"])
+            errors += 1
             continue
 
-    return {"considered": len(prospects), "drafted": drafted}
+    return {
+        "considered": len(prospects), "drafted": drafted,
+        "refused": refused, "errors": errors,
+    }
 
 
 async def morning_drafts() -> dict:
@@ -1005,11 +1108,29 @@ async def morning_drafts() -> dict:
     candidate_result = await _draft_candidate_outreach()
     prospect_result = await _draft_prospect_outreach()
 
+    # FIX 5 (chief-of-staff, ai-pseudonimisering branch): a combined
+    # top-level `refused` (and `errors`, added in the same branch) so a
+    # direct Python caller of morning_drafts() -- e.g. a test, or a future
+    # caller that awaits the coroutine itself -- doesn't have to add up
+    # both sub-dicts. Correct today, but keep in mind this dict is *not*
+    # currently visible anywhere else: POST /api/outreach/run/{job_name}
+    # (the only HTTP path that runs this job, including for the
+    # gsp-morning-brief routine) schedules it with background_tasks.add_task
+    # and answers 202 immediately, discarding the return value -- so no
+    # routine actually sees these counters yet. `refused` is also returned
+    # top-level *and* inside both sub-dicts; each is correct on its own,
+    # just don't double-count it if you're summing across this response.
+    refused = candidate_result.get("refused", 0) + prospect_result.get("refused", 0)
+    errors = candidate_result.get("errors", 0) + prospect_result.get("errors", 0)
+
     logger.info(
-        "morning_drafts: candidates=%s prospects=%s", candidate_result, prospect_result
+        "morning_drafts: candidates=%s prospects=%s refused=%s errors=%s",
+        candidate_result, prospect_result, refused, errors,
     )
     return {
         "status": "success",
         "candidates": candidate_result,
         "prospects": prospect_result,
+        "refused": refused,
+        "errors": errors,
     }

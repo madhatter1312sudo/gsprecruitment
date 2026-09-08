@@ -291,6 +291,72 @@ class CandidateResponse(CandidateCreate):
     model_config = {"from_attributes": True}
 
 
+# FIX 2 follow-up (chief-of-staff, ai-pseudonimisering branch, finding 10):
+# routers/candidates.py's GET endpoints use response_model=CandidateResponse
+# with response_model_exclude={"cv_text"} to keep cv_text out of the actual
+# response body -- but response_model_exclude only trims the serialized
+# instance, it does not change the model FastAPI builds the OpenAPI schema
+# from. So openapi.snapshot.json (and any external agent generating a
+# client from it) still promised a `cv_text` field on those GET responses
+# that never actually arrives. A pydantic subclass can only add fields, not
+# remove one it inherited, so this is a genuinely separate model rather
+# than another response_model_exclude — every field is CandidateResponse's,
+# minus cv_text; keep the two in sync by hand (same trade-off already made
+# for _CANDIDATE_PUBLIC_COLUMNS in routers/candidates.py).
+class CandidatePublicResponse(BaseModel):
+    id: int
+    full_name: str = Field(..., min_length=1, max_length=255)
+    email: Optional[str] = Field(None, max_length=255)
+    phone: Optional[str] = None
+    linkedin_url: Optional[str] = None
+    github_url: Optional[str] = None
+    portfolio_url: Optional[str] = None
+    current_company: Optional[str] = None
+    current_title: Optional[str] = None
+    location: Optional[str] = None
+    willing_to_relocate: bool = False
+    salary_expectation_min: Optional[int] = None
+    salary_expectation_max: Optional[int] = None
+    notice_period_days: Optional[int] = None
+    years_experience: Optional[float] = None
+    skills: List[str] = []
+    languages: List[str] = []
+    education: Optional[str] = None
+    source: str = "apollo"
+    source_url: Optional[str] = None
+    lawful_basis: Optional[str] = Field(
+        None, pattern=r"^(gerechtvaardigd_belang|opt_in_talentpool|toestemming_referral|portal_registratie)$"
+    )
+    date_found: Optional[date] = None
+    sourced_by_agent: Optional[str] = None
+    strength_score: Optional[float] = Field(None, ge=1.0, le=10.0)
+    switch_readiness: Optional[str] = Field(None, pattern=r"^(LOW|MEDIUM|HIGH|ACTIVE)$")
+    tags: List[str] = []
+    status: str = "sourced"
+    is_passive: bool = True
+    screening_score: Optional[int] = None
+    screening_notes: Optional[str] = None
+    quality_score: Optional[float] = None
+    cv_file_path: Optional[str] = None
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+
+    @field_validator("linkedin_url", "github_url", "portfolio_url")
+    @classmethod
+    def _url_scheme_http_only(cls, v):
+        try:
+            return _normalize_http_url(v)
+        except ValueError:
+            return None
+
+    @field_validator("skills", "languages", "tags", mode="before")
+    @classmethod
+    def _none_to_empty_list(cls, v):
+        return v if v is not None else []
+
+    model_config = {"from_attributes": True}
+
+
 class CandidateSourceCreate(CandidateCreate):
     """POST /api/candidates (X-API-Key sourcing path) only — WS-E.7,
     SOP §2 "geen bron-URL = geen contact". Unlike CandidateCreate,

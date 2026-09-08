@@ -15,6 +15,28 @@ logger = logging.getLogger("talent_os.matches")
 router = APIRouter(prefix="/api/matches", tags=["matches"], dependencies=[Depends(verify_api_key)])
 
 
+def _consent_gate_sql(prefix: str = "") -> str:
+    """FIX 3 (chief-of-staff, ai-pseudonimisering branch): the matching gate
+    used to accept `source_url OR lawful_basis = 'opt_in_talentpool'`
+    without checking whether that talentpool consent was still valid --
+    routers/outreach.py's send-time gate (_draft_refusal) already refuses
+    an expired/never-set consent_talentpool_until outright (WS-C.17,
+    SOP §1.5), so matching was strictly wider than sending: someone whose
+    consent had lapsed stayed matchable (and, via POST /api/matches,
+    readable back by name through GET /api/matches/job/{job_id}).
+    This mirrors outreach.py's gate exactly (minus the Art.14-notice check,
+    which only applies to a drafted message body, not to matching):
+    opt_in_talentpool requires a still-valid consent_talentpool_until;
+    every other basis requires a public http(s) source_url on file."""
+    p = prefix
+    return (
+        f"({p}lawful_basis = 'opt_in_talentpool' AND {p}consent_talentpool_until IS NOT NULL "
+        f"AND {p}consent_talentpool_until > NOW()) "
+        f"OR ({p}lawful_basis IS NOT NULL AND {p}lawful_basis != 'opt_in_talentpool' "
+        f"AND {p}source_url ~* '^https?://')"
+    )
+
+
 async def _run_matching_for_job(job_id: int) -> None:
     """Embed the job against all active candidates and upsert match rows.
     Runs in a FastAPI background task — no Celery/Redis required."""
@@ -29,9 +51,16 @@ async def _run_matching_for_job(job_id: int) -> None:
             logger.warning("matching: job %s not found", job_id)
             return
 
+        # See the FIX 1 note in candidates_for_job() below for why
+        # talentpool opt-ins (no source_url, lawful_basis=
+        # 'opt_in_talentpool') get the same exception here, and the FIX 3
+        # note on _consent_gate_sql() for why that exception now also
+        # requires a still-valid consent_talentpool_until.
         candidates = await fetch_all(
-            "SELECT id, full_name, current_title, cv_text, skills FROM candidates "
-            "WHERE deleted_at IS NULL AND consent_withdrawn_at IS NULL",
+            f"SELECT id, full_name, current_title, education, years_experience, skills "
+            f"FROM candidates "
+            f"WHERE deleted_at IS NULL AND consent_withdrawn_at IS NULL "
+            f"AND ({_consent_gate_sql()})",
         )
         if not candidates:
             logger.info("matching: no candidates to match for job %s", job_id)
@@ -89,9 +118,19 @@ async def create_match(payload: MatchCreate):
     agent doing matching) write results directly, instead of the in-backend
     OpenRouter matcher in _run_matching_for_job. Same upsert semantics as
     that job. `rationale` is accepted but not persisted — no column for it
-    yet."""
+    yet.
+
+    FIX 1 (chief-of-staff, ai-pseudonimisering branch): this endpoint used
+    to only check `deleted_at IS NULL` on the candidate, so any caller with
+    the shared X-API-Key could create a match for an arbitrary
+    candidate_id -- including withdrawn-consent rows and the purchased
+    Apollo pool -- and then read the name back via
+    GET /api/matches/job/{job_id}. Give it the same eligibility check as
+    _run_matching_for_job / candidates_for_job."""
     candidate = await fetch_one(
-        "SELECT id FROM candidates WHERE id = $1 AND deleted_at IS NULL", payload.candidate_id,
+        f"SELECT id FROM candidates WHERE id = $1 AND deleted_at IS NULL "
+        f"AND consent_withdrawn_at IS NULL AND ({_consent_gate_sql()})",
+        payload.candidate_id,
     )
     if not candidate:
         raise HTTPException(status_code=400, detail=f"Candidate {payload.candidate_id} not found")
@@ -118,7 +157,18 @@ async def create_match(payload: MatchCreate):
 async def candidates_for_job(job_id: int, limit: int = Query(30, ge=1, le=100)):
     """Cheap keyword-overlap prefilter — NO AI, NO OpenRouter. Ranks active
     candidates against a job's title/requirements so an external agent (e.g.
-    a Claude cloud agent) can shortlist without pulling all candidates."""
+    a Claude cloud agent) can shortlist without pulling all candidates.
+
+    Deliberately returns no name and no CV text (VERWERKINGSREGISTER.md
+    §2.6 measure A3): round two of the privacy audit found that
+    regex-cleaning free CV text cannot be made reliably sound (addresses
+    without a recognised street-type suffix, foreign addresses, non-ISO
+    dates all survived), so the fix is not sending it at all rather than
+    cleaning it harder. `id` (the candidate's id, i.e. `candidate_id`),
+    `current_title`, `skills`, `location` and `current_company` are enough
+    for an external agent to shortlist and write matches back with
+    `POST /api/matches` keyed on `candidate_id` — it never needs the
+    person's name or CV prose to do that."""
     job = await fetch_one(
         "SELECT id, title, description, requirements FROM job_orders "
         "WHERE id = $1 AND deleted_at IS NULL", job_id,
@@ -138,22 +188,38 @@ async def candidates_for_job(job_id: int, limit: int = Query(30, ge=1, le=100)):
 
     # Rank on the existing `cv_search` tsvector (GIN-indexed, dutch stemmed)
     # plus a bonus for skills[] overlap with the job's keyword tokens
-    # (also GIN-indexed) — no AI/embeddings involved.
-    # NOTE: the Apollo-bulk candidate pool has empty skills[] and cv_text, so
-    # cv_search/skills ranking scores 0 for nearly everyone. current_title is the
-    # one populated free-text signal, so we rank primarily on it (falling back to
-    # cv_search + skills bonus where they do exist). A hard tsvector filter would
-    # return nothing for such candidates, so we rank-and-limit instead of filtering.
+    # (also GIN-indexed) — no AI/embeddings involved. cv_search still feeds
+    # the ranking score (cv_rank) even though cv_text itself is never
+    # returned below.
+    # NOTE: the source_url filter below (VERWERKINGSREGISTER.md rij 1, §2.6
+    # measure A1) excludes the whole Apollo-bulk pool, which is also most of
+    # where empty skills[]/cv_text rows lived — the remaining pool is mostly
+    # rows with real profile text, but current_title is still ranked
+    # primarily since it's the one field guaranteed to be populated.
+    # FIX (chief-of-staff, ai-pseudonimisering FIX 1): a talentpool opt-in
+    # row never gets a source_url (routers/public.py's confirm_talentpool_
+    # optin() only sets lawful_basis='opt_in_talentpool') so the bare
+    # source_url check silently dropped exactly the group with the
+    # strongest legal basis. `pool_origin` (migration 022) was considered
+    # instead, but services/harvest.py and services/scheduler.py's Apollo
+    # INSERTs never set pool_origin themselves -- it is only backfilled for
+    # rows that existed when 022 ran -- so a `pool_origin IS DISTINCT FROM
+    # 'apollo'` filter would silently let every *new* Apollo row straight
+    # into matching (NULL is distinct from 'apollo'), which is worse than
+    # today's bug. source_url stays the Apollo-pool signal; we widen it
+    # with the same opt_in_talentpool exception routers/outreach.py's
+    # _draft_refusal() already relies on (WS-C.17 / SOP §1.5).
     rows = await fetch_all(
-        """SELECT * FROM (
-               SELECT c.id, c.full_name, c.current_title, c.current_company, c.skills,
-                      c.location, c.years_experience, c.cv_text, c.updated_at,
+        f"""SELECT * FROM (
+               SELECT c.id, c.current_title, c.current_company, c.skills,
+                      c.location, c.years_experience, c.updated_at,
                       ts_rank(to_tsvector('dutch', coalesce(c.current_title, '')),
                               plainto_tsquery('dutch', $1)) AS title_rank,
                       ts_rank(c.cv_search, plainto_tsquery('dutch', $1)) AS cv_rank,
                       (SELECT COUNT(*) FROM unnest(c.skills) s WHERE lower(s) = ANY($2::text[])) AS skill_matches
                FROM candidates c
                WHERE c.deleted_at IS NULL AND c.consent_withdrawn_at IS NULL
+                 AND ({_consent_gate_sql("c.")})
            ) ranked
            ORDER BY (title_rank + cv_rank + skill_matches * 0.05) DESC, updated_at DESC NULLS LAST
            LIMIT $3""",
@@ -163,13 +229,11 @@ async def candidates_for_job(job_id: int, limit: int = Query(30, ge=1, le=100)):
     return [
         {
             "id": r["id"],
-            "full_name": r["full_name"],
             "current_title": r["current_title"],
             "current_company": r["current_company"],
             "skills": r["skills"] or [],
             "location": r["location"],
             "years_experience": float(r["years_experience"]) if r["years_experience"] is not None else None,
-            "cv_excerpt": (r["cv_text"] or "")[:500],
             "cv_rank": float(r["cv_rank"]),
             "skill_matches": r["skill_matches"],
         }
@@ -221,12 +285,33 @@ async def get_match(match_id: int):
 
 @router.get("/job/{job_id}")
 async def get_job_matches(job_id: int, min_score: float = Query(0, ge=0, le=100)):
-    """Get all matches for a specific job, sorted by score."""
+    """Get all matches for a specific job, sorted by score.
+
+    FIX 2 (chief-of-staff, ai-pseudonimisering branch, ronde 5): this
+    endpoint sits behind X-API-Key, not a client/admin JWT, so its only
+    real caller can be an external routine, not a human recruiter --
+    the earlier docstring's "a human recruiter created or confirmed [a
+    match] in order to decide who to draft outreach for" was an
+    unverified assumption. A repo-wide grep of website/ (incl.
+    website/admin/), app/, scripts/ and docs/ turns up zero call sites
+    for /api/matches (any sub-path); VERWERKINGSREGISTER.md rij 4 already
+    documents the actual consumer as the external matching routine, keyed
+    on candidate_id via candidates-for-job / POST /api/matches, which
+    never needed a name. So this endpoint gets the same treatment as
+    candidates-for-job: no full_name. A caller that needs the name for a
+    specific candidate_id it already holds can still look it up through
+    an endpoint that carries its own justification (e.g. the admin panel,
+    behind the JWT). Gate it exactly like matching itself
+    (_consent_gate_sql) -- unchanged from the previous fix: no match (or
+    anything behind it) for a candidate who was soft-deleted, withdrew
+    consent, or never had a valid lawful basis in the first place."""
     rows = await fetch_all(
-        "SELECT m.*, c.full_name, c.current_title, c.current_company "
-        "FROM matches m JOIN candidates c ON m.candidate_id = c.id "
-        "WHERE m.job_id = $1 AND m.match_score >= $2 "
-        "ORDER BY m.match_score DESC",
+        f"SELECT m.*, c.current_title, c.current_company "
+        f"FROM matches m JOIN candidates c ON m.candidate_id = c.id "
+        f"WHERE m.job_id = $1 AND m.match_score >= $2 "
+        f"AND c.deleted_at IS NULL AND c.consent_withdrawn_at IS NULL "
+        f"AND ({_consent_gate_sql('c.')}) "
+        f"ORDER BY m.match_score DESC",
         job_id, min_score,
     )
     return rows

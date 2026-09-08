@@ -18,7 +18,15 @@ from core.config import settings
 
 logger = logging.getLogger("talent_os.outreach_ai")
 
-SYSTEM_PROMPT = """You are the outreach copywriter for GSP Recruitment, a young, specialized \
+# VERWERKINGSREGISTER.md §1.3 (OpenRouter-rij): the recipient's real name
+# is personal data and never leaves this process. The model only ever sees
+# this placeholder token and is instructed to use it verbatim wherever it
+# would greet the recipient by name; draft_email() fills in the real name
+# itself, locally, after the model has returned the text (see
+# _fill_recipient_name() below).
+NAME_PLACEHOLDER = "{{RECIPIENT_NAME}}"
+
+SYSTEM_PROMPT = f"""You are the outreach copywriter for GSP Recruitment, a young, specialized \
 tech recruitment firm based in the Brainport Eindhoven region (Netherlands).
 
 Rules you must always follow:
@@ -27,11 +35,15 @@ Rules you must always follow:
 Only reference the specific job/company context you are given.
 - NEVER mention or sign with an individual founder or recruiter's name. Always write \
 in the team voice and sign off as "Team GSP Recruitment".
+- You have NOT been given the recipient's real name. Wherever you would address them \
+by name (e.g. in the greeting), use exactly this literal placeholder token, unchanged \
+and untranslated: {NAME_PLACEHOLDER}. Never invent, guess, or substitute a different \
+name or greeting word for it.
 - Keep the email body to roughly 150 words or fewer.
 - Always end the body with this exact opt-out line on its own line: \
 "Wil je geen berichten meer ontvangen? Antwoord met STOP."
 - Mention the specific job title/company context provided to you.
-- Respond ONLY with a JSON object of the form {"subject": "...", "body": "..."} — \
+- Respond ONLY with a JSON object of the form {{"subject": "...", "body": "..."}} — \
 no markdown, no code fences, no extra commentary.
 """
 
@@ -40,7 +52,8 @@ def _build_user_prompt(target: Dict[str, Any], context: Dict[str, Any], language
     lang_label = "Dutch" if language == "nl" else "English"
     lines = [
         f"Write a {lang_label} recruitment outreach email.",
-        f"Target name: {target.get('name') or target.get('full_name') or 'there'}",
+        f"Recipient name to use in the greeting: the literal token {NAME_PLACEHOLDER} "
+        "(you have not been given their real name — see system instructions).",
     ]
     if target.get("company"):
         lines.append(f"Target's current company: {target['company']}")
@@ -53,6 +66,65 @@ def _build_user_prompt(target: Dict[str, Any], context: Dict[str, Any], language
     if context.get("notes"):
         lines.append(f"Additional notes: {context['notes']}")
     return "\n".join(lines)
+
+
+class DraftGenerationError(RuntimeError):
+    """Raised by draft_email() when the model's response can't be trusted
+    to have used the name placeholder correctly (security-audit follow-up,
+    finding 4). Callers (harvest.py, scheduler.py) already wrap draft_email()
+    in a broad try/except per candidate/prospect and skip that one row on
+    any exception, so this fits the existing "skip and log" flow without
+    further changes there."""
+
+
+# Matches the *literal* placeholder token and a couple of trivially mangled
+# variants (brackets, stray whitespace, wrong case) of that exact string.
+# Used only by contains_placeholder_leak() (the storage/approval fail-closed
+# check) — draft_email() itself no longer relies on this to "repair" a
+# mangled token (see finding 4 below); it requires the exact token.
+_PLACEHOLDER_LEAK_RE = re.compile(
+    r"\{\{\s*recipient_name\s*\}\}|\[\s*recipient_name\s*\]|recipient_name",
+    re.IGNORECASE,
+)
+
+# Generic "any {{...}} template token" detector — security-audit follow-up
+# (finding 4): _PLACEHOLDER_LEAK_RE only recognises the literal string
+# "recipient_name" in some shape. A model that translates or otherwise
+# mangles the token into something else entirely (e.g. "{{ONTVANGER_NAAM}}",
+# "{{ RECIPIENT NAME }}") slips straight past it. This catches *any*
+# double-curly-brace token shape as a second, positive-shaped check at the
+# storage/approval boundary — it is deliberately broad (any content between
+# the braces) since the whole point is to catch content we didn't expect.
+_TEMPLATE_TOKEN_RE = re.compile(r"\{\{[^}]{0,40}\}\}")
+
+
+def _fill_recipient_name(text: str, name: str) -> str:
+    """Replace the *exact* AI-facing name placeholder with the real
+    recipient name, locally, after the model has already returned its
+    text. draft_email() only ever calls this once it has confirmed the
+    exact token appears exactly once (see finding 4) — this function no
+    longer tries to repair a mangled variant itself. Uses a replacement
+    function rather than a template string so a name containing a
+    backslash (or a `\\g<...>` look-alike) can never trip re.sub's
+    backreference syntax (finding 9)."""
+    if not text:
+        return text
+    return re.compile(re.escape(NAME_PLACEHOLDER)).sub(lambda _m: name, text)
+
+
+def contains_placeholder_leak(*texts: Optional[str]) -> bool:
+    """True if any given string still contains the name placeholder in any
+    recognisable form, OR any generic {{...}} template token at all (see
+    _TEMPLATE_TOKEN_RE — finding 4). draft_email() itself now refuses to
+    return a draft unless the exact placeholder was used exactly once (so
+    it should never trip this check); this is the shared fail-closed check
+    callers use before a draft is ever stored or approved, in case a
+    future prompt change or an unrelated draft source (e.g. the external
+    POST /drafts endpoint) lets one slip through."""
+    return any(
+        _PLACEHOLDER_LEAK_RE.search(t or "") or _TEMPLATE_TOKEN_RE.search(t or "")
+        for t in texts
+    )
 
 
 def _parse_json_response(raw: str) -> Dict[str, str]:
@@ -86,7 +158,17 @@ async def draft_email(
     Draft an outreach email subject + body for a target (candidate or client
     prospect) using OpenRouter chat completions. Returns a dict with
     "subject" and "body" — this is ALWAYS a draft, never sent automatically.
+
+    The recipient's real name is never sent to OpenRouter (VERWERKINGSREGISTER.md
+    §1.3): the model only sees NAME_PLACEHOLDER and this function fills in
+    the real name itself, locally, once the model has returned its text.
     """
+    recipient_name = str(target.get("name") or target.get("full_name") or "").strip()
+    # No known name at all (e.g. a prospect record with only a title) —
+    # fall back to a neutral greeting word rather than leaving the
+    # placeholder or an empty string in the sent draft.
+    fill_name = recipient_name or ("daar" if language == "nl" else "there")
+
     user_prompt = _build_user_prompt(target, context, language)
 
     payload = {
@@ -116,7 +198,35 @@ async def draft_email(
         logger.error("outreach_ai: unexpected OpenRouter response shape: %s", data)
         raw_content = ""
 
-    return _parse_json_response(raw_content or "")
+    parsed = _parse_json_response(raw_content or "")
+
+    # security-audit follow-up (finding 4): positive check, before the
+    # substitution, rather than the old fail-open pattern-match-and-hope.
+    # If the model didn't use the exact placeholder exactly once, we can no
+    # longer tell whether it omitted the greeting, invented a name, or used
+    # a mangled/translated token our regex wouldn't recognise -- any of
+    # which would otherwise ship an email with the wrong (or no, or a
+    # literal template-token) greeting. Refuse outright instead of guessing.
+    token_count = parsed["subject"].count(NAME_PLACEHOLDER) + parsed["body"].count(NAME_PLACEHOLDER)
+    if token_count != 1:
+        # chief-of-staff (ai-pseudonimisering branch, finding 9): the
+        # recipient name in `fill_name` is still a placeholder at this
+        # point, but subject/body already carry company name and job
+        # context -- logging them in full on every refusal put that in
+        # the logs. Log lengths, not content.
+        logger.error(
+            "outreach_ai: model response used the name placeholder %s time(s) "
+            "(expected exactly 1) -- refusing to draft. subject_len=%s body_len=%s",
+            token_count, len(parsed.get("subject") or ""), len(parsed.get("body") or ""),
+        )
+        raise DraftGenerationError(
+            f"Model response contained the name placeholder {token_count} "
+            "time(s), expected exactly 1"
+        )
+
+    parsed["subject"] = _fill_recipient_name(parsed["subject"], fill_name)
+    parsed["body"] = _fill_recipient_name(parsed["body"], fill_name)
+    return parsed
 
 
 # ── Blog drafting ─────────────────────────────────────────────────────────
