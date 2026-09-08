@@ -72,8 +72,8 @@ paragraph under this table for the same caveat, kept in sync by hand
 since it's prose, not a table cell test_retention.py parses).
 `placed_candidate` stays
 schema_ready=False: its `action` is "retain", so services/scheduler.py's
-_category_result() reports it "not_applicable" before it ever looks at
-schema_ready — this job never purges 7-year fiscal data, so schema_ready
+generate_retention_review() skips it before it ever looks at
+schema_ready — this job never queues/purges 7-year fiscal data, so schema_ready
 is moot for it either way (see that row's own selector_sql comment below
 for what its anchor is and why). `logs` also stays schema_ready=False
 (action="infra_only", no DB column by design).
@@ -107,6 +107,28 @@ anonymising the same candidate first.
     included here for documentation/visibility only.
   - "infra_only": not a database category at all (log rotation) — no
     selector runs; the row exists purely so the table is complete.
+
+Owner decision (WS-E.10, retention-kolommen branch, fifth round): after
+four rounds of guard fixes it became clear every "no reaction" signal
+this table can check lives in a channel this backend does not reliably
+record on its own -- the actual work (a phone call, a LinkedIn thread, an
+e-mail from a recruiter's own mailbox) happens outside this system. The
+owner therefore chose NOT to let this table's selectors delete or
+anonymise anything by themselves, ever, at any confidence level. What
+"schema_ready" and a selector above still mean is unchanged -- they are
+still the one true definition of "who is due" -- but reaching that state
+now only ever queues a person for a human's monthly sign-off
+(services/scheduler.py generate_retention_review(),
+retention_review_items via migrations/035_retention_review_queue.py) via
+GET/POST /api/v1/admin/retention/review*  (routers/retention_admin.py).
+Actual anonymise/hard_delete only happens from the per-item/per-category
+approve endpoint, after that queue row exists and an admin explicitly
+approves it -- see routers/retention_admin.py's module docstring and
+tests/test_ws_e10_no_unapproved_purge_path.py for the structural test
+that a later change cannot silently reopen a direct purge path without
+failing loudly. The guards, selectors and anchor columns documented above
+are unchanged and still exactly what decides who is ON that monthly list
+-- only the mechanism that used to act on that list by itself is gone.
 """
 from dataclasses import dataclass
 from typing import Optional, Tuple
@@ -205,8 +227,16 @@ CANDIDATE_NO_REACTION_GUARD_SQL = """
       AND NOT EXISTS (SELECT 1 FROM placements pl WHERE pl.candidate_id = c.id AND pl.deleted_at IS NULL)
 """
 
+# retention-kolommen branch, owner decision (fifth round): the SELECT list
+# below carries `term_expired_op` (the anchor value plus the row's own
+# period, i.e. the fixed calendar date the term became due) alongside id/
+# email -- WS-E.10's monthly review list (services/scheduler.py
+# generate_retention_review()) reads this to show "verstreken sinds" per
+# person without recomputing the period in Python and risking it drifting
+# from the WHERE clause that actually enforces it.
 SOURCED_NO_RESPONSE_SQL = """
-    SELECT c.id, c.email FROM candidates c WHERE c.lawful_basis = $1
+    SELECT c.id, c.email, c.date_found + INTERVAL '3 months' AS term_expired_op
+      FROM candidates c WHERE c.lawful_basis = $1
       AND c.status = 'sourced' AND c.date_found IS NOT NULL
       AND c.date_found <= (CURRENT_DATE - INTERVAL '3 months')
       AND c.consent_withdrawn_at IS NULL AND c.deleted_at IS NULL AND c.email IS NOT NULL
@@ -227,7 +257,8 @@ SOURCED_NO_RESPONSE_SQL = """
 # ("we approached this prospect and it's still an open thread") and is
 # already the same pattern used elsewhere in this module.
 PROSPECT_NO_RESPONSE_SQL = """
-    SELECT cp.id FROM client_prospects cp WHERE cp.status = 'new'
+    SELECT cp.id, cp.contact_email, cp.created_at + INTERVAL '12 months' AS term_expired_op
+      FROM client_prospects cp WHERE cp.status = 'new'
       AND cp.created_at <= (NOW() - INTERVAL '12 months') AND cp.opt_out_at IS NULL
       AND NOT EXISTS (
           SELECT 1 FROM outreach_drafts od
@@ -271,7 +302,8 @@ PROSPECT_NO_RESPONSE_SQL = """
 # (re-ticking the consent) always pushes consent_talentpool_until back
 # out, removing the candidate from this selector immediately.
 TALENTPOOL_EXPIRED_SQL = """
-    SELECT c.id, c.email FROM candidates c WHERE c.lawful_basis = 'opt_in_talentpool'
+    SELECT c.id, c.email, c.consent_talentpool_until + INTERVAL '30 days' AS term_expired_op
+      FROM candidates c WHERE c.lawful_basis = 'opt_in_talentpool'
       AND c.consent_talentpool_until IS NOT NULL
       AND c.consent_talentpool_until <= (NOW() - INTERVAL '30 days')
       AND c.deleted_at IS NULL AND c.email IS NOT NULL
@@ -326,7 +358,8 @@ TALENTPOOL_EXPIRED_SQL = """
 # table, so a placement created independently of both left this row with
 # no signal at all. See tests/integration/test_retention_guards.py.
 REJECTED_APPLICANT_SQL = """
-    SELECT id, email FROM candidates c WHERE c.status = 'rejected'
+    SELECT id, email, rejected_at + INTERVAL '4 weeks' AS term_expired_op
+      FROM candidates c WHERE c.status = 'rejected'
       AND c.rejected_at IS NOT NULL AND c.rejected_at <= (NOW() - INTERVAL '4 weeks')
       AND c.deleted_at IS NULL AND c.email IS NOT NULL
       AND NOT EXISTS (
@@ -450,7 +483,8 @@ def _domain_match_sql(left: str, right: str) -> str:
 
 
 PROSPECT_RESPONDING_SQL = f"""
-    SELECT id, contact_email FROM client_prospects cp WHERE cp.status != 'new'
+    SELECT id, contact_email, last_contacted_at + INTERVAL '12 months' AS term_expired_op
+      FROM client_prospects cp WHERE cp.status != 'new'
       AND cp.last_contacted_at IS NOT NULL AND cp.last_contacted_at <= (NOW() - INTERVAL '12 months')
       AND cp.opt_out_at IS NULL
       AND NOT EXISTS (
@@ -496,7 +530,8 @@ PROSPECT_RESPONDING_SQL = f"""
 # belonging to an actively placed candidate previously carried none of
 # this guard's two existing signals either.
 PORTAL_ACCOUNT_INACTIVE_SQL = """
-    SELECT id, email FROM users u WHERE u.role = 'candidate' AND u.deleted_at IS NULL
+    SELECT id, email, last_login_at + INTERVAL '24 months' AS term_expired_op
+      FROM users u WHERE u.role = 'candidate' AND u.deleted_at IS NULL
       AND u.last_login_at IS NOT NULL AND u.last_login_at <= (NOW() - INTERVAL '24 months')
       AND NOT EXISTS (
           SELECT 1 FROM candidate_profiles cpf
@@ -508,6 +543,47 @@ PORTAL_ACCOUNT_INACTIVE_SQL = """
                 OR EXISTS (SELECT 1 FROM placements pl WHERE pl.candidate_id = c.id AND pl.deleted_at IS NULL)
             )
       )
+"""
+
+
+# ── Apollo bulk-pool cleanup (VERWERKINGSREGISTER.md §2.6, §5.7) ─────────
+#
+# Moved here from routers/retention_admin.py (WS-E.10, owner decision,
+# fifth round) so both that router's dry-run preview endpoint and
+# services/scheduler.py's generate_retention_review() import the exact
+# same text -- the same "exactly one copy of each guarded selector"
+# discipline the rest of this module already follows. Not one of
+# RETENTION_TABLE's ten §1.4 rows (this is a one-off historical bulk-
+# harvest pool, not an ongoing category), but it uses the same
+# CANDIDATE_NO_REACTION_GUARD_SQL guards and, since WS-E.10, feeds the
+# same retention_review_items queue under category='apollo_pool_purge'
+# instead of its own direct-delete endpoint -- see
+# routers/retention_admin.py's module docstring for why that endpoint no
+# longer purges by itself.
+#
+# Rows without an http(s) source_url never passed the LIA (§2.6) — those
+# are the pool this category considers. A row that later gained a real
+# public source_url (the owner's other option besides wiping the pool,
+# §5.7) is left alone entirely, at both queries below.
+APOLLO_POOL_ROWS_SQL = """
+    SELECT c.id, c.email FROM candidates c
+    WHERE c.pool_origin = 'apollo'
+      AND c.deleted_at IS NULL
+      AND (c.source_url IS NULL OR c.source_url !~* '^https?://')
+"""
+
+# security-auditor follow-up (WS-E.8 HIGH): pool_origin='apollo' plus a
+# missing source_url is not by itself proof the row is inert bulk-harvest
+# noise -- an Apollo-sourced candidate can still have picked up a real
+# match, a client pipeline entry, a recorded activity, a portal account,
+# a placement, or be the (anonymised) subject of a presented-candidate
+# outreach draft to a client_prospect, all independent of source_url ever
+# being backfilled. Applied to BOTH the anonymise and the hard-delete
+# branches -- neither is safe to run against a row any of these six
+# reference. See tests/test_retention.py's
+# test_apollo_pool_purge_target_sql_carries_all_six_guards.
+APOLLO_POOL_TARGET_SQL = APOLLO_POOL_ROWS_SQL + CANDIDATE_NO_REACTION_GUARD_SQL + """
+      AND NOT EXISTS (SELECT 1 FROM outreach_drafts d WHERE d.presented_candidate_id = c.id)
 """
 
 
@@ -539,6 +615,20 @@ class RetentionRow:
     selector_sql: str        # documents the intended selector; always mentions anchor_column
     public_nl: PublicRetentionText  # website/privacy.html #retention-table-nl, this row
     public_en: PublicRetentionText  # website/privacy.html #retention-table-en, this row
+    # WS-E.10 (owner decision, fifth round): plain-language NL description
+    # of which protective signal(s) this row's selector checks for and
+    # found absent -- every anonymise/hard_delete selector above is a
+    # conjunction of NOT EXISTS guards, so a row it returns has ALL of
+    # these absent simultaneously (there is no finer-grained "which one
+    # specifically" to report per person; the guards are ANDed, not
+    # scored). Read by services/scheduler.py's generate_retention_review()
+    # into retention_review_items.signal_missing_nl for the monthly
+    # human-approval list (GET /api/v1/admin/retention/review) -- this is
+    # the "welk signaal ontbrak waardoor hij niet beschermd was" column
+    # the owner asked for. "" only for retain/infra_only rows, which never
+    # reach the review queue at all (services/scheduler.py's
+    # generate_retention_review() skips them outright).
+    signal_missing_nl: str
 
 
 RETENTION_TABLE: Tuple[RetentionRow, ...] = (
@@ -552,6 +642,9 @@ RETENTION_TABLE: Tuple[RetentionRow, ...] = (
         action="anonymise",
         schema_ready=True,
         selector_sql=REJECTED_APPLICANT_SQL,
+        signal_missing_nl=(
+            "geen nieuwe match, pipeline-activiteit of plaatsing sinds de afwijzing"
+        ),
         public_nl=PublicRetentionText(
             categorie="Afgewezen sollicitant",
             bewaartermijn="4 weken na de afwijzingsdatum",
@@ -573,6 +666,10 @@ RETENTION_TABLE: Tuple[RetentionRow, ...] = (
         action="anonymise",
         schema_ready=True,
         selector_sql=TALENTPOOL_EXPIRED_SQL,
+        signal_missing_nl=(
+            "geen match, pipeline-activiteit, vastgelegde reactie, portalaccount of "
+            "plaatsing sinds het verlopen van de toestemming"
+        ),
         public_nl=PublicRetentionText(
             categorie="Talentpool met expliciete toestemming",
             bewaartermijn="12 maanden, verlengbaar",
@@ -594,6 +691,10 @@ RETENTION_TABLE: Tuple[RetentionRow, ...] = (
         action="anonymise",
         schema_ready=True,
         selector_sql=SOURCED_NO_RESPONSE_SQL,
+        signal_missing_nl=(
+            "geen match, pipeline-activiteit, vastgelegde reactie, portalaccount of "
+            "plaatsing sinds het vinden van de persoon"
+        ),
         public_nl=PublicRetentionText(
             categorie="Gesourcete persoon zonder reactie",
             bewaartermijn="3 maanden na de datum waarop wij u vonden, zonder reactie",
@@ -621,6 +722,7 @@ RETENTION_TABLE: Tuple[RetentionRow, ...] = (
         action="hard_delete",
         schema_ready=True,
         selector_sql=PROSPECT_NO_RESPONSE_SQL,
+        signal_missing_nl="geen verzonden outreach-draft naar dit contact",
         public_nl=PublicRetentionText(
             categorie="Prospect zonder reactie", bewaartermijn="12 maanden", toelichting="",
         ),
@@ -638,6 +740,7 @@ RETENTION_TABLE: Tuple[RetentionRow, ...] = (
         action="anonymise",
         schema_ready=True,
         selector_sql=PROSPECT_RESPONDING_SQL,
+        signal_missing_nl="geen actieve klantrelatie (op bedrijfsnaam of domein) bij dit bedrijf",
         public_nl=PublicRetentionText(
             categorie="Prospect die wel reageert (relatie)",
             bewaartermijn="zolang actief + 12 maanden na laatste contact",
@@ -659,6 +762,9 @@ RETENTION_TABLE: Tuple[RetentionRow, ...] = (
         action="anonymise",
         schema_ready=True,
         selector_sql=PORTAL_ACCOUNT_INACTIVE_SQL,
+        signal_missing_nl=(
+            "geen voortgezette match, pipeline-activiteit of plaatsing bij de gekoppelde kandidaat"
+        ),
         public_nl=PublicRetentionText(
             categorie="Actief portalaccount zonder sollicitatie",
             bewaartermijn="zolang account actief; 24 maanden inactiviteit → verwijderen",
@@ -680,6 +786,10 @@ RETENTION_TABLE: Tuple[RetentionRow, ...] = (
         action="anonymise",
         schema_ready=True,
         selector_sql=SOURCED_NO_RESPONSE_SQL,  # same guarded query; lawful_basis is the $1 parameter
+        signal_missing_nl=(
+            "geen match, pipeline-activiteit, vastgelegde reactie, portalaccount of "
+            "plaatsing sinds het vinden van de persoon"
+        ),
         public_nl=PublicRetentionText(
             categorie="Referral",
             bewaartermijn=(
@@ -710,6 +820,7 @@ RETENTION_TABLE: Tuple[RetentionRow, ...] = (
             "SELECT id FROM quiz_submissions WHERE created_at <= (NOW() - INTERVAL '12 months'); "
             "SELECT id FROM contact_submissions WHERE created_at <= (NOW() - INTERVAL '12 months')"
         ),
+        signal_missing_nl="n.v.t. -- deze categorie kent geen beschermingssignaal, alleen leeftijd",
         public_nl=PublicRetentionText(
             categorie="Leads/quiz", bewaartermijn="12 maanden", toelichting="",
         ),
@@ -747,7 +858,7 @@ RETENTION_TABLE: Tuple[RetentionRow, ...] = (
             "AND COALESCE(end_date, start_date) <= (CURRENT_DATE - INTERVAL '7 years') "
             "-- action=retain: 7 years is a floor, not a purge trigger; this job never deletes/anonymises "
             "this category (schema_ready=False is moot for a 'retain' row -- "
-            "services/scheduler.py._category_result() reports 'not_applicable' before ever checking it). "
+            "services/scheduler.py's generate_retention_review() skips it outright before ever checking it). "
             "WS-C.7 (migrations/029_placements.py) added `placements` and, on candidates, the "
             "immigratiestatus columns (nationality, needs_work_permit, kennismigrant_status, "
             "ruling_30pct_status, ind_case_number) -- both fall under this same 7-year floor and are "
@@ -757,6 +868,7 @@ RETENTION_TABLE: Tuple[RetentionRow, ...] = (
             "every anonymising selector in this module (CANDIDATE_NO_REACTION_GUARD_SQL, "
             "REJECTED_APPLICANT_SQL, PORTAL_ACCOUNT_INACTIVE_SQL) regardless of this row's own action."
         ),
+        signal_missing_nl="",  # action=retain: never reaches the review queue
         public_nl=PublicRetentionText(
             categorie="Geplaatste kandidaat (contract- en factuurdata)",
             bewaartermijn="7 jaar",
@@ -781,6 +893,7 @@ RETENTION_TABLE: Tuple[RetentionRow, ...] = (
         action="infra_only",
         schema_ready=False,
         selector_sql="-- infra_only: no DB selector; enforced by Docker/Caddy log rotation, not this job",
+        signal_missing_nl="",  # action=infra_only: never reaches the review queue
         public_nl=PublicRetentionText(
             categorie="Logs",
             bewaartermijn=(

@@ -392,23 +392,29 @@ async def draft_blog_post() -> dict:
     return {"status": "success", "slug": slug, "topic": topic}
 
 
-# ── Job 6: daily 04:00 — retention purge (WS-E.8) ───────────────────────
+# ── Job 6: monthly (1st, 04:00) — retention review queue (WS-E.10) ──────
 #
-# core/retention.py is the single source of truth for the table (rows,
-# anchor columns, actions). This module only orchestrates: for each row
-# that is schema_ready and has a category handler below, count matching
-# rows and, when actually purging, act on them via the same
-# erase_person()-style logic (anonymise) or a plain DELETE (hard_delete)
-# the table calls for. A row that is not schema_ready or has no handler
-# (retain/infra_only categories) is reported but never queried or touched
-# — see core/retention.py's docstring for why each of those isn't
-# actionable yet.
+# Owner decision (retention-kolommen branch, fifth round): after four
+# rounds of guard fixes it was clear every "no reaction" signal this table
+# can check lives in a channel this backend does not reliably record (a
+# phone call, a LinkedIn thread, a reply landing in someone's own
+# mailbox). This job therefore never deletes or anonymises anything by
+# itself any more, at any confidence level -- it only queues who
+# core/retention.py's guarded selectors say is due into
+# retention_review_items (migrations/035_retention_review_queue.py) for a
+# human to approve or reject, once a month
+# (GET/POST /api/v1/admin/retention/review*, routers/retention_admin.py).
+# core/retention.py's selectors and guards (who ends up on the list) are
+# entirely unchanged by this -- see that module for those.
 #
-# HARD RULE (WS-E.8 task): this job must never delete/anonymise anything
-# in dry_run=True mode — that mode issues reads only (fetch_all/fetch_one),
-# never execute(). The daily cron always calls it with
-# dry_run=not settings.retention_purge_enabled, so a fresh/staging deploy
-# (RETENTION_PURGE_ENABLED unset/false) only ever logs counts.
+# The _count_* functions below are unchanged from the old purge job (same
+# guarded selectors, same "read the shared query, never a local copy"
+# discipline) -- they are still what both this review job and
+# GET /api/v1/admin/retention/table's summary read. What is gone is every
+# _purge_* sibling that used to call erase_person()/execute() straight
+# off of one of these counts -- see routers/retention_admin.py's module
+# docstring for where an actual purge happens now (only from an approved
+# retention_review_items row).
 
 async def _count_sourced_no_response(lawful_basis: str) -> list:
     # security-auditor follow-up (WS-E.8): status='sourced' alone isn't
@@ -423,16 +429,6 @@ async def _count_sourced_no_response(lawful_basis: str) -> list:
     return await fetch_all(retention.SOURCED_NO_RESPONSE_SQL, lawful_basis)
 
 
-async def _purge_sourced_no_response(lawful_basis: str, reason: str) -> int:
-    from routers.gdpr import erase_person
-
-    rows = await _count_sourced_no_response(lawful_basis)
-    for row in rows:
-        if row["email"]:
-            await erase_person(row["email"], actor_id=None, reason=reason)
-    return len(rows)
-
-
 async def _count_talentpool_expired() -> list:
     # WS-C.17: mirrors _count_sourced_no_response -- reads the shared
     # selector from core/retention.py so the query this job runs and the
@@ -440,62 +436,22 @@ async def _count_talentpool_expired() -> list:
     return await fetch_all(retention.TALENTPOOL_EXPIRED_SQL)
 
 
-async def _purge_talentpool_expired(reason: str) -> int:
-    from routers.gdpr import erase_person
-
-    rows = await _count_talentpool_expired()
-    for row in rows:
-        if row["email"]:
-            await erase_person(row["email"], actor_id=None, reason=reason)
-    return len(rows)
-
-
 # ── rejected_applicant / prospect_responding / portal_account_inactive ──
 # (WS-E.8 follow-up, migrations/032_retention_anchor_columns.py) -- same
 # pattern as sourced_no_response/talentpool_expired above: the guarded
 # selector lives once in core/retention.py, this module only counts
-# (dry_run) or counts-then-erases (real run) against it.
+# against it.
 
 async def _count_rejected_applicants() -> list:
     return await fetch_all(retention.REJECTED_APPLICANT_SQL)
-
-
-async def _purge_rejected_applicants(reason: str) -> int:
-    from routers.gdpr import erase_person
-
-    rows = await _count_rejected_applicants()
-    for row in rows:
-        if row["email"]:
-            await erase_person(row["email"], actor_id=None, reason=reason)
-    return len(rows)
 
 
 async def _count_prospect_responding() -> list:
     return await fetch_all(retention.PROSPECT_RESPONDING_SQL)
 
 
-async def _purge_prospect_responding(reason: str) -> int:
-    from routers.gdpr import erase_person
-
-    rows = await _count_prospect_responding()
-    for row in rows:
-        if row["contact_email"]:
-            await erase_person(row["contact_email"], actor_id=None, reason=reason)
-    return len(rows)
-
-
 async def _count_portal_account_inactive() -> list:
     return await fetch_all(retention.PORTAL_ACCOUNT_INACTIVE_SQL)
-
-
-async def _purge_portal_account_inactive(reason: str) -> int:
-    from routers.gdpr import erase_person
-
-    rows = await _count_portal_account_inactive()
-    for row in rows:
-        if row["email"]:
-            await erase_person(row["email"], actor_id=None, reason=reason)
-    return len(rows)
 
 
 # ── Talentpool renewal reminder (WS-C.17, security-audit follow-up H3c) ──
@@ -627,141 +583,205 @@ async def _count_prospect_no_response() -> list:
     return await fetch_all(retention.PROSPECT_NO_RESPONSE_SQL)
 
 
-async def _purge_prospect_no_response() -> int:
-    rows = await _count_prospect_no_response()
-    ids = [r["id"] for r in rows]
-    if ids:
-        await execute("DELETE FROM client_prospects WHERE id = ANY($1::int[])", ids)
-    return len(rows)
+async def talentpool_optin_requests_cleanup_job() -> dict:
+    """Daily cron entry point (04:00). Unlike the ten retention-table rows
+    above, talentpool_optin_requests (migrations/030_talentpool_consent.py)
+    is not part of this PR's WS-E.10 redesign: it holds only e-mail + a
+    token hash for the public double-opt-in flow, is purged purely on age
+    (7 days -- see the constant's own comment above), and does not depend
+    on any of the "did anything real happen" guards that motivated moving
+    the other ten categories to a human-approved monthly review (there is
+    no guard here that could be wrong about a missed signal, because there
+    is no signal to miss: an unconfirmed opt-in link is either confirmed
+    within 7 days or it isn't). It therefore keeps running automatically,
+    same as before this branch."""
+    count = await _purge_stale_talentpool_optin_requests()
+    if count:
+        await execute(
+            "INSERT INTO audit_log (action, actor_id, target_type, target_id, changes) "
+            "VALUES ($1, NULL, $2, NULL, $3::jsonb)",
+            "retention_purge", "talentpool_optin_requests",
+            json.dumps({"category": "talentpool_optin_requests", "count": count, "action": "hard_delete"}),
+        )
+    logger.info("talentpool_optin_requests_cleanup_job: purged=%s", count)
+    return {"status": "purged", "count": count}
 
 
-async def _count_leads_quiz() -> int:
-    quiz = await fetch_all("SELECT id FROM quiz_submissions WHERE created_at <= (NOW() - INTERVAL '12 months')")
-    contact = await fetch_all("SELECT id FROM contact_submissions WHERE created_at <= (NOW() - INTERVAL '12 months')")
-    return len(quiz) + len(contact)
+# ── Per-category live rows for the monthly review queue ─────────────────
+#
+# Table-name/e-mail-column-name lookups for the seven RETENTION_TABLE
+# categories that share the CANDIDATE_NO_REACTION_GUARD_SQL-style guarded
+# selectors above -- leads_quiz (two tables, no guard) and
+# apollo_pool_purge (not a RETENTION_TABLE row at all) are handled
+# separately in generate_retention_review() below.
+_REVIEW_SUBJECT_TABLE = {
+    "sourced_no_response": "candidates", "referral": "candidates",
+    "talentpool_consent": "candidates", "rejected_applicant": "candidates",
+    "portal_account_inactive": "users",
+    "prospect_responding": "client_prospects", "prospect_no_response": "client_prospects",
+}
+_REVIEW_EMAIL_FIELD = {
+    "sourced_no_response": "email", "referral": "email",
+    "talentpool_consent": "email", "rejected_applicant": "email",
+    "portal_account_inactive": "email",
+    "prospect_responding": "contact_email", "prospect_no_response": "contact_email",
+}
 
 
-async def _purge_leads_quiz() -> int:
-    quiz = await fetch_all("SELECT id FROM quiz_submissions WHERE created_at <= (NOW() - INTERVAL '12 months')")
-    contact = await fetch_all("SELECT id FROM contact_submissions WHERE created_at <= (NOW() - INTERVAL '12 months')")
-    if quiz:
-        await execute("DELETE FROM quiz_submissions WHERE id = ANY($1::int[])", [r["id"] for r in quiz])
-    if contact:
-        await execute("DELETE FROM contact_submissions WHERE id = ANY($1::int[])", [r["id"] for r in contact])
-    return len(quiz) + len(contact)
+async def _live_rows_for_category(row: "retention.RetentionRow") -> list:
+    """The exact same guarded selector the old purge job used to act on
+    directly -- now only read, never acted on here. Returns [] for a
+    category with no handler (there are none among the seven this is
+    called for; kept defensive rather than letting a future new category
+    silently fall through to no rows queued without a signal)."""
+    if row.key == "sourced_no_response":
+        return await _count_sourced_no_response("gerechtvaardigd_belang")
+    if row.key == "referral":
+        return await _count_sourced_no_response("toestemming_referral")
+    if row.key == "talentpool_consent":
+        return await _count_talentpool_expired()
+    if row.key == "rejected_applicant":
+        return await _count_rejected_applicants()
+    if row.key == "prospect_responding":
+        return await _count_prospect_responding()
+    if row.key == "portal_account_inactive":
+        return await _count_portal_account_inactive()
+    if row.key == "prospect_no_response":
+        return await _count_prospect_no_response()
+    logger.warning("_live_rows_for_category: no handler for category %s", row.key)
+    return []
 
 
-async def _category_result(row: "retention.RetentionRow", dry_run: bool) -> dict:
-    """Count (dry_run) or count-then-act (not dry_run) for one retention
-    table row. Never queries a column that doesn't exist yet
-    (schema_ready=False short-circuits before any DB call) and never
-    calls execute() when dry_run=True."""
-    if row.action in ("retain", "infra_only"):
-        return {"key": row.key, "status": "not_applicable", "count": None}
-    if not row.schema_ready:
-        return {"key": row.key, "status": "schema_not_ready", "count": None}
-
-    try:
-        if row.key == "sourced_no_response":
-            if dry_run:
-                count = len(await _count_sourced_no_response("gerechtvaardigd_belang"))
-            else:
-                count = await _purge_sourced_no_response(
-                    "gerechtvaardigd_belang", f"retention_purge:{row.key}",
-                )
-        elif row.key == "referral":
-            if dry_run:
-                count = len(await _count_sourced_no_response("toestemming_referral"))
-            else:
-                count = await _purge_sourced_no_response(
-                    "toestemming_referral", f"retention_purge:{row.key}",
-                )
-        elif row.key == "talentpool_consent":
-            if dry_run:
-                count = len(await _count_talentpool_expired())
-            else:
-                count = await _purge_talentpool_expired(f"retention_purge:{row.key}")
-        elif row.key == "prospect_no_response":
-            count = len(await _count_prospect_no_response()) if dry_run else await _purge_prospect_no_response()
-        elif row.key == "leads_quiz":
-            count = await _count_leads_quiz() if dry_run else await _purge_leads_quiz()
-        elif row.key == "rejected_applicant":
-            if dry_run:
-                count = len(await _count_rejected_applicants())
-            else:
-                count = await _purge_rejected_applicants(f"retention_purge:{row.key}")
-        elif row.key == "prospect_responding":
-            if dry_run:
-                count = len(await _count_prospect_responding())
-            else:
-                count = await _purge_prospect_responding(f"retention_purge:{row.key}")
-        elif row.key == "portal_account_inactive":
-            if dry_run:
-                count = len(await _count_portal_account_inactive())
-            else:
-                count = await _purge_portal_account_inactive(f"retention_purge:{row.key}")
-        else:
-            return {"key": row.key, "status": "no_handler", "count": None}
-    except Exception:
-        logger.exception("run_retention_purge: category %s failed", row.key)
-        return {"key": row.key, "status": "error", "count": None}
-
-    return {"key": row.key, "status": "counted" if dry_run else "purged", "count": count}
-
-
-async def run_retention_purge(dry_run: bool = True) -> dict:
-    """WS-E.8. Walks core/retention.RETENTION_TABLE and, per category,
-    either counts matching rows (dry_run=True — no writes at all, ever)
-    or purges them (dry_run=False — anonymise via erase_person()-style
-    logic or hard-delete, per the row's `action`) and writes one
-    audit_log row per *purged* category with counts only — never an
-    e-mail address or name (json.dumps, never a raw dict — commit
-    72b4bcd)."""
-    results = []
-    for row in retention.RETENTION_TABLE:
-        result = await _category_result(row, dry_run)
-        results.append(result)
-        if not dry_run and result["status"] == "purged":
-            await execute(
-                "INSERT INTO audit_log (action, actor_id, target_type, target_id, changes) "
-                "VALUES ($1, NULL, $2, NULL, $3::jsonb)",
-                "retention_purge", "retention_category",
-                json.dumps({"category": row.key, "count": result["count"], "action": row.action}),
-            )
-
-    # M2: talentpool_optin_requests isn't one of RETENTION_TABLE's ten
-    # documented rows (see that table's docstring above) -- counted/purged
-    # alongside them but reported under its own key, not mixed into
-    # `categories`.
-    if dry_run:
-        optin_count = len(await _count_stale_talentpool_optin_requests())
-    else:
-        optin_count = await _purge_stale_talentpool_optin_requests()
-        if optin_count:
-            await execute(
-                "INSERT INTO audit_log (action, actor_id, target_type, target_id, changes) "
-                "VALUES ($1, NULL, $2, NULL, $3::jsonb)",
-                "retention_purge", "talentpool_optin_requests",
-                json.dumps({"category": "talentpool_optin_requests", "count": optin_count, "action": "hard_delete"}),
-            )
-    talentpool_optin_purge = {
-        "status": "counted" if dry_run else "purged", "count": optin_count,
-    }
-
-    logger.info(
-        "run_retention_purge: dry_run=%s results=%s talentpool_optin_requests=%s",
-        dry_run, {r["key"]: (r["status"], r["count"]) for r in results}, talentpool_optin_purge,
+async def _upsert_review_item(
+    category: str, subject_table: str, subject_id: int, email: Optional[str],
+    action: str, term_expired_at, signal_missing_nl: str,
+) -> None:
+    """Insert a fresh 'pending' review item, or reopen an existing
+    'rejected' one -- WS-E.10's "iemand die hij niet goedkeurt, moet niet
+    volgende maand opnieuw op de lijst staan zonder dat zichtbaar is dat
+    hij eerder is overgeslagen" requirement. A 'purged' item is left alone
+    (the person is gone, nothing to reopen); a 'no_longer_eligible' item
+    reopens the same way a 'rejected' one does -- both mean "not currently
+    being acted on", and this run's live selector just proved the subject
+    is due again. UNIQUE(category, subject_table, subject_id)
+    (migrations/035_retention_review_queue.py) is what makes this a
+    genuine upsert rather than ever inserting a second, indistinguishable
+    row for the same person."""
+    await execute(
+        """INSERT INTO retention_review_items
+             (category, subject_table, subject_id, email, action, term_expired_at, signal_missing_nl)
+           VALUES ($1, $2, $3, $4, $5, $6, $7)
+           ON CONFLICT (category, subject_table, subject_id) DO UPDATE SET
+             email = EXCLUDED.email,
+             action = EXCLUDED.action,
+             term_expired_at = EXCLUDED.term_expired_at,
+             signal_missing_nl = EXCLUDED.signal_missing_nl,
+             last_seen_at = NOW(),
+             status = CASE
+                 WHEN retention_review_items.status IN ('rejected', 'no_longer_eligible') THEN 'pending'
+                 ELSE retention_review_items.status
+             END,
+             reappeared_after_rejection_at = CASE
+                 WHEN retention_review_items.status = 'rejected'
+                 THEN COALESCE(retention_review_items.reappeared_after_rejection_at, NOW())
+                 ELSE retention_review_items.reappeared_after_rejection_at
+             END""",
+        category, subject_table, subject_id, email, action, term_expired_at, signal_missing_nl,
     )
-    return {"dry_run": dry_run, "categories": results, "talentpool_optin_requests_purge": talentpool_optin_purge}
 
 
-async def retention_purge_job() -> dict:
-    """Cron entry point — always defers to the RETENTION_PURGE_ENABLED env
-    flag (core/config.py), never runs a real purge just because the daily
-    trigger fired. The admin endpoint (routers/retention_admin.py) is the
-    only way to force a real run regardless of this flag, and even there
-    only with confirm='PURGE'."""
-    return await run_retention_purge(dry_run=not settings.retention_purge_enabled)
+async def _retire_stale_pending(category: str, subject_table: str, live_ids: list) -> None:
+    """Whatever was 'pending' for this category+table last run but isn't
+    in this run's live selector any more picked up a protective signal in
+    the meantime -- mark it 'no_longer_eligible' (kept, not deleted, for
+    the same visibility reason a rejection is kept) rather than silently
+    leaving a stale row an admin could still approve into a purge of
+    someone who is no longer actually due."""
+    await execute(
+        """UPDATE retention_review_items SET status = 'no_longer_eligible', last_seen_at = NOW()
+           WHERE category = $1 AND subject_table = $2 AND status = 'pending'
+             AND NOT (subject_id = ANY($3::int[]))""",
+        category, subject_table, live_ids,
+    )
+
+
+async def generate_retention_review() -> dict:
+    """WS-E.10 monthly job. Walks core/retention.RETENTION_TABLE's seven
+    guarded, schema_ready anonymise/hard_delete categories (retain/
+    infra_only rows are never actionable at all; see core/retention.py),
+    plus leads_quiz (two tables, age-only) and apollo_pool_purge
+    (VERWERKINGSREGISTER.md §2.6/§5.7, folded into this same queue --
+    see routers/retention_admin.py's module docstring for why that used
+    to be its own direct-delete endpoint and no longer is), and queues
+    every row each one's selector currently returns into
+    retention_review_items. Never touches the GDPR erasure routine and
+    never deletes a candidate/prospect/user row -- read-only against
+    every table except retention_review_items itself."""
+    summary: dict = {}
+
+    for row in retention.RETENTION_TABLE:
+        if row.action not in ("anonymise", "hard_delete") or not row.schema_ready:
+            continue  # retain/infra_only, or schema_not_ready -- see core/retention.py
+        if row.key == "leads_quiz":
+            continue  # spans two subtables with no shared guard -- handled separately below
+        subject_table = _REVIEW_SUBJECT_TABLE[row.key]
+        email_field = _REVIEW_EMAIL_FIELD[row.key]
+        live_rows = await _live_rows_for_category(row)
+        live_ids = [r["id"] for r in live_rows]
+        for r in live_rows:
+            await _upsert_review_item(
+                row.key, subject_table, r["id"], r.get(email_field),
+                row.action, r.get("term_expired_op"), row.signal_missing_nl,
+            )
+        await _retire_stale_pending(row.key, subject_table, live_ids)
+        summary[row.key] = {"queued": len(live_rows)}
+
+    # leads_quiz: two unrelated tables, hard_delete, no protective guard --
+    # purely an age cutoff, so there is no "signal_missing" beyond that.
+    quiz_rows = await fetch_all(
+        "SELECT id, created_at + INTERVAL '12 months' AS term_expired_op FROM quiz_submissions "
+        "WHERE created_at <= (NOW() - INTERVAL '12 months')"
+    )
+    contact_rows = await fetch_all(
+        "SELECT id, created_at + INTERVAL '12 months' AS term_expired_op FROM contact_submissions "
+        "WHERE created_at <= (NOW() - INTERVAL '12 months')"
+    )
+    leads_quiz_row = retention.get_row("leads_quiz")
+    for subject_table, rows_ in (("quiz_submissions", quiz_rows), ("contact_submissions", contact_rows)):
+        for r in rows_:
+            await _upsert_review_item(
+                "leads_quiz", subject_table, r["id"], None, "hard_delete",
+                r["term_expired_op"], leads_quiz_row.signal_missing_nl,
+            )
+        await _retire_stale_pending("leads_quiz", subject_table, [r["id"] for r in rows_])
+    summary["leads_quiz"] = {"queued": len(quiz_rows) + len(contact_rows)}
+
+    # apollo_pool_purge (VERWERKINGSREGISTER.md §2.6/§5.7) -- not a
+    # RETENTION_TABLE row (a one-off historical pool, not an ongoing
+    # category), folded into this same queue since WS-E.10 instead of its
+    # own direct-delete endpoint. Action varies per row (anonymise with an
+    # e-mail, hard_delete without), unlike every other category here.
+    apollo_rows = await fetch_all(retention.APOLLO_POOL_TARGET_SQL)
+    for r in apollo_rows:
+        action = "anonymise" if r["email"] else "hard_delete"
+        await _upsert_review_item(
+            "apollo_pool_purge", "candidates", r["id"], r["email"], action,
+            None, "n.v.t. -- eenmalige Apollo-poolopschoning, geen bewaartermijn-anker",
+        )
+    await _retire_stale_pending("apollo_pool_purge", "candidates", [r["id"] for r in apollo_rows])
+    summary["apollo_pool_purge"] = {"queued": len(apollo_rows)}
+
+    logger.info("generate_retention_review: summary=%s", summary)
+    return {"generated_at": datetime.now(timezone.utc).isoformat(), "categories": summary}
+
+
+async def retention_review_job() -> dict:
+    """Monthly cron entry point (1st of month, 04:00 Europe/Amsterdam).
+    Unconditional -- no env flag gates it the way RETENTION_PURGE_ENABLED
+    used to gate the old daily purge, because there is nothing left for a
+    flag to gate: populating an internal, admin-JWT-only review queue
+    deletes nothing (see generate_retention_review()'s own docstring)."""
+    return await generate_retention_review()
 
 
 # ── Scheduler lifecycle ──────────────────────────────────────────────────
@@ -823,17 +843,26 @@ async def start_scheduler() -> None:
         id="draft_blog_post", replace_existing=True,
     )
     scheduler.add_job(
-        retention_purge_job, CronTrigger(hour=4, minute=0),
-        id="retention_purge", replace_existing=True,
+        talentpool_optin_requests_cleanup_job, CronTrigger(hour=4, minute=0),
+        id="talentpool_optin_requests_cleanup", replace_existing=True,
     )
     scheduler.add_job(
         talentpool_reminder_job, CronTrigger(hour=4, minute=30),
         id="talentpool_reminder", replace_existing=True,
     )
+    # WS-E.10 (owner decision, retention-kolommen branch, fifth round):
+    # monthly, not daily -- this job only ever queues people for human
+    # review (generate_retention_review()'s own docstring), never purges,
+    # so there is no HARD RULE left to re-check on every cron tick the way
+    # the old daily purge job had to.
+    scheduler.add_job(
+        retention_review_job, CronTrigger(day=1, hour=4, minute=0),
+        id="retention_review", replace_existing=True,
+    )
 
     scheduler.start()
     logger.info(
-        "scheduler: started with %s daily jobs + 1 weekly job (Europe/Amsterdam)",
+        "scheduler: started with %s daily jobs + 1 weekly job + 1 monthly job (Europe/Amsterdam)",
         4 + apollo_jobs_registered,
     )
 
@@ -863,7 +892,8 @@ JOBS_BY_NAME = {
     "matching": matching,
     "drafting": draft_outreach,
     "blog": draft_blog_post,
-    "retention_purge": retention_purge_job,
+    "retention_review": retention_review_job,
+    "talentpool_optin_cleanup": talentpool_optin_requests_cleanup_job,
     # Manual-trigger only — deliberately NOT added to start_scheduler()'s
     # cron jobs below. One-shot Apollo bulk-harvest (services/harvest.py)
     # and its outreach-draft catch-up, both run via routers/outreach.py's

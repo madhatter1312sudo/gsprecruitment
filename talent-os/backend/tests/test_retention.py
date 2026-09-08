@@ -497,108 +497,76 @@ def patch_scheduler_db(monkeypatch):
     return _patch
 
 
-def test_dry_run_issues_no_execute_calls(patch_scheduler_db):
+# ── WS-E.10 (owner decision, retention-kolommen branch, fifth round): ────
+# run_retention_purge()/retention_purge_job()/_category_result() and every
+# _purge_* helper are gone outright, not merely defaulted off -- see
+# core/retention.py's and services/scheduler.py's own module docstrings,
+# and tests/test_ws_e10_no_unapproved_purge_path.py for the structural
+# guard that a later change cannot silently bring a direct-purge path
+# back without a test failing. What is left below only ever counts or
+# queues.
+
+def test_run_retention_purge_and_friends_no_longer_exist():
+    """The functions that used to purge directly are gone, not merely
+    unused -- a regression that re-adds one of them under the old name
+    would pass every other test in this file silently."""
+    import services.scheduler as scheduler
+    for name in (
+        "run_retention_purge", "retention_purge_job", "_category_result",
+        "_purge_sourced_no_response", "_purge_talentpool_expired",
+        "_purge_rejected_applicants", "_purge_prospect_responding",
+        "_purge_portal_account_inactive", "_purge_prospect_no_response",
+        "_purge_leads_quiz",
+    ):
+        assert not hasattr(scheduler, name), f"scheduler.{name} must not exist any more"
+
+
+def test_generate_retention_review_only_ever_counts_and_queues(patch_scheduler_db):
+    """The monthly review job never calls erase_person() and never issues
+    a DELETE/UPDATE against a candidate/prospect/user/quiz/contact row --
+    the only execute() calls it makes are INSERT/UPDATE against
+    retention_review_items itself."""
     rec = _Recorder()
     scheduler = patch_scheduler_db(rec)
-    result = asyncio.run(scheduler.run_retention_purge(dry_run=True))
-    assert result["dry_run"] is True
-    assert rec.execute_calls == []  # no UPDATE/DELETE/INSERT at all
-    # every schema_ready, actionable category returned a count
-    counted = {c["key"]: c["count"] for c in result["categories"] if c["status"] == "counted"}
-    assert counted == {
-        "sourced_no_response": 0, "prospect_no_response": 0, "referral": 0,
-        "leads_quiz": 0, "talentpool_consent": 0,
-        # WS-E.8 follow-up (migrations/032_retention_anchor_columns.py):
-        # rejected_at / last_contacted_at / last_login_at now exist, so
-        # these three are counted too instead of schema_not_ready.
-        "rejected_applicant": 0, "prospect_responding": 0, "portal_account_inactive": 0,
+    result = asyncio.run(scheduler.generate_retention_review())
+    assert "categories" in result
+    for sql, _args in rec.execute_calls:
+        assert "retention_review_items" in sql, sql
+        for forbidden_table in ("candidates", "client_prospects", "users", "quiz_submissions", "contact_submissions"):
+            # the review_items UPDATE/INSERT text itself never names these
+            # tables -- only the (unused-here) hard_delete/anonymise path
+            # in routers/retention_admin.py ever does.
+            assert f"FROM {forbidden_table}" not in sql and f"DELETE FROM {forbidden_table}" not in sql
+
+
+def test_generate_retention_review_covers_every_actionable_category(patch_scheduler_db):
+    rec = _Recorder()
+    scheduler = patch_scheduler_db(rec)
+    result = asyncio.run(scheduler.generate_retention_review())
+    categories = result["categories"]
+    assert set(categories) == {
+        "sourced_no_response", "referral", "talentpool_consent", "rejected_applicant",
+        "prospect_responding", "portal_account_inactive", "prospect_no_response",
+        "leads_quiz", "apollo_pool_purge",
     }
+    # placed_candidate (retain) and logs (infra_only) never reach the
+    # queue -- same reasoning core/retention.py's docstring gives for why
+    # they were never purged by the old job either.
+    assert "placed_candidate" not in categories
+    assert "logs" not in categories
 
 
-def test_dry_run_reports_schema_not_ready_categories(patch_scheduler_db):
-    rec = _Recorder()
-    scheduler = patch_scheduler_db(rec)
-    result = asyncio.run(scheduler.run_retention_purge(dry_run=True))
-    by_key = {c["key"]: c["status"] for c in result["categories"]}
-    # WS-E.8 follow-up (migrations/032_retention_anchor_columns.py):
-    # rejected_at (candidates), last_contacted_at (client_prospects) and
-    # last_login_at (users) now exist -- these three are counted, not
-    # schema_not_ready, and each fetches its own guarded selector from
-    # core/retention.py.
-    assert by_key["rejected_applicant"] == "counted"
-    assert by_key["prospect_responding"] == "counted"
-    assert by_key["portal_account_inactive"] == "counted"
-    assert by_key["placed_candidate"] == "not_applicable"
-    assert by_key["logs"] == "not_applicable"
-    # WS-C.17: talentpool_consent is schema_ready as of migrations/030 --
-    # it's counted, not reported schema_not_ready, and it fetches the
-    # shared retention.TALENTPOOL_EXPIRED_SQL selector.
-    assert by_key["talentpool_consent"] == "counted"
-    # no row is reported schema_not_ready any more -- placed_candidate and
-    # logs are not_applicable (action="retain"/"infra_only") instead, for
-    # reasons unrelated to schema (see core/retention.py's docstring).
-    assert "schema_not_ready" not in by_key.values()
-    fetched_categories = {sql for sql, _ in rec.fetch_calls}
-    assert any("consent_talentpool_until" in sql for sql in fetched_categories)
-    assert any("rejected_at" in sql for sql in fetched_categories)
-    assert any("last_contacted_at" in sql for sql in fetched_categories)
-    assert any("last_login_at" in sql for sql in fetched_categories)
+def test_talentpool_optin_requests_cleanup_job_is_unaffected_by_ws_e10():
+    """talentpool_optin_requests cleanup is not one of the ten guarded
+    categories the owner moved to human review (see that job's own
+    docstring for why) -- it must still exist as its own callable."""
+    import services.scheduler as scheduler
+    assert hasattr(scheduler, "talentpool_optin_requests_cleanup_job")
 
 
-def test_real_run_purges_and_writes_one_audit_row_per_purged_category(monkeypatch, patch_scheduler_db):
-    rec = _Recorder()
-    scheduler = patch_scheduler_db(rec)
+# ── Admin endpoints -- POST .../retention/run counts only, always ───────
 
-    # sourced_no_response / referral purge via erase_person() -- stub that
-    # out too so this test doesn't need a full erase_person() DB fixture.
-    erased = []
-
-    async def _fake_erase_person(email, actor_id=None, reason="manual"):
-        erased.append((email, reason))
-        return {"status": "complete"}
-
-    import routers.gdpr as gdpr
-    monkeypatch.setattr(gdpr, "erase_person", _fake_erase_person)
-
-    result = asyncio.run(scheduler.run_retention_purge(dry_run=False))
-    assert result["dry_run"] is False
-
-    # No matching rows (fetch_all always returns []) -- every actionable
-    # category purges 0 rows, but each still gets exactly one audit_log
-    # INSERT (the "one row per category" requirement), and no anonymise/
-    # delete calls actually fired since there was nothing to act on.
-    audit_inserts = [c for c in rec.execute_calls if c[0].startswith("INSERT INTO audit_log")]
-    purged_keys = {c["key"] for c in result["categories"] if c["status"] == "purged"}
-    assert purged_keys == {
-        "sourced_no_response", "prospect_no_response", "referral", "leads_quiz", "talentpool_consent",
-        # WS-E.8 follow-up (migrations/032_retention_anchor_columns.py):
-        # now schema_ready, so purged like the others (0 rows -- fetch_all
-        # always returns [] in this fixture).
-        "rejected_applicant", "prospect_responding", "portal_account_inactive",
-    }
-    assert len(audit_inserts) == len(purged_keys)
-    for sql, args in audit_inserts:
-        assert sql.strip().startswith("INSERT INTO audit_log")
-        assert args[0] == "retention_purge"
-    assert erased == []  # no candidate rows returned by the stub, so nothing to erase
-
-
-def test_retention_purge_job_defaults_to_dry_run_when_flag_unset(monkeypatch, patch_scheduler_db):
-    """RETENTION_PURGE_ENABLED unset/false (core/config.py default) -- the
-    cron entry point must fall back to dry_run=True."""
-    rec = _Recorder()
-    scheduler = patch_scheduler_db(rec)
-    monkeypatch.setattr(scheduler.settings, "retention_purge_enabled", False)
-    result = asyncio.run(scheduler.retention_purge_job())
-    assert result["dry_run"] is True
-    assert rec.execute_calls == []
-
-
-# ── Admin endpoints -- confirm flag enforcement (no HTTP client needed;
-#    call the route functions directly like the FastAPI dependency system
-#    would, with a fake current_user) ───────────────────────────────────
-
-def test_run_retention_endpoint_dry_run_default_needs_no_confirm(monkeypatch, patch_scheduler_db):
+def test_run_retention_endpoint_dry_run_default_returns_counts(monkeypatch, patch_scheduler_db):
     rec = _Recorder()
     patch_scheduler_db(rec)
     from routers import retention_admin
@@ -607,35 +575,23 @@ def test_run_retention_endpoint_dry_run_default_needs_no_confirm(monkeypatch, pa
     assert payload.dry_run is True
     result = asyncio.run(retention_admin.run_retention(payload, current_user={"id": 1, "role": "admin"}))
     assert result["dry_run"] is True
+    assert rec.execute_calls == []
 
 
-def test_run_retention_endpoint_real_run_without_confirm_is_refused(patch_scheduler_db):
+def test_run_retention_endpoint_dry_run_false_is_refused_regardless_of_confirm(patch_scheduler_db):
+    """WS-E.10: dry_run=false is refused no matter what confirm carries --
+    there is no confirm value that makes this endpoint purge any more."""
     rec = _Recorder()
     patch_scheduler_db(rec)
     from fastapi import HTTPException
     from routers import retention_admin
 
-    payload = retention_admin.RetentionRunRequest(dry_run=False)
-    with pytest.raises(HTTPException) as exc_info:
-        asyncio.run(retention_admin.run_retention(payload, current_user={"id": 1, "role": "admin"}))
-    assert exc_info.value.status_code == 409
+    for confirm in (None, "PURGE", "anything"):
+        payload = retention_admin.RetentionRunRequest(dry_run=False, confirm=confirm)
+        with pytest.raises(HTTPException) as exc_info:
+            asyncio.run(retention_admin.run_retention(payload, current_user={"id": 1, "role": "admin"}))
+        assert exc_info.value.status_code == 410
     assert rec.execute_calls == []
-
-
-def test_run_retention_endpoint_real_run_with_confirm_proceeds(patch_scheduler_db, monkeypatch):
-    rec = _Recorder()
-    patch_scheduler_db(rec)
-
-    async def _fake_erase_person(email, actor_id=None, reason="manual"):
-        return {"status": "complete"}
-
-    import routers.gdpr as gdpr
-    monkeypatch.setattr(gdpr, "erase_person", _fake_erase_person)
-
-    from routers import retention_admin
-    payload = retention_admin.RetentionRunRequest(dry_run=False, confirm="PURGE")
-    result = asyncio.run(retention_admin.run_retention(payload, current_user={"id": 1, "role": "admin"}))
-    assert result["dry_run"] is False
 
 
 def test_apollo_pool_purge_target_sql_carries_all_six_guards():
@@ -704,105 +660,34 @@ def test_apollo_pool_purge_dry_run_reports_guard_skipped_rows(monkeypatch):
     }
 
 
-def test_apollo_pool_purge_real_run_without_confirm_is_refused(monkeypatch):
-    calls = []
+def test_apollo_pool_purge_real_run_is_refused_regardless_of_confirm(monkeypatch):
+    """WS-E.10 (owner decision, fifth round): the dry_run=false branch
+    that used to actually anonymise/delete here is gone outright -- not
+    merely gated behind a stronger confirm string. A real deletion for
+    this pool now only ever happens via the same review-queue approve
+    endpoint every other category uses
+    (category='apollo_pool_purge')."""
+    rows = [{"id": 1, "email": "with-email@example.com"}, {"id": 2, "email": None}]
+    executed = []
 
     async def _fake_fetch_all(sql, *args):
-        calls.append(sql)
-        return []
+        return rows
+
+    async def _fake_execute(sql, *args):
+        executed.append((sql, args))
+        return "OK"
 
     from fastapi import HTTPException
     from routers import retention_admin
     monkeypatch.setattr(retention_admin, "fetch_all", _fake_fetch_all)
-
-    payload = retention_admin.ApolloPoolPurgeRequest(dry_run=False)
-    with pytest.raises(HTTPException) as exc_info:
-        asyncio.run(retention_admin.purge_apollo_pool(payload, current_user={"id": 1, "role": "admin"}))
-    assert exc_info.value.status_code == 409
-    assert calls == []  # refused before even querying the pool
-
-
-def test_apollo_pool_purge_real_run_with_correct_confirm_proceeds(monkeypatch):
-    rows = [
-        {"id": 1, "email": "with-email@example.com"},
-        {"id": 2, "email": None},
-    ]
-    executed = []
-    erased = []
-
-    async def _fake_fetch_all(sql, *args):
-        return rows
-
-    async def _fake_execute(sql, *args):
-        executed.append((sql, args))
-        return "OK"
-
-    async def _fake_erase_person(email, actor_id=None, reason="manual"):
-        erased.append(email)
-        return {"status": "complete"}
-
-    from routers import retention_admin
-    import routers.gdpr as gdpr
-    monkeypatch.setattr(retention_admin, "fetch_all", _fake_fetch_all)
     monkeypatch.setattr(retention_admin, "execute", _fake_execute)
-    monkeypatch.setattr(gdpr, "erase_person", _fake_erase_person)
 
-    payload = retention_admin.ApolloPoolPurgeRequest(dry_run=False, confirm="DELETE APOLLO POOL")
-    result = asyncio.run(retention_admin.purge_apollo_pool(payload, current_user={"id": 7, "role": "admin"}))
-
-    assert result == {"dry_run": False, "total": 2, "anonymised": 1, "hard_deleted": 1, "skipped": 0}
-    assert erased == ["with-email@example.com"]
-    delete_calls = [c for c in executed if c[0].startswith("DELETE FROM candidates")]
-    assert len(delete_calls) == 1
-    assert delete_calls[0][1] == ([2],)
-    audit_calls = [c for c in executed if c[0].startswith("INSERT INTO audit_log")]
-    assert len(audit_calls) == 1
-    assert audit_calls[0][1][0] == "apollo_pool_purge"
-
-
-def test_apollo_pool_purge_writes_audit_row_even_when_the_delete_fails(monkeypatch):
-    """security-auditor follow-up (WS-E.8 HIGH #2): the audit_log INSERT
-    lives in a `finally`, so a failure partway through (here: the hard-
-    delete DELETE statement itself raising) still leaves an audit trail
-    recording what actually completed (the anonymise that ran first)
-    before the exception propagates."""
-    rows = [
-        {"id": 1, "email": "with-email@example.com"},
-        {"id": 2, "email": None},
-    ]
-    executed = []
-    erased = []
-
-    async def _fake_fetch_all(sql, *args):
-        return rows
-
-    async def _fake_execute(sql, *args):
-        executed.append((sql, args))
-        if sql.strip().startswith("DELETE FROM candidates"):
-            raise RuntimeError("simulated DB failure")
-        return "OK"
-
-    async def _fake_erase_person(email, actor_id=None, reason="manual"):
-        erased.append(email)
-        return {"status": "complete"}
-
-    from routers import retention_admin
-    import routers.gdpr as gdpr
-    monkeypatch.setattr(retention_admin, "fetch_all", _fake_fetch_all)
-    monkeypatch.setattr(retention_admin, "execute", _fake_execute)
-    monkeypatch.setattr(gdpr, "erase_person", _fake_erase_person)
-
-    payload = retention_admin.ApolloPoolPurgeRequest(dry_run=False, confirm="DELETE APOLLO POOL")
-    with pytest.raises(RuntimeError):
-        asyncio.run(retention_admin.purge_apollo_pool(payload, current_user={"id": 7, "role": "admin"}))
-
-    assert erased == ["with-email@example.com"]  # the anonymise step completed before the failure
-    audit_calls = [c for c in executed if c[0].startswith("INSERT INTO audit_log")]
-    assert len(audit_calls) == 1, "audit row must still be written despite the DELETE failure"
-    import json as _json
-    changes = _json.loads(audit_calls[0][1][3])
-    assert changes["anonymised"] == 1
-    assert changes["hard_deleted"] == 0  # the DELETE never completed
+    for confirm in (None, "DELETE APOLLO POOL", "anything"):
+        payload = retention_admin.ApolloPoolPurgeRequest(dry_run=False, confirm=confirm)
+        with pytest.raises(HTTPException) as exc_info:
+            asyncio.run(retention_admin.purge_apollo_pool(payload, current_user={"id": 7, "role": "admin"}))
+        assert exc_info.value.status_code == 410
+    assert executed == []  # never wrote anything, whatever confirm carried
 
 
 # ── security-auditor follow-up (WS-E.8 MEDIUM #4): scheduler's Apollo

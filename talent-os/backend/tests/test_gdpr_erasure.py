@@ -315,8 +315,8 @@ def test_erase_person_adds_suppression_entry_for_a_normal_erasure(fake_db):
 def test_erase_person_skips_suppression_entry_for_lapsed_talentpool_consent(fake_db):
     """Security-audit follow-up (WS-C.17, LOW, post-APPROVED): erasure
     triggered by the retention purge of a lapsed talentpool consent
-    (services/scheduler.py._purge_talentpool_expired's
-    reason=f"retention_purge:{row.key}", row.key="talentpool_consent")
+    (since WS-E.10, routers/retention_admin.py's review-approve endpoint
+    passes reason=f"retention_purge:{row.key}", row.key="talentpool_consent")
     must NOT add the person to suppression_list -- that would silently
     block the exact re-signup the reminder e-mail invites. This is the
     one exception; every other erasure reason still adds the entry."""
