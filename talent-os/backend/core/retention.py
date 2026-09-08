@@ -119,7 +119,7 @@ anonymise anything by themselves, ever, at any confidence level. What
 still the one true definition of "who is due" -- but reaching that state
 now only ever queues a person for a human's monthly sign-off
 (services/scheduler.py generate_retention_review(),
-retention_review_items via migrations/035_retention_review_queue.py) via
+retention_review_items via migrations/036_retention_review_queue.py) via
 GET/POST /api/v1/admin/retention/review*  (routers/retention_admin.py).
 Actual anonymise/hard_delete only happens from the per-item/per-category
 approve endpoint, after that queue row exists and an admin explicitly

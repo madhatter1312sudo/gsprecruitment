@@ -19,7 +19,7 @@ any confidence level. What is left:
      later change reopens it.
   3. GET  /api/v1/admin/retention/review — the monthly review queue
      (services/scheduler.py generate_retention_review(),
-     retention_review_items via migrations/035_retention_review_queue.py):
+     retention_review_items via migrations/036_retention_review_queue.py):
      per person/row, the category, the date the term expired
      (term_expired_at), and which protective signal was absent
      (signal_missing_nl) — exactly what the owner asked the monthly list

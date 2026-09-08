@@ -70,7 +70,7 @@ import sys
 sys.path.insert(0, os.path.dirname(__file__))
 from _runner import run_migration  # noqa: E402
 
-VERSION = "035_retention_review_queue"
+VERSION = "036_retention_review_queue"
 
 MIGRATION_SQL = """
 CREATE TABLE IF NOT EXISTS retention_review_items (

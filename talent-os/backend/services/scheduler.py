@@ -401,7 +401,7 @@ async def draft_blog_post() -> dict:
 # mailbox). This job therefore never deletes or anonymises anything by
 # itself any more, at any confidence level -- it only queues who
 # core/retention.py's guarded selectors say is due into
-# retention_review_items (migrations/035_retention_review_queue.py) for a
+# retention_review_items (migrations/036_retention_review_queue.py) for a
 # human to approve or reject, once a month
 # (GET/POST /api/v1/admin/retention/review*, routers/retention_admin.py).
 # core/retention.py's selectors and guards (who ends up on the list) are
@@ -664,7 +664,7 @@ async def _upsert_review_item(
     reopens the same way a 'rejected' one does -- both mean "not currently
     being acted on", and this run's live selector just proved the subject
     is due again. UNIQUE(category, subject_table, subject_id)
-    (migrations/035_retention_review_queue.py) is what makes this a
+    (migrations/036_retention_review_queue.py) is what makes this a
     genuine upsert rather than ever inserting a second, indistinguishable
     row for the same person."""
     await execute(
