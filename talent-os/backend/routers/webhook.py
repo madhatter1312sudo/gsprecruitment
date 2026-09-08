@@ -114,6 +114,13 @@ async def hermes_webhook(request: Request):
                 idx += 1
         if not fields:
             return {"received": True, "action": action, "updated": False}
+        # WS-E.8 follow-up (migrations/032_retention_anchor_columns.py):
+        # this and routers/candidates.py's PATCH /api/candidates/{id} are
+        # the only two write paths onto candidates.status -- stamp
+        # rejected_at here too, or a Hermes-agent rejection would never
+        # be picked up by core/retention.py's rejected_applicant purge.
+        if data.get("status") == "rejected":
+            fields.append("rejected_at = NOW()")
         values.append(candidate_id)
         await fetch_one(
             f"UPDATE candidates SET {', '.join(fields)}, updated_at = NOW() WHERE id = ${idx} RETURNING id",

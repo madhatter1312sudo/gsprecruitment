@@ -246,6 +246,68 @@ def test_scheduler_reuses_the_shared_retention_selectors_not_a_local_copy():
     assert scheduler.retention.PROSPECT_NO_RESPONSE_SQL is retention.PROSPECT_NO_RESPONSE_SQL
 
 
+# ── WS-E.8 follow-up (migrations/032_retention_anchor_columns.py): the
+# three anchor columns that made rejected_applicant/prospect_responding/
+# portal_account_inactive schema_not_ready now exist ────────────────────
+
+def test_rejected_applicant_row_is_schema_ready_with_shared_selector():
+    row = retention.get_row("rejected_applicant")
+    assert row.schema_ready is True
+    assert row.action == "anonymise"
+    assert row.anchor_column == "candidates.rejected_at"
+    assert row.selector_sql is retention.REJECTED_APPLICANT_SQL
+
+
+def test_rejected_applicant_sql_requires_status_rejected_and_guards_against_later_activity():
+    """A candidate can be marked rejected and later picked back up for a
+    different role -- status must still be 'rejected' and no match/
+    pipeline_entries activity may have happened after rejected_at."""
+    sql = retention.REJECTED_APPLICANT_SQL
+    assert "status = 'rejected'" in sql
+    assert "rejected_at" in sql and "INTERVAL '4 weeks'" in sql
+    assert "FROM matches m" in sql and "m.updated_at > c.rejected_at" in sql
+    assert "FROM pipeline_entries p" in sql and "p.updated_at > c.rejected_at" in sql
+
+
+def test_prospect_responding_row_is_schema_ready_with_shared_selector():
+    row = retention.get_row("prospect_responding")
+    assert row.schema_ready is True
+    assert row.action == "anonymise"
+    assert row.anchor_column == "client_prospects.last_contacted_at"
+    assert row.selector_sql is retention.PROSPECT_RESPONDING_SQL
+
+
+def test_prospect_responding_sql_guards_against_replies_and_sent_drafts():
+    """Same gap as PROSPECT_NO_RESPONSE_SQL -- status/last_contacted_at
+    alone isn't proof a prospect isn't mid-conversation."""
+    sql = retention.PROSPECT_RESPONDING_SQL
+    assert "status != 'new'" in sql
+    assert "last_contacted_at" in sql and "INTERVAL '12 months'" in sql
+    assert "FROM outreach_messages om" in sql and "om.replied_at IS NOT NULL" in sql
+    assert "FROM outreach_drafts od" in sql and "od.status = 'sent'" in sql
+    assert "target_type = 'client_prospect'" in sql
+
+
+def test_portal_account_inactive_row_is_schema_ready_with_shared_selector():
+    row = retention.get_row("portal_account_inactive")
+    assert row.schema_ready is True
+    assert row.action == "anonymise"
+    assert row.anchor_column == "users.last_login_at"
+    assert row.selector_sql is retention.PORTAL_ACCOUNT_INACTIVE_SQL
+
+
+def test_portal_account_inactive_sql_guards_against_a_linked_candidate_with_real_signals():
+    """'Actief portalaccount zonder sollicitatie' means no real engagement
+    -- not merely no recent login. A candidate can be matched/piped
+    without ever logging into the portal."""
+    sql = retention.PORTAL_ACCOUNT_INACTIVE_SQL
+    assert "role = 'candidate'" in sql
+    assert "last_login_at" in sql and "INTERVAL '24 months'" in sql
+    assert "FROM candidates c" in sql
+    assert "FROM matches m" in sql and "m.status <> 'suggested'" in sql
+    assert "FROM pipeline_entries p" in sql
+
+
 def test_sourced_no_response_query_excludes_a_candidate_with_a_progressed_match(monkeypatch):
     """End-to-end guard check against a fake DB that actually applies the
     WHERE clause semantics, not just a substring check on the SQL text --
@@ -277,6 +339,42 @@ def test_sourced_no_response_query_excludes_a_candidate_with_a_progressed_match(
 
     monkeypatch.setattr(scheduler, "fetch_all", _fake_fetch_all)
     rows = asyncio.run(scheduler._count_sourced_no_response("gerechtvaardigd_belang"))
+    assert [r["id"] for r in rows] == [1]
+
+
+def test_count_rejected_applicants_calls_the_shared_selector(monkeypatch):
+    import services.scheduler as scheduler
+
+    async def _fake_fetch_all(sql, *args):
+        assert sql is retention.REJECTED_APPLICANT_SQL
+        return [{"id": 1, "email": "rejected@example.com"}]
+
+    monkeypatch.setattr(scheduler, "fetch_all", _fake_fetch_all)
+    rows = asyncio.run(scheduler._count_rejected_applicants())
+    assert [r["id"] for r in rows] == [1]
+
+
+def test_count_prospect_responding_calls_the_shared_selector(monkeypatch):
+    import services.scheduler as scheduler
+
+    async def _fake_fetch_all(sql, *args):
+        assert sql is retention.PROSPECT_RESPONDING_SQL
+        return [{"id": 1, "contact_email": "prospect@example.com"}]
+
+    monkeypatch.setattr(scheduler, "fetch_all", _fake_fetch_all)
+    rows = asyncio.run(scheduler._count_prospect_responding())
+    assert [r["id"] for r in rows] == [1]
+
+
+def test_count_portal_account_inactive_calls_the_shared_selector(monkeypatch):
+    import services.scheduler as scheduler
+
+    async def _fake_fetch_all(sql, *args):
+        assert sql is retention.PORTAL_ACCOUNT_INACTIVE_SQL
+        return [{"id": 1, "email": "inactive@example.com"}]
+
+    monkeypatch.setattr(scheduler, "fetch_all", _fake_fetch_all)
+    rows = asyncio.run(scheduler._count_portal_account_inactive())
     assert [r["id"] for r in rows] == [1]
 
 
@@ -317,6 +415,10 @@ def test_dry_run_issues_no_execute_calls(patch_scheduler_db):
     assert counted == {
         "sourced_no_response": 0, "prospect_no_response": 0, "referral": 0,
         "leads_quiz": 0, "talentpool_consent": 0,
+        # WS-E.8 follow-up (migrations/032_retention_anchor_columns.py):
+        # rejected_at / last_contacted_at / last_login_at now exist, so
+        # these three are counted too instead of schema_not_ready.
+        "rejected_applicant": 0, "prospect_responding": 0, "portal_account_inactive": 0,
     }
 
 
@@ -325,20 +427,29 @@ def test_dry_run_reports_schema_not_ready_categories(patch_scheduler_db):
     scheduler = patch_scheduler_db(rec)
     result = asyncio.run(scheduler.run_retention_purge(dry_run=True))
     by_key = {c["key"]: c["status"] for c in result["categories"]}
-    assert by_key["rejected_applicant"] == "schema_not_ready"
-    assert by_key["prospect_responding"] == "schema_not_ready"
-    assert by_key["portal_account_inactive"] == "schema_not_ready"
+    # WS-E.8 follow-up (migrations/032_retention_anchor_columns.py):
+    # rejected_at (candidates), last_contacted_at (client_prospects) and
+    # last_login_at (users) now exist -- these three are counted, not
+    # schema_not_ready, and each fetches its own guarded selector from
+    # core/retention.py.
+    assert by_key["rejected_applicant"] == "counted"
+    assert by_key["prospect_responding"] == "counted"
+    assert by_key["portal_account_inactive"] == "counted"
     assert by_key["placed_candidate"] == "not_applicable"
     assert by_key["logs"] == "not_applicable"
     # WS-C.17: talentpool_consent is schema_ready as of migrations/030 --
     # it's counted, not reported schema_not_ready, and it fetches the
     # shared retention.TALENTPOOL_EXPIRED_SQL selector.
     assert by_key["talentpool_consent"] == "counted"
+    # no row is reported schema_not_ready any more -- placed_candidate and
+    # logs are not_applicable (action="retain"/"infra_only") instead, for
+    # reasons unrelated to schema (see core/retention.py's docstring).
+    assert "schema_not_ready" not in by_key.values()
     fetched_categories = {sql for sql, _ in rec.fetch_calls}
     assert any("consent_talentpool_until" in sql for sql in fetched_categories)
-    # the still-not-ready categories never issued a fetch -- no query
-    # against a column that doesn't exist in the DB
-    assert not any("rejected_at" in sql for sql in fetched_categories)
+    assert any("rejected_at" in sql for sql in fetched_categories)
+    assert any("last_contacted_at" in sql for sql in fetched_categories)
+    assert any("last_login_at" in sql for sql in fetched_categories)
 
 
 def test_real_run_purges_and_writes_one_audit_row_per_purged_category(monkeypatch, patch_scheduler_db):
@@ -367,6 +478,10 @@ def test_real_run_purges_and_writes_one_audit_row_per_purged_category(monkeypatc
     purged_keys = {c["key"] for c in result["categories"] if c["status"] == "purged"}
     assert purged_keys == {
         "sourced_no_response", "prospect_no_response", "referral", "leads_quiz", "talentpool_consent",
+        # WS-E.8 follow-up (migrations/032_retention_anchor_columns.py):
+        # now schema_ready, so purged like the others (0 rows -- fetch_all
+        # always returns [] in this fixture).
+        "rejected_applicant", "prospect_responding", "portal_account_inactive",
     }
     assert len(audit_inserts) == len(purged_keys)
     for sql, args in audit_inserts:

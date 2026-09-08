@@ -443,6 +443,54 @@ async def _purge_talentpool_expired(reason: str) -> int:
     return len(rows)
 
 
+# ── rejected_applicant / prospect_responding / portal_account_inactive ──
+# (WS-E.8 follow-up, migrations/032_retention_anchor_columns.py) -- same
+# pattern as sourced_no_response/talentpool_expired above: the guarded
+# selector lives once in core/retention.py, this module only counts
+# (dry_run) or counts-then-erases (real run) against it.
+
+async def _count_rejected_applicants() -> list:
+    return await fetch_all(retention.REJECTED_APPLICANT_SQL)
+
+
+async def _purge_rejected_applicants(reason: str) -> int:
+    from routers.gdpr import erase_person
+
+    rows = await _count_rejected_applicants()
+    for row in rows:
+        if row["email"]:
+            await erase_person(row["email"], actor_id=None, reason=reason)
+    return len(rows)
+
+
+async def _count_prospect_responding() -> list:
+    return await fetch_all(retention.PROSPECT_RESPONDING_SQL)
+
+
+async def _purge_prospect_responding(reason: str) -> int:
+    from routers.gdpr import erase_person
+
+    rows = await _count_prospect_responding()
+    for row in rows:
+        if row["contact_email"]:
+            await erase_person(row["contact_email"], actor_id=None, reason=reason)
+    return len(rows)
+
+
+async def _count_portal_account_inactive() -> list:
+    return await fetch_all(retention.PORTAL_ACCOUNT_INACTIVE_SQL)
+
+
+async def _purge_portal_account_inactive(reason: str) -> int:
+    from routers.gdpr import erase_person
+
+    rows = await _count_portal_account_inactive()
+    for row in rows:
+        if row["email"]:
+            await erase_person(row["email"], actor_id=None, reason=reason)
+    return len(rows)
+
+
 # ── Talentpool renewal reminder (WS-C.17, security-audit follow-up H3c) ──
 #
 # One e-mail, sent once per consent cycle, 30 days before
@@ -626,6 +674,21 @@ async def _category_result(row: "retention.RetentionRow", dry_run: bool) -> dict
             count = len(await _count_prospect_no_response()) if dry_run else await _purge_prospect_no_response()
         elif row.key == "leads_quiz":
             count = await _count_leads_quiz() if dry_run else await _purge_leads_quiz()
+        elif row.key == "rejected_applicant":
+            if dry_run:
+                count = len(await _count_rejected_applicants())
+            else:
+                count = await _purge_rejected_applicants(f"retention_purge:{row.key}")
+        elif row.key == "prospect_responding":
+            if dry_run:
+                count = len(await _count_prospect_responding())
+            else:
+                count = await _purge_prospect_responding(f"retention_purge:{row.key}")
+        elif row.key == "portal_account_inactive":
+            if dry_run:
+                count = len(await _count_portal_account_inactive())
+            else:
+                count = await _purge_portal_account_inactive(f"retention_purge:{row.key}")
         else:
             return {"key": row.key, "status": "no_handler", "count": None}
     except Exception:

@@ -255,6 +255,14 @@ async def mfa_verify(request: Request, data: MfaVerifyRequest):
 
     clear_pending_failures(user_id, iat)
     await _audit("mfa_login_verified", user_id, user_id, {})
+    # WS-E.8 follow-up (migrations/032_retention_anchor_columns.py) --
+    # see routers/auth.py login()'s comment: this completes a login that
+    # required a second factor, so it stamps last_login_at too. Best-
+    # effort, same reasoning as login().
+    try:
+        await execute("UPDATE users SET last_login_at = NOW() WHERE id = $1", user_id)
+    except Exception:
+        logger.exception("mfa_verify: failed to stamp last_login_at for user %s", user_id)
 
     return _build_token_response(row)
 
@@ -290,5 +298,10 @@ async def mfa_recovery(request: Request, data: MfaRecoveryRequest):
     clear_pending_failures(user_id, iat)
     remaining = [h for h in (row["mfa_recovery_codes_hash"] or []) if h != target_hash]
     await _audit("mfa_recovery_code_used", user_id, user_id, {"codes_remaining": len(remaining)})
+    # WS-E.8 follow-up -- see mfa_verify() above.
+    try:
+        await execute("UPDATE users SET last_login_at = NOW() WHERE id = $1", user_id)
+    except Exception:
+        logger.exception("mfa_recovery: failed to stamp last_login_at for user %s", user_id)
 
     return _build_token_response(row)

@@ -187,6 +187,15 @@ async def update_prospect(
         values.append(val)
         idx += 1
 
+    # WS-E.8 follow-up (migrations/032_retention_anchor_columns.py):
+    # client_prospects.status only ever moves by manual admin action (see
+    # services/scheduler.py's _count_prospect_no_response docstring) --
+    # this is the one place "we had contact with this prospect" is
+    # recorded today, so a status change also stamps last_contacted_at,
+    # the anchor core/retention.py's prospect_responding row purges on.
+    if "status" in update_dict:
+        set_parts.append("last_contacted_at = NOW()")
+
     values.append(prospect_id)
     row = await fetch_one(
         f"UPDATE client_prospects SET {', '.join(set_parts)} WHERE id = ${idx} RETURNING *",

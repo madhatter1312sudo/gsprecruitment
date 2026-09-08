@@ -387,6 +387,17 @@ async def approve_draft(
             current_user["id"], draft_id,
         )
 
+        # WS-E.8 follow-up (migrations/032_retention_anchor_columns.py):
+        # sending to a client_prospect is itself a contact event, so stamp
+        # last_contacted_at here too, alongside the manual-status-change
+        # path in routers/prospects.py -- the anchor core/retention.py's
+        # prospect_responding row purges on.
+        if draft["target_type"] == "client_prospect" and draft["target_id"]:
+            await execute(
+                "UPDATE client_prospects SET last_contacted_at = NOW() WHERE id = $1",
+                draft["target_id"],
+            )
+
         # Best-effort mirror into outreach_messages, if the schema allows it
         # (some deployments have campaign_id NOT NULL there — skip gracefully).
         try:

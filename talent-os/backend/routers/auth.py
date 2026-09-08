@@ -261,6 +261,19 @@ async def login(request: Request, data: UserLogin):
     if mfa_required_for_user(user):
         return {"mfa_required": True, "mfa_token": issue_mfa_pending_token(user["id"])}
 
+    # WS-E.8 follow-up (migrations/032_retention_anchor_columns.py):
+    # last_login_at is the anchor core/retention.py's portal_account_
+    # inactive row purges on -- stamped here (a real, non-MFA-pending
+    # login), in mfa_verify()/mfa_recovery() (routers/mfa.py, the
+    # completion of a login that required a second factor) and in
+    # google_signin() below, but never on /register (a new account isn't
+    # a login yet) or /refresh (reuses an existing session). Best-effort:
+    # a DB hiccup here must never turn a successful login into a 500.
+    try:
+        await execute("UPDATE users SET last_login_at = NOW() WHERE id = $1", user["id"])
+    except Exception:
+        logger.exception("login: failed to stamp last_login_at for user %s", user["id"])
+
     return _build_token_response(user)
 
 
@@ -717,6 +730,12 @@ async def google_callback(
             "INSERT INTO candidate_profiles (user_id) VALUES ($1) ON CONFLICT DO NOTHING",
             user["id"],
         )
+
+    # WS-E.8 follow-up -- see login()'s comment above.
+    try:
+        await execute("UPDATE users SET last_login_at = NOW() WHERE id = $1", user["id"])
+    except Exception:
+        logger.exception("google_signin: failed to stamp last_login_at for user %s", user["id"])
 
     token_response = _build_token_response(user)
     # Fragment, not query string -- see the module-level comment above.

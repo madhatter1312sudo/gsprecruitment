@@ -44,16 +44,27 @@ assumptions from the SOP pending the owner's confirmation (§6.4); the
 other seven are settled.
 
 `schema_ready=False` marks a row whose anchor column does not exist in the
-database yet (rejected_at, a "last contact"/"last login" column — none of
-these exist as of WS-C.17). The purge job (services/scheduler.py) skips
-those categories entirely — it never issues a query against a column that
-isn't there — and reports them as "schema_not_ready" so an admin calling
+database yet. The purge job (services/scheduler.py) skips those
+categories entirely — it never issues a query against a column that isn't
+there — and reports them as "schema_not_ready" so an admin calling
 GET /api/v1/admin/retention/table or POST .../retention/run can see
-exactly which rows are enforced today and which need a follow-up migration
-(owner decision, not made in this PR — see the WS-E.8 task notes).
+exactly which rows are enforced today and which need a follow-up
+migration.
 `consent_talentpool_until` (talentpool_consent row) is schema_ready=True as
 of WS-C.17 (migrations/030_talentpool_consent.py) — see that migration and
 TALENTPOOL_EXPIRED_SQL below.
+`rejected_at` (candidates), `last_contacted_at` (client_prospects) and
+`last_login_at` (users) are schema_ready=True as of
+migrations/032_retention_anchor_columns.py — see REJECTED_APPLICANT_SQL,
+PROSPECT_RESPONDING_SQL and PORTAL_ACCOUNT_INACTIVE_SQL below for the
+guarded selectors and their write paths. `placed_candidate` stays
+schema_ready=False: its `action` is "retain", so services/scheduler.py's
+_category_result() reports it "not_applicable" before it ever looks at
+schema_ready — this job never purges 7-year fiscal data, so a dedicated
+invoice-date column would never be queried or written to by anything and
+is deliberately not added here (see that migration's docstring). `logs`
+also stays schema_ready=False (action="infra_only", no DB column by
+design).
 
 `action` is one of:
   - "anonymise": run via erase_person()-style logic (routers/gdpr.py) —
@@ -148,6 +159,80 @@ TALENTPOOL_EXPIRED_SQL = """
       AND NOT EXISTS (SELECT 1 FROM users u WHERE LOWER(u.email) = LOWER(c.email) AND u.deleted_at IS NULL)
 """
 
+# migrations/032_retention_anchor_columns.py adds candidates.rejected_at,
+# stamped by the only two write paths onto candidates.status
+# (routers/candidates.py PATCH /api/candidates/{id} and
+# routers/webhook.py's candidate_updated Hermes action) whenever status is
+# set to 'rejected'. rejected_at itself is a deliberate, explicit action
+# (not a default value nothing ever advances, unlike status='sourced' in
+# SOURCED_NO_RESPONSE_SQL above), but a rejected candidate can still be
+# reconsidered later without rejected_at being cleared -- `status =
+# 'rejected'` must still hold (a later status change away from 'rejected'
+# drops the row out of this selector even if rejected_at is stale), and
+# the two NOT EXISTS guards additionally exclude anyone whose matches or
+# pipeline_entries were touched *after* rejected_at (picked back up for
+# another role since being rejected).
+REJECTED_APPLICANT_SQL = """
+    SELECT id, email FROM candidates c WHERE c.status = 'rejected'
+      AND c.rejected_at IS NOT NULL AND c.rejected_at <= (NOW() - INTERVAL '4 weeks')
+      AND c.deleted_at IS NULL AND c.email IS NOT NULL
+      AND NOT EXISTS (
+          SELECT 1 FROM matches m WHERE m.candidate_id = c.id
+            AND m.status NOT IN ('rejected') AND m.updated_at > c.rejected_at
+      )
+      AND NOT EXISTS (
+          SELECT 1 FROM pipeline_entries p WHERE p.candidate_id = c.id AND p.updated_at > c.rejected_at
+      )
+"""
+
+# migrations/032_retention_anchor_columns.py adds
+# client_prospects.last_contacted_at, stamped whenever an admin changes a
+# prospect's status (routers/prospects.py PUT .../prospects/{id} -- per
+# that router's own docstring, client_prospects.status only ever moves by
+# manual admin action, so a status change is the one place "we had
+# contact" is recorded today) and whenever an outreach draft targeting
+# this prospect is approved/sent (routers/outreach.py approve_draft).
+# Same "status alone isn't proof of no reaction" gap PROSPECT_NO_RESPONSE_
+# SQL guards against applies here too -- reuse its two NOT EXISTS guards
+# (a reply via outreach_messages, or a sent-but-not-yet-replied draft) so
+# a prospect mid-conversation is never purged out from under an in-flight
+# thread even if last_contacted_at happens to be stale.
+PROSPECT_RESPONDING_SQL = """
+    SELECT id, contact_email FROM client_prospects cp WHERE cp.status != 'new'
+      AND cp.last_contacted_at IS NOT NULL AND cp.last_contacted_at <= (NOW() - INTERVAL '12 months')
+      AND NOT EXISTS (
+          SELECT 1 FROM outreach_messages om
+          WHERE LOWER(om.recipient_email) = LOWER(cp.contact_email) AND om.replied_at IS NOT NULL
+      )
+      AND NOT EXISTS (
+          SELECT 1 FROM outreach_drafts od
+          WHERE LOWER(od.target_email) = LOWER(cp.contact_email) AND od.target_type = 'client_prospect' AND od.status = 'sent'
+      )
+"""
+
+# migrations/032_retention_anchor_columns.py adds users.last_login_at,
+# stamped on every successful authentication that returns a real token
+# (routers/auth.py login()/google_signin(), routers/mfa.py mfa_verify()/
+# mfa_recovery()) -- never on /register or /refresh (see that migration's
+# docstring). "Actief portalaccount zonder sollicitatie" means exactly
+# that: an account with no real engagement, not merely one that hasn't
+# logged in recently -- a candidate can be actively matched/piped/
+# contacted by a recruiter without ever touching the portal, so the guard
+# below excludes any user whose linked candidates row (by e-mail) has a
+# progressed match or a pipeline entry, on top of the shared
+# reply/live-account guards the other selectors use.
+PORTAL_ACCOUNT_INACTIVE_SQL = """
+    SELECT id, email FROM users u WHERE u.role = 'candidate' AND u.deleted_at IS NULL
+      AND u.last_login_at IS NOT NULL AND u.last_login_at <= (NOW() - INTERVAL '24 months')
+      AND NOT EXISTS (
+          SELECT 1 FROM candidates c WHERE LOWER(c.email) = LOWER(u.email)
+            AND (
+                EXISTS (SELECT 1 FROM matches m WHERE m.candidate_id = c.id AND m.status <> 'suggested')
+                OR EXISTS (SELECT 1 FROM pipeline_entries p WHERE p.candidate_id = c.id)
+            )
+      )
+"""
+
 
 @dataclass(frozen=True)
 class PublicRetentionText:
@@ -188,12 +273,8 @@ RETENTION_TABLE: Tuple[RetentionRow, ...] = (
         legal_basis_ref="VERWERKINGSREGISTER §1.4 rij 1 / SOP §6 rij 1",
         anchor_column="candidates.rejected_at",
         action="anonymise",
-        schema_ready=False,
-        selector_sql=(
-            "SELECT id, email FROM candidates "
-            "WHERE rejected_at IS NOT NULL AND rejected_at <= NOW() - INTERVAL '4 weeks' "
-            "AND deleted_at IS NULL -- schema_ready=False: candidates.rejected_at does not exist yet"
-        ),
+        schema_ready=True,
+        selector_sql=REJECTED_APPLICANT_SQL,
         public_nl=PublicRetentionText(
             categorie="Afgewezen sollicitant",
             bewaartermijn="4 weken na de afwijzingsdatum",
@@ -278,12 +359,8 @@ RETENTION_TABLE: Tuple[RetentionRow, ...] = (
         legal_basis_ref="VERWERKINGSREGISTER §1.4 rij 5 / SOP §6 rij 5",
         anchor_column="client_prospects.last_contacted_at",
         action="anonymise",
-        schema_ready=False,
-        selector_sql=(
-            "SELECT id, contact_email FROM client_prospects WHERE status != 'new' "
-            "AND last_contacted_at IS NOT NULL AND last_contacted_at <= (NOW() - INTERVAL '12 months') "
-            "-- schema_ready=False: client_prospects.last_contacted_at does not exist yet"
-        ),
+        schema_ready=True,
+        selector_sql=PROSPECT_RESPONDING_SQL,
         public_nl=PublicRetentionText(
             categorie="Prospect die wel reageert (relatie)",
             bewaartermijn="zolang actief + 12 maanden na laatste contact",
@@ -303,12 +380,8 @@ RETENTION_TABLE: Tuple[RetentionRow, ...] = (
         legal_basis_ref="VERWERKINGSREGISTER §1.4 rij 6 / SOP §6 rij 6",
         anchor_column="users.last_login_at",
         action="anonymise",
-        schema_ready=False,
-        selector_sql=(
-            "SELECT id, email FROM users WHERE role = 'candidate' AND deleted_at IS NULL "
-            "AND last_login_at IS NOT NULL AND last_login_at <= (NOW() - INTERVAL '24 months') "
-            "-- schema_ready=False: users.last_login_at does not exist yet"
-        ),
+        schema_ready=True,
+        selector_sql=PORTAL_ACCOUNT_INACTIVE_SQL,
         public_nl=PublicRetentionText(
             categorie="Actief portalaccount zonder sollicitatie",
             bewaartermijn="zolang account actief; 24 maanden inactiviteit → verwijderen",
