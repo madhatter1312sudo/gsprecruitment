@@ -13,7 +13,7 @@ from models.schemas import (
     AdminDashboard, AdminUserUpdate, AdminJobUpdate, AdminJobCreate, AdminAnalytics,
     AuditLogEntry, ContentItem, ContentUpdate, SystemSettings, SystemSettingsUpdate,
     HealthResponse, PipelineStageUpdate, LeadReadUpdate, LEAD_INTEREST_TYPES,
-    AdminTalentpoolConsentUpdate,
+    AdminTalentpoolConsentUpdate, AdminSpecPresentationConsentUpdate,
 )
 from routers.health import get_health_detail
 from routers.client import _record_stage_change
@@ -788,6 +788,90 @@ async def admin_update_talentpool_consent(
         "INSERT INTO audit_log (action, actor_id, target_type, target_id, changes) VALUES ($1, $2, $3, $4, $5::jsonb)",
         "admin_talentpool_consent_update", current_user["id"], "candidate", candidate_id,
         json.dumps({"consent": data.consent, "scope": data.scope, "evidence": privacy.redact_emails(data.evidence)}),
+    )
+
+    return row
+
+
+# ── Spec-presentatietoestemming, admin-recorded ──────────────────────────
+# §6 punt 10, docs/VERWERKINGSREGISTER.md. `consent_spec_presentation_at`
+# (migrations/018) is what routers/client.py's `_project_candidate_public()`
+# gates a candidate's `full_name` on before showing them to a client, and
+# what routers/outreach.py's refusal logic requires before a spec/MPC draft
+# naming this candidate can be approved (SOP §5) -- until this endpoint,
+# nothing in the codebase ever wrote it, so no candidate's name was ever
+# shown. Human admin only (require_role("admin")), never the shared
+# X-API-Key: that key is also used by the external routines (PATCH
+# /api/candidates, routers/candidates.py), and a routine must never be able
+# to record consent on a human's behalf, without evidence and without an
+# audit trail -- see the deliberately absent `consent_spec_presentation_at`
+# in that endpoint's `allowed_fields` and
+# tests/test_ws_c17_talentpool_consent.py-style coverage in
+# tests/test_spec_presentation_consent.py.
+# `evidence` is mandatory (same reasoning as the talentpool-consent
+# endpoint above: this records consent an admin has evidence for, not a
+# live tick of the box) and `job_id` is mandatory when granting, so the
+# grant is always tied to the specific role privacy.html promises
+# ("toestemming voor een specifieke rol") -- see
+# migrations/032_spec_presentation_consent_job.py for why that is a single
+# nullable FK column rather than a per-client history table, and the
+# restrisico that choice still carries.
+
+@router.patch("/candidates/{candidate_id}/spec-presentation-consent")
+async def admin_update_spec_presentation_consent(
+    candidate_id: int,
+    data: AdminSpecPresentationConsentUpdate,
+    current_user: dict = Depends(require_role("admin")),
+):
+    candidate = await fetch_one(
+        "SELECT id, consent_withdrawn_at FROM candidates WHERE id = $1 AND deleted_at IS NULL",
+        candidate_id,
+    )
+    if not candidate:
+        raise HTTPException(status_code=404, detail="Candidate not found")
+    if candidate["consent_withdrawn_at"]:
+        raise HTTPException(
+            status_code=409,
+            detail="Candidate has withdrawn consent (consent_withdrawn_at set) -- "
+                   "cannot record spec-presentation consent for this candidate.",
+        )
+
+    if data.consent:
+        job = await fetch_one(
+            "SELECT id FROM job_orders WHERE id = $1 AND deleted_at IS NULL", data.job_id,
+        )
+        if not job:
+            raise HTTPException(status_code=422, detail="job_id does not reference an existing, non-deleted job order")
+
+        row = await fetch_one(
+            """UPDATE candidates
+               SET consent_spec_presentation_at = NOW(), consent_spec_presentation_job_id = $1,
+                   updated_at = NOW()
+               WHERE id = $2
+               RETURNING id, consent_spec_presentation_at, consent_spec_presentation_job_id""",
+            data.job_id, candidate_id,
+        )
+    else:
+        row = await fetch_one(
+            """UPDATE candidates
+               SET consent_spec_presentation_at = NULL, consent_spec_presentation_job_id = NULL,
+                   updated_at = NOW()
+               WHERE id = $1
+               RETURNING id, consent_spec_presentation_at, consent_spec_presentation_job_id""",
+            candidate_id,
+        )
+
+    # Same redaction as admin_update_talentpool_consent above: evidence is
+    # free text an admin typed -- redact any e-mail-looking substring
+    # before it lands in audit_log.changes, never the plaintext address.
+    await execute(
+        "INSERT INTO audit_log (action, actor_id, target_type, target_id, changes) VALUES ($1, $2, $3, $4, $5::jsonb)",
+        "admin_spec_presentation_consent_update", current_user["id"], "candidate", candidate_id,
+        json.dumps({
+            "consent": data.consent,
+            "job_id": data.job_id if data.consent else None,
+            "evidence": privacy.redact_emails(data.evidence),
+        }),
     )
 
     return row
