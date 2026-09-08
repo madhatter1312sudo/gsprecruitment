@@ -57,7 +57,7 @@ import sys
 sys.path.insert(0, os.path.dirname(__file__))
 from _runner import run_migration  # noqa: E402
 
-VERSION = "032_spec_presentation_consent_job"
+VERSION = "033_spec_presentation_consent_job"
 
 MIGRATION_SQL = """
 ALTER TABLE candidates ADD COLUMN IF NOT EXISTS consent_spec_presentation_job_id INTEGER REFERENCES job_orders(id);
