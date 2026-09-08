@@ -1,14 +1,37 @@
 """
 Talent OS — WS-E.8 retention table.
 
-Single source of truth for the bewaartabel (retention table) that
-docs/VERWERKINGSREGISTER.md §1.4 and docs/SOURCING-SOP.md §6 both carry in
-prose/Markdown, and that services/scheduler.py's run_retention_purge()
-and routers/retention_admin.py execute against. Change the table here
-first, then regenerate the Markdown in the two docs (render_markdown())
-and website/privacy.html so the four stay identical — tests/test_retention.py
-checks the register against this module; it does not check privacy.html or
-the SOP copy automatically, so update those two by hand in the same PR.
+Single source of truth for the bewaartabel (retention table), with TWO
+rendered voices per row rather than one:
+
+  - the INTERNAL voice (`categorie`, `bewaartermijn`, `bron_opmerking`,
+    plus `legal_basis_ref`/`anchor_column`/`schema_ready`/`selector_sql`)
+    — accountability text for docs/VERWERKINGSREGISTER.md §1.4 and
+    docs/SOURCING-SOP.md §6. It names the anchor column (`date_found`,
+    `rejected_at`), cites WS-ticket numbers and §-cross-references, and
+    marks which periods are still an "aanname" pending the owner's
+    confirmation (§6 punt 4 of the register hangs off this field — don't
+    reword or drop "aanname" from a row's `bron_opmerking` without also
+    updating that punt).
+  - the PUBLIC voice (`public_nl` / `public_en`, a `PublicRetentionText`
+    each) — the plain-language wording for website/privacy.html's two
+    retention tables (`retention-table-nl` / `retention-table-en`). It is
+    written for a candidate or a regulator, not a developer: no column
+    names, no ticket numbers, no internal cross-references. It is NOT a
+    translation of `bron_opmerking` — the two serve different readers and
+    are allowed to say different things about the same period (e.g. "3
+    maanden na `date_found`" internally vs. "3 maanden na de datum waarop
+    wij u vonden" publicly).
+
+Both voices live on the same `RetentionRow`, so there is exactly one place
+to change a period: edit the row here, then regenerate the two Markdown
+docs with `render_markdown()` (register_rows()) and update
+website/privacy.html's two <tbody>s to match `public_rows("nl")` /
+`public_rows("en")` (categorie, bewaartermijn, toelichting tuples, in
+table order). tests/test_retention.py checks all four consumers against
+this module — the register and SOP against `register_rows()`, and each
+privacy.html table against its own `public_rows(lang)` — so a row changed
+here without updating a consumer fails loudly instead of drifting silently.
 
 Ten rows, matching VERWERKINGSREGISTER.md §1.4 exactly, in table order:
 afgewezen sollicitant, talentpool met toestemming, gesourcete persoon
@@ -127,6 +150,21 @@ TALENTPOOL_EXPIRED_SQL = """
 
 
 @dataclass(frozen=True)
+class PublicRetentionText:
+    """One row's public-facing wording, as published on
+    website/privacy.html — plain language for a candidate or a regulator.
+    `categorie` may differ from RetentionRow.categorie only by language
+    (the NL public categorie is always identical to the internal one;
+    `public_en` carries the English name). `toelichting` is the public
+    third column ("Toelichting"/"Note") and may be "" when the categorie
+    and bewaartermijn are already self-explanatory — it is a distinct
+    field from `bron_opmerking`, not a translation of it."""
+    categorie: str
+    bewaartermijn: str
+    toelichting: str
+
+
+@dataclass(frozen=True)
 class RetentionRow:
     key: str
     categorie: str          # register's "Categorie" column, verbatim
@@ -137,6 +175,8 @@ class RetentionRow:
     action: str              # "anonymise" | "hard_delete" | "retain" | "infra_only"
     schema_ready: bool       # False == anchor_column doesn't exist in the DB yet
     selector_sql: str        # documents the intended selector; always mentions anchor_column
+    public_nl: PublicRetentionText  # website/privacy.html #retention-table-nl, this row
+    public_en: PublicRetentionText  # website/privacy.html #retention-table-en, this row
 
 
 RETENTION_TABLE: Tuple[RetentionRow, ...] = (
@@ -154,6 +194,16 @@ RETENTION_TABLE: Tuple[RetentionRow, ...] = (
             "WHERE rejected_at IS NOT NULL AND rejected_at <= NOW() - INTERVAL '4 weeks' "
             "AND deleted_at IS NULL -- schema_ready=False: candidates.rejected_at does not exist yet"
         ),
+        public_nl=PublicRetentionText(
+            categorie="Afgewezen sollicitant",
+            bewaartermijn="4 weken na de afwijzingsdatum",
+            toelichting="",
+        ),
+        public_en=PublicRetentionText(
+            categorie="Rejected applicant",
+            bewaartermijn="4 weeks after rejection date",
+            toelichting="",
+        ),
     ),
     RetentionRow(
         key="talentpool_consent",
@@ -165,6 +215,16 @@ RETENTION_TABLE: Tuple[RetentionRow, ...] = (
         action="anonymise",
         schema_ready=True,
         selector_sql=TALENTPOOL_EXPIRED_SQL,
+        public_nl=PublicRetentionText(
+            categorie="Talentpool met expliciete toestemming",
+            bewaartermijn="12 maanden, verlengbaar",
+            toelichting="",
+        ),
+        public_en=PublicRetentionText(
+            categorie="Talent pool with explicit consent",
+            bewaartermijn="12 months, renewable",
+            toelichting="",
+        ),
     ),
     RetentionRow(
         key="sourced_no_response",
@@ -176,6 +236,22 @@ RETENTION_TABLE: Tuple[RetentionRow, ...] = (
         action="anonymise",
         schema_ready=True,
         selector_sql=SOURCED_NO_RESPONSE_SQL,
+        public_nl=PublicRetentionText(
+            categorie="Gesourcete persoon zonder reactie",
+            bewaartermijn="3 maanden na de datum waarop wij u vonden, zonder reactie",
+            toelichting=(
+                "Geldt voor kandidaten die wij zelf via openbare bronnen benaderen "
+                "(zie §3) en die niet op ons eerste bericht reageren"
+            ),
+        ),
+        public_en=PublicRetentionText(
+            categorie="Sourced person, no response",
+            bewaartermijn="3 months after the date found, if no response",
+            toelichting=(
+                "Applies to candidates we approach ourselves through public sources "
+                "(§3) who do not respond to our first message"
+            ),
+        ),
     ),
     RetentionRow(
         key="prospect_no_response",
@@ -187,6 +263,12 @@ RETENTION_TABLE: Tuple[RetentionRow, ...] = (
         action="hard_delete",
         schema_ready=True,
         selector_sql=PROSPECT_NO_RESPONSE_SQL,
+        public_nl=PublicRetentionText(
+            categorie="Prospect zonder reactie", bewaartermijn="12 maanden", toelichting="",
+        ),
+        public_en=PublicRetentionText(
+            categorie="Prospect, no response", bewaartermijn="12 months", toelichting="",
+        ),
     ),
     RetentionRow(
         key="prospect_responding",
@@ -201,6 +283,16 @@ RETENTION_TABLE: Tuple[RetentionRow, ...] = (
             "SELECT id, contact_email FROM client_prospects WHERE status != 'new' "
             "AND last_contacted_at IS NOT NULL AND last_contacted_at <= (NOW() - INTERVAL '12 months') "
             "-- schema_ready=False: client_prospects.last_contacted_at does not exist yet"
+        ),
+        public_nl=PublicRetentionText(
+            categorie="Prospect die wel reageert (relatie)",
+            bewaartermijn="zolang actief + 12 maanden na laatste contact",
+            toelichting="",
+        ),
+        public_en=PublicRetentionText(
+            categorie="Prospect who responds (relationship)",
+            bewaartermijn="as long as active + 12 months after last contact",
+            toelichting="",
         ),
     ),
     RetentionRow(
@@ -217,6 +309,16 @@ RETENTION_TABLE: Tuple[RetentionRow, ...] = (
             "AND last_login_at IS NOT NULL AND last_login_at <= (NOW() - INTERVAL '24 months') "
             "-- schema_ready=False: users.last_login_at does not exist yet"
         ),
+        public_nl=PublicRetentionText(
+            categorie="Actief portalaccount zonder sollicitatie",
+            bewaartermijn="zolang account actief; 24 maanden inactiviteit → verwijderen",
+            toelichting="",
+        ),
+        public_en=PublicRetentionText(
+            categorie="Active portal account without application",
+            bewaartermijn="as long as active; 24 months inactive → deleted",
+            toelichting="",
+        ),
     ),
     RetentionRow(
         key="referral",
@@ -228,6 +330,22 @@ RETENTION_TABLE: Tuple[RetentionRow, ...] = (
         action="anonymise",
         schema_ready=True,
         selector_sql=SOURCED_NO_RESPONSE_SQL,  # same guarded query; lawful_basis is the $1 parameter
+        public_nl=PublicRetentionText(
+            categorie="Referral",
+            bewaartermijn=(
+                "zoals bij sourcing (3 maanden na de datum waarop wij u vonden, "
+                "zonder reactie); herkomst = referrer"
+            ),
+            toelichting="Aangedragen met uw toestemming vóór het eerste contact, zie §3",
+        ),
+        public_en=PublicRetentionText(
+            categorie="Referral",
+            bewaartermijn=(
+                "as sourced (3 months after the date found, if no response); "
+                "source = referrer"
+            ),
+            toelichting="Introduced with your consent before first contact, see §3",
+        ),
     ),
     RetentionRow(
         key="leads_quiz",
@@ -241,6 +359,12 @@ RETENTION_TABLE: Tuple[RetentionRow, ...] = (
         selector_sql=(
             "SELECT id FROM quiz_submissions WHERE created_at <= (NOW() - INTERVAL '12 months'); "
             "SELECT id FROM contact_submissions WHERE created_at <= (NOW() - INTERVAL '12 months')"
+        ),
+        public_nl=PublicRetentionText(
+            categorie="Leads/quiz", bewaartermijn="12 maanden", toelichting="",
+        ),
+        public_en=PublicRetentionText(
+            categorie="Leads/quiz", bewaartermijn="12 months", toelichting="",
         ),
     ),
     RetentionRow(
@@ -263,6 +387,16 @@ RETENTION_TABLE: Tuple[RetentionRow, ...] = (
             "erased (not merely retained past it) by routers/gdpr.py's erase_person() alongside the "
             "rest of a placed candidate's PII once the retention floor has passed and erasure runs."
         ),
+        public_nl=PublicRetentionText(
+            categorie="Geplaatste kandidaat (contract- en factuurdata)",
+            bewaartermijn="7 jaar",
+            toelichting="Fiscale bewaarplicht",
+        ),
+        public_en=PublicRetentionText(
+            categorie="Placed candidate (contract/invoice data)",
+            bewaartermijn="7 years",
+            toelichting="Statutory tax retention",
+        ),
     ),
     RetentionRow(
         key="logs",
@@ -277,6 +411,22 @@ RETENTION_TABLE: Tuple[RetentionRow, ...] = (
         action="infra_only",
         schema_ready=False,
         selector_sql="-- infra_only: no DB selector; enforced by Docker/Caddy log rotation, not this job",
+        public_nl=PublicRetentionText(
+            categorie="Logs",
+            bewaartermijn=(
+                "30 dagen (streeftermijn; vandaag afgedwongen via omvangsrotatie, "
+                "niet via een vaste termijn)"
+            ),
+            toelichting="Technische logs voor beveiliging en foutopsporing",
+        ),
+        public_en=PublicRetentionText(
+            categorie="Logs",
+            bewaartermijn=(
+                "30 days (target; today enforced through size-based rotation, "
+                "not a fixed time limit)"
+            ),
+            toelichting="Technical logs for security and troubleshooting",
+        ),
     ),
 )
 
@@ -299,6 +449,22 @@ def render_markdown(rows: Tuple[RetentionRow, ...] = RETENTION_TABLE) -> str:
 
 def register_rows(rows: Tuple[RetentionRow, ...] = RETENTION_TABLE):
     """(categorie, bewaartermijn, bron_opmerking) tuples, in table order —
-    what tests/test_retention.py compares against the register's parsed
-    rows."""
+    the INTERNAL voice; what tests/test_retention.py compares against the
+    register's and the SOP's parsed rows."""
     return tuple((row.categorie, row.bewaartermijn, row.bron_opmerking) for row in rows)
+
+
+def public_rows(lang: str, rows: Tuple[RetentionRow, ...] = RETENTION_TABLE):
+    """(categorie, bewaartermijn, toelichting) tuples, in table order, in
+    the PUBLIC voice for `lang` ("nl" or "en") — what
+    tests/test_retention.py compares against website/privacy.html's
+    #retention-table-nl / #retention-table-en. Not the same tuples as
+    register_rows(): the public wording is plain-language and does not
+    carry internal anchors, ticket numbers, or §-cross-references."""
+    if lang not in ("nl", "en"):
+        raise ValueError(f"public_rows: unknown lang {lang!r}, expected 'nl' or 'en'")
+    attr = f"public_{lang}"
+    return tuple(
+        (getattr(row, attr).categorie, getattr(row, attr).bewaartermijn, getattr(row, attr).toelichting)
+        for row in rows
+    )

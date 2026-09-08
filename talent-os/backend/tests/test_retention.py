@@ -92,7 +92,7 @@ def test_privacy_html_nl_retention_table_matches_code():
     with open(PRIVACY_HTML_PATH, encoding="utf-8") as f:
         text = f.read()
     rows = _parse_html_retention_table(text, "retention-table-nl")
-    assert rows == list(retention.register_rows())
+    assert rows == list(retention.public_rows("nl"))
 
 
 # security-auditor follow-up (WS-E.8 LOW #6): the register/SOP are Dutch
@@ -128,6 +128,16 @@ def test_privacy_html_en_retention_table_translates_the_same_categories_in_order
     assert len(en_rows) == len(nl_rows) == 10
     for (nl_categorie, _, _), (en_categorie, _, _) in zip(nl_rows, en_rows):
         assert en_categorie == _EN_CATEGORY_TRANSLATION[nl_categorie]
+
+
+def test_privacy_html_en_retention_table_matches_code():
+    """Same check as the NL table, against the module's own EN public
+    voice -- keeps the EN table tied to core/retention.py, not just to the
+    NL table's category order (the check above)."""
+    with open(PRIVACY_HTML_PATH, encoding="utf-8") as f:
+        text = f.read()
+    en_rows = _parse_html_retention_table(text, "retention-table-en")
+    assert en_rows == list(retention.public_rows("en"))
 
 
 def test_table_has_exactly_the_documented_ten_rows():
