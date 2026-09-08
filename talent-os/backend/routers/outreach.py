@@ -19,6 +19,7 @@ from core.deps import require_role
 from core import privacy
 from services.email_service import email_service
 from services import scheduler as scheduler_service
+from services import outreach_ai
 
 logger = logging.getLogger("talent_os.outreach")
 
@@ -73,6 +74,11 @@ REFUSAL_PROSPECT_NOT_FOUND = (404, "prospect_not_found")
 REFUSAL_UNKNOWN_TARGET_TYPE = (422, "unknown_target_type")
 REFUSAL_CANDIDATE_MISSING_PROVENANCE = (409, "candidate_missing_provenance")
 REFUSAL_TALENTPOOL_CONSENT_EXPIRED = (409, "talentpool_consent_expired")
+# AI-drafting name placeholder (services/outreach_ai.NAME_PLACEHOLDER) never
+# leaves this process as recipient PII goes to OpenRouter — draft_email()
+# always substitutes it, but this is the fail-closed check at the
+# storage/approval boundary in case a variant ever slips through.
+REFUSAL_PLACEHOLDER_LEAK = (422, "name_placeholder_leak")
 
 # lawful_basis values whose grounds are Art. 13, not Art. 14 (SOP §3.2):
 # the person supplied the data themselves, so the Art. 14 notice block
@@ -96,6 +102,10 @@ async def _draft_refusal(draft: dict):
     body = draft.get("body") or ""
     language = draft.get("language")
     target_type = draft.get("target_type")
+
+    if outreach_ai.contains_placeholder_leak(draft.get("subject"), body):
+        status_code, code = REFUSAL_PLACEHOLDER_LEAK
+        return status_code, code, "Draft still contains the AI-drafting name placeholder — refusing to send."
 
     if not _has_optout_line(body):
         status_code, code = REFUSAL_MISSING_OPTOUT
@@ -236,6 +246,13 @@ async def create_draft(
     draft already exists for the same (target_type, target_id, job_id)
     with status='draft', mirroring the dedupe in services/scheduler.py's
     draft_outreach job."""
+    if outreach_ai.contains_placeholder_leak(payload.subject, payload.body):
+        raise HTTPException(
+            status_code=422,
+            detail={"code": "name_placeholder_leak",
+                    "message": "subject/body contains the AI-drafting name placeholder — refusing to store."},
+        )
+
     existing = await fetch_one(
         """SELECT id FROM outreach_drafts
            WHERE target_type = $1 AND target_id = $2 AND job_id IS NOT DISTINCT FROM $3
@@ -307,6 +324,13 @@ async def update_draft(
     update_dict = updates.model_dump(exclude_none=True)
     if not update_dict:
         raise HTTPException(status_code=400, detail="No fields to update")
+
+    if outreach_ai.contains_placeholder_leak(update_dict.get("subject"), update_dict.get("body")):
+        raise HTTPException(
+            status_code=422,
+            detail={"code": "name_placeholder_leak",
+                    "message": "subject/body contains the AI-drafting name placeholder — refusing to store."},
+        )
 
     set_parts = []
     values = []

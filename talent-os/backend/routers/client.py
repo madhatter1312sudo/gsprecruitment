@@ -121,15 +121,35 @@ def _require_candidate_access(current_user: dict) -> None:
 # Anonymised projection for the client-facing candidate endpoints: no email,
 # phone, linkedin/github/portfolio URLs, cv_text, or any other direct
 # identifier/contact channel. Field names match the `candidates` table.
+#
+# FIX 1 (chief-of-staff, ai-pseudonimisering branch, ronde 5): this used to
+# hand out `full_name` unconditionally to every approved client account,
+# over the whole pool, filtered only on `deleted_at IS NULL` -- while the
+# public privacy statement (both languages) and the SOP promise clients see
+# candidates "aanvankelijk anoniem (geen naam, foto of contactgegevens)"
+# until the candidate has given explicit consent for that specific role.
+# `consent_spec_presentation_at` (migrations/018) is that consent: it is
+# the exact column routers/outreach.py's `_draft_refusal()` already
+# requires before a candidate may be anonymously presented to a client
+# prospect (REFUSAL_CANDIDATE_NO_SPEC_CONSENT) -- reused here rather than
+# inventing a second consent flag for the same fact. A later
+# `consent_withdrawn_at` (or erasure) overrides an earlier-granted
+# presentation consent, same as everywhere else in this codebase.
 def _project_candidate_public(row: dict) -> dict:
     """Defense in depth: even if a query selects extra columns, strip down
     to the anonymised field set before it ever reaches a response body."""
     projected = {k: row.get(k) for k in (
-        "id", "full_name", "current_title", "current_company",
+        "id", "current_title", "current_company",
         "location", "years_experience",
     )}
     # NULL array columns must be coerced to [] on read (commit 6ded1db).
     projected["skills"] = row.get("skills") or []
+    if (
+        row.get("consent_spec_presentation_at")
+        and not row.get("consent_withdrawn_at")
+        and not row.get("deleted_at")
+    ):
+        projected["full_name"] = row.get("full_name")
     return projected
 
 
@@ -400,7 +420,12 @@ async def search_candidates(
     """Search candidates with filters."""
     _require_candidate_access(current_user)
 
-    conditions = ["c.deleted_at IS NULL"]
+    # FIX 1 follow-up (chief-of-staff, ai-pseudonimisering branch, ronde
+    # 5): a candidate who withdrew consent stops being freshly shown to a
+    # client at all here, not just un-named -- unlike the client's own
+    # pipeline (get_pipeline below), this is a fresh browsing listing, so
+    # there is no ongoing engagement to preserve.
+    conditions = ["c.deleted_at IS NULL", "c.consent_withdrawn_at IS NULL"]
     params = []
     idx = 1
 
@@ -446,7 +471,8 @@ async def search_candidates(
     params_ext = params + [limit, offset]
     rows = await fetch_all(
         f"""SELECT c.id, c.full_name, c.current_title, c.current_company,
-                   c.location, c.skills, c.years_experience
+                   c.location, c.skills, c.years_experience,
+                   c.consent_spec_presentation_at, c.consent_withdrawn_at
             FROM candidates c
             WHERE {where}
             ORDER BY c.created_at DESC
@@ -475,8 +501,10 @@ async def view_candidate_profile(
 
     candidate = await fetch_one(
         """SELECT id, full_name, current_title, current_company,
-                  location, skills, years_experience
-           FROM candidates WHERE id = $1 AND deleted_at IS NULL""",
+                  location, skills, years_experience,
+                  consent_spec_presentation_at, consent_withdrawn_at
+           FROM candidates
+           WHERE id = $1 AND deleted_at IS NULL AND consent_withdrawn_at IS NULL""",
         candidate_id,
     )
     if not candidate:
@@ -589,7 +617,8 @@ async def get_pipeline(
     params_ext = params + [limit, offset]
     rows = await fetch_all(
         f"""SELECT pe.*, c.full_name, c.current_title, c.current_company,
-                   c.location, c.skills, j.title AS job_title
+                   c.location, c.skills, j.title AS job_title,
+                   c.consent_spec_presentation_at, c.consent_withdrawn_at
             FROM pipeline_entries pe
             JOIN candidates c ON c.id = pe.candidate_id
             JOIN job_orders j ON j.id = pe.job_id
@@ -599,7 +628,28 @@ async def get_pipeline(
         *params_ext,
     )
 
-    return {"items": rows, "total": total, "limit": limit, "offset": offset}
+    # FIX 1 (chief-of-staff, ai-pseudonimisering branch, ronde 5): same
+    # presentation-consent gate as _project_candidate_public -- a pipeline
+    # entry existing at all does not mean the candidate ever consented to
+    # be named to this client. Keep every pe.*/job_title field (this is
+    # the client's own pipeline, not a fresh anonymised listing); only
+    # full_name is conditional, and the two internal consent columns never
+    # leave this function.
+    items = []
+    for r in rows:
+        item = dict(r)
+        eligible = (
+            item.get("consent_spec_presentation_at")
+            and not item.get("consent_withdrawn_at")
+        )
+        item.pop("consent_spec_presentation_at", None)
+        item.pop("consent_withdrawn_at", None)
+        if not eligible:
+            item.pop("full_name", None)
+        item["skills"] = item.get("skills") or []
+        items.append(item)
+
+    return {"items": items, "total": total, "limit": limit, "offset": offset}
 
 
 @router.patch("/pipeline/{entry_id}/stage")

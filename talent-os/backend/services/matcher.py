@@ -65,14 +65,23 @@ class EmbeddingMatcher:
         if not candidates:
             return []
 
-        # Build candidate texts
+        # Build candidate texts — structured fields only, no free CV text.
+        # Round two of the privacy audit found that regex-cleaning free-text
+        # CVs cannot be made reliably sound (addresses without a recognised
+        # street-type suffix, foreign addresses, non-ISO dates all survived
+        # pseudonymize_cv_text() in testing). VERWERKINGSREGISTER.md §2.6
+        # measure A3 now reads "no CV text to external processors" rather
+        # than "pseudonymize it first" — so cv_text never enters the
+        # embedding input at all, pseudonymized or not.
         cand_texts = []
         for c in candidates:
             # DB NULLs come through as None — never assume the defaults kick in
             title = c.get("current_title") or ""
-            cv = (c.get("cv_text") or "")[:500]
+            education = c.get("education") or ""
+            years = c.get("years_experience")
+            experience = f"{years} jaar ervaring" if years is not None else ""
             skills = " ".join(c.get("skills") or [])
-            cand_texts.append(f"{title} {cv} {skills}")
+            cand_texts.append(f"{title} {education} {experience} {skills}".strip())
 
         # Embed in batches — the embeddings endpoint caps input arrays
         # (~2048 items) and 5k+ candidates in one request 4xx's.
