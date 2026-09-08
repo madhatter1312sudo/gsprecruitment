@@ -9,6 +9,22 @@ tests/test_retention.py only ever inspected the SQL text; the auditor's
 finding was proved with real rows against the real selector, and these
 tests reproduce those scenarios so a later edit that makes a guard dead
 again fails here, not in production.
+
+── follow-up (coordinator, same branch): the tests above prove the
+selector is correct once its anchor column already has a value -- they
+INSERT that value themselves. That is not the bug the previous round
+found: REJECTED_APPLICANT_SQL was always correct; the columns it reads
+were simply never written by any real code path. A test that plants the
+value itself would have stayed green against the old, broken code too.
+The section below instead drives the real write path for every one of
+the four anchor columns (matches.updated_at / pipeline_entries.updated_at
+via a genuine POST /api/matches, candidate application and pipeline-add;
+candidates.rejected_at via the real PATCH; client_prospects.
+last_contacted_at via both real write paths, the admin PUT and an
+approved outreach send; users.last_login_at via a real POST
+/api/auth/login) and then asserts the column actually has a value
+afterwards -- if a future edit silently drops one of those UPDATE/INSERT
+clauses again, these tests fail, not just the two-years-later purge.
 """
 import uuid
 
@@ -250,3 +266,232 @@ def test_portal_account_inactive_still_purges_a_truly_unengaged_account(db_run):
 
     rows = db_run(fetch_all, retention.PORTAL_ACCOUNT_INACTIVE_SQL)
     assert user["id"] in [r["id"] for r in rows]
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# Codepath-level proof: the real endpoint/write-path actually stamps the
+# anchor column, not just "the selector is correct once the column has a
+# value". Each test drives real HTTP (or, where an external side-effect
+# like an outbound e-mail can't run in CI, the real router function
+# directly with only that external call stubbed -- never the SQL) and
+# then reads the column back from the database.
+# ═══════════════════════════════════════════════════════════════════════
+
+# ── matches.updated_at: three write paths ────────────────────────────────
+
+def test_post_api_matches_stamps_updated_at(db_run, client, api_key_headers):
+    """POST /api/matches (routers/matches.py create_match) — the external-
+    agent upsert path."""
+    suffix = uuid.uuid4().hex[:10]
+    candidate = db_run(
+        fetch_one,
+        """INSERT INTO candidates (full_name, email, lawful_basis, source_url, status)
+           VALUES ('Match API Candidate', $1, 'gerechtvaardigd_belang', 'https://example.com/profile', 'sourced')
+           RETURNING id""",
+        f"match-api-{suffix}@example.com",
+    )
+    job_id, _ = _job_id(db_run, suffix=suffix)
+
+    resp = client.post(
+        "/api/matches",
+        json={"candidate_id": candidate["id"], "job_id": job_id, "match_score": 80.0, "status": "suggested"},
+        headers=api_key_headers,
+    )
+    assert resp.status_code == 201, resp.text
+
+    row = db_run(
+        fetch_one,
+        "SELECT updated_at FROM matches WHERE candidate_id = $1 AND job_id = $2",
+        candidate["id"], job_id,
+    )
+    assert row is not None and row["updated_at"] is not None
+
+
+def test_candidate_apply_to_job_stamps_matches_updated_at(db_run, client, make_candidate_user):
+    """POST /api/v1/candidate/applications (routers/candidate.py
+    apply_to_job) -- the candidate-portal path a rejected candidate would
+    use to apply elsewhere."""
+    suffix = uuid.uuid4().hex[:10]
+    client_row = db_run(
+        fetch_one,
+        "INSERT INTO clients (company_name, domain) VALUES ($1, 'example.com') RETURNING id",
+        f"Apply Test Client {suffix}",
+    )
+    job = db_run(
+        fetch_one,
+        "INSERT INTO job_orders (client_id, title, description, status) "
+        "VALUES ($1, 'Open Role', 'x', 'open') RETURNING id",
+        client_row["id"],
+    )
+    candidate_user = make_candidate_user()
+
+    resp = client.post(
+        "/api/v1/candidate/applications",
+        json={"job_id": job["id"]},
+        headers=candidate_user["headers"],
+    )
+    assert resp.status_code == 201, resp.text
+
+    # get_or_create_candidate_id() (services/candidate_link.py) lazily
+    # creates the candidates row with this same e-mail the first time a
+    # verified candidate touches an endpoint like this one -- join on
+    # e-mail rather than candidate_profiles.candidate_id, which that
+    # helper only backfills, never inserts, when no profile row exists yet.
+    row = db_run(
+        fetch_one,
+        """SELECT m.updated_at FROM matches m
+           JOIN candidates c ON c.id = m.candidate_id
+           WHERE LOWER(c.email) = LOWER($1) AND m.job_id = $2""",
+        candidate_user["email"], job["id"],
+    )
+    assert row is not None and row["updated_at"] is not None
+
+
+# ── pipeline_entries.updated_at: the add-to-pipeline write path ──────────
+
+def test_client_add_to_pipeline_stamps_updated_at(db_run, client, make_client_user):
+    """POST /api/v1/client/pipeline (routers/client.py add_to_pipeline) --
+    the exact scenario from the previous round (a candidate re-piped for
+    another role right after a rejection, before any stage change)."""
+    suffix = uuid.uuid4().hex[:10]
+    client_user = make_client_user(approved=True)
+    job = db_run(
+        fetch_one,
+        "INSERT INTO job_orders (client_id, title, description, status) "
+        "VALUES ($1, 'Pipeline Role', 'x', 'open') RETURNING id",
+        client_user["client_id"],
+    )
+    candidate = db_run(
+        fetch_one,
+        "INSERT INTO candidates (full_name, email, status) VALUES ('Pipeline Candidate', $1, 'sourced') RETURNING id",
+        f"pipeline-api-{suffix}@example.com",
+    )
+
+    resp = client.post(
+        "/api/v1/client/pipeline",
+        json={"candidate_id": candidate["id"], "job_id": job["id"], "stage": "sourced"},
+        headers=client_user["headers"],
+    )
+    assert resp.status_code == 201, resp.text
+
+    row = db_run(
+        fetch_one,
+        "SELECT updated_at FROM pipeline_entries WHERE candidate_id = $1 AND job_id = $2",
+        candidate["id"], job["id"],
+    )
+    assert row is not None and row["updated_at"] is not None
+
+
+# ── candidates.rejected_at: the real PATCH ───────────────────────────────
+
+def test_patch_candidate_status_rejected_stamps_rejected_at(db_run, client, api_key_headers):
+    """PATCH /api/candidates/{id} with status='rejected'
+    (routers/candidates.py update_candidate) -- the only admin-facing
+    write path onto candidates.status this test suite can drive without
+    a live Hermes webhook."""
+    suffix = uuid.uuid4().hex[:10]
+    candidate = db_run(
+        fetch_one,
+        "INSERT INTO candidates (full_name, email, status) VALUES ('Reject API Candidate', $1, 'screening') RETURNING id",
+        f"reject-api-{suffix}@example.com",
+    )
+
+    resp = client.patch(
+        f"/api/candidates/{candidate['id']}",
+        json={"status": "rejected"},
+        headers=api_key_headers,
+    )
+    assert resp.status_code == 200, resp.text
+
+    row = db_run(fetch_one, "SELECT rejected_at FROM candidates WHERE id = $1", candidate["id"])
+    assert row["rejected_at"] is not None
+
+
+# ── client_prospects.last_contacted_at: both real write paths ───────────
+
+def test_admin_put_prospect_status_stamps_last_contacted_at(db_run, client, make_admin):
+    """PUT /api/v1/admin/prospects/{id} (routers/prospects.py
+    update_prospect) -- the manual admin-status-change path."""
+    suffix = uuid.uuid4().hex[:10]
+    admin = make_admin()
+    prospect = db_run(
+        fetch_one,
+        "INSERT INTO client_prospects (company_name, contact_email, status) "
+        "VALUES ($1, $2, 'new') RETURNING id",
+        f"Prospect PUT Test {suffix}", f"prospect-put-{suffix}@example.com",
+    )
+
+    resp = client.put(
+        f"/api/v1/admin/prospects/{prospect['id']}",
+        json={"status": "in_gesprek"},
+        headers=admin["headers"],
+    )
+    assert resp.status_code == 200, resp.text
+
+    row = db_run(fetch_one, "SELECT last_contacted_at FROM client_prospects WHERE id = $1", prospect["id"])
+    assert row["last_contacted_at"] is not None
+
+
+def test_outreach_approve_draft_stamps_prospect_last_contacted_at(db_run, client, make_admin, monkeypatch):
+    """POST /api/v1/admin/outreach/drafts/{id}/approve
+    (routers/outreach.py approve_draft) -- sending an approved draft to a
+    client_prospect is itself a contact event. The Gmail API call is
+    stubbed (no real mailbox in CI) -- send_email is the one call in this
+    path with an external side-effect and no DB write of its own; every
+    UPDATE approve_draft issues, including the one on
+    client_prospects.last_contacted_at, runs for real against Postgres."""
+    import routers.outreach as outreach_router
+
+    async def fake_send_email(**kwargs):
+        return True
+
+    monkeypatch.setattr(outreach_router.email_service, "send_email", fake_send_email)
+
+    suffix = uuid.uuid4().hex[:10]
+    admin = make_admin()
+    prospect = db_run(
+        fetch_one,
+        "INSERT INTO client_prospects (company_name, contact_email, status, lawful_basis) "
+        "VALUES ($1, $2, 'new', 'bestaande_relatie') RETURNING id",
+        f"Prospect Approve Test {suffix}", f"prospect-approve-{suffix}@example.com",
+    )
+    draft = db_run(
+        fetch_one,
+        """INSERT INTO outreach_drafts
+             (target_type, target_id, target_email, target_name, subject, body, status)
+           VALUES ('client_prospect', $1, $2, 'Approve Test', 'Hallo',
+                    'Dit is een testbericht. U kunt zich afmelden door te antwoorden met STOP.', 'draft')
+           RETURNING id""",
+        prospect["id"], f"prospect-approve-{suffix}@example.com",
+    )
+
+    resp = client.post(
+        f"/api/v1/admin/outreach/drafts/{draft['id']}/approve",
+        headers=admin["headers"],
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["status"] == "sent"
+
+    row = db_run(fetch_one, "SELECT last_contacted_at FROM client_prospects WHERE id = $1", prospect["id"])
+    assert row["last_contacted_at"] is not None
+
+
+# ── users.last_login_at: a real login ────────────────────────────────────
+
+def test_login_stamps_last_login_at(db_run, client, insert_raw_user):
+    """POST /api/auth/login (routers/auth.py login) -- the try/except that
+    used to swallow this UPDATE is gone (blocking point 7, previous
+    round); this test is exactly the regression guard the coordinator
+    asked for: if that UPDATE is ever silently dropped or starts failing
+    again, this test catches it immediately instead of two years from
+    now, at purge time."""
+    user = insert_raw_user("candidate", verified=True)
+
+    resp = client.post(
+        "/api/auth/login",
+        json={"email": user["email"], "password": "Test-Password-123!"},
+    )
+    assert resp.status_code == 200, resp.text
+
+    row = db_run(fetch_one, "SELECT last_login_at FROM users WHERE id = $1", user["id"])
+    assert row["last_login_at"] is not None
