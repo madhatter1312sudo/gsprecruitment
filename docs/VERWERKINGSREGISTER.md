@@ -2,7 +2,7 @@
 
 Status: concept 2026-09-02, opgesteld door security-auditor (MASTERPLAN-2026 WS-E.11), ter vaststelling door chief-of-staff en de verwerkingsverantwoordelijke. Dit register beschrijft de verwerkingen zoals ze **vandaag in de code op `main` staan**, plus de wijzigingen in de openstaande M0/M1-PR's (gemarkeerd). Het is geen wensbeeld: waar de code niet doet wat de privacyverklaring belooft, staat dat hier (§7).
 
-Verwerkingsverantwoordelijke: GSP Recruitment (KvK 75546686, Brainport/Eindhoven), contact `info@gsprecruitment.nl`. Geen functionaris voor gegevensbescherming aangewezen; op grond van de omvang en de aard van de verwerkingen (geen grootschalige systematische monitoring, geen bijzondere categorieën als kernactiviteit) is dat naar onze beoordeling niet verplicht (art. 37 AVG). Herbeoordelen zodra de EOR-lijn (§3b) live is.
+Verwerkingsverantwoordelijke: GSP Recruitment (KvK 75545586, Brainport/Eindhoven), contact `info@gsprecruitment.nl`. Geen functionaris voor gegevensbescherming aangewezen; op grond van de omvang en de aard van de verwerkingen (geen grootschalige systematische monitoring, geen bijzondere categorieën als kernactiviteit) is dat naar onze beoordeling niet verplicht (art. 37 AVG). Herbeoordelen zodra de EOR-lijn (§3b) live is.
 
 Bewaartermijnen, grondslagen, de vaste `lawful_basis`-waardenset en de Art. 14-tekst in dit document zijn identiek aan `docs/SOURCING-SOP.md` (WS-F.4, SOP versie af3af81) en aan WS-E.8. Bij wijziging van het een, het ander in dezelfde PR bijwerken. §8 vermeldt welke bij het opstellen gevonden afwijkingen in de SOP zijn opgelost en wat nog open staat.
 
