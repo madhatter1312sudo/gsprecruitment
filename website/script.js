@@ -79,6 +79,35 @@ const GSP_WHATSAPP = '31617913965';
     enBtn?.addEventListener('click', () => setLang('en'));
     nlBtn?.addEventListener('click', () => setLang('nl'));
     setLang(currentLang);
+
+    // The browser resolves a #hash target during initial navigation, while
+    // the other language's block is still visible (the page markup starts
+    // in NL, see html[data-lang] in styles.css), so a same-language link
+    // can land the reader at the top of the page instead of the anchor.
+    // Re-target the scroll now that setLang() above has fixed visibility.
+    //
+    // A handful of anchors (e.g. #gevonden on privacy-kandidaten.html) exist
+    // once per language as #gevonden-nl / #gevonden-en, each hidden while
+    // its language isn't active. An outreach e-mail can only carry one URL,
+    // so it may link to the bare anchor (#gevonden) or to the "wrong"
+    // language's suffixed id for this reader's preference. Normalize both
+    // cases to the id for the language actually active after setLang().
+    if (location.hash) {
+      let id = location.hash.slice(1);
+      const suffixMatch = id.match(/^(.+)-(?:nl|en)$/);
+      if (suffixMatch) {
+        id = suffixMatch[1] + '-' + currentLang;
+      } else if (document.getElementById(id + '-' + currentLang)) {
+        id = id + '-' + currentLang;
+      }
+      const target = document.getElementById(id);
+      // Only re-jump on a real navigation: on back/forward the browser has
+      // already restored the reader's own scroll position, and forcing a
+      // jump back to the anchor here would override that (no bfcache case).
+      const navEntry = performance.getEntriesByType && performance.getEntriesByType('navigation')[0];
+      const isBackForward = navEntry ? navEntry.type === 'back_forward' : false;
+      if (target && !isBackForward) target.scrollIntoView();
+    }
   }
 
   // ── Preloader ──────────────────────────────────────────

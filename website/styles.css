@@ -103,6 +103,15 @@
 /* ── Reset ──────────────────────────────────────────────── */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 html { scroll-behavior: smooth; font-size: 16px; -webkit-text-size-adjust: 100%; }
+/* Anchor targets land clear of the 76px fixed header (.header), not tucked
+   under it — applies to every #id on the site, not just a hand-picked few.
+   Only one offset property here on purpose: this used to be paired with
+   html { scroll-padding-top: 96px }, and the two stacked (96+96=192px),
+   landing every anchor jump on the whole site, both public pages and the
+   candidate/client portals (same styles.css, hash-routed), about 115px
+   past the 77px-tall fixed header. Measured in Chromium against
+   werkgevers.html#specialisms, kandidaten.html#salary, #quiz and #faq. */
+[id] { scroll-margin-top: 96px; }
 body {
   font-family: var(--font);
   color: var(--text);
