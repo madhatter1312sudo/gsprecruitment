@@ -496,6 +496,38 @@
         "title": "AdminJobUpdate",
         "type": "object"
       },
+      "AdminSpecPresentationConsentUpdate": {
+        "description": "Admin: PATCH /api/v1/admin/candidates/{id}/spec-presentation-consent.\nRecords (or withdraws) the candidate's consent for\n`routers/client.py` to show their `full_name` to clients for one\nspecific role -- website/privacy.html's \"toestemming voor een\nspecifieke rol\". Modelled on AdminTalentpoolConsentUpdate above:\n`evidence` is mandatory (this endpoint records consent an admin has\nevidence for -- a signed form, an e-mail on file -- not a live tick\nof a box), and `job_id` is mandatory when granting (consent=True) so\nthe grant is always tied to the role it was given for, per\nmigrations/035_spec_presentation_consent_job.py. `job_id` is ignored\n(and cleared) on withdrawal (consent=False).",
+        "properties": {
+          "consent": {
+            "title": "Consent",
+            "type": "boolean"
+          },
+          "evidence": {
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Evidence",
+            "type": "string"
+          },
+          "job_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Job Id"
+          }
+        },
+        "required": [
+          "consent",
+          "evidence"
+        ],
+        "title": "AdminSpecPresentationConsentUpdate",
+        "type": "object"
+      },
       "AdminTalentpoolConsentUpdate": {
         "description": "Admin: PATCH /api/v1/admin/candidates/{id}/talentpool-consent.\n`evidence` is mandatory -- a short note on what evidence of consent\nthe admin has on file (e.g. a signed form, an e-mail) since this\nendpoint records consent on the candidate's behalf rather than\ncapturing a live tick of the box.",
         "properties": {
@@ -8321,6 +8353,61 @@
           }
         ],
         "summary": "List All Candidates",
+        "tags": [
+          "admin-portal"
+        ]
+      }
+    },
+    "/api/v1/admin/candidates/{candidate_id}/spec-presentation-consent": {
+      "patch": {
+        "operationId": "admin_update_spec_presentation_consent_api_v1_admin_candidates__candidate_id__spec_presentation_consent_patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "candidate_id",
+            "required": true,
+            "schema": {
+              "title": "Candidate Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdminSpecPresentationConsentUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Admin Update Spec Presentation Consent",
         "tags": [
           "admin-portal"
         ]

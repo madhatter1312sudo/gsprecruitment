@@ -1,5 +1,5 @@
 """Talent OS — Pydantic schemas for request/response models."""
-from pydantic import BaseModel, EmailStr, Field, field_validator
+from pydantic import BaseModel, EmailStr, Field, field_validator, model_validator
 from typing import Optional, List, Any, Literal
 from datetime import datetime, date
 from decimal import Decimal
@@ -142,6 +142,36 @@ class AdminTalentpoolConsentUpdate(BaseModel):
         if v is not None and v not in TALENTPOOL_CONSENT_SCOPES:
             raise ValueError(f"scope must be one of {TALENTPOOL_CONSENT_SCOPES}")
         return v
+
+
+# ── Spec-presentatietoestemming (migrations/018 + 035, §6 punt 10 van
+# docs/VERWERKINGSREGISTER.md) ────────────────────────────────────────────
+
+class AdminSpecPresentationConsentUpdate(BaseModel):
+    """Admin: PATCH /api/v1/admin/candidates/{id}/spec-presentation-consent.
+    Records (or withdraws) the candidate's consent for
+    `routers/client.py` to show their `full_name` to clients for one
+    specific role -- website/privacy.html's "toestemming voor een
+    specifieke rol". Modelled on AdminTalentpoolConsentUpdate above:
+    `evidence` is mandatory (this endpoint records consent an admin has
+    evidence for -- a signed form, an e-mail on file -- not a live tick
+    of a box), and `job_id` is mandatory when granting (consent=True) so
+    the grant is always tied to the role it was given for, per
+    migrations/035_spec_presentation_consent_job.py. `job_id` is ignored
+    (and cleared) on withdrawal (consent=False)."""
+    consent: bool
+    job_id: Optional[int] = None
+    evidence: str = Field(..., min_length=1, max_length=2000)
+
+    @model_validator(mode="after")
+    def _job_id_required_when_granting(self):
+        # field_validator would not fire on job_id's default (None) --
+        # pydantic v2 skips a validator on a field that was never passed
+        # unless validate_default=True -- so this check runs after the
+        # whole model is built instead, where self.job_id is always seen.
+        if self.consent and self.job_id is None:
+            raise ValueError("job_id is required when consent=true")
+        return self
 
 
 class RefreshRequest(BaseModel):
