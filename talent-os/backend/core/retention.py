@@ -97,10 +97,18 @@ from dataclasses import dataclass
 from typing import Optional, Tuple
 
 
-# Shared SQL, imported by services/scheduler.py rather than duplicated
-# there -- security-auditor follow-up (WS-E.8 FIX FIRST): the selectors
-# below and the ones the purge job actually runs must never drift apart,
-# so this module owns the one copy of each and the job imports it.
+# Shared SQL, imported by services/scheduler.py (and, for the candidate
+# no-reaction guards specifically, by routers/retention_admin.py's Apollo
+# pool purge too) rather than duplicated there -- security-auditor
+# follow-up (WS-E.8 FIX FIRST): the selectors below and the ones the
+# purge job actually runs must never drift apart, so this module owns the
+# one copy of each and the callers import it. CANDIDATE_NO_REACTION_GUARD_SQL
+# below is that one copy for the four candidate-side "did anything real
+# happen since" checks -- chief-of-staff second FIX FIRST caught
+# routers/retention_admin.py keeping its own independently-maintained
+# near-copy of these guards (with the same dead replied_at/email bugs
+# fixed here) despite this module's own claim of exactly one copy; it now
+# imports and reuses this constant instead.
 #
 # "status = 'sourced'" alone is not proof nobody has reacted: nothing in
 # this codebase moves candidates.status off 'sourced' when a match
@@ -108,32 +116,76 @@ from typing import Optional, Tuple
 # in, or the person registers a portal account. The four NOT EXISTS
 # guards check those signal tables directly instead of trusting one
 # column that nothing keeps in sync.
+#
+# FIX (chief-of-staff second FIX FIRST, WS-E.8 retention-kolommen branch,
+# blocking point 1): the first version of this guard block (still visible
+# in git history) closed with two guards that were dead on arrival:
+#   - `outreach_messages o WHERE o.replied_at IS NOT NULL` -- nothing in
+#     this codebase ever writes replied_at (outreach is draft-only, a
+#     human sends from their own mailbox and any reply lands there, not
+#     in this DB -- see the comment on PROSPECT_NO_RESPONSE_SQL below,
+#     first found on this same column). For candidates it was doubly dead:
+#     the one INSERT into outreach_messages (routers/outreach.py
+#     approve_draft) wrote neither candidate_id nor replied_at, so the
+#     `o.candidate_id = c.id` half of the join could never match either.
+#   - `users u WHERE LOWER(u.email) = LOWER(c.email)` -- the same
+#     unreliable email-matching PORTAL_ACCOUNT_INACTIVE_SQL's own comment
+#     below rejects for exactly this reason (a portal account and its
+#     candidate record can carry different addresses). Fixed here the
+#     same way that selector already was: via candidate_profiles, the
+#     real FK erase_person() (routers/gdpr.py) trusts.
+# Replacement signal for "we approached this person and it's still live":
+# an *approved and sent* outreach_drafts row (target_type='candidate',
+# status='sent') -- the one candidate-side event this codebase actually
+# records, the same pattern PROSPECT_NO_RESPONSE_SQL's sent-draft guard
+# already used on the prospect side. routers/outreach.py's approve_draft
+# now also stamps outreach_messages.candidate_id on its mirror insert when
+# target_type='candidate', giving that table a real key too, but the
+# guard here reads outreach_drafts directly since that is the row stamped
+# 'sent' regardless of whether the mirror insert's schema-tolerant INSERT
+# happens to succeed.
+# See tests/integration/test_retention_guards.py for the DB-backed proof:
+# a candidate with a sent outreach draft, or a live portal account linked
+# via candidate_profiles under a *different* e-mail address, is excluded;
+# a candidate with neither is still selected.
+CANDIDATE_NO_REACTION_GUARD_SQL = """
+      AND NOT EXISTS (SELECT 1 FROM matches m WHERE m.candidate_id = c.id AND m.status <> 'suggested')
+      AND NOT EXISTS (SELECT 1 FROM pipeline_entries p WHERE p.candidate_id = c.id)
+      AND NOT EXISTS (
+          SELECT 1 FROM outreach_drafts od
+          WHERE od.target_type = 'candidate' AND od.target_id = c.id AND od.status = 'sent'
+      )
+      AND NOT EXISTS (
+          SELECT 1 FROM candidate_profiles cpf
+          JOIN users u ON u.id = cpf.user_id
+          WHERE cpf.candidate_id = c.id AND u.deleted_at IS NULL
+      )
+"""
+
 SOURCED_NO_RESPONSE_SQL = """
     SELECT c.id, c.email FROM candidates c WHERE c.lawful_basis = $1
       AND c.status = 'sourced' AND c.date_found IS NOT NULL
       AND c.date_found <= (CURRENT_DATE - INTERVAL '3 months')
       AND c.consent_withdrawn_at IS NULL AND c.deleted_at IS NULL AND c.email IS NOT NULL
-      AND NOT EXISTS (SELECT 1 FROM matches m WHERE m.candidate_id = c.id AND m.status <> 'suggested')
-      AND NOT EXISTS (SELECT 1 FROM pipeline_entries p WHERE p.candidate_id = c.id)
-      AND NOT EXISTS (SELECT 1 FROM outreach_messages o WHERE o.candidate_id = c.id AND o.replied_at IS NOT NULL)
-      AND NOT EXISTS (SELECT 1 FROM users u WHERE LOWER(u.email) = LOWER(c.email) AND u.deleted_at IS NULL)
-"""
+""" + CANDIDATE_NO_REACTION_GUARD_SQL
 
 # Same "the status column isn't kept in sync" problem on the prospect
 # side: routers/outreach.py never writes back to client_prospects.status
 # once a draft is approved and sent, or once a reply comes in -- see
 # _count_prospect_no_response()'s docstring (services/scheduler.py).
-# outreach_drafts has no reply column of its own (only outreach_messages
-# does, once a draft becomes an actually-sent message), so the reply
-# guard runs against outreach_messages; a sent-but-not-yet-replied draft
-# is still caught by the second NOT EXISTS.
+#
+# FIX (chief-of-staff second FIX FIRST, WS-E.8 retention-kolommen branch,
+# blocking point 1): this guard used to carry a second NOT EXISTS against
+# `outreach_messages om ... om.replied_at IS NOT NULL`. Outreach is
+# draft-only by design (a human sends from their own mailbox; any reply
+# lands there, not in this DB), so nothing in this codebase has ever
+# written replied_at -- that guard was dead code that could never exclude
+# anyone. Dropped outright: the sent-draft guard below is the real signal
+# ("we approached this prospect and it's still an open thread") and is
+# already the same pattern used elsewhere in this module.
 PROSPECT_NO_RESPONSE_SQL = """
     SELECT cp.id FROM client_prospects cp WHERE cp.status = 'new'
       AND cp.created_at <= (NOW() - INTERVAL '12 months') AND cp.opt_out_at IS NULL
-      AND NOT EXISTS (
-          SELECT 1 FROM outreach_messages om
-          WHERE LOWER(om.recipient_email) = LOWER(cp.contact_email) AND om.replied_at IS NOT NULL
-      )
       AND NOT EXISTS (
           SELECT 1 FROM outreach_drafts od
           WHERE LOWER(od.target_email) = LOWER(cp.contact_email) AND od.target_type = 'client_prospect' AND od.status = 'sent'
@@ -164,24 +216,23 @@ PROSPECT_NO_RESPONSE_SQL = """
 # Security-audit follow-up (H3b): same "status alone isn't proof of no
 # reaction" problem SOURCED_NO_RESPONSE_SQL guards against applies here --
 # a talentpool candidate can pick up a real match, a pipeline entry, a
-# reply, or a live portal account without any of that ever clearing
-# lawful_basis/consent_talentpool_until. The same four NOT EXISTS guards
-# apply. A 30-day grace period on top of consent_talentpool_until (not
-# just "<= NOW()") gives the reminder e-mail (services/scheduler.py's
-# talentpool_reminder job, sent 30 days *before* expiry) room to land and
-# be acted on before this selector would otherwise purge the same row --
-# renewing (re-ticking the consent) always pushes consent_talentpool_until
-# back out, removing the candidate from this selector immediately.
+# sent outreach draft, or a live portal account without any of that ever
+# clearing lawful_basis/consent_talentpool_until. The same
+# CANDIDATE_NO_REACTION_GUARD_SQL guards apply (see that block's own
+# comment above for the chief-of-staff second FIX FIRST that replaced the
+# dead replied_at guard and the unreliable email join here too). A 30-day
+# grace period on top of consent_talentpool_until (not just "<= NOW()")
+# gives the reminder e-mail (services/scheduler.py's talentpool_reminder
+# job, sent 30 days *before* expiry) room to land and be acted on before
+# this selector would otherwise purge the same row -- renewing
+# (re-ticking the consent) always pushes consent_talentpool_until back
+# out, removing the candidate from this selector immediately.
 TALENTPOOL_EXPIRED_SQL = """
     SELECT c.id, c.email FROM candidates c WHERE c.lawful_basis = 'opt_in_talentpool'
       AND c.consent_talentpool_until IS NOT NULL
       AND c.consent_talentpool_until <= (NOW() - INTERVAL '30 days')
       AND c.deleted_at IS NULL AND c.email IS NOT NULL
-      AND NOT EXISTS (SELECT 1 FROM matches m WHERE m.candidate_id = c.id AND m.status <> 'suggested')
-      AND NOT EXISTS (SELECT 1 FROM pipeline_entries p WHERE p.candidate_id = c.id)
-      AND NOT EXISTS (SELECT 1 FROM outreach_messages o WHERE o.candidate_id = c.id AND o.replied_at IS NOT NULL)
-      AND NOT EXISTS (SELECT 1 FROM users u WHERE LOWER(u.email) = LOWER(c.email) AND u.deleted_at IS NULL)
-"""
+""" + CANDIDATE_NO_REACTION_GUARD_SQL
 
 # migrations/032_retention_anchor_columns.py adds candidates.rejected_at,
 # stamped by the only two write paths onto candidates.status
@@ -291,13 +342,32 @@ REJECTED_APPLICANT_SQL = """
 # months stale; an already-erased prospect (opt_out_at set) is excluded on
 # a second run; a genuinely stale, non-client, non-opted-out prospect is
 # still selected.
+#
+# FIX (chief-of-staff second FIX FIRST, WS-E.8 retention-kolommen branch,
+# blocking point 3): the client match above used to be `LOWER(company_name)
+# = LOWER(company_name)` alone -- two free-text fields, filled in
+# independently by whoever created the client vs. whoever created the
+# prospect ("ASML Netherlands B.V." vs. "ASML" never match). Both
+# `clients` and `client_prospects` also carry a `domain` column
+# (migrations/000_baseline.py, migrations/012_mobile_growth.py) -- a
+# harder key that does not depend on two humans having typed the company
+# name identically. The guard below keeps the name match (still valid
+# when it happens to agree) and adds an OR on domain, so a differently
+# worded but same-domain active client is excluded too. See
+# tests/integration/test_retention_guards.py for the DB-backed proof: a
+# prospect at "ASML" with an active client at "ASML Netherlands B.V." but
+# the same domain is excluded even though the names never match.
 PROSPECT_RESPONDING_SQL = """
     SELECT id, contact_email FROM client_prospects cp WHERE cp.status != 'new'
       AND cp.last_contacted_at IS NOT NULL AND cp.last_contacted_at <= (NOW() - INTERVAL '12 months')
       AND cp.opt_out_at IS NULL
       AND NOT EXISTS (
           SELECT 1 FROM clients cl
-          WHERE LOWER(cl.company_name) = LOWER(cp.company_name) AND cl.account_status = 'active'
+          WHERE cl.account_status = 'active'
+            AND (
+                LOWER(cl.company_name) = LOWER(cp.company_name)
+                OR (cl.domain IS NOT NULL AND cp.domain IS NOT NULL AND LOWER(cl.domain) = LOWER(cp.domain))
+            )
       )
 """
 

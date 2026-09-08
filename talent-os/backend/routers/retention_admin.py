@@ -105,30 +105,39 @@ APOLLO_POOL_CONFIRM = "DELETE APOLLO POOL"
 # public source_url (the owner's other option besides wiping the pool,
 # §5.7) is left alone entirely, at both queries below.
 _POOL_ROWS_SQL = """
-    SELECT id, email FROM candidates
-    WHERE pool_origin = 'apollo'
-      AND deleted_at IS NULL
-      AND (source_url IS NULL OR source_url !~* '^https?://')
+    SELECT c.id, c.email FROM candidates c
+    WHERE c.pool_origin = 'apollo'
+      AND c.deleted_at IS NULL
+      AND (c.source_url IS NULL OR c.source_url !~* '^https?://')
 """
 
 # security-auditor follow-up (WS-E.8 HIGH): pool_origin='apollo' plus a
 # missing source_url is not by itself proof the row is inert bulk-harvest
 # noise -- an Apollo-sourced candidate can still have picked up a real
-# match, a client pipeline entry, an outreach reply, a portal account, or
-# be the (anonymised) subject of a presented-candidate outreach draft to
-# a client_prospect, all independent of source_url ever being backfilled.
-# Same five guards as core/retention.SOURCED_NO_RESPONSE_SQL, plus a
-# fifth specific to this pool: outreach_drafts.presented_candidate_id
-# (SOP §5 spec-candidate presentation), which points at a candidate row
-# without going through target_email/target_id at all. Applied to BOTH
-# the anonymise and the hard-delete branches -- neither is safe to run
-# against a row any of these five reference.
-_TARGET_ROWS_SQL = _POOL_ROWS_SQL + """
-      AND NOT EXISTS (SELECT 1 FROM matches m WHERE m.candidate_id = candidates.id AND m.status <> 'suggested')
-      AND NOT EXISTS (SELECT 1 FROM pipeline_entries p WHERE p.candidate_id = candidates.id)
-      AND NOT EXISTS (SELECT 1 FROM outreach_messages o WHERE o.candidate_id = candidates.id AND o.replied_at IS NOT NULL)
-      AND NOT EXISTS (SELECT 1 FROM users u WHERE LOWER(u.email) = LOWER(candidates.email) AND u.deleted_at IS NULL)
-      AND NOT EXISTS (SELECT 1 FROM outreach_drafts d WHERE d.presented_candidate_id = candidates.id)
+# match, a client pipeline entry, a sent outreach draft, a portal
+# account, or be the (anonymised) subject of a presented-candidate
+# outreach draft to a client_prospect, all independent of source_url ever
+# being backfilled.
+#
+# FIX (chief-of-staff second FIX FIRST, WS-E.8 retention-kolommen branch,
+# blocking point 1): this file used to keep its own independently-typed
+# copy of the four candidate no-reaction guards, with the same two dead
+# bugs core/retention.py's own module docstring says there is exactly one
+# copy of: outreach_messages o WHERE o.replied_at IS NOT NULL (nothing
+# ever writes replied_at) and users u WHERE LOWER(u.email) =
+# LOWER(candidates.email) (a portal account and its candidate row can
+# carry different addresses). Rather than re-fix the same bug a second
+# time in a second place, this now imports and reuses
+# core.retention.CANDIDATE_NO_REACTION_GUARD_SQL -- the same four guards
+# SOURCED_NO_RESPONSE_SQL and TALENTPOOL_EXPIRED_SQL use, aliased the same
+# way (`c` for the candidates row) so the string concatenates directly --
+# plus a fifth guard specific to this pool: outreach_drafts.
+# presented_candidate_id (SOP §5 spec-candidate presentation), which
+# points at a candidate row without going through target_email/target_id
+# at all. Applied to BOTH the anonymise and the hard-delete branches --
+# neither is safe to run against a row any of these five reference.
+_TARGET_ROWS_SQL = _POOL_ROWS_SQL + retention.CANDIDATE_NO_REACTION_GUARD_SQL + """
+      AND NOT EXISTS (SELECT 1 FROM outreach_drafts d WHERE d.presented_candidate_id = c.id)
 """
 
 

@@ -86,11 +86,16 @@ _ALLOWLIST = {
         "branch -- same reasoning as the FK-first branch above: a "
         "requester's own row, consent_withdrawn_at does not apply to "
         "self-access.",
-    ("retention_admin.py", "SELECT id, email FROM candidates"):
+    ("retention_admin.py", "SELECT c.id, c.email FROM candidates c"):
         "Apollo-pool purge dry-run/execute tooling (admin JWT only, "
         "POST /api/v1/admin/apollo-pool/purge) -- id/email are read to "
         "drive erase_person()/DELETE internally and are never returned in "
-        "the response body (only aggregate counts are).",
+        "the response body (only aggregate counts are). Aliased to `c` "
+        "(chief-of-staff second FIX FIRST, retention-kolommen branch) so "
+        "this query can share core.retention.CANDIDATE_NO_REACTION_GUARD_SQL "
+        "verbatim with SOURCED_NO_RESPONSE_SQL/TALENTPOOL_EXPIRED_SQL "
+        "instead of keeping its own independently-maintained copy of the "
+        "same four guards.",
     ("client.py", "SELECT c.id, c.full_name, c.current_title, c.current_company,"):
         "GET /api/v1/client/candidates (search_candidates) -- deleted_at "
         "IS NULL and consent_withdrawn_at IS NULL ARE both required here "

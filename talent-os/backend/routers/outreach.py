@@ -400,6 +400,19 @@ async def approve_draft(
 
         # Best-effort mirror into outreach_messages, if the schema allows it
         # (some deployments have campaign_id NOT NULL there — skip gracefully).
+        #
+        # WS-E.8 follow-up (chief-of-staff second FIX FIRST, retention-
+        # kolommen branch): stamp candidate_id on this mirror row when the
+        # draft targets a candidate, so the candidate side of
+        # outreach_messages gets a real, usable key too (the column
+        # already exists, migrations/000_baseline.py — nothing ever wrote
+        # it before). This does not by itself make replied_at meaningful
+        # (no mailbox integration exists to ever set that column, and none
+        # is added here); the retention guards that need "was this
+        # candidate approached" read outreach_drafts directly instead
+        # (core.retention.CANDIDATE_NO_REACTION_GUARD_SQL), since that is
+        # the row this endpoint actually stamps 'sent' on, independent of
+        # whether this schema-tolerant mirror insert succeeds.
         try:
             columns = await fetch_all(
                 "SELECT column_name, is_nullable FROM information_schema.columns "
@@ -408,15 +421,22 @@ async def approve_draft(
             col_names = {c["column_name"] for c in columns}
             required_missing = any(
                 c["is_nullable"] == "NO" and c["column_name"] not in
-                {"id", "created_at", "recipient_email", "subject", "body", "channel", "status"}
+                {"id", "created_at", "recipient_email", "subject", "body", "channel", "status", "candidate_id"}
                 for c in columns
             )
             if col_names and "recipient_email" in col_names and not required_missing:
-                await execute(
-                    """INSERT INTO outreach_messages (recipient_email, subject, body, channel, status)
-                       VALUES ($1, $2, $3, 'email', 'sent')""",
-                    draft["target_email"], draft["subject"], draft["body"],
-                )
+                if "candidate_id" in col_names and draft["target_type"] == "candidate" and draft["target_id"]:
+                    await execute(
+                        """INSERT INTO outreach_messages (candidate_id, recipient_email, subject, body, channel, status)
+                           VALUES ($1, $2, $3, $4, 'email', 'sent')""",
+                        draft["target_id"], draft["target_email"], draft["subject"], draft["body"],
+                    )
+                else:
+                    await execute(
+                        """INSERT INTO outreach_messages (recipient_email, subject, body, channel, status)
+                           VALUES ($1, $2, $3, 'email', 'sent')""",
+                        draft["target_email"], draft["subject"], draft["body"],
+                    )
         except Exception:
             logger.info("outreach: skipping outreach_messages mirror (schema mismatch)")
 

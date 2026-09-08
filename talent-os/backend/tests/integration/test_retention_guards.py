@@ -495,3 +495,239 @@ def test_login_stamps_last_login_at(db_run, client, insert_raw_user):
 
     row = db_run(fetch_one, "SELECT last_login_at FROM users WHERE id = $1", user["id"])
     assert row["last_login_at"] is not None
+
+
+# ── chief-of-staff second FIX FIRST (WS-E.8 retention-kolommen branch) ──
+# blocking point 1: SOURCED_NO_RESPONSE_SQL and TALENTPOOL_EXPIRED_SQL used
+# to carry a dead outreach_messages.replied_at guard (nothing ever writes
+# that column) and an unreliable LOWER(email)=LOWER(email) portal-account
+# join. Both are now CANDIDATE_NO_REACTION_GUARD_SQL: a sent
+# outreach_drafts row, and the real candidate_profiles FK. Proven below
+# against real rows, plus one end-to-end test that drives the real send
+# path (routers/outreach.py approve_draft) instead of planting the
+# outreach_drafts row directly.
+
+def _sourced_candidate_id(db_run, *, suffix, lawful_basis="gerechtvaardigd_belang", date_found_ago="4 months"):
+    row = db_run(
+        fetch_one,
+        f"""INSERT INTO candidates (full_name, email, status, lawful_basis, date_found, deleted_at)
+            VALUES ($1, $2, 'sourced', $3, NOW() - INTERVAL '{date_found_ago}', NULL)
+            RETURNING id""",
+        f"Test Sourced {suffix}", f"sourced-{suffix}@example.com", lawful_basis,
+    )
+    return row["id"]
+
+
+def test_sourced_no_response_still_purges_a_clean_sourced_candidate(db_run):
+    """No sent draft, no linked portal account -- must still be selected,
+    proving the replacement guards don't over-protect."""
+    suffix = uuid.uuid4().hex[:10]
+    lawful_basis = "gerechtvaardigd_belang"
+    cid = _sourced_candidate_id(db_run, suffix=suffix, lawful_basis=lawful_basis)
+
+    rows = db_run(fetch_all, retention.SOURCED_NO_RESPONSE_SQL, lawful_basis)
+    assert cid in [r["id"] for r in rows]
+
+
+def test_sourced_no_response_excludes_a_candidate_with_a_sent_outreach_draft(db_run):
+    """The real replacement for the dead replied_at guard: a sent (not
+    merely drafted) outreach_drafts row targeting this candidate."""
+    suffix = uuid.uuid4().hex[:10]
+    lawful_basis = "gerechtvaardigd_belang"
+    cid = _sourced_candidate_id(db_run, suffix=suffix, lawful_basis=lawful_basis)
+    db_run(
+        execute,
+        "INSERT INTO outreach_drafts (target_type, target_id, target_email, status) "
+        "VALUES ('candidate', $1, $2, 'sent')",
+        cid, f"sourced-{suffix}@example.com",
+    )
+
+    rows = db_run(fetch_all, retention.SOURCED_NO_RESPONSE_SQL, lawful_basis)
+    assert cid not in [r["id"] for r in rows]
+
+
+def test_sourced_no_response_still_purges_a_candidate_with_only_a_draft_status_draft(db_run):
+    """A drafted-but-never-approved outreach_drafts row (status='draft')
+    is not a real contact event -- must not grant immunity."""
+    suffix = uuid.uuid4().hex[:10]
+    lawful_basis = "gerechtvaardigd_belang"
+    cid = _sourced_candidate_id(db_run, suffix=suffix, lawful_basis=lawful_basis)
+    db_run(
+        execute,
+        "INSERT INTO outreach_drafts (target_type, target_id, target_email, status) "
+        "VALUES ('candidate', $1, $2, 'draft')",
+        cid, f"sourced-{suffix}@example.com",
+    )
+
+    rows = db_run(fetch_all, retention.SOURCED_NO_RESPONSE_SQL, lawful_basis)
+    assert cid in [r["id"] for r in rows]
+
+
+def test_sourced_no_response_excludes_a_candidate_with_a_linked_portal_account_under_a_different_email(db_run):
+    """The real replacement for the LOWER(email)=LOWER(email) join: the
+    candidate_profiles FK, same relation PORTAL_ACCOUNT_INACTIVE_SQL and
+    erase_person() already trust -- proven here with two deliberately
+    different e-mail addresses, the exact case the old join missed."""
+    suffix = uuid.uuid4().hex[:10]
+    lawful_basis = "gerechtvaardigd_belang"
+    cid = _sourced_candidate_id(db_run, suffix=suffix, lawful_basis=lawful_basis)
+    user = db_run(
+        fetch_one,
+        """INSERT INTO users (email, password_hash, full_name, role)
+           VALUES ($1, 'x', 'Sourced Portal User', 'candidate') RETURNING id""",
+        f"sourced-portal-{suffix}@example.com",  # deliberately different from the candidate's e-mail
+    )
+    db_run(
+        execute,
+        "INSERT INTO candidate_profiles (user_id, candidate_id) VALUES ($1, $2)",
+        user["id"], cid,
+    )
+
+    rows = db_run(fetch_all, retention.SOURCED_NO_RESPONSE_SQL, lawful_basis)
+    assert cid not in [r["id"] for r in rows]
+
+
+def _talentpool_candidate_id(db_run, *, suffix, consent_expired_ago="45 days"):
+    row = db_run(
+        fetch_one,
+        f"""INSERT INTO candidates
+              (full_name, email, status, lawful_basis, consent_talentpool_until, deleted_at)
+            VALUES ($1, $2, 'sourced', 'opt_in_talentpool', NOW() - INTERVAL '{consent_expired_ago}', NULL)
+            RETURNING id""",
+        f"Test Talentpool {suffix}", f"talentpool-{suffix}@example.com",
+    )
+    return row["id"]
+
+
+def test_talentpool_expired_still_purges_a_clean_expired_candidate(db_run):
+    suffix = uuid.uuid4().hex[:10]
+    cid = _talentpool_candidate_id(db_run, suffix=suffix)
+
+    rows = db_run(fetch_all, retention.TALENTPOOL_EXPIRED_SQL)
+    assert cid in [r["id"] for r in rows]
+
+
+def test_talentpool_expired_excludes_a_candidate_with_a_sent_outreach_draft(db_run):
+    suffix = uuid.uuid4().hex[:10]
+    cid = _talentpool_candidate_id(db_run, suffix=suffix)
+    db_run(
+        execute,
+        "INSERT INTO outreach_drafts (target_type, target_id, target_email, status) "
+        "VALUES ('candidate', $1, $2, 'sent')",
+        cid, f"talentpool-{suffix}@example.com",
+    )
+
+    rows = db_run(fetch_all, retention.TALENTPOOL_EXPIRED_SQL)
+    assert cid not in [r["id"] for r in rows]
+
+
+def test_talentpool_expired_excludes_a_candidate_with_a_linked_portal_account_under_a_different_email(db_run):
+    suffix = uuid.uuid4().hex[:10]
+    cid = _talentpool_candidate_id(db_run, suffix=suffix)
+    user = db_run(
+        fetch_one,
+        """INSERT INTO users (email, password_hash, full_name, role)
+           VALUES ($1, 'x', 'Talentpool Portal User', 'candidate') RETURNING id""",
+        f"talentpool-portal-{suffix}@example.com",
+    )
+    db_run(
+        execute,
+        "INSERT INTO candidate_profiles (user_id, candidate_id) VALUES ($1, $2)",
+        user["id"], cid,
+    )
+
+    rows = db_run(fetch_all, retention.TALENTPOOL_EXPIRED_SQL)
+    assert cid not in [r["id"] for r in rows]
+
+
+def test_outreach_approve_candidate_draft_excludes_candidate_from_sourced_no_response(
+    db_run, client, make_admin, monkeypatch,
+):
+    """End-to-end proof of the replacement guard's write path (same
+    pattern as test_outreach_approve_draft_stamps_prospect_last_contacted_at
+    above, candidate side): POST /api/v1/admin/outreach/drafts/{id}/approve
+    (routers/outreach.py approve_draft) stamps outreach_drafts.status =
+    'sent' for real -- the exact row SOURCED_NO_RESPONSE_SQL's replacement
+    guard now reads. Before this round the guard read replied_at, a
+    column nothing in this codebase writes; this shows the new guard
+    reads a column a real endpoint does write."""
+    import routers.outreach as outreach_router
+
+    async def fake_send_email(**kwargs):
+        return True
+
+    monkeypatch.setattr(outreach_router.email_service, "send_email", fake_send_email)
+
+    suffix = uuid.uuid4().hex[:10]
+    admin = make_admin()
+    # opt_in_talentpool: no Art.14 block or public source_url required to
+    # pass approve_draft's refusal checks, and consent_talentpool_until
+    # in the future so the talentpool-expiry check itself doesn't refuse.
+    email = f"sourced-approve-{suffix}@example.com"
+    candidate = db_run(
+        fetch_one,
+        """INSERT INTO candidates
+             (full_name, email, status, lawful_basis, date_found, consent_talentpool_until, deleted_at)
+           VALUES ($1, $2, 'sourced', 'opt_in_talentpool',
+                   NOW() - INTERVAL '4 months', NOW() + INTERVAL '60 days', NULL)
+           RETURNING id""",
+        f"Sourced Approve Test {suffix}", email,
+    )
+    draft = db_run(
+        fetch_one,
+        """INSERT INTO outreach_drafts
+             (target_type, target_id, target_email, target_name, subject, body, status)
+           VALUES ('candidate', $1, $2, 'Approve Test', 'Hallo',
+                    'Dit is een testbericht. U kunt zich afmelden door te antwoorden met STOP.', 'draft')
+           RETURNING id""",
+        candidate["id"], email,
+    )
+
+    # Before sending: a genuinely untouched sourced candidate is selected.
+    rows = db_run(fetch_all, retention.SOURCED_NO_RESPONSE_SQL, "opt_in_talentpool")
+    assert candidate["id"] in [r["id"] for r in rows]
+
+    resp = client.post(
+        f"/api/v1/admin/outreach/drafts/{draft['id']}/approve",
+        headers=admin["headers"],
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["status"] == "sent"
+
+    rows = db_run(fetch_all, retention.SOURCED_NO_RESPONSE_SQL, "opt_in_talentpool")
+    assert candidate["id"] not in [r["id"] for r in rows]
+
+    # The mirror insert into outreach_messages now also carries
+    # candidate_id for a candidate-targeted send (routers/outreach.py
+    # approve_draft, same round) -- proves that write path too.
+    mirror = db_run(
+        fetch_one,
+        "SELECT candidate_id FROM outreach_messages WHERE recipient_email = $1 ORDER BY id DESC LIMIT 1",
+        email,
+    )
+    assert mirror is not None
+    assert mirror["candidate_id"] == candidate["id"]
+
+
+# ── chief-of-staff second FIX FIRST, blocking point 3: prospect_responding
+# client match must not depend on company_name text agreeing ────────────
+
+def test_prospect_responding_excludes_an_active_client_matched_only_by_domain(db_run):
+    """Bewezen scenario (point 3): a prospect at "ASML" and an active
+    client at "ASML Netherlands B.V." never match on company_name, but do
+    share a domain -- the guard must still exclude the prospect."""
+    suffix = uuid.uuid4().hex[:10]
+    pid = _prospect_id(db_run, suffix=suffix, company=f"ASML {suffix}", status="klant")
+    db_run(
+        execute,
+        "UPDATE client_prospects SET domain = 'asml.example.com' WHERE id = $1",
+        pid,
+    )
+    db_run(
+        execute,
+        "INSERT INTO clients (company_name, domain, account_status) VALUES ($1, 'asml.example.com', 'active')",
+        f"ASML Netherlands B.V. {suffix}",
+    )
+
+    rows = db_run(fetch_all, retention.PROSPECT_RESPONDING_SQL)
+    assert pid not in [r["id"] for r in rows]

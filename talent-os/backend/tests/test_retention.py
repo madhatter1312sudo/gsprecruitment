@@ -173,6 +173,17 @@ def test_get_row_found_and_not_found():
 
 
 # ── security-auditor follow-up (WS-E.8 HIGH #1): "no reaction" guards ────
+#
+# chief-of-staff second FIX FIRST (retention-kolommen branch, blocking
+# point 1): outreach_messages.replied_at is dead code -- nothing in this
+# codebase ever writes it (outreach is draft-only, a human sends from
+# their own mailbox and any reply lands there, not in this DB) -- and the
+# LOWER(email)=LOWER(email) join to users is the same unreliable match
+# PORTAL_ACCOUNT_INACTIVE_SQL's own comment rejects. Both guards below now
+# assert the real replacements: a sent outreach_drafts row keyed on
+# target_id (not free-text email), and the same candidate_profiles FK
+# join PORTAL_ACCOUNT_INACTIVE_SQL uses. See
+# tests/integration/test_retention_guards.py for the DB-backed proof.
 
 def test_sourced_no_response_sql_guards_against_every_reaction_signal():
     sql = retention.SOURCED_NO_RESPONSE_SQL
@@ -180,8 +191,13 @@ def test_sourced_no_response_sql_guards_against_every_reaction_signal():
     assert "NOT EXISTS" in sql
     assert "FROM matches m" in sql and "m.status <> 'suggested'" in sql
     assert "FROM pipeline_entries p" in sql
-    assert "FROM outreach_messages o" in sql and "o.replied_at IS NOT NULL" in sql
-    assert "FROM users u" in sql and "u.deleted_at IS NULL" in sql
+    assert "FROM outreach_drafts od" in sql
+    assert "od.target_type = 'candidate'" in sql and "od.status = 'sent'" in sql
+    assert "FROM candidate_profiles cpf" in sql
+    assert "JOIN users u ON u.id = cpf.user_id" in sql and "u.deleted_at IS NULL" in sql
+    # The dead/unreliable guards must actually be gone, not just unused.
+    assert "replied_at" not in sql
+    assert "LOWER(u.email) = LOWER(c.email)" not in sql
 
 
 def test_sourced_and_referral_rows_share_the_same_guarded_selector():
@@ -191,11 +207,16 @@ def test_sourced_and_referral_rows_share_the_same_guarded_selector():
     assert referral.selector_sql is retention.SOURCED_NO_RESPONSE_SQL
 
 
-def test_prospect_no_response_sql_guards_against_replies_and_sent_drafts():
+def test_prospect_no_response_sql_guards_against_sent_drafts():
+    """The replied_at guard this test used to also check for is gone --
+    chief-of-staff second FIX FIRST (blocking point 1): nothing ever
+    writes outreach_messages.replied_at, so it was dead code that could
+    never exclude a prospect. The sent-draft guard is the real,
+    already-working signal and stays."""
     sql = retention.PROSPECT_NO_RESPONSE_SQL
     assert "status = 'new'" in sql
-    assert "FROM outreach_messages om" in sql and "om.replied_at IS NOT NULL" in sql
     assert "FROM outreach_drafts od" in sql and "od.status = 'sent'" in sql
+    assert "replied_at" not in sql
     assert retention.get_row("prospect_no_response").selector_sql is retention.PROSPECT_NO_RESPONSE_SQL
 
 
@@ -217,15 +238,22 @@ def test_talentpool_expired_sql_has_a_30_day_grace_period_past_expiry():
 
 
 def test_talentpool_expired_sql_guards_against_every_reaction_signal():
-    """Security-audit fix H3b: same four NOT EXISTS guards as
+    """Security-audit fix H3b, guards refreshed by the chief-of-staff
+    second FIX FIRST: same CANDIDATE_NO_REACTION_GUARD_SQL guards as
     SOURCED_NO_RESPONSE_SQL -- status/lawful_basis alone is not proof a
-    talentpool candidate never reacted."""
+    talentpool candidate never reacted, and the guard is the real
+    sent-draft/FK-join version, not the dead replied_at/email one."""
     sql = retention.TALENTPOOL_EXPIRED_SQL
     assert "NOT EXISTS" in sql
     assert "FROM matches m" in sql and "m.status <> 'suggested'" in sql
     assert "FROM pipeline_entries p" in sql
-    assert "FROM outreach_messages o" in sql and "o.replied_at IS NOT NULL" in sql
-    assert "FROM users u" in sql and "u.deleted_at IS NULL" in sql
+    assert "FROM outreach_drafts od" in sql
+    assert "od.target_type = 'candidate'" in sql and "od.status = 'sent'" in sql
+    assert "FROM candidate_profiles cpf" in sql
+    assert "JOIN users u ON u.id = cpf.user_id" in sql and "u.deleted_at IS NULL" in sql
+    assert "replied_at" not in sql
+    assert "LOWER(u.email) = LOWER(c.email)" not in sql
+    assert sql.endswith(retention.CANDIDATE_NO_REACTION_GUARD_SQL)
 
 
 def test_talentpool_consent_row_is_schema_ready_with_shared_selector():
@@ -290,13 +318,19 @@ def test_prospect_responding_sql_guards_against_active_clients_and_opt_out():
     itself tests for. The real, working guards now are: opt_out_at (so an
     already-erased row drops out for good) and clients.account_status
     (so an active client relationship is never purged, matching this
-    row's own "zolang actief" bewaartermijn)."""
+    row's own "zolang actief" bewaartermijn).
+
+    chief-of-staff second FIX FIRST (blocking point 3): company_name
+    equality alone is two free-text fields ("ASML" vs. "ASML Netherlands
+    B.V." never match) -- the guard now also matches on the domain column
+    both tables carry, a harder key."""
     sql = retention.PROSPECT_RESPONDING_SQL
     assert "status != 'new'" in sql
     assert "last_contacted_at" in sql and "INTERVAL '12 months'" in sql
     assert "opt_out_at IS NULL" in sql
     assert "FROM clients cl" in sql and "cl.account_status = 'active'" in sql
     assert "cl.company_name" in sql and "cp.company_name" in sql
+    assert "cl.domain" in sql and "cp.domain" in sql
     # The dead/contradictory outreach guards must actually be gone, not
     # just unused -- a regression that re-adds them re-creates the
     # permanent-immunity bug (point 4) even if a later edit also fixes
@@ -344,22 +378,22 @@ def test_portal_account_inactive_sql_guards_against_a_linked_candidate_with_real
 def test_sourced_no_response_query_excludes_a_candidate_with_a_progressed_match(monkeypatch):
     """End-to-end guard check against a fake DB that actually applies the
     WHERE clause semantics, not just a substring check on the SQL text --
-    a candidate with a non-'suggested' match, a pipeline entry, a replied
-    outreach message, or a live user account must never come back."""
+    a candidate with a non-'suggested' match, a pipeline entry, a sent
+    outreach draft, or a live portal account must never come back."""
     import services.scheduler as scheduler
 
     candidates = {
         1: {"id": 1, "email": "clean@example.com"},       # no signals -- eligible
         2: {"id": 2, "email": "has-match@example.com"},   # progressed match
         3: {"id": 3, "email": "has-pipeline@example.com"},  # pipeline entry
-        4: {"id": 4, "email": "has-reply@example.com"},   # replied outreach message
-        5: {"id": 5, "email": "has-account@example.com"},  # live user account
+        4: {"id": 4, "email": "has-draft@example.com"},   # sent outreach draft
+        5: {"id": 5, "email": "has-account@example.com"},  # live portal account
     }
     signals = {
         "matches": {2},
         "pipeline_entries": {3},
-        "outreach_messages": {4},
-        "users": {5},
+        "outreach_drafts": {4},
+        "candidate_profiles": {5},
     }
 
     async def _fake_fetch_all(sql, *args):
@@ -367,7 +401,7 @@ def test_sourced_no_response_query_excludes_a_candidate_with_a_progressed_match(
         return [
             c for cid, c in candidates.items()
             if cid not in signals["matches"] and cid not in signals["pipeline_entries"]
-            and cid not in signals["outreach_messages"] and cid not in signals["users"]
+            and cid not in signals["outreach_drafts"] and cid not in signals["candidate_profiles"]
         ]
 
     monkeypatch.setattr(scheduler, "fetch_all", _fake_fetch_all)
@@ -581,14 +615,22 @@ def test_run_retention_endpoint_real_run_with_confirm_proceeds(patch_scheduler_d
 def test_apollo_pool_purge_target_sql_carries_all_five_guards():
     """security-auditor follow-up (WS-E.8 HIGH #2): the same reaction
     signals as the retention job's sourced_no_response guard, plus the
-    presented-candidate guard specific to this pool."""
+    presented-candidate guard specific to this pool.
+
+    chief-of-staff second FIX FIRST (blocking point 1): this file used to
+    keep its own copy of the four shared guards, with the same dead
+    replied_at/email bugs -- it now reuses
+    core.retention.CANDIDATE_NO_REACTION_GUARD_SQL verbatim, so this test
+    asserts that identity rather than re-checking the guard text a second
+    time (that text is already covered by
+    test_sourced_no_response_sql_guards_against_every_reaction_signal)."""
+    from core import retention
     from routers import retention_admin
 
     sql = retention_admin._TARGET_ROWS_SQL
-    assert "FROM matches m" in sql and "m.status <> 'suggested'" in sql
-    assert "FROM pipeline_entries p" in sql
-    assert "FROM outreach_messages o" in sql and "o.replied_at IS NOT NULL" in sql
-    assert "FROM users u" in sql and "u.deleted_at IS NULL" in sql
+    assert retention.CANDIDATE_NO_REACTION_GUARD_SQL in sql
+    assert "replied_at" not in sql
+    assert "LOWER(u.email) = LOWER(" not in sql
     assert "FROM outreach_drafts d" in sql and "d.presented_candidate_id" in sql
     assert sql.count("NOT EXISTS") == 5
     # the unguarded pool query is a strict prefix -- the guards are

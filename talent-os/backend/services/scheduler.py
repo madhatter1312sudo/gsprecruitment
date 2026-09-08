@@ -603,16 +603,20 @@ async def _count_prospect_no_response() -> list:
     # client_prospects.status once a draft is sent or answered (routers/
     # outreach.py never writes back to client_prospects) -- status='new'
     # therefore does NOT by itself mean "no reaction" here either, same
-    # gap as sourced_no_response above. outreach_drafts has no replied_at
-    # column of its own (only outreach_messages does, once a draft is
-    # approved and actually sent), so the reply guard in
-    # retention.PROSPECT_NO_RESPONSE_SQL runs against outreach_messages; a
-    # sent-but-not-yet-replied draft is still caught by the second NOT
-    # EXISTS so a prospect mid-conversation isn't wiped out from under an
-    # in-flight thread. client_prospects.status still only ever moves by
-    # manual admin action (no automatic transition exists anywhere in
-    # this codebase) -- this guard compensates for that gap rather than
-    # fixing it.
+    # gap as sourced_no_response above. client_prospects.status still
+    # only ever moves by manual admin action (no automatic transition
+    # exists anywhere in this codebase) -- the guard in
+    # retention.PROSPECT_NO_RESPONSE_SQL compensates for that gap rather
+    # than fixing it, via the one candidate-side event this codebase
+    # actually records: a sent outreach_drafts row, so a prospect
+    # mid-conversation isn't wiped out from under an in-flight thread.
+    #
+    # chief-of-staff second FIX FIRST (WS-E.8 retention-kolommen branch):
+    # that guard used to also carry a reply check against
+    # outreach_messages.replied_at -- dead code, since outreach is
+    # draft-only and nothing ever writes that column (a human sends from
+    # their own mailbox; any reply lands there, not in this DB). Removed;
+    # the sent-draft guard is the real, working signal.
     return await fetch_all(retention.PROSPECT_NO_RESPONSE_SQL)
 
 
