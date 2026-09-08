@@ -813,7 +813,7 @@ async def admin_update_talentpool_consent(
 # live tick of the box) and `job_id` is mandatory when granting, so the
 # grant is always tied to the specific role privacy.html promises
 # ("toestemming voor een specifieke rol") -- see
-# migrations/033_spec_presentation_consent_job.py for why that is a single
+# migrations/034_spec_presentation_consent_job.py for why that is a single
 # nullable FK column rather than a per-client history table, and the
 # restrisico that choice still carries.
 

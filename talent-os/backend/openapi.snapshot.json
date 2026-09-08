@@ -497,7 +497,7 @@
         "type": "object"
       },
       "AdminSpecPresentationConsentUpdate": {
-        "description": "Admin: PATCH /api/v1/admin/candidates/{id}/spec-presentation-consent.\nRecords (or withdraws) the candidate's consent for\n`routers/client.py` to show their `full_name` to clients for one\nspecific role -- website/privacy.html's \"toestemming voor een\nspecifieke rol\". Modelled on AdminTalentpoolConsentUpdate above:\n`evidence` is mandatory (this endpoint records consent an admin has\nevidence for -- a signed form, an e-mail on file -- not a live tick\nof a box), and `job_id` is mandatory when granting (consent=True) so\nthe grant is always tied to the role it was given for, per\nmigrations/033_spec_presentation_consent_job.py. `job_id` is ignored\n(and cleared) on withdrawal (consent=False).",
+        "description": "Admin: PATCH /api/v1/admin/candidates/{id}/spec-presentation-consent.\nRecords (or withdraws) the candidate's consent for\n`routers/client.py` to show their `full_name` to clients for one\nspecific role -- website/privacy.html's \"toestemming voor een\nspecifieke rol\". Modelled on AdminTalentpoolConsentUpdate above:\n`evidence` is mandatory (this endpoint records consent an admin has\nevidence for -- a signed form, an e-mail on file -- not a live tick\nof a box), and `job_id` is mandatory when granting (consent=True) so\nthe grant is always tied to the role it was given for, per\nmigrations/034_spec_presentation_consent_job.py. `job_id` is ignored\n(and cleared) on withdrawal (consent=False).",
         "properties": {
           "consent": {
             "title": "Consent",

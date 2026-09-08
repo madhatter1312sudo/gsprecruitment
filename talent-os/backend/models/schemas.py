@@ -144,7 +144,7 @@ class AdminTalentpoolConsentUpdate(BaseModel):
         return v
 
 
-# ── Spec-presentatietoestemming (migrations/018 + 033, §6 punt 10 van
+# ── Spec-presentatietoestemming (migrations/018 + 034, §6 punt 10 van
 # docs/VERWERKINGSREGISTER.md) ────────────────────────────────────────────
 
 class AdminSpecPresentationConsentUpdate(BaseModel):
@@ -157,7 +157,7 @@ class AdminSpecPresentationConsentUpdate(BaseModel):
     evidence for -- a signed form, an e-mail on file -- not a live tick
     of a box), and `job_id` is mandatory when granting (consent=True) so
     the grant is always tied to the role it was given for, per
-    migrations/033_spec_presentation_consent_job.py. `job_id` is ignored
+    migrations/034_spec_presentation_consent_job.py. `job_id` is ignored
     (and cleared) on withdrawal (consent=False)."""
     consent: bool
     job_id: Optional[int] = None
