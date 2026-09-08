@@ -22,14 +22,23 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 
 from core.database import fetch_one, fetch_all, fetch_val, execute
 from core.deps import require_role
+from core import privacy
 from models.schemas import ClientAdminUpdate
 
 router = APIRouter(prefix="/api/v1/admin/clients", tags=["clients-admin"])
 
 ERKEND_REFERENT_VALUES = {"ja", "nee", "onbekend"}
 
+# security-audit FIX FIRST (WS-E.8 retention-kolommen branch, fourth
+# round, blocking point 3): the only write path for clients.account_status
+# (migrations/034_clients_account_status_lifecycle.py closes its value
+# set at the DB level too) -- an admin explicitly promotes a stub/lead
+# client to 'active' once a real relationship exists, or moves a churned
+# client to 'inactive'. Before this PR nothing ever wrote this column.
+ACCOUNT_STATUS_VALUES = {"lead", "active", "inactive"}
+
 # Fields PATCH is allowed to touch, mapped 1:1 to clients columns.
-_UPDATABLE_FIELDS = {"company_name", "domain", "industry", "erkend_referent", "notes"}
+_UPDATABLE_FIELDS = {"company_name", "domain", "industry", "erkend_referent", "notes", "account_status"}
 
 _LATERAL_JOINS = """
 LEFT JOIN LATERAL (
@@ -140,7 +149,7 @@ async def get_client_detail(
 ):
     row = await fetch_one(
         f"""SELECT c.id, c.company_name, c.domain, c.industry, c.location,
-                   c.erkend_referent, c.notes, c.created_at, c.updated_at,
+                   c.erkend_referent, c.notes, c.account_status, c.created_at, c.updated_at,
                    COALESCE(oj.open_job_count, 0) AS open_job_count
             FROM clients c
             {_LATERAL_JOINS}
@@ -179,6 +188,16 @@ async def update_client(
     if not update_dict:
         raise HTTPException(status_code=400, detail="No valid fields to update")
 
+    # security-audit FIX FIRST (WS-E.8 retention-kolommen branch, fourth
+    # round, blocking point 4): normalize free-text domain input the same
+    # way every other write path to clients.domain/client_prospects.domain
+    # now does (core/privacy.py normalize_domain), so a manually-edited
+    # "https://www.Example.com/" and an e-mail-derived "example.com"
+    # resolve to the same key core/retention.py's PROSPECT_RESPONDING_SQL
+    # compares on.
+    if "domain" in update_dict:
+        update_dict["domain"] = privacy.normalize_domain(update_dict["domain"])
+
     set_parts = []
     values = []
     idx = 1
@@ -191,7 +210,8 @@ async def update_client(
     row = await fetch_one(
         f"""UPDATE clients SET {', '.join(set_parts)}, updated_at = NOW()
             WHERE id = ${idx} AND deleted_at IS NULL
-            RETURNING id, company_name, domain, industry, erkend_referent, notes, updated_at""",
+            RETURNING id, company_name, domain, industry, erkend_referent, notes,
+                      account_status, updated_at""",
         *values,
     )
     if not row:

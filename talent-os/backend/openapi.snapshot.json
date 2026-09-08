@@ -2462,6 +2462,18 @@
       },
       "ClientAdminUpdate": {
         "properties": {
+          "account_status": {
+            "anyOf": [
+              {
+                "pattern": "^(lead|active|inactive)$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Account Status"
+          },
           "company_name": {
             "anyOf": [
               {

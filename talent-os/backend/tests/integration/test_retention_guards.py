@@ -529,9 +529,18 @@ def test_sourced_no_response_still_purges_a_clean_sourced_candidate(db_run):
     assert cid in [r["id"] for r in rows]
 
 
-def test_sourced_no_response_excludes_a_candidate_with_a_sent_outreach_draft(db_run):
-    """The real replacement for the dead replied_at guard: a sent (not
-    merely drafted) outreach_drafts row targeting this candidate."""
+# FIX (security-audit FIX FIRST, WS-E.8 retention-kolommen branch, FOURTH
+# round, blocking point 2): the test below used to assert the opposite --
+# that a sent outreach draft alone excluded the candidate. That was the
+# bug: it measured contact ("we sent something"), not reaction, and it
+# gave permanent immunity to a candidate who never actually responded --
+# the exact opposite of what a "no response" retention category is for.
+# See test_sourced_no_response_excludes_a_candidate_with_a_recorded_activity
+# below for the real replacement signal.
+def test_sourced_no_response_still_purges_a_candidate_with_only_a_sent_outreach_draft(db_run):
+    """A sent-but-never-reacted-to outreach draft must not grant immunity
+    on its own -- it is proof WE made contact, not proof the candidate
+    reacted."""
     suffix = uuid.uuid4().hex[:10]
     lawful_basis = "gerechtvaardigd_belang"
     cid = _sourced_candidate_id(db_run, suffix=suffix, lawful_basis=lawful_basis)
@@ -543,7 +552,45 @@ def test_sourced_no_response_excludes_a_candidate_with_a_sent_outreach_draft(db_
     )
 
     rows = db_run(fetch_all, retention.SOURCED_NO_RESPONSE_SQL, lawful_basis)
+    assert cid in [r["id"] for r in rows]
+
+
+def test_sourced_no_response_excludes_a_candidate_with_a_recorded_activity(db_run):
+    """The real reaction signal (security-audit FIX FIRST, WS-E.8
+    retention-kolommen branch, FOURTH round, blocking point 2): a
+    recruiter logging a real interaction in `activities`
+    (migrations/028_activities.py) -- channel-independent, unlike
+    outreach_drafts/outreach_messages, which only ever record what WE
+    sent."""
+    suffix = uuid.uuid4().hex[:10]
+    lawful_basis = "gerechtvaardigd_belang"
+    cid = _sourced_candidate_id(db_run, suffix=suffix, lawful_basis=lawful_basis)
+    db_run(
+        execute,
+        "INSERT INTO activities (subject_type, subject_id, type, body) "
+        "VALUES ('candidate', $1, 'call', 'Reageerde positief via LinkedIn')",
+        cid,
+    )
+
+    rows = db_run(fetch_all, retention.SOURCED_NO_RESPONSE_SQL, lawful_basis)
     assert cid not in [r["id"] for r in rows]
+
+
+def test_sourced_no_response_still_purges_a_candidate_with_a_deleted_activity(db_run):
+    """A soft-deleted activities row (deleted_at set) must not grant
+    immunity -- same deleted_at convention every other table here uses."""
+    suffix = uuid.uuid4().hex[:10]
+    lawful_basis = "gerechtvaardigd_belang"
+    cid = _sourced_candidate_id(db_run, suffix=suffix, lawful_basis=lawful_basis)
+    db_run(
+        execute,
+        "INSERT INTO activities (subject_type, subject_id, type, body, deleted_at) "
+        "VALUES ('candidate', $1, 'call', 'Oud, verwijderd', NOW())",
+        cid,
+    )
+
+    rows = db_run(fetch_all, retention.SOURCED_NO_RESPONSE_SQL, lawful_basis)
+    assert cid in [r["id"] for r in rows]
 
 
 def test_sourced_no_response_still_purges_a_candidate_with_only_a_draft_status_draft(db_run):
@@ -607,7 +654,10 @@ def test_talentpool_expired_still_purges_a_clean_expired_candidate(db_run):
     assert cid in [r["id"] for r in rows]
 
 
-def test_talentpool_expired_excludes_a_candidate_with_a_sent_outreach_draft(db_run):
+def test_talentpool_expired_still_purges_a_candidate_with_only_a_sent_outreach_draft(db_run):
+    """Same fourth-round fix as sourced_no_response above: a sent-but-
+    never-reacted-to draft is not a reaction and must not grant
+    immunity."""
     suffix = uuid.uuid4().hex[:10]
     cid = _talentpool_candidate_id(db_run, suffix=suffix)
     db_run(
@@ -615,6 +665,20 @@ def test_talentpool_expired_excludes_a_candidate_with_a_sent_outreach_draft(db_r
         "INSERT INTO outreach_drafts (target_type, target_id, target_email, status) "
         "VALUES ('candidate', $1, $2, 'sent')",
         cid, f"talentpool-{suffix}@example.com",
+    )
+
+    rows = db_run(fetch_all, retention.TALENTPOOL_EXPIRED_SQL)
+    assert cid in [r["id"] for r in rows]
+
+
+def test_talentpool_expired_excludes_a_candidate_with_a_recorded_activity(db_run):
+    suffix = uuid.uuid4().hex[:10]
+    cid = _talentpool_candidate_id(db_run, suffix=suffix)
+    db_run(
+        execute,
+        "INSERT INTO activities (subject_type, subject_id, type, body) "
+        "VALUES ('candidate', $1, 'note', 'Belde terug, wil verlengen')",
+        cid,
     )
 
     rows = db_run(fetch_all, retention.TALENTPOOL_EXPIRED_SQL)
@@ -640,17 +704,23 @@ def test_talentpool_expired_excludes_a_candidate_with_a_linked_portal_account_un
     assert cid not in [r["id"] for r in rows]
 
 
-def test_outreach_approve_candidate_draft_excludes_candidate_from_sourced_no_response(
+def test_outreach_approve_candidate_draft_does_not_by_itself_exclude_from_sourced_no_response(
     db_run, client, make_admin, monkeypatch,
 ):
-    """End-to-end proof of the replacement guard's write path (same
-    pattern as test_outreach_approve_draft_stamps_prospect_last_contacted_at
-    above, candidate side): POST /api/v1/admin/outreach/drafts/{id}/approve
-    (routers/outreach.py approve_draft) stamps outreach_drafts.status =
-    'sent' for real -- the exact row SOURCED_NO_RESPONSE_SQL's replacement
-    guard now reads. Before this round the guard read replied_at, a
-    column nothing in this codebase writes; this shows the new guard
-    reads a column a real endpoint does write."""
+    """End-to-end proof, real send path (POST /api/v1/admin/outreach/
+    drafts/{id}/approve, routers/outreach.py approve_draft): sending a
+    draft alone must NOT grant this candidate immunity any more.
+
+    security-audit FIX FIRST (WS-E.8 retention-kolommen branch, FOURTH
+    round, blocking point 2): before this round, this same test asserted
+    the opposite -- that a real approved send excluded the candidate.
+    That was exactly the bug: "sent" measures contact, not reaction, and
+    turned every candidate anyone ever drafted outreach to into permanent
+    protection regardless of whether they ever responded. This proves the
+    real send path no longer has that side effect; the positive case (a
+    recorded activities row DOES exclude) is
+    test_sourced_no_response_excludes_a_candidate_with_a_recorded_activity
+    above."""
     import routers.outreach as outreach_router
 
     async def fake_send_email(**kwargs):
@@ -695,18 +765,21 @@ def test_outreach_approve_candidate_draft_excludes_candidate_from_sourced_no_res
     assert resp.json()["status"] == "sent"
 
     rows = db_run(fetch_all, retention.SOURCED_NO_RESPONSE_SQL, "opt_in_talentpool")
-    assert candidate["id"] not in [r["id"] for r in rows]
+    assert candidate["id"] in [r["id"] for r in rows]
 
     # The mirror insert into outreach_messages now also carries
     # candidate_id for a candidate-targeted send (routers/outreach.py
     # approve_draft, same round) -- proves that write path too.
     mirror = db_run(
         fetch_one,
-        "SELECT candidate_id FROM outreach_messages WHERE recipient_email = $1 ORDER BY id DESC LIMIT 1",
+        "SELECT candidate_id, sent_at FROM outreach_messages WHERE recipient_email = $1 ORDER BY id DESC LIMIT 1",
         email,
     )
     assert mirror is not None
     assert mirror["candidate_id"] == candidate["id"]
+    # minor point (fourth round): the mirror row used to set status='sent'
+    # but never sent_at.
+    assert mirror["sent_at"] is not None
 
 
 # ── chief-of-staff second FIX FIRST, blocking point 3: prospect_responding
@@ -731,3 +804,264 @@ def test_prospect_responding_excludes_an_active_client_matched_only_by_domain(db
 
     rows = db_run(fetch_all, retention.PROSPECT_RESPONDING_SQL)
     assert pid not in [r["id"] for r in rows]
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# FOURTH round -- security-audit FIX FIRST (WS-E.8 retention-kolommen
+# branch): a placed candidate must never be selected by any category
+# (blocking point 1); the domain match must exclude empty strings and
+# normalize the two independent write shapes (blocking point 4); every
+# guard fixed in this round gets a test through its real write path, not
+# a direct INSERT that only proves the SELECT's WHERE-clause semantics --
+# per the coordinator's blocking point 5.
+# ═══════════════════════════════════════════════════════════════════════
+
+def _create_placement_via_api(client, admin, *, candidate_id, job_id, client_id):
+    resp = client.post(
+        "/api/v1/admin/placements",
+        json={
+            "candidate_id": candidate_id, "job_id": job_id, "client_id": client_id,
+            "placement_type": "detachering", "status": "actief",
+        },
+        headers=admin["headers"],
+    )
+    assert resp.status_code == 201, resp.text
+    return resp.json()
+
+
+def test_sourced_no_response_excludes_a_candidate_with_a_real_placement(db_run, client, make_admin):
+    """Bewezen scenario (blocking point 1): routers/placements.py's
+    create_placement (the real placement route) writes candidate_id/
+    job_id/client_id and nothing else -- it never touches matches or
+    pipeline_entries, so a placed candidate previously carried none of
+    this guard's other signals and was purged like anyone else."""
+    suffix = uuid.uuid4().hex[:10]
+    admin = make_admin()
+    lawful_basis = "gerechtvaardigd_belang"
+    cid = _sourced_candidate_id(db_run, suffix=suffix, lawful_basis=lawful_basis)
+    job_id, client_id = _job_id(db_run, suffix=suffix)
+
+    rows = db_run(fetch_all, retention.SOURCED_NO_RESPONSE_SQL, lawful_basis)
+    assert cid in [r["id"] for r in rows]
+
+    _create_placement_via_api(client, admin, candidate_id=cid, job_id=job_id, client_id=client_id)
+
+    rows = db_run(fetch_all, retention.SOURCED_NO_RESPONSE_SQL, lawful_basis)
+    assert cid not in [r["id"] for r in rows]
+
+
+def test_rejected_applicant_excludes_a_candidate_with_a_real_placement(db_run, client, make_admin):
+    suffix = uuid.uuid4().hex[:10]
+    admin = make_admin()
+    cid = _candidate_id(db_run, suffix=suffix)
+    job_id, client_id = _job_id(db_run, suffix=suffix)
+
+    rows = db_run(fetch_all, retention.REJECTED_APPLICANT_SQL)
+    assert cid in [r["id"] for r in rows]
+
+    _create_placement_via_api(client, admin, candidate_id=cid, job_id=job_id, client_id=client_id)
+
+    rows = db_run(fetch_all, retention.REJECTED_APPLICANT_SQL)
+    assert cid not in [r["id"] for r in rows]
+
+
+def test_portal_account_inactive_excludes_a_linked_candidate_with_a_real_placement(db_run, client, make_admin):
+    suffix = uuid.uuid4().hex[:10]
+    admin = make_admin()
+    user = db_run(
+        fetch_one,
+        """INSERT INTO users (email, password_hash, full_name, role, last_login_at)
+           VALUES ($1, 'x', 'Portal Placed User', 'candidate', NOW() - INTERVAL '25 months')
+           RETURNING id""",
+        f"portal-placed-{suffix}@example.com",
+    )
+    cid = db_run(
+        fetch_one,
+        "INSERT INTO candidates (full_name, email, status) VALUES ('Portal Placed Candidate', $1, 'sourced') RETURNING id",
+        f"portal-placed-cand-{suffix}@example.com",
+    )["id"]
+    db_run(
+        execute,
+        "INSERT INTO candidate_profiles (user_id, candidate_id) VALUES ($1, $2)",
+        user["id"], cid,
+    )
+    job_id, client_id = _job_id(db_run, suffix=suffix)
+
+    rows = db_run(fetch_all, retention.PORTAL_ACCOUNT_INACTIVE_SQL)
+    assert user["id"] in [r["id"] for r in rows]
+
+    _create_placement_via_api(client, admin, candidate_id=cid, job_id=job_id, client_id=client_id)
+
+    rows = db_run(fetch_all, retention.PORTAL_ACCOUNT_INACTIVE_SQL)
+    assert user["id"] not in [r["id"] for r in rows]
+
+
+# ── blocking point 3: clients.account_status now has a real write path ──
+
+def test_patch_client_account_status_stamps_the_column(db_run, client, make_admin):
+    """PATCH /api/v1/admin/clients/{id} (routers/clients_admin.py
+    update_client) -- the only write path for account_status this branch
+    adds. Closed set enforced both by the Pydantic pattern and
+    migrations/034's CHECK constraint."""
+    admin = make_admin()
+    row = db_run(
+        fetch_one,
+        "INSERT INTO clients (company_name, domain) VALUES ($1, 'example.com') RETURNING id, account_status",
+        f"Account Status Test {uuid.uuid4().hex[:8]}",
+    )
+    assert row["account_status"] == "lead"  # migrations/034's new DEFAULT
+
+    resp = client.patch(
+        f"/api/v1/admin/clients/{row['id']}",
+        json={"account_status": "active"},
+        headers=admin["headers"],
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["account_status"] == "active"
+
+    updated = db_run(fetch_one, "SELECT account_status FROM clients WHERE id = $1", row["id"])
+    assert updated["account_status"] == "active"
+
+
+def test_patch_client_account_status_rejects_a_value_outside_the_closed_set(client, make_admin, db_run):
+    admin = make_admin()
+    row = db_run(
+        fetch_one,
+        "INSERT INTO clients (company_name, domain) VALUES ($1, 'example.com') RETURNING id",
+        f"Account Status Reject Test {uuid.uuid4().hex[:8]}",
+    )
+    resp = client.patch(
+        f"/api/v1/admin/clients/{row['id']}",
+        json={"account_status": "definitely-not-a-real-status"},
+        headers=admin["headers"],
+    )
+    assert resp.status_code == 422, resp.text
+
+
+# ── blocking point 4: domain normalization, through the real write paths ─
+
+def test_prospect_responding_excludes_active_client_via_normalized_domain_write_paths(
+    db_run, client, make_admin,
+):
+    """Both real write paths at once, deliberately in incompatible raw
+    shapes: POST /api/v1/admin/prospects (routers/prospects.py
+    create_prospect, `website` free-text field with scheme + "www.") on
+    one side, PATCH /api/v1/admin/clients/{id} (routers/clients_admin.py
+    update_client, bare host) on the other. Before normalizing at write
+    time (core/privacy.py normalize_domain) these two never compared
+    equal; the guard must exclude the prospect once both sides resolve to
+    the same host."""
+    suffix = uuid.uuid4().hex[:10]
+    admin = make_admin()
+    host = f"asml-{suffix}.example.com"
+
+    prospect_resp = client.post(
+        "/api/v1/admin/prospects",
+        json={
+            "company": f"ASML {suffix}", "website": f"https://www.{host}/careers",
+            "lawful_basis": "bestaande_relatie", "status": "in_gesprek",
+        },
+        headers=admin["headers"],
+    )
+    assert prospect_resp.status_code == 201, prospect_resp.text
+    prospect = prospect_resp.json()
+    db_run(
+        execute,
+        "UPDATE client_prospects SET last_contacted_at = NOW() - INTERVAL '13 months' WHERE id = $1",
+        prospect["id"],
+    )
+
+    client_row = db_run(
+        fetch_one,
+        "INSERT INTO clients (company_name, domain) VALUES ($1, 'example.com') RETURNING id",
+        f"ASML Netherlands B.V. {suffix}",
+    )
+    patch_resp = client.patch(
+        f"/api/v1/admin/clients/{client_row['id']}",
+        json={"domain": host.upper(), "account_status": "active"},
+        headers=admin["headers"],
+    )
+    assert patch_resp.status_code == 200, patch_resp.text
+
+    # Proof the normalization actually happened at write time, not just
+    # that the guard happens to tolerate the raw values.
+    stored_prospect_domain = db_run(
+        fetch_one, "SELECT domain FROM client_prospects WHERE id = $1", prospect["id"],
+    )
+    assert stored_prospect_domain["domain"] == host
+    stored_client_domain = db_run(
+        fetch_one, "SELECT domain FROM clients WHERE id = $1", client_row["id"],
+    )
+    assert stored_client_domain["domain"] == host
+
+    rows = db_run(fetch_all, retention.PROSPECT_RESPONDING_SQL)
+    assert prospect["id"] not in [r["id"] for r in rows]
+
+
+def test_prospect_responding_does_not_match_two_rows_with_an_empty_domain(db_run):
+    """Negative case the coordinator asked for explicitly: an
+    `IS NOT NULL` check alone never excludes '', so before this fix two
+    unrelated rows that both happened to have domain='' matched each
+    other. Company names deliberately differ (so only the domain path
+    could possibly match) and last_contacted_at is stale enough to
+    otherwise select the prospect."""
+    suffix = uuid.uuid4().hex[:10]
+    pid = _prospect_id(db_run, suffix=suffix, company=f"Empty Domain Prospect {suffix}", status="in_gesprek")
+    db_run(execute, "UPDATE client_prospects SET domain = '' WHERE id = $1", pid)
+    db_run(
+        execute,
+        "INSERT INTO clients (company_name, domain, account_status) VALUES ($1, '', 'active')",
+        f"Empty Domain Client {suffix}",
+    )
+
+    rows = db_run(fetch_all, retention.PROSPECT_RESPONDING_SQL)
+    assert pid in [r["id"] for r in rows]
+
+
+# ── minor point (fourth round): candidates.pool_origin now stamped by the
+# real Apollo bulk-harvest write path, not just migration 022's one-time
+# backfill -- routers/retention_admin.py's Apollo-pool-purge selector
+# (`c.pool_origin = 'apollo'`) previously missed every row sourced since
+# that migration ran. ────────────────────────────────────────────────────
+
+def test_harvest_candidates_stamps_pool_origin_apollo(db_run, monkeypatch):
+    import services.harvest as harvest
+
+    suffix = uuid.uuid4().hex[:10]
+    fake_email = f"pool-origin-{suffix}@example.com"
+
+    class _FakeApolloClient:
+        def __init__(self, api_key):
+            pass
+
+        async def search_people(self, **kwargs):
+            return {"people": [{
+                "first_name": "Pool", "last_name": f"Origin {suffix}",
+                "email": fake_email, "id": f"apollo-test-{suffix}",
+            }]}
+
+        async def close(self):
+            pass
+
+    monkeypatch.setattr(harvest, "ApolloClient", _FakeApolloClient)
+    monkeypatch.setattr(harvest.settings, "apollo_api_key", "test-key")
+    monkeypatch.setattr(harvest.settings, "apollo_sync_enabled", True)
+
+    async def _fake_flag_enabled(key):
+        return True
+
+    monkeypatch.setattr(harvest, "_flag_enabled", _fake_flag_enabled)
+    # CAP_CANDIDATES=1 so the real function returns after exactly one
+    # insert instead of looping over every title/page combination.
+    monkeypatch.setattr(harvest, "CAP_CANDIDATES", 1)
+    monkeypatch.setattr(harvest, "CANDIDATE_TITLES", [f"Test Title {suffix}"])
+
+    result = db_run(harvest.harvest_candidates)
+    assert result["inserted"] == 1
+
+    row = db_run(
+        fetch_one, "SELECT pool_origin, source FROM candidates WHERE email = $1", fake_email,
+    )
+    assert row is not None
+    assert row["source"] == "apollo_bulk"
+    assert row["pool_origin"] == "apollo"

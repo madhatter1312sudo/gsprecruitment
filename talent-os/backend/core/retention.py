@@ -73,11 +73,26 @@ since it's prose, not a table cell test_retention.py parses).
 `placed_candidate` stays
 schema_ready=False: its `action` is "retain", so services/scheduler.py's
 _category_result() reports it "not_applicable" before it ever looks at
-schema_ready — this job never purges 7-year fiscal data, so a dedicated
-invoice-date column would never be queried or written to by anything and
-is deliberately not added here (see that migration's docstring). `logs`
-also stays schema_ready=False (action="infra_only", no DB column by
-design).
+schema_ready — this job never purges 7-year fiscal data, so schema_ready
+is moot for it either way (see that row's own selector_sql comment below
+for what its anchor is and why). `logs` also stays schema_ready=False
+(action="infra_only", no DB column by design).
+
+security-audit FIX FIRST (WS-E.8 retention-kolommen branch, FOURTH
+round, blocking point 1): `placed_candidate`'s anchor used to be
+`matches.status = 'placed'` -- a value nothing in this backend ever
+writes (grep the routers: every `status = 'placed'` reference is a
+SELECT/COUNT, never an UPDATE/INSERT). The real, authoritative record of
+a placement is `placements` (migrations/029_placements.py,
+routers/placements.py), written by the actual placement route -- the
+anchor below now points there instead. This is a documentation-only
+change for this row (action="retain" means its selector_sql is never
+run), but it matters everywhere else in this module: every other
+candidate-purging selector (CANDIDATE_NO_REACTION_GUARD_SQL,
+REJECTED_APPLICANT_SQL, PORTAL_ACCOUNT_INACTIVE_SQL) now also excludes
+any candidate with a `placements` row, so the 7-year floor this row
+documents is never silently defeated by one of the other nine categories
+anonymising the same candidate first.
 
 `action` is one of:
   - "anonymise": run via erase_person()-style logic (routers/gdpr.py) —
@@ -103,8 +118,8 @@ from typing import Optional, Tuple
 # follow-up (WS-E.8 FIX FIRST): the selectors below and the ones the
 # purge job actually runs must never drift apart, so this module owns the
 # one copy of each and the callers import it. CANDIDATE_NO_REACTION_GUARD_SQL
-# below is that one copy for the four candidate-side "did anything real
-# happen since" checks -- chief-of-staff second FIX FIRST caught
+# below is that one copy for the candidate-side "did anything real happen
+# since" checks -- chief-of-staff second FIX FIRST caught
 # routers/retention_admin.py keeping its own independently-maintained
 # near-copy of these guards (with the same dead replied_at/email bugs
 # fixed here) despite this module's own claim of exactly one copy; it now
@@ -112,10 +127,10 @@ from typing import Optional, Tuple
 #
 # "status = 'sourced'" alone is not proof nobody has reacted: nothing in
 # this codebase moves candidates.status off 'sourced' when a match
-# progresses, a client pipeline entry is created, an outreach reply comes
-# in, or the person registers a portal account. The four NOT EXISTS
-# guards check those signal tables directly instead of trusting one
-# column that nothing keeps in sync.
+# progresses, a client pipeline entry is created, a recruiter logs a real
+# reaction, the person registers a portal account, or the person is
+# placed. The five NOT EXISTS guards below check those signal tables
+# directly instead of trusting one column that nothing keeps in sync.
 #
 # FIX (chief-of-staff second FIX FIRST, WS-E.8 retention-kolommen branch,
 # blocking point 1): the first version of this guard block (still visible
@@ -134,32 +149,60 @@ from typing import Optional, Tuple
 #     candidate record can carry different addresses). Fixed here the
 #     same way that selector already was: via candidate_profiles, the
 #     real FK erase_person() (routers/gdpr.py) trusts.
-# Replacement signal for "we approached this person and it's still live":
-# an *approved and sent* outreach_drafts row (target_type='candidate',
-# status='sent') -- the one candidate-side event this codebase actually
-# records, the same pattern PROSPECT_NO_RESPONSE_SQL's sent-draft guard
-# already used on the prospect side. routers/outreach.py's approve_draft
-# now also stamps outreach_messages.candidate_id on its mirror insert when
-# target_type='candidate', giving that table a real key too, but the
-# guard here reads outreach_drafts directly since that is the row stamped
-# 'sent' regardless of whether the mirror insert's schema-tolerant INSERT
-# happens to succeed.
-# See tests/integration/test_retention_guards.py for the DB-backed proof:
-# a candidate with a sent outreach draft, or a live portal account linked
-# via candidate_profiles under a *different* e-mail address, is excluded;
-# a candidate with neither is still selected.
+# FIX (security-audit FIX FIRST, WS-E.8 retention-kolommen branch, FOURTH
+# round, blocking point 2): the sent-outreach-draft guard that used to sit
+# here measured contact, not reaction -- it recorded something WE did (an
+# admin clicked approve), not anything the candidate did. That inverted
+# the very category this guard protects: SOURCED_NO_RESPONSE_SQL exists
+# specifically to purge people who were contacted and never responded, so
+# treating "we sent them a message" as permanent immunity meant nobody who
+# actually belongs in "no response" could ever be purged, while a
+# candidate approached over a channel approve_draft cannot complete for
+# (LinkedIn: DraftCreate.target_email is a required field, but a channel=
+# 'linkedin' draft still has to pass one -- an admin can only submit "",
+# and approve_draft's own `if not draft["target_email"]` refusal then
+# means that draft can never reach status='sent' at all) never got this
+# protection in the first place, real reply or not. Both directions were
+# wrong for the same reason: "sent" is not "reacted".
+#
+# Replaced with the one place a real reaction actually gets written down
+# regardless of channel: `activities` (migrations/028_activities.py), the
+# general-purpose CRM log a recruiter writes to directly whenever a
+# candidate calls back, replies on LinkedIn, or otherwise engages --
+# channel-independent, unlike outreach_drafts/outreach_messages, which
+# only ever records what WE sent. This is deliberately unbounded (like
+# the matches/pipeline_entries guards beside it) rather than
+# recency-windowed against outreach_drafts.sent_at/created_at -- both
+# still plain TIMESTAMP columns (migrations/010_outreach_drafts.py) -- so
+# no new NOW()-comparison against those columns is introduced here (see
+# migrations/033_retention_guard_fixes.py's own docstring on why that
+# comparison would need a timezone fix first if one were ever added).
+#
+# security-audit FIX FIRST (blocking point 1, same round): also excludes
+# any candidate with a real placement (migrations/029_placements.py) --
+# routers/placements.py's create_placement writes candidate_id/job_id/
+# client_id directly and touches neither `matches` nor `pipeline_entries`,
+# so an actively placed candidate previously carried none of this guard's
+# other four signals and was purgeable like anyone else. See
+# tests/integration/test_retention_guards.py for the DB-backed proof: a
+# candidate with an activities row, or an active placement, or a live
+# portal account linked via candidate_profiles under a *different*
+# e-mail address, is excluded; a candidate with none of those is still
+# selected; a merely-sent (never reacted-to) outreach draft no longer
+# grants immunity on its own.
 CANDIDATE_NO_REACTION_GUARD_SQL = """
       AND NOT EXISTS (SELECT 1 FROM matches m WHERE m.candidate_id = c.id AND m.status <> 'suggested')
       AND NOT EXISTS (SELECT 1 FROM pipeline_entries p WHERE p.candidate_id = c.id)
       AND NOT EXISTS (
-          SELECT 1 FROM outreach_drafts od
-          WHERE od.target_type = 'candidate' AND od.target_id = c.id AND od.status = 'sent'
+          SELECT 1 FROM activities a
+          WHERE a.subject_type = 'candidate' AND a.subject_id = c.id AND a.deleted_at IS NULL
       )
       AND NOT EXISTS (
           SELECT 1 FROM candidate_profiles cpf
           JOIN users u ON u.id = cpf.user_id
           WHERE cpf.candidate_id = c.id AND u.deleted_at IS NULL
       )
+      AND NOT EXISTS (SELECT 1 FROM placements pl WHERE pl.candidate_id = c.id AND pl.deleted_at IS NULL)
 """
 
 SOURCED_NO_RESPONSE_SQL = """
@@ -274,6 +317,14 @@ TALENTPOOL_EXPIRED_SQL = """
 # type. See tests/integration/test_retention_guards.py for the DB-backed
 # proof (a fresh match / a fresh pipeline entry created after rejection
 # now excludes the candidate; a rejection with neither still purges).
+# FIX (security-audit FIX FIRST, WS-E.8 retention-kolommen branch, FOURTH
+# round, blocking point 1): a placements guard, same as
+# CANDIDATE_NO_REACTION_GUARD_SQL's -- a rejected candidate later placed
+# through a different job would carry a matches/pipeline_entries row only
+# if that placement happened to go through the matching/pipeline flow;
+# routers/placements.py's create_placement (WS-C.7) never touches either
+# table, so a placement created independently of both left this row with
+# no signal at all. See tests/integration/test_retention_guards.py.
 REJECTED_APPLICANT_SQL = """
     SELECT id, email FROM candidates c WHERE c.status = 'rejected'
       AND c.rejected_at IS NOT NULL AND c.rejected_at <= (NOW() - INTERVAL '4 weeks')
@@ -285,6 +336,7 @@ REJECTED_APPLICANT_SQL = """
       AND NOT EXISTS (
           SELECT 1 FROM pipeline_entries p WHERE p.candidate_id = c.id AND p.updated_at > c.rejected_at
       )
+      AND NOT EXISTS (SELECT 1 FROM placements pl WHERE pl.candidate_id = c.id AND pl.deleted_at IS NULL)
 """
 
 # migrations/032_retention_anchor_columns.py adds
@@ -357,7 +409,47 @@ REJECTED_APPLICANT_SQL = """
 # tests/integration/test_retention_guards.py for the DB-backed proof: a
 # prospect at "ASML" with an active client at "ASML Netherlands B.V." but
 # the same domain is excluded even though the names never match.
-PROSPECT_RESPONDING_SQL = """
+#
+# FIX (security-audit FIX FIRST, WS-E.8 retention-kolommen branch, FOURTH
+# round, blocking point 4): that domain match was itself not a hard key --
+# `clients.domain` and `client_prospects.domain` are filled by independent
+# code paths in incompatible shapes (an e-mail's domain part vs. a
+# free-text website field that may carry "https://www." and a path, vs.
+# "" from services/harvest.py when Apollo returns neither), and a bare
+# `IS NOT NULL` never excludes "". Once any one client row had domain=''
+# (or two differently-formatted URLs for the same real domain), the OR
+# above either silently protected every empty-domain prospect or missed a
+# same-company match it should have caught. Both sides are now run
+# through the same normalisation core/privacy.py's normalize_domain()
+# applies at write time (lower-case, strip scheme/"www.", strip
+# path/query/fragment) and NULLIF'd back to NULL on '', so `IS NOT NULL`
+# actually means "has a domain" again. See
+# tests/integration/test_retention_guards.py for the DB-backed proof: two
+# differently-formatted URLs for the same host still match, and two rows
+# that both carry an empty domain no longer match each other.
+#
+# FIX (security-audit FIX FIRST, WS-E.8 retention-kolommen branch, FOURTH
+# round, blocking point 3): `clients.account_status` now has a real write
+# path (migrations/034_clients_account_status_lifecycle.py,
+# routers/clients_admin.py update_client, closed set lead|active|
+# inactive) instead of being read-only everywhere -- 'active' means an
+# admin has confirmed the relationship, not merely that a `clients` row
+# exists (every client-portal registration auto-creates one, with the
+# user's own name as company_name, and that stub used to inherit the same
+# DEFAULT 'active' this guard trusted).
+_NORMALIZED_DOMAIN_SQL = (
+    "NULLIF(LOWER(REGEXP_REPLACE(REGEXP_REPLACE(TRIM(BOTH FROM {col}), "
+    "'^https?://', ''), '^www\\.', '')), '')"
+)
+
+
+def _domain_match_sql(left: str, right: str) -> str:
+    l_norm = _NORMALIZED_DOMAIN_SQL.format(col=left)
+    r_norm = _NORMALIZED_DOMAIN_SQL.format(col=right)
+    return f"({l_norm} IS NOT NULL AND {l_norm} = {r_norm})"
+
+
+PROSPECT_RESPONDING_SQL = f"""
     SELECT id, contact_email FROM client_prospects cp WHERE cp.status != 'new'
       AND cp.last_contacted_at IS NOT NULL AND cp.last_contacted_at <= (NOW() - INTERVAL '12 months')
       AND cp.opt_out_at IS NULL
@@ -366,7 +458,7 @@ PROSPECT_RESPONDING_SQL = """
           WHERE cl.account_status = 'active'
             AND (
                 LOWER(cl.company_name) = LOWER(cp.company_name)
-                OR (cl.domain IS NOT NULL AND cp.domain IS NOT NULL AND LOWER(cl.domain) = LOWER(cp.domain))
+                OR {_domain_match_sql("cl.domain", "cp.domain")}
             )
       )
 """
@@ -395,6 +487,14 @@ PROSPECT_RESPONDING_SQL = """
 # created/backfilled. The guard below uses that same real relation, so a
 # user whose linked candidate has an active match/pipeline entry is
 # protected even when the two email addresses differ.
+#
+# FIX (security-audit FIX FIRST, WS-E.8 retention-kolommen branch, FOURTH
+# round, blocking point 1): also excludes a linked candidate with a real
+# placement -- routers/placements.py's create_placement never touches
+# matches/pipeline_entries (see CANDIDATE_NO_REACTION_GUARD_SQL's own
+# comment above for the fuller reasoning), so an idle portal account
+# belonging to an actively placed candidate previously carried none of
+# this guard's two existing signals either.
 PORTAL_ACCOUNT_INACTIVE_SQL = """
     SELECT id, email FROM users u WHERE u.role = 'candidate' AND u.deleted_at IS NULL
       AND u.last_login_at IS NOT NULL AND u.last_login_at <= (NOW() - INTERVAL '24 months')
@@ -405,6 +505,7 @@ PORTAL_ACCOUNT_INACTIVE_SQL = """
             AND (
                 EXISTS (SELECT 1 FROM matches m WHERE m.candidate_id = c.id AND m.status <> 'suggested')
                 OR EXISTS (SELECT 1 FROM pipeline_entries p WHERE p.candidate_id = c.id)
+                OR EXISTS (SELECT 1 FROM placements pl WHERE pl.candidate_id = c.id AND pl.deleted_at IS NULL)
             )
       )
 """
@@ -622,19 +723,39 @@ RETENTION_TABLE: Tuple[RetentionRow, ...] = (
         bewaartermijn="7 jaar",
         bron_opmerking="fiscale bewaarplicht",
         legal_basis_ref="VERWERKINGSREGISTER §1.4 rij 9 / SOP §6 rij 9",
-        anchor_column="matches.updated_at (status='placed')",
+        # security-audit FIX FIRST (WS-E.8 retention-kolommen branch, FOURTH
+        # round, blocking point 1): moved off `matches.status = 'placed'`,
+        # a value nothing in this backend ever writes -- every occurrence
+        # of that string is a SELECT/COUNT, never an UPDATE/INSERT, so the
+        # anchor previously hung off a column with no real write path at
+        # all. `placements.start_date` (migrations/029_placements.py) is
+        # the real one: routers/placements.py's create_placement writes it
+        # on every placement, and `placements` -- not `matches` -- is the
+        # authoritative table for "this is a placement" (its own `status`
+        # lifecycle concept|actief|beeindigd|geannuleerd, margin/billing
+        # fields). Chosen over teaching the placement route to also flip a
+        # `matches` row to status='placed' because a placement need not
+        # have a corresponding `matches` row at all (it can be created
+        # directly against a candidate_id/job_id/client_id with no prior
+        # match ever having existed), so anchoring on `matches` would still
+        # miss placements created that way.
+        anchor_column="placements.start_date",
         action="retain",
         schema_ready=False,
         selector_sql=(
-            "SELECT id FROM matches WHERE status = 'placed' "
-            "AND updated_at <= (NOW() - INTERVAL '7 years') "
+            "SELECT id FROM placements WHERE status IN ('actief', 'beeindigd') "
+            "AND COALESCE(end_date, start_date) <= (CURRENT_DATE - INTERVAL '7 years') "
             "-- action=retain: 7 years is a floor, not a purge trigger; this job never deletes/anonymises "
-            "this category. No dedicated invoice-date column exists yet either (schema_ready=False). "
+            "this category (schema_ready=False is moot for a 'retain' row -- "
+            "services/scheduler.py._category_result() reports 'not_applicable' before ever checking it). "
             "WS-C.7 (migrations/029_placements.py) added `placements` and, on candidates, the "
             "immigratiestatus columns (nationality, needs_work_permit, kennismigrant_status, "
             "ruling_30pct_status, ind_case_number) -- both fall under this same 7-year floor and are "
             "erased (not merely retained past it) by routers/gdpr.py's erase_person() alongside the "
-            "rest of a placed candidate's PII once the retention floor has passed and erasure runs."
+            "rest of a placed candidate's PII once the retention floor has passed and erasure runs. "
+            "A candidate with any non-deleted `placements` row is, separately, excluded outright from "
+            "every anonymising selector in this module (CANDIDATE_NO_REACTION_GUARD_SQL, "
+            "REJECTED_APPLICANT_SQL, PORTAL_ACCOUNT_INACTIVE_SQL) regardless of this row's own action."
         ),
         public_nl=PublicRetentionText(
             categorie="Geplaatste kandidaat (contract- en factuurdata)",

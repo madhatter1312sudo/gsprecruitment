@@ -114,8 +114,8 @@ _POOL_ROWS_SQL = """
 # security-auditor follow-up (WS-E.8 HIGH): pool_origin='apollo' plus a
 # missing source_url is not by itself proof the row is inert bulk-harvest
 # noise -- an Apollo-sourced candidate can still have picked up a real
-# match, a client pipeline entry, a sent outreach draft, a portal
-# account, or be the (anonymised) subject of a presented-candidate
+# match, a client pipeline entry, a recorded activity, a portal account,
+# a placement, or be the (anonymised) subject of a presented-candidate
 # outreach draft to a client_prospect, all independent of source_url ever
 # being backfilled.
 #
@@ -128,14 +128,17 @@ _POOL_ROWS_SQL = """
 # LOWER(candidates.email) (a portal account and its candidate row can
 # carry different addresses). Rather than re-fix the same bug a second
 # time in a second place, this now imports and reuses
-# core.retention.CANDIDATE_NO_REACTION_GUARD_SQL -- the same four guards
-# SOURCED_NO_RESPONSE_SQL and TALENTPOOL_EXPIRED_SQL use, aliased the same
-# way (`c` for the candidates row) so the string concatenates directly --
-# plus a fifth guard specific to this pool: outreach_drafts.
-# presented_candidate_id (SOP §5 spec-candidate presentation), which
-# points at a candidate row without going through target_email/target_id
-# at all. Applied to BOTH the anonymise and the hard-delete branches --
-# neither is safe to run against a row any of these five reference.
+# core.retention.CANDIDATE_NO_REACTION_GUARD_SQL -- the same guards
+# SOURCED_NO_RESPONSE_SQL and TALENTPOOL_EXPIRED_SQL use (five as of the
+# fourth round: matches/pipeline_entries/activities/candidate_profiles/
+# placements -- see that constant's own docstring for why the sent-draft
+# guard it used to carry is gone), aliased the same way (`c` for the
+# candidates row) so the string concatenates directly -- plus a sixth
+# guard specific to this pool: outreach_drafts.presented_candidate_id
+# (SOP §5 spec-candidate presentation), which points at a candidate row
+# without going through target_email/target_id at all. Applied to BOTH
+# the anonymise and the hard-delete branches -- neither is safe to run
+# against a row any of these six reference.
 _TARGET_ROWS_SQL = _POOL_ROWS_SQL + retention.CANDIDATE_NO_REACTION_GUARD_SQL + """
       AND NOT EXISTS (SELECT 1 FROM outreach_drafts d WHERE d.presented_candidate_id = c.id)
 """

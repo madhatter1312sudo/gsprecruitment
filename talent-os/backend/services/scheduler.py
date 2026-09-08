@@ -119,11 +119,18 @@ async def apollo_search_and_sync() -> dict:
                     company = person["employment_history"][0].get("company_name", "")
 
                 try:
+                    # security-audit follow-up (WS-E.8 retention-kolommen
+                    # branch, fourth round): stamp pool_origin='apollo' here
+                    # too (see services/harvest.py's harvest_candidates for
+                    # the fuller comment) -- routers/retention_admin.py's
+                    # Apollo-pool-purge selector reads this column and
+                    # otherwise never sees anything sourced after
+                    # migrations/022_apollo_pool_flag.py's one-time backfill.
                     row = await fetch_one(
                         """INSERT INTO candidates
                            (full_name, email, current_company, current_title, location,
-                            skills, source, sourced_by_agent, is_passive)
-                           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+                            skills, source, sourced_by_agent, is_passive, pool_origin)
+                           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'apollo')
                            ON CONFLICT (email) DO NOTHING
                            RETURNING id""",
                         name, email, company,

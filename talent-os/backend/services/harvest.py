@@ -39,6 +39,7 @@ from asyncpg.exceptions import UniqueViolationError
 
 from core.config import settings
 from core.database import execute, fetch_all, fetch_one, fetch_val
+from core import privacy
 from services.apollo_client import ApolloClient
 from services import outreach_ai
 
@@ -250,12 +251,24 @@ async def harvest_candidates() -> dict:
                     apollo_ref = f"apollo:{person.get('id')}" if person.get("id") else None
 
                     try:
+                        # security-audit follow-up (WS-E.8 retention-kolommen
+                        # branch, fourth round): pool_origin='apollo' was, up
+                        # to now, only ever backfilled once by
+                        # migrations/022_apollo_pool_flag.py -- no INSERT
+                        # ever set it going forward, so
+                        # routers/retention_admin.py's Apollo-pool-purge
+                        # selector (`c.pool_origin = 'apollo'`) has missed
+                        # every row harvested since that migration ran.
+                        # Stamped here at the one INSERT this bulk pipeline
+                        # actually uses.
                         row = await fetch_one(
                             """INSERT INTO candidates
                                (full_name, email, current_company, current_title, location,
-                                linkedin_url, skills, source, source_url, sourced_by_agent, is_passive)
+                                linkedin_url, skills, source, source_url, sourced_by_agent, is_passive,
+                                pool_origin)
                                SELECT $1::varchar,$2::varchar,$3::varchar,$4::varchar,$5::varchar,
-                                      $6::varchar,$7::text[],$8::varchar,$9::varchar,$10::varchar,$11::boolean
+                                      $6::varchar,$7::text[],$8::varchar,$9::varchar,$10::varchar,$11::boolean,
+                                      'apollo'
                                WHERE NOT EXISTS (
                                    SELECT 1 FROM candidates
                                    WHERE full_name = $1::varchar
@@ -349,7 +362,13 @@ async def harvest_prospects() -> dict:
                 if not company_name:
                     continue
 
-                domain = org.get("primary_domain") or org.get("website_url") or ""
+                # security-audit FIX FIRST (WS-E.8 retention-kolommen
+                # branch, fourth round, blocking point 4): normalized so
+                # this free-text/URL value compares cleanly against
+                # clients.domain in core/retention.py's
+                # PROSPECT_RESPONDING_SQL -- previously this could be "",
+                # which `IS NOT NULL` alone never excludes.
+                domain = privacy.normalize_domain(org.get("primary_domain") or org.get("website_url"))
                 contact_title = person.get("title") or ""
                 contact_email = _clean_email(person.get("email") or person.get("personal_email"))
                 contact_linkedin = person.get("linkedin_url") or ""

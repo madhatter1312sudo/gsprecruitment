@@ -977,6 +977,10 @@ class ClientAdminUpdate(BaseModel):
     industry: Optional[str] = Field(None, max_length=255)
     erkend_referent: Optional[str] = Field(None, pattern=r"^(ja|nee|onbekend)$")
     notes: Optional[str] = None
+    # security-audit FIX FIRST (WS-E.8 retention-kolommen branch, fourth
+    # round, blocking point 3): the closed value set migrations/034 also
+    # enforces at the DB level via a CHECK constraint.
+    account_status: Optional[str] = Field(None, pattern=r"^(lead|active|inactive)$")
 
 
 # ── WS-C.5: Pipeline Stage History ───────────────────────────────────────

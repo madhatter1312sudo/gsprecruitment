@@ -8,6 +8,7 @@ from core.database import fetch_one, fetch_all, execute
 from core.security import hash_password, verify_password, create_access_token, decode_token, hash_token
 from core.deps import get_current_user, get_optional_user, require_role, _token_predates_password_change
 from core.mfa import mfa_required_for_user, issue_mfa_pending_token
+from core import privacy
 from core.config import settings
 from models.schemas import (
     UserRegister, UserLogin, TokenResponse, UserResponse, UserUpdate,
@@ -163,7 +164,7 @@ async def register(request: Request, data: UserRegister):
         # ever created this linkage for a client signup.
         client = await fetch_one(
             "INSERT INTO clients (company_name, domain) VALUES ($1, $2) RETURNING id",
-            user["full_name"], email.split("@")[1] if "@" in email else "",
+            user["full_name"], privacy.normalize_domain(email.split("@")[1] if "@" in email else None),
         )
         if client:
             await execute(

@@ -95,7 +95,7 @@ _ALLOWLIST = {
         "this query can share core.retention.CANDIDATE_NO_REACTION_GUARD_SQL "
         "verbatim with SOURCED_NO_RESPONSE_SQL/TALENTPOOL_EXPIRED_SQL "
         "instead of keeping its own independently-maintained copy of the "
-        "same four guards.",
+        "same guards.",
     ("client.py", "SELECT c.id, c.full_name, c.current_title, c.current_company,"):
         "GET /api/v1/client/candidates (search_candidates) -- deleted_at "
         "IS NULL and consent_withdrawn_at IS NULL ARE both required here "

@@ -25,6 +25,7 @@ from pydantic import BaseModel, Field, field_validator
 
 from core.database import fetch_one, fetch_all, fetch_val, execute
 from core.deps import require_role
+from core import privacy
 
 logger = logging.getLogger("talent_os.prospects")
 
@@ -147,8 +148,8 @@ async def create_prospect(
             source_url, lawful_basis)
            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,COALESCE($11,'new'),$12,$13)
            RETURNING *""",
-        payload.company, payload.website, payload.contact_name, payload.contact_title,
-        payload.email, payload.linkedin_url, payload.location, payload.industry,
+        payload.company, privacy.normalize_domain(payload.website), payload.contact_name,
+        payload.contact_title, payload.email, payload.linkedin_url, payload.location, payload.industry,
         payload.source, payload.notes, payload.status,
         payload.source_url, payload.lawful_basis,
     )

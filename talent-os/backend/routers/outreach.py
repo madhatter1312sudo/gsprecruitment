@@ -425,11 +425,35 @@ async def approve_draft(
                 for c in columns
             )
             if col_names and "recipient_email" in col_names and not required_missing:
-                if "candidate_id" in col_names and draft["target_type"] == "candidate" and draft["target_id"]:
+                # security-audit follow-up (WS-E.8 retention-kolommen
+                # branch, fourth round, minor point): this mirror row set
+                # status='sent' but never sent_at -- stamped alongside it
+                # now (same NOW() this endpoint already uses for
+                # outreach_drafts.sent_at above), but only when the column
+                # is actually there -- same schema-tolerance the
+                # candidate_id branch below already applies. Four literal
+                # INSERT statements (not one built from an interpolated
+                # column list) so tests/test_baseline_schema.py's static
+                # column-existence scan can still parse each one.
+                with_candidate_id = "candidate_id" in col_names and draft["target_type"] == "candidate" and draft["target_id"]
+                has_sent_at = "sent_at" in col_names
+                if with_candidate_id and has_sent_at:
+                    await execute(
+                        """INSERT INTO outreach_messages (candidate_id, recipient_email, subject, body, channel, sent_at, status)
+                           VALUES ($1, $2, $3, $4, 'email', NOW(), 'sent')""",
+                        draft["target_id"], draft["target_email"], draft["subject"], draft["body"],
+                    )
+                elif with_candidate_id:
                     await execute(
                         """INSERT INTO outreach_messages (candidate_id, recipient_email, subject, body, channel, status)
                            VALUES ($1, $2, $3, $4, 'email', 'sent')""",
                         draft["target_id"], draft["target_email"], draft["subject"], draft["body"],
+                    )
+                elif has_sent_at:
+                    await execute(
+                        """INSERT INTO outreach_messages (recipient_email, subject, body, channel, sent_at, status)
+                           VALUES ($1, $2, $3, 'email', NOW(), 'sent')""",
+                        draft["target_email"], draft["subject"], draft["body"],
                     )
                 else:
                     await execute(
