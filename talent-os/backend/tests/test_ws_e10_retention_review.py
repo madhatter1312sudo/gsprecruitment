@@ -63,6 +63,7 @@ class _FakePool:
 
 
 _EMAIL_COL_RE = re.compile(r"SELECT (\w+) AS email FROM (\w+) WHERE id = \$1")
+_MARKER_COL_RE = re.compile(r"SELECT (\w+) AS marker FROM (\w+) WHERE id = \$1")
 
 
 class _FakeItemsDB:
@@ -82,12 +83,23 @@ class _FakeItemsDB:
     queries should return -- empty by default (no conflict) for each.
     own_linked_candidate_id: what the fake candidate_profiles lookup
     returns for the subject's OWN FK link (used only when subject_table
-    is 'users') -- None by default (no link)."""
+    is 'users') -- None by default (no link).
+
+    unerased_subjects: {(subject_table, subject_id)} -- round 6
+    postcondition check (code-reviewer): _approve_one() re-reads the
+    subject's own erased-marker column (deleted_at/opt_out_at) right
+    after erase_person() returns, and refuses to report 'purged' unless
+    it is actually set. Empty by default -- every subject in this set
+    "was actually erased" as far as this fake is concerned, matching a
+    real erase_person() having done its job -- a dedicated test proves
+    the postcondition itself by naming a subject here whose marker
+    stays NULL despite erase_person() reporting success."""
 
     def __init__(
         self, items: dict, subject_emails: dict = None,
         conflicting_users: list = None, conflicting_candidates: list = None,
         conflicting_prospects: list = None, own_linked_candidate_id: int = None,
+        unerased_subjects: set = None,
     ):
         self.items = items  # id -> dict
         self.subject_emails = subject_emails if subject_emails is not None else {
@@ -97,6 +109,7 @@ class _FakeItemsDB:
         self.conflicting_candidates = conflicting_candidates if conflicting_candidates is not None else []
         self.conflicting_prospects = conflicting_prospects if conflicting_prospects is not None else []
         self.own_linked_candidate_id = own_linked_candidate_id
+        self.unerased_subjects = unerased_subjects if unerased_subjects is not None else set()
         self.decisions = []
         self.audit_log = []
 
@@ -109,6 +122,11 @@ class _FakeItemsDB:
                 return None
             item["status"] = "purging"
             return {"id": args[0]}
+        m = _MARKER_COL_RE.search(sql)
+        if m:
+            table = m.group(2)
+            erased = (table, args[0]) not in self.unerased_subjects
+            return {"marker": "2026-01-01T00:00:00Z" if erased else None}
         m = _EMAIL_COL_RE.search(sql)
         if m:
             table = m.group(2)
@@ -128,12 +146,17 @@ class _FakeItemsDB:
             ]
         # round 6 (security-auditor + code-reviewer): H2's guard now
         # checks all three identity tables, any role -- see
-        # _refuse_if_email_belongs_to_an_unrelated_account().
-        if "SELECT id FROM users WHERE LOWER(email)" in sql:
+        # _refuse_if_email_belongs_to_an_unrelated_account(). Round 6
+        # re-check: the guard's queries compare LOWER(TRIM(column)), not
+        # just LOWER(column) -- match on the table/column shape only, not
+        # the exact function nesting, so this fake doesn't silently stop
+        # matching (and start raising AssertionError) the moment the SQL
+        # text changes again without the underlying shape changing.
+        if "SELECT id FROM users WHERE LOWER(" in sql and "email)) = $1" in sql:
             return list(self.conflicting_users)
-        if "SELECT id FROM candidates WHERE LOWER(email)" in sql:
+        if "SELECT id FROM candidates WHERE LOWER(" in sql and "email)) = $1" in sql:
             return list(self.conflicting_candidates)
-        if "SELECT id FROM client_prospects WHERE LOWER(contact_email)" in sql:
+        if "SELECT id FROM client_prospects WHERE LOWER(" in sql and "contact_email)) = $1" in sql:
             return list(self.conflicting_prospects)
         raise AssertionError(f"unexpected fetch_all: {sql}")
 
@@ -449,6 +472,31 @@ def test_approve_unclaims_the_item_when_the_action_itself_fails(monkeypatch):
     assert db.items[1]["status"] == "rejected"  # unclaimed back, not stuck at 'purging'
     # the decision row written before the (failed) action is left in place
     assert db.decisions == [{"review_item_id": 1, "decision": "approved", "actor_id": 9, "note": None}]
+
+
+def test_approve_refuses_to_report_purged_when_the_subject_row_was_not_actually_erased(monkeypatch):
+    """Round 6 postcondition (code-reviewer, WS-E.10 approval queue): a
+    mocked erase_person() that reports success without touching the
+    subject's own row (standing in for whatever future mismatch might
+    someday cause the same thing for real -- an address-normalisation
+    gap was one concrete instance) must never let this item be marked
+    'purged' -- and, like any other action failure, the item is unclaimed
+    back to its original status rather than left stuck at 'purging'."""
+    db = _FakeItemsDB(
+        {1: _pending_item(status="rejected")},
+        unerased_subjects={("candidates", 42)},
+    )
+    retention_admin = _install(monkeypatch, db)
+
+    import routers.gdpr as gdpr
+    monkeypatch.setattr(gdpr, "erase_person", _fake_erase_person_recorder([]))
+
+    payload = retention_admin.ReviewDecisionRequest(confirm="APPROVE")
+    with pytest.raises(HTTPException) as exc_info:
+        asyncio.run(retention_admin.approve_review_item(1, payload, current_user={"id": 9, "role": "admin"}))
+    assert exc_info.value.status_code == 500
+
+    assert db.items[1]["status"] == "rejected"  # unclaimed back, never marked 'purged'
 
 
 # ── reject ────────────────────────────────────────────────────────────

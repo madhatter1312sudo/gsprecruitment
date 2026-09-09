@@ -307,3 +307,140 @@ def test_approving_a_rejected_candidate_does_not_follow_an_fk_linked_unrelated_p
     portal_row = db_run(fetch_one, "SELECT email, deleted_at FROM users WHERE id = $1", portal_user["id"])
     assert portal_row["email"] == subject_email
     assert portal_row["deleted_at"] is None
+
+
+# ── Round 6 re-check (security-auditor + code-reviewer): the guard used to
+#    compare the RAW subject address (LOWER(email) = LOWER($1)) while
+#    erase_person() compared the NORMALISED one (strip+lower) -- a subject
+#    whose own stored address carries whitespace made the guard blind to a
+#    real conflict elsewhere. Both scenarios below create the SUBJECT
+#    through the real, unstripped write path (POST /api/candidates,
+#    POST /api/v1/admin/prospects -- neither strips e-mail today) with a
+#    padded address, and a genuine conflict sharing the CLEAN version of
+#    that same address -- reproducing S2b/S3b via address padding rather
+#    than via a missing scope check. ─────────────────────────────────────
+
+def test_approving_a_padded_prospect_subject_still_detects_a_real_conflict(db_run, make_admin, client, api_key_headers):
+    import services.scheduler as scheduler
+    from fastapi import HTTPException
+    from core.database import execute, fetch_one
+
+    admin = make_admin()
+    suffix = uuid.uuid4().hex[:10]
+    clean_email = f"scope-leak-pad-a-{suffix}@example.com"
+    padded_email = clean_email + " "  # trailing space -- exactly what ProspectCreate.email accepts unstripped
+
+    resp = client.post(
+        "/api/v1/admin/prospects",
+        headers=admin["headers"],
+        json={
+            "company": f"Padded Prospect Co {suffix}",
+            "contact_name": "Padded Prospect Contact",
+            "email": padded_email,
+            "status": "contacted",
+            "lawful_basis": "zakelijk_functioneel_adres",
+        },
+    )
+    assert resp.status_code == 201, resp.text
+    prospect_id = resp.json()["id"]
+    # last_contacted_at has no create-time field (routers/prospects.py) --
+    # only PUT status changes / an approved outreach draft stamp it --
+    # backdate it directly so PROSPECT_RESPONDING_SQL sees it as due.
+    db_run(execute, "UPDATE client_prospects SET last_contacted_at = NOW() - INTERVAL '13 months' WHERE id = $1", prospect_id)
+    prospect_before = db_run(fetch_one, "SELECT contact_email FROM client_prospects WHERE id = $1", prospect_id)
+    assert prospect_before["contact_email"] == padded_email, "the padded address must actually be what's stored"
+
+    # A genuine conflict sharing the CLEAN address: a placed candidate
+    # (7-year fiscal floor) and a live candidate-role portal login.
+    placed_candidate_id = _placed_candidate(db_run, suffix=f"{suffix}-pad-a", email=clean_email)
+    live_user_id = _live_candidate_portal_account(db_run, suffix=f"{suffix}-pad-a", email=clean_email)
+
+    db_run(scheduler.generate_retention_review)
+    item = db_run(
+        fetch_one,
+        "SELECT id FROM retention_review_items WHERE category = 'prospect_responding' AND subject_id = $1",
+        prospect_id,
+    )
+    assert item is not None, "prospect must actually be queued for this test to be meaningful"
+
+    with pytest.raises(HTTPException) as exc_info:
+        _approve(db_run, admin, item["id"])
+    assert exc_info.value.status_code == 409
+    assert exc_info.value.detail["code"] == "retention_purge_blocked_unrelated_account"
+
+    prospect_row = db_run(fetch_one, "SELECT contact_email, opt_out_at FROM client_prospects WHERE id = $1", prospect_id)
+    assert prospect_row["contact_email"] == padded_email  # untouched -- still padded, not "purged"
+    assert prospect_row["opt_out_at"] is None
+
+    candidate_row = db_run(fetch_one, "SELECT email, deleted_at FROM candidates WHERE id = $1", placed_candidate_id)
+    assert candidate_row["email"] == clean_email
+    assert candidate_row["deleted_at"] is None
+
+    user_row = db_run(fetch_one, "SELECT email, deleted_at FROM users WHERE id = $1", live_user_id)
+    assert user_row["email"] == clean_email
+    assert user_row["deleted_at"] is None
+
+    still_pending = db_run(fetch_one, "SELECT status FROM retention_review_items WHERE id = $1", item["id"])
+    assert still_pending["status"] == "pending"
+
+
+def test_approving_a_padded_candidate_subject_still_detects_a_real_conflict(db_run, make_admin, client, api_key_headers):
+    import services.scheduler as scheduler
+    from fastapi import HTTPException
+    from core.database import execute, fetch_one
+
+    admin = make_admin()
+    suffix = uuid.uuid4().hex[:10]
+    clean_email = f"scope-leak-pad-b-{suffix}@example.com"
+    padded_email = " " + clean_email  # leading space -- CandidateCreate.email accepts unstripped
+
+    resp = client.post(
+        "/api/candidates",
+        headers=api_key_headers,
+        json={
+            "full_name": f"Padded Candidate {suffix}",
+            "email": padded_email,
+            "source_url": "https://example.com/profile",
+            "lawful_basis": "gerechtvaardigd_belang",
+        },
+    )
+    assert resp.status_code == 201, resp.text
+    subject_id = resp.json()["id"]
+    # rejected_at/status have no create-time field on this endpoint either
+    # -- backdate directly so REJECTED_APPLICANT_SQL sees it as due.
+    db_run(
+        execute,
+        "UPDATE candidates SET status = 'rejected', rejected_at = NOW() - INTERVAL '5 weeks' WHERE id = $1",
+        subject_id,
+    )
+    subject_before = db_run(fetch_one, "SELECT email FROM candidates WHERE id = $1", subject_id)
+    assert subject_before["email"] == padded_email, "the padded address must actually be what's stored"
+
+    # A genuine conflict sharing the CLEAN address: a live candidate-role
+    # portal login (any role on `users` is a conflict for a candidates-
+    # table subject, round 6).
+    live_user_id = _live_candidate_portal_account(db_run, suffix=f"{suffix}-pad-b", email=clean_email)
+
+    db_run(scheduler.generate_retention_review)
+    item = db_run(
+        fetch_one,
+        "SELECT id FROM retention_review_items WHERE category = 'rejected_applicant' AND subject_id = $1",
+        subject_id,
+    )
+    assert item is not None, "candidate must actually be queued for this test to be meaningful"
+
+    with pytest.raises(HTTPException) as exc_info:
+        _approve(db_run, admin, item["id"])
+    assert exc_info.value.status_code == 409
+    assert exc_info.value.detail["code"] == "retention_purge_blocked_unrelated_account"
+
+    subject_row = db_run(fetch_one, "SELECT email, deleted_at FROM candidates WHERE id = $1", subject_id)
+    assert subject_row["email"] == padded_email  # untouched -- still padded, not "purged"
+    assert subject_row["deleted_at"] is None
+
+    user_row = db_run(fetch_one, "SELECT email, deleted_at FROM users WHERE id = $1", live_user_id)
+    assert user_row["email"] == clean_email
+    assert user_row["deleted_at"] is None
+
+    still_pending = db_run(fetch_one, "SELECT status FROM retention_review_items WHERE id = $1", item["id"])
+    assert still_pending["status"] == "pending"

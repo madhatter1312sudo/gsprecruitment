@@ -61,13 +61,18 @@ class _FakeDB:
     client_prospects, data_subject_requests, and candidates/users
     themselves)."""
 
+    # Round 6 re-check (security-auditor + code-reviewer): erase_person()'s
+    # identity-table lookups (candidates/client_prospects) now compare
+    # LOWER(TRIM(column)), not plain LOWER(column) -- the side-table
+    # lookups below them (quiz/contact submissions, outreach, data_subject_
+    # requests) are unchanged.
     _ONE_ROW_SELECTS = (
-        "SELECT id FROM candidates WHERE LOWER(email)",
+        "SELECT id FROM candidates WHERE LOWER(TRIM(email))",
         "SELECT id FROM quiz_submissions WHERE LOWER(email)",
         "SELECT id FROM contact_submissions WHERE LOWER(email)",
         "SELECT id FROM outreach_drafts WHERE LOWER(target_email)",
         "SELECT id FROM outreach_messages WHERE LOWER(recipient_email)",
-        "SELECT id FROM client_prospects WHERE LOWER(contact_email)",
+        "SELECT id FROM client_prospects WHERE LOWER(TRIM(contact_email))",
         "SELECT id FROM data_subject_requests WHERE LOWER(request_email)",
     )
 
@@ -85,7 +90,7 @@ class _FakeDB:
 
     async def fetch_all(self, sql, *args):
         self._record(sql, args)
-        if sql.strip().startswith("SELECT id FROM users WHERE LOWER(email)"):
+        if sql.strip().startswith("SELECT id FROM users WHERE LOWER(TRIM(email))"):
             return [{"id": 42}]
         if "SELECT id, cv_file_path FROM candidates WHERE" in sql:
             return [{"id": 99, "cv_file_path": None}]

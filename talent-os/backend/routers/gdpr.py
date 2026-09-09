@@ -286,7 +286,7 @@ async def _redact_audit_log_email(email: str, replacement: str) -> int:
 
 
 async def _anonymize_by_id(
-    select_sql: str, update_sql: str, select_param, email_hash: str, id_filter: Optional[int] = None,
+    select_sql: str, update_sql: str, select_param, email_hash: str,
 ) -> int:
     """Fetch matching row ids (select_sql, filtered to select_param as $1
     -- normally email_norm, but any value select_sql's $1 expects works,
@@ -301,16 +301,16 @@ async def _anonymize_by_id(
     row individually distinguishable even where no such constraint
     exists.
 
-    `id_filter` (retention-kolommen H1/H2 follow-up) narrows select_sql
-    with an extra `AND id = $2` -- used by erase_person()'s `scope_table`/
-    `scope_id` below to constrain the *identity* row (candidates/users/
-    client_prospects matching subject_table) to exactly the retention-
-    review subject, instead of every row that happens to share the same
-    e-mail address today."""
-    if id_filter is not None:
-        rows = await fetch_all(select_sql + " AND id = $2", select_param, id_filter)
-    else:
-        rows = await fetch_all(select_sql, select_param)
+    Retention-kolommen H1/H2/round-6 follow-up: erase_person()'s
+    `scope_table`/`scope_id` used to narrow this via an extra `id_filter`
+    param appended as `AND id = $2` onto an e-mail-based select_sql --
+    dropped (round 6 re-check, security-auditor + code-reviewer): a
+    scoped call now passes an id-only select_sql (`WHERE id = $1`,
+    select_param=scope_id) directly, with no e-mail condition at all, so
+    the subject row is matched regardless of any whitespace/case mismatch
+    between the address this call was given and what that row actually
+    has on file -- see erase_person()'s own call sites below."""
+    rows = await fetch_all(select_sql, select_param)
     for row in rows:
         anon = f"erased-{email_hash[:16]}-{row['id']}@erased.invalid"
         await execute(update_sql, row["id"], anon)
@@ -357,33 +357,38 @@ async def erase_person(
     of scope here.
 
     `scope_table`/`scope_id` (retention-kolommen H1/H2 follow-up, round 6
-    security-audit/code-review): when given, they name the exact
+    security-audit/code-review, re-checked again round 6 after an
+    address-padding bypass): when given, they name the exact
     retention_review_items subject (subject_table, subject_id) this call
-    is erasing on behalf of, and constrain the matching *identity* row in
-    that one table (candidates/users/client_prospects) to that id -- not
-    merely to "whatever row(s) currently carry this e-mail address". This
-    matters specifically because `email` here is re-read from the
-    subject row immediately before the call (routers/retention_admin.py's
-    `_approve_one()`), not trusted from the (possibly stale)
-    retention_review_items.email column -- but the unique constraint on
-    candidates.email/users.email is what normally makes "this e-mail" and
-    "this row" the same thing, and scope_id is the belt-and-braces check
-    for the case where it isn't (two rows racing to the same
-    freshly-changed address, a client_prospects.contact_email that
-    carries no uniqueness constraint at all).
+    is erasing on behalf of. The matching *identity* row in that one
+    table (candidates/users/client_prospects) is selected BY ID ALONE
+    (`WHERE id = $1`, no e-mail condition whatsoever) -- not "the row(s)
+    with id = scope_id AND this e-mail address", which is what the first
+    round-6 fix did and which silently matched NOTHING (leaving the
+    actual subject row completely untouched, while the other two -- still
+    e-mail-wide -- tables below anonymised whoever ELSE genuinely had the
+    clean address) the moment the subject's own stored address carried
+    whitespace that `email` here (re-read fresh off the subject row by
+    routers/retention_admin.py's `_approve_one()`, then normalised) no
+    longer did. Selecting by id alone makes that mismatch structurally
+    irrelevant: this row IS the subject, by definition of scope_id, full
+    stop.
 
-    The other two identity tables besides the one scope_table names still
-    read e-mail-wide here, same as every side-table cleanup below
-    (outreach, quiz/contact submissions, audit_log redaction,
-    suppression_list, ...) -- but that is safe ONLY because
-    routers/retention_admin.py's `_refuse_if_email_belongs_to_an_
-    unrelated_account()` has, by this point, already confirmed no OTHER
-    row on ANY of the three identity tables carries this address; a
-    conflict there refuses (409) before erase_person() is ever called.
-    Do not call this function with a scope_table/scope_id pair without
-    running that check (or an equivalent one) immediately before it, on
-    a freshly-read address, or this e-mail-wide read becomes exactly the
-    unscoped wipe scope_table exists to prevent.
+    The other two identity tables besides the one scope_table names are,
+    for a scoped call, NOT touched at all here -- not e-mail-wide, not in
+    any other way. The first round-6 fix left them e-mail-wide on the
+    theory that routers/retention_admin.py's `_refuse_if_email_belongs_
+    to_an_unrelated_account()` had, by this point, already confirmed no
+    OTHER row on either table carries this address, making that guard a
+    single point of failure for two live UPDATE statements: exactly the
+    address-padding mismatch above defeated it. Skipping those two tables
+    outright for a scoped call needs no such guarantee to hold, and also
+    closes the small TOCTOU window between that guard's read and this
+    call. Side-table cleanup below (outreach, quiz/contact submissions,
+    audit_log redaction, suppression_list, ...) is unaffected by any of
+    this -- those are traces of communication with an address, not a
+    second identity row scope could misattribute erasure to, and stay
+    e-mail-wide regardless of scope, same as before.
 
     The WS-C.16 extra_ids expansion below (a users row's
     candidate_profiles.candidate_id FK, followed regardless of that
@@ -393,7 +398,10 @@ async def erase_person(
     erased, which no amount of e-mail-based conflict-checking would ever
     catch (round 6 code-review finding). Self-service/admin erasure never
     pass these (scope_table=None), preserving today's e-mail-wide
-    behaviour, extra_ids included, exactly as before.
+    behaviour, extra_ids included, exactly as before -- except that the
+    three identity-table lookups now compare LOWER(TRIM(column)) rather
+    than plain LOWER(column), so a padded address on some OTHER row no
+    longer hides it from an otherwise-legitimate unscoped erasure either.
     """
     email_norm = privacy.normalize_email(email)
     if not email_norm:
@@ -401,13 +409,32 @@ async def erase_person(
     email_hash = privacy.email_hash(email_norm)
     email_domain = privacy.email_domain(email_norm)
 
-    users_id_filter = scope_id if scope_table == "users" else None
-    if users_id_filter is not None:
-        users_rows = await fetch_all(
-            "SELECT id FROM users WHERE LOWER(email) = $1 AND id = $2", email_norm, users_id_filter,
-        )
+    # Round 6 re-check (security-auditor + code-reviewer, adversarial
+    # address-padding probes): a scoped call's OWN identity row is now
+    # selected by id ALONE -- never by e-mail at all -- so a subject whose
+    # stored address carries whitespace the caller already stripped
+    # before comparing (a real gap: POST /api/candidates and POST
+    # /api/v1/admin/prospects both store `email` unstripped) is still the
+    # exact row this call touches, regardless of any mismatch between
+    # "the address we were told" and "the address this row actually has
+    # on file". The other two identity tables are, for a scoped call, not
+    # queried AT ALL here -- not even e-mail-wide -- rather than trusting
+    # routers/retention_admin.py's guard as the only thing standing
+    # between "no other row has this address" and an e-mail-wide UPDATE;
+    # skipping them outright removes both the small TOCTOU window between
+    # that guard's read and this call, and this exact normalisation
+    # mismatch, as a structural matter rather than a matching detail. Only
+    # the unscoped path (scope_table=None -- self-service/admin erasure)
+    # still matches e-mail-wide, and now does so via LOWER(TRIM(column))
+    # rather than plain LOWER(column), so a stray space on some OTHER
+    # row's stored address doesn't hide it from an otherwise-legitimate
+    # e-mail-wide erasure either.
+    if scope_table == "users":
+        users_rows = await fetch_all("SELECT id FROM users WHERE id = $1", scope_id)
+    elif scope_table is None:
+        users_rows = await fetch_all("SELECT id FROM users WHERE LOWER(TRIM(email)) = $1", email_norm)
     else:
-        users_rows = await fetch_all("SELECT id FROM users WHERE LOWER(email) = $1", email_norm)
+        users_rows = []
     user_ids = [u["id"] for u in users_rows]
 
     profile_rows = []
@@ -415,16 +442,16 @@ async def erase_person(
         p = await fetch_one("SELECT cv_file_path FROM candidate_profiles WHERE user_id = $1", uid)
         if p:
             profile_rows.append(p)
-    candidates_id_filter = scope_id if scope_table == "candidates" else None
-    if candidates_id_filter is not None:
+    if scope_table == "candidates":
         candidate_rows = await fetch_all(
-            "SELECT id, cv_file_path FROM candidates WHERE LOWER(email) = $1 AND id = $2",
-            email_norm, candidates_id_filter,
+            "SELECT id, cv_file_path FROM candidates WHERE id = $1", scope_id,
+        )
+    elif scope_table is None:
+        candidate_rows = await fetch_all(
+            "SELECT id, cv_file_path FROM candidates WHERE LOWER(TRIM(email)) = $1", email_norm,
         )
     else:
-        candidate_rows = await fetch_all(
-            "SELECT id, cv_file_path FROM candidates WHERE LOWER(email) = $1", email_norm,
-        )
+        candidate_rows = []
     candidate_ids = [c["id"] for c in candidate_rows]
 
     # WS-C.16 (migrations/023): also pick up any candidates row this
@@ -473,17 +500,26 @@ async def erase_person(
     # a placed candidate's PII (core/retention.py) -- they exist only to
     # support a placement, so they're nulled here alongside every other
     # candidates.* PII column, not retained separately.
-    await _anonymize_by_id(
-        "SELECT id FROM candidates WHERE LOWER(email) = $1",
-        """UPDATE candidates SET
+    _CANDIDATES_ANONYMIZE_UPDATE_SQL = """UPDATE candidates SET
              full_name = 'Erased', email = $2, phone = NULL, linkedin_url = NULL,
              github_url = NULL, portfolio_url = NULL, cv_text = NULL, cv_file_path = NULL,
              education = NULL, nationality = NULL, needs_work_permit = NULL,
              kennismigrant_status = NULL, ruling_30pct_status = NULL, ind_case_number = NULL,
              deleted_at = NOW(), consent_withdrawn_at = COALESCE(consent_withdrawn_at, NOW())
-           WHERE id = $1""",
-        email_norm, email_hash, id_filter=candidates_id_filter,
-    )
+           WHERE id = $1"""
+    # Round 6 re-check: id-only when this call is scoped to candidates,
+    # e-mail-wide (TRIM'd) only when unscoped, untouched entirely when
+    # scoped to a DIFFERENT identity table -- see the matching comment
+    # above candidate_rows/user_ids for why.
+    if scope_table == "candidates":
+        await _anonymize_by_id(
+            "SELECT id FROM candidates WHERE id = $1", _CANDIDATES_ANONYMIZE_UPDATE_SQL, scope_id, email_hash,
+        )
+    elif scope_table is None:
+        await _anonymize_by_id(
+            "SELECT id FROM candidates WHERE LOWER(TRIM(email)) = $1", _CANDIDATES_ANONYMIZE_UPDATE_SQL,
+            email_norm, email_hash,
+        )
     # WS-C.16 extra: anonymise the FK-linked candidates rows the e-mail
     # match above wouldn't have reached (see extra_ids above) -- reuses
     # _anonymize_by_id with an id list instead of an e-mail as the $1
@@ -511,11 +547,13 @@ async def erase_person(
             uid,
         )
         await execute("DELETE FROM push_tokens WHERE user_id = $1", uid)
-    await _anonymize_by_id(
-        "SELECT id FROM users WHERE LOWER(email) = $1",
-        "UPDATE users SET full_name = 'Erased', email = $2, deleted_at = NOW() WHERE id = $1",
-        email_norm, email_hash, id_filter=users_id_filter,
-    )
+    _USERS_ANONYMIZE_UPDATE_SQL = "UPDATE users SET full_name = 'Erased', email = $2, deleted_at = NOW() WHERE id = $1"
+    if scope_table == "users":
+        await _anonymize_by_id("SELECT id FROM users WHERE id = $1", _USERS_ANONYMIZE_UPDATE_SQL, scope_id, email_hash)
+    elif scope_table is None:
+        await _anonymize_by_id(
+            "SELECT id FROM users WHERE LOWER(TRIM(email)) = $1", _USERS_ANONYMIZE_UPDATE_SQL, email_norm, email_hash,
+        )
 
     # pipeline_entries.notes is free text a client wrote about a specific
     # candidate (routers/client.py) -- keyed by candidate_id, not e-mail,
@@ -546,12 +584,20 @@ async def erase_person(
     # A prospect contact person can share the same address as a candidate
     # (or simply be the subject of their own erasure request) — anonymise
     # the contact identity and set opt_out_at, same as add_suppression().
-    await _anonymize_by_id(
-        "SELECT id FROM client_prospects WHERE LOWER(contact_email) = $1",
+    _CLIENT_PROSPECTS_ANONYMIZE_UPDATE_SQL = (
         "UPDATE client_prospects SET contact_name = 'Erased', contact_email = $2, contact_linkedin = NULL, "
-        "opt_out_at = COALESCE(opt_out_at, NOW()) WHERE id = $1",
-        email_norm, email_hash, id_filter=(scope_id if scope_table == "client_prospects" else None),
+        "opt_out_at = COALESCE(opt_out_at, NOW()) WHERE id = $1"
     )
+    if scope_table == "client_prospects":
+        await _anonymize_by_id(
+            "SELECT id FROM client_prospects WHERE id = $1",
+            _CLIENT_PROSPECTS_ANONYMIZE_UPDATE_SQL, scope_id, email_hash,
+        )
+    elif scope_table is None:
+        await _anonymize_by_id(
+            "SELECT id FROM client_prospects WHERE LOWER(TRIM(contact_email)) = $1",
+            _CLIENT_PROSPECTS_ANONYMIZE_UPDATE_SQL, email_norm, email_hash,
+        )
     await _anonymize_by_id(
         "SELECT id FROM data_subject_requests WHERE LOWER(request_email) = $1",
         "UPDATE data_subject_requests SET request_email = $2 WHERE id = $1",

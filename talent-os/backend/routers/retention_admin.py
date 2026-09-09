@@ -112,6 +112,16 @@ _HARD_DELETE_TABLES = frozenset({"quiz_submissions", "contact_submissions", "can
 # never needs an e-mail at all.
 _SUBJECT_EMAIL_COLUMN = {"candidates": "email", "client_prospects": "contact_email", "users": "email"}
 
+# Round 6 re-check (code-reviewer, WS-E.10 approval queue): the column on
+# each table that erase_person() sets on the SUBJECT's own row when it
+# actually anonymises it -- checked immediately after erase_person()
+# returns (see _approve_one()'s postcondition below) so "this item is
+# marked purged" can never again mean anything other than "this row is
+# actually anonymised", regardless of what caused a mismatch (an address
+# normalisation gap, a future refactor, anything else this dict doesn't
+# need to know about).
+_SUBJECT_ERASED_MARKER_COLUMN = {"candidates": "deleted_at", "client_prospects": "opt_out_at", "users": "deleted_at"}
+
 # L1: a bulk decision (by explicit id list, or by category) is capped at
 # this many items -- large enough for a real monthly backlog, small enough
 # that a mistaken bulk call cannot fan out into thousands of individual
@@ -353,11 +363,26 @@ async def _refuse_if_email_belongs_to_an_unrelated_account(
     round 6 code-review finding) -- routers/gdpr.py's erase-person
     routine now skips that expansion outright whenever `scope_table` is
     given, so a scoped call never reaches that row at all; there is
-    nothing left here to refuse it for."""
+    nothing left here to refuse it for.
+
+    Round 6 re-check (security-auditor + code-reviewer, adversarial
+    address-padding probes): `email` is normalised (core.privacy.
+    normalize_email -- strip+lower) here again, defensively, even though
+    every call site already does this first -- a guard whose own
+    correctness depends on a caller convention it cannot enforce is not
+    actually enforcing anything. Every query below compares
+    LOWER(TRIM(column)) to that normalised value, not just LOWER(column)
+    -- a real write path (POST /api/candidates' CandidateCreate.email,
+    POST /api/v1/admin/prospects' ProspectCreate.email; neither strips
+    whitespace) can and does store a padded address today, and this
+    guard must see that row as the same identity the erasure routine's own
+    (equally TRIM'd) matching will see it as -- a guard comparing a
+    different key than the erasure it guards is not a guard at all."""
+    email = privacy.normalize_email(email)
     conflicts = []
 
     user_rows = await fetch_all(
-        "SELECT id FROM users WHERE LOWER(email) = LOWER($1) AND deleted_at IS NULL", email,
+        "SELECT id FROM users WHERE LOWER(TRIM(email)) = $1 AND deleted_at IS NULL", email,
     )
     if subject_table == "users":
         user_rows = [u for u in user_rows if u["id"] != subject_id]
@@ -372,7 +397,7 @@ async def _refuse_if_email_belongs_to_an_unrelated_account(
         own_linked_candidate_id = linked["candidate_id"] if linked else None
 
     candidate_rows = await fetch_all(
-        "SELECT id FROM candidates WHERE LOWER(email) = LOWER($1) AND deleted_at IS NULL", email,
+        "SELECT id FROM candidates WHERE LOWER(TRIM(email)) = $1 AND deleted_at IS NULL", email,
     )
     if subject_table == "candidates":
         candidate_rows = [c for c in candidate_rows if c["id"] != subject_id]
@@ -381,7 +406,7 @@ async def _refuse_if_email_belongs_to_an_unrelated_account(
     conflicts.extend(candidate_rows)
 
     prospect_rows = await fetch_all(
-        "SELECT id FROM client_prospects WHERE LOWER(contact_email) = LOWER($1) AND opt_out_at IS NULL",
+        "SELECT id FROM client_prospects WHERE LOWER(TRIM(contact_email)) = $1 AND opt_out_at IS NULL",
         email,
     )
     if subject_table == "client_prospects":
@@ -474,7 +499,25 @@ async def _approve_one(item_id: int, actor_id: int, note: Optional[str]) -> dict
 
     current_email = None
     if item["action"] == "anonymise":
-        current_email = await _current_subject_email(item["subject_table"], item["subject_id"])
+        # round 6 re-check (security-auditor + code-reviewer): normalise
+        # (strip+lower, core.privacy.normalize_email) BEFORE this address
+        # goes anywhere near the guard or erase_person() -- both of those
+        # already normalise/compare on a stripped address internally, so
+        # a raw, possibly-padded read here (a leading/trailing space on
+        # the subject's OWN stored address, reachable via the real
+        # POST /api/candidates and POST /api/v1/admin/prospects write
+        # paths, neither of which strips e-mail today) used to make this
+        # exact address the ONE thing the guard and erase_person() did
+        # NOT agree on: the guard compared the raw address, erase_person()
+        # the normalised one, so the guard could see "no conflict" while
+        # erase_person() then matched (and anonymised) a completely
+        # different, unpadded row sharing the clean address -- leaving
+        # the actual subject untouched and the item reported "purged"
+        # regardless. One normalised value, used everywhere below, closes
+        # that gap at the source rather than in either callee.
+        current_email = privacy.normalize_email(
+            await _current_subject_email(item["subject_table"], item["subject_id"])
+        )
         if not current_email:
             raise HTTPException(
                 status_code=409,
@@ -525,6 +568,34 @@ async def _approve_one(item_id: int, actor_id: int, note: Optional[str]) -> dict
                 current_email, actor_id=actor_id, reason=f"retention_purge:{item['category']}",
                 scope_table=item["subject_table"], scope_id=item["subject_id"],
             )
+            # Postcondition (round 6, code-reviewer): erase_person()
+            # having returned without raising is not, by itself, proof
+            # that THIS subject row is the one it anonymised -- that is
+            # precisely the invariant an address-normalisation mismatch
+            # broke before (the guard and the erasure disagreeing on
+            # what "this e-mail" meant let the subject survive intact
+            # while a second, unrelated row silently absorbed the
+            # anonymisation). Re-read the subject's own erased-marker
+            # column right off its source row and refuse to report
+            # "purged" unless it is actually set -- this makes the whole
+            # class of "reported as purged while the subject is intact"
+            # bug structurally impossible here, independent of whatever
+            # future mismatch might otherwise cause it. The except clause
+            # below unclaims the item back to original_status exactly as
+            # it would for any other failure in this block.
+            marker_column = _SUBJECT_ERASED_MARKER_COLUMN[item["subject_table"]]
+            marker_row = await fetch_one(
+                f"SELECT {marker_column} AS marker FROM {item['subject_table']} WHERE id = $1",
+                item["subject_id"],
+            )
+            if marker_row is None or marker_row["marker"] is None:
+                raise HTTPException(
+                    status_code=500,
+                    detail=(
+                        f"erase_person() returned without anonymising subject "
+                        f"{item['subject_table']}.id={item['subject_id']} -- refusing to report 'purged'."
+                    ),
+                )
         elif item["action"] == "hard_delete":
             table = item["subject_table"]
             if table not in _HARD_DELETE_TABLES:

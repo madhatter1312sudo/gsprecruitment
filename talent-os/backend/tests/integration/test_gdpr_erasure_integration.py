@@ -234,3 +234,44 @@ def test_scoped_erasure_does_not_follow_a_users_row_to_an_unrelated_fk_linked_ca
     linked_row = db_run(fetch_one, "SELECT email, deleted_at FROM candidates WHERE id = $1", linked_candidate["id"])
     assert linked_row["email"] == linked_email  # the FK-linked, unrelated candidate is NOT touched
     assert linked_row["deleted_at"] is None
+
+
+def test_scoped_erasure_erases_the_subject_despite_a_padded_stored_address(db_run):
+    """Round 6 re-check (security-auditor + code-reviewer, WS-E.10
+    approval queue): the subject row's own stored address can carry
+    whitespace a caller already stripped before comparing (a real gap --
+    POST /api/candidates' CandidateCreate.email and POST /api/v1/admin/
+    prospects' ProspectCreate.email neither strip nor validate the
+    address). A scoped call (scope_table='candidates', scope_id=this
+    row's id) must still anonymise THIS row, selected by id alone --
+    never by re-deriving "the row with this e-mail" from an address that
+    no longer matches what's actually stored, which is exactly how a
+    prior round-6 fix (`... AND id = $2` on an e-mail-filtered SELECT)
+    silently matched nothing and left the subject untouched."""
+    from core.database import execute, fetch_one
+    from routers.gdpr import erase_person
+
+    padded_email = f"  scope-erase-padded-{uuid.uuid4().hex[:10]}@example.com  "  # leading AND trailing space
+    normalized_email = padded_email.strip().lower()
+
+    subject_candidate = db_run(
+        fetch_one,
+        "INSERT INTO candidates (full_name, email, deleted_at) VALUES ($1, $2, NULL) RETURNING id",
+        "Scope Erase Padded Subject", padded_email,
+    )
+    stored = db_run(fetch_one, "SELECT email FROM candidates WHERE id = $1", subject_candidate["id"])
+    assert stored["email"] == padded_email, "the padded address must actually be what's stored"
+
+    # erase_person() is called with the NORMALISED address -- exactly what
+    # routers/retention_admin.py's _approve_one() now does (privacy.
+    # normalize_email() applied before the call) -- never the raw,
+    # padded one this row happens to carry.
+    result = db_run(
+        erase_person, normalized_email, None, "test: scoped erasure despite padded address",
+        scope_table="candidates", scope_id=subject_candidate["id"],
+    )
+    assert result["status"] == "complete"
+
+    subject_row = db_run(fetch_one, "SELECT email, deleted_at FROM candidates WHERE id = $1", subject_candidate["id"])
+    assert subject_row["email"] != padded_email  # the scoped subject IS erased, id-only match
+    assert subject_row["deleted_at"] is not None
