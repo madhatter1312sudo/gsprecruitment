@@ -338,7 +338,12 @@ def test_kind_sql_treats_linked_profile_as_self_registered_even_if_sourced(monke
 
     a_rows_calls = [sql for sql, params in db.calls if "SELECT c.id AS candidate_id" in sql]
     assert a_rows_calls, "expected the branch-A row query to run"
-    kind_sql_fragment = "CASE WHEN cp.user_id IS NOT NULL OR c.source = 'portal_registration' THEN 'self-registered' ELSE 'sourced' END"
+    kind_sql_fragment = (
+        "CASE WHEN cp.user_id IS NOT NULL OR c.source = 'portal_registration' "
+        "OR EXISTS (SELECT 1 FROM users ux WHERE LOWER(ux.email) = LOWER(c.email) "
+        "AND ux.role = 'candidate' AND ux.deleted_at IS NULL) "
+        "THEN 'self-registered' ELSE 'sourced' END"
+    )
     for sql in a_rows_calls:
         assert kind_sql_fragment in sql
 
@@ -566,3 +571,27 @@ def test_health_detail_duplicate_profile_links_none_when_db_down(monkeypatch):
 
     result = asyncio.run(health.get_health_detail())
     assert result.duplicate_profile_links is None
+
+
+# ── 5. GDPR self-export covers source_page/referrer_host ─────────────────
+# migrations/038_leads_origin.py adds source_page/referrer_host to
+# contact_submissions and quiz_submissions -- routers/gdpr.py's
+# export_my_data() selects an explicit column list from both (unlike the
+# candidates SELECT *, see tests/test_ws_c7_placements.py), so a new
+# personal-data column there needs its own regression guard or it goes
+# missing from a person's Art. 15/20 export silently (security-auditor
+# WS2 finding).
+
+def test_gdpr_export_selects_source_page_and_referrer_host_from_quiz_and_contact():
+    import inspect
+    import routers.gdpr as gdpr
+
+    source = inspect.getsource(gdpr.export_my_data)
+    full_quiz_stmt = source[source.index("quiz = await fetch_all("):source.index("contact = await fetch_all(")]
+    full_contact_stmt = source[source.index("contact = await fetch_all("):source.index("push_tokens = await fetch_all(")]
+    assert "source_page" in full_quiz_stmt and "referrer_host" in full_quiz_stmt, (
+        "quiz_submissions export is missing source_page/referrer_host"
+    )
+    assert "source_page" in full_contact_stmt and "referrer_host" in full_contact_stmt, (
+        "contact_submissions export is missing source_page/referrer_host"
+    )

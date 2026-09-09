@@ -164,7 +164,25 @@ def route_admin_api(route, request):
                         "active_clients": 2, "placements_this_week": 0})
         return
     if path == "/api/v1/admin/audit-log":
-        json_response({"items": [], "total": 0})
+        # `changes` here is a plain JS object -- the shape the fixed
+        # get_audit_log() now guarantees after decoding asyncpg's raw
+        # jsonb text (code-reviewer WS2 finding: the old stub had no
+        # `changes` field at all, so admin.js's `typeof e.changes ===
+        # 'object'` gate was never exercised and the "always shows a
+        # dash" regression slipped through).
+        json_response({
+            "items": [{
+                "id": 1,
+                "action": "user_update",
+                "actor_id": 1,
+                "actor_email": "admin@example.invalid",
+                "target_type": "user",
+                "target_id": 42,
+                "changes": {"status": "actief", "role": "candidate"},
+                "created_at": "2026-09-01T10:00:00Z",
+            }],
+            "total": 1,
+        })
         return
 
     # ---- Users list / detail (unrelated to the Opdrachtgevers roster
@@ -363,6 +381,14 @@ def main():
         page.goto(base, wait_until="domcontentloaded", timeout=15000)
         page.wait_for_timeout(800)
 
+        # ---- Dashboard: recent activity changeKeys (code-reviewer WS2) ----
+        # The stubbed audit-log item's `changes` is a real object, matching
+        # the fixed get_audit_log() contract -- this must render the
+        # "(status, role)" suffix, not silently show nothing.
+        activity_text = page.eval_on_selector('#recentActivityList', "el => el.textContent") or ""
+        if "(status, role)" not in activity_text:
+            failures.append(f"dashboard: recent activity did not render changeKeys — got: {activity_text[:200]!r}")
+
         # ---- Opdrachtgevers ----
         errors_before = len(console_errors)
         page.click('.nav-link[data-section="clients"]')
@@ -555,6 +581,22 @@ def main():
         new_errors = console_errors[errors_before:]
         if new_errors:
             failures.append(f"analytics: {len(new_errors)} console error(s): {new_errors[:3]}")
+
+        # ---- Audit Log: Details column (code-reviewer WS2) ----
+        errors_before = len(console_errors)
+        page.click('.nav-link[data-section="audit"]')
+        page.wait_for_timeout(600)
+        audit_rows = page.eval_on_selector_all('#section-audit table tbody tr', "els => els.length")
+        if audit_rows != 1:
+            failures.append(f"audit: table rendered {audit_rows} rows, expected 1")
+        details_text = page.eval_on_selector('#section-audit table tbody tr td:last-child', "el => el.textContent") or ""
+        if "status" not in details_text or "actief" not in details_text:
+            failures.append(f"audit: Details column did not render the changes object — got: {details_text[:200]!r}")
+        if details_text.strip() == "—":
+            failures.append("audit: Details column showed the empty-state dash instead of the changes object")
+        new_errors = console_errors[errors_before:]
+        if new_errors:
+            failures.append(f"audit: {len(new_errors)} console error(s): {new_errors[:3]}")
 
         # ---- Rapportage ----
         errors_before = len(console_errors)

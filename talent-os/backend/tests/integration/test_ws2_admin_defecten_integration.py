@@ -300,6 +300,66 @@ def test_unlinked_self_registered_still_listed_once(client, make_admin, make_can
     assert items[0]["user_id"] == portal_user["id"]
 
 
+def test_unlinked_email_matched_account_shows_once_as_self_registered(client, make_admin, make_candidate_user, db_run):
+    """code-reviewer WS2 finding: a sourced candidates row (source='apollo')
+    plus a portal account sharing its e-mail, whose candidate_profiles row
+    is NOT linked yet (candidate_id IS NULL) -- exactly the case branch
+    B's NOT EXISTS dedup guard was written to exclude, to stop the
+    double-listing test above. Without kind_sql also counting this case,
+    the person fell out of both branches for kind=self-registered: branch
+    A called them 'sourced' (cp.candidate_id is NULL on the join, so
+    kind_sql's old cp.user_id check saw nothing), and branch B excluded
+    them outright. GET /candidates?kind=self-registered must show them,
+    exactly once."""
+    from core.database import execute, fetch_one
+
+    admin = make_admin()
+    suffix = uuid.uuid4().hex[:10]
+    email = f"emailmatch-{suffix}@example.com"
+
+    candidate_row = db_run(
+        fetch_one,
+        """INSERT INTO candidates (full_name, email, current_title, source, status, updated_at)
+           VALUES ('Email Matched Person', $1, 'Embedded Software Engineer', 'apollo', 'sourced', NOW())
+           RETURNING id""",
+        email,
+    )
+    portal_user = make_candidate_user()
+    db_run(execute, "UPDATE users SET email = $1 WHERE id = $2", email, portal_user["id"])
+    # candidate_profiles row deliberately left unlinked (candidate_id NULL)
+    # -- the WS-C.16 backfill/candidate_link.py hasn't run yet.
+    db_run(execute, "INSERT INTO candidate_profiles (user_id) VALUES ($1)", portal_user["id"])
+
+    r_unfiltered = client.get(
+        "/api/v1/admin/candidates", params={"search": suffix, "limit": 200, "offset": 0},
+        headers=admin["headers"],
+    )
+    assert r_unfiltered.status_code == 200
+    items = [it for it in r_unfiltered.json()["items"] if it.get("email") == email]
+    assert len(items) == 1, f"expected exactly one row for {email}, got {items}"
+    assert items[0]["kind"] == "self-registered"
+
+    r_kind = client.get(
+        "/api/v1/admin/candidates", params={"kind": "self-registered", "search": suffix, "limit": 200, "offset": 0},
+        headers=admin["headers"],
+    )
+    assert r_kind.status_code == 200
+    kind_items = [it for it in r_kind.json()["items"] if it.get("email") == email]
+    assert len(kind_items) == 1, (
+        f"kind=self-registered must show the e-mail-matched account, got {kind_items} "
+        f"(regression: it vanished from this filter entirely)"
+    )
+    assert kind_items[0]["candidate_id"] == candidate_row["id"]
+    assert kind_items[0]["user_id"] == portal_user["id"]
+
+    # The sourced-detail route must agree.
+    r_sourced_detail = client.get(
+        f"/api/v1/admin/candidates/sourced/{candidate_row['id']}", headers=admin["headers"],
+    )
+    assert r_sourced_detail.status_code == 200
+    assert r_sourced_detail.json()["kind"] == "self-registered"
+
+
 # ── item 4/5 sanity: analytics + health stay valid on a fresh-migrated DB ──
 
 def test_admin_analytics_returns_expected_keys(client, make_admin):

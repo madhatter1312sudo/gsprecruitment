@@ -537,7 +537,21 @@ async def list_all_candidates(
     # candidates row, without c.source itself ever being rewritten. source
     # keeps its original sourcing-provenance meaning (see core/sources.py);
     # it's just no longer the only signal `kind` derives from.
-    kind_sql = f"CASE WHEN cp.user_id IS NOT NULL OR c.source = '{PORTAL_REGISTRATION}' THEN 'self-registered' ELSE 'sourced' END"
+    #
+    # A third case (code-reviewer WS2 finding): an e-mail-matched candidate
+    # portal account whose candidate_profiles row is NOT linked yet
+    # (cp.candidate_id IS NULL) -- exactly the row branch B's NOT EXISTS
+    # guard below excludes, to avoid double-listing it. Without also
+    # counting it here, that person is neither branch A's self-registered
+    # nor branch B's -- they vanish from kind=self-registered entirely.
+    # The EXISTS keeps this in one CASE (no extra join needed) so it works
+    # in both the COUNT and the row query.
+    kind_sql = (
+        "CASE WHEN cp.user_id IS NOT NULL OR c.source = '{portal}' "
+        "OR EXISTS (SELECT 1 FROM users ux WHERE LOWER(ux.email) = LOWER(c.email) "
+        "AND ux.role = 'candidate' AND ux.deleted_at IS NULL) "
+        "THEN 'self-registered' ELSE 'sourced' END"
+    ).format(portal=PORTAL_REGISTRATION)
 
     if status:
         a_conditions.append(f"c.status = ${idx}")
@@ -702,8 +716,10 @@ async def get_candidate_detail(
         # linked candidate_profiles row means self-registered regardless
         # of this row's original c.source, so the detail view's `kind`
         # can't disagree with what GET /candidates just showed for the
-        # same person.
-        candidate["kind"] = "self-registered" if linked_profile or candidate["source"] == PORTAL_REGISTRATION else "sourced"
+        # same person. `user` here already covers the third case
+        # (e-mail-matched account, cp row not linked yet) via the
+        # fallback lookup a few lines up -- no extra query needed.
+        candidate["kind"] = "self-registered" if (linked_profile or user or candidate["source"] == PORTAL_REGISTRATION) else "sourced"
         candidate["user_id"] = user["id"] if user else None
         candidate["is_verified"] = user["is_verified"] if user else None
         return candidate
@@ -996,6 +1012,13 @@ async def get_audit_log(
             LIMIT ${idx} OFFSET ${idx + 1}""",
         *params_ext,
     )
+
+    # `changes` is jsonb but asyncpg returns raw JSON text on this
+    # connection (no codec registered) -- same pattern as get_lead_detail.
+    for row in rows:
+        val = row.get("changes")
+        if isinstance(val, str):
+            row["changes"] = json.loads(val)
 
     return {"items": rows, "total": total, "limit": limit, "offset": offset}
 
