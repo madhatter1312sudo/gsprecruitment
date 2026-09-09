@@ -884,6 +884,12 @@ async def get_platform_analytics(current_user: dict = Depends(require_role("admi
     """Get platform-wide analytics data."""
     analytics = AdminAnalytics()
 
+    # WS-4 (migrations/037_pool_vacancies_consent_sources.py): job_fill_rate
+    # and client_retention_rate must not count GSP's own internal clients
+    # (the demo-vacatures client and the anonymous-opdrachtgever pool
+    # client, both is_internal = true) -- they are not real opdrachtgevers,
+    # and including them would inflate both rates with jobs/clients that
+    # were never actually won or retained.
     (
         user_growth_rows, total_jobs, filled_jobs, total_clients, repeat_clients,
     ) = await asyncio.gather(
@@ -892,14 +898,21 @@ async def get_platform_analytics(current_user: dict = Depends(require_role("admi
                FROM users WHERE deleted_at IS NULL AND created_at >= NOW() - INTERVAL '12 months'
                GROUP BY month ORDER BY month""",
         ),
-        fetch_val("SELECT COUNT(*) FROM job_orders WHERE deleted_at IS NULL AND is_demo = false"),
-        fetch_val("SELECT COUNT(*) FROM job_orders WHERE filled_at IS NOT NULL AND deleted_at IS NULL AND is_demo = false"),
-        fetch_val("SELECT COUNT(*) FROM clients WHERE deleted_at IS NULL"),
+        fetch_val(
+            """SELECT COUNT(*) FROM job_orders j JOIN clients cl ON cl.id = j.client_id
+               WHERE j.deleted_at IS NULL AND j.is_demo = false AND cl.is_internal = false""",
+        ),
+        fetch_val(
+            """SELECT COUNT(*) FROM job_orders j JOIN clients cl ON cl.id = j.client_id
+               WHERE j.filled_at IS NOT NULL AND j.deleted_at IS NULL AND j.is_demo = false
+                 AND cl.is_internal = false""",
+        ),
+        fetch_val("SELECT COUNT(*) FROM clients WHERE deleted_at IS NULL AND is_internal = false"),
         fetch_val(
             """SELECT COUNT(*) FROM (
-                   SELECT client_id FROM job_orders
-                   WHERE filled_at IS NOT NULL AND deleted_at IS NULL
-                   GROUP BY client_id HAVING COUNT(*) > 1
+                   SELECT j.client_id FROM job_orders j JOIN clients cl ON cl.id = j.client_id
+                   WHERE j.filled_at IS NOT NULL AND j.deleted_at IS NULL AND cl.is_internal = false
+                   GROUP BY j.client_id HAVING COUNT(*) > 1
                ) repeat_client_groups""",
         ),
     )

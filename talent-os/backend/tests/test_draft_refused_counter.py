@@ -33,6 +33,10 @@ def _candidate_row(i):
         "full_name": f"Candidate {i}", "email": f"candidate{i}@example.com",
         "current_company": "Acme", "job_title": "Embedded Engineer",
         "job_description": "C++ / FreeRTOS", "job_company": "Acme",
+        # WS-4 (migrations/037): draft_outreach() now reads this to decide
+        # whether to anonymise job_company -- False here, same as any
+        # ordinary, named client.
+        "job_client_internal": False,
     }
 
 

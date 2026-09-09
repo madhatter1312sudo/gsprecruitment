@@ -19,12 +19,15 @@ from starlette.requests import Request
 from core.security import hash_token
 
 
-def _fake_request() -> Request:
+def _fake_request(ip: str = "9.9.9.9") -> Request:
     """Bare starlette Request -- slowapi's @limiter.limit decorator reads
     request.headers/request.client to key the limit, same helper as
-    tests/test_ws_e4_ratelimit_lockout.py._make_request."""
+    tests/test_ws_e4_ratelimit_lockout.py._make_request. `ip` is
+    overridable (WS-4 tests use their own) so every module-level test
+    sharing the default "9.9.9.9" doesn't collide against
+    talentpool_optin's 5/minute limit purely from test-suite volume."""
     scope = {
-        "type": "http", "headers": [], "client": ("9.9.9.9", 12345),
+        "type": "http", "headers": [], "client": (ip, 12345),
         "method": "POST", "path": "/",
     }
     return Request(scope)
@@ -281,11 +284,18 @@ def test_profile_get_has_no_consent_when_never_recorded(patch_profile_router):
 # ── Public: POST /api/public/talentpool-optin + /talentpool-confirm ──────
 
 class _PublicDB:
-    def __init__(self, pending_row=None, existing_candidate=None, suppressed=False, recent_pending=False):
+    def __init__(self, pending_row=None, existing_candidate=None, suppressed=False,
+                 recent_pending=False, job_row=None):
         self.pending_row = pending_row
         self.existing_candidate = existing_candidate
         self.suppressed = suppressed
         self.recent_pending = recent_pending
+        # WS-4 (migrations/037): the job_orders lookup used both by
+        # talentpool_optin() (validating an incoming job_id) and
+        # talentpool_confirm() (re-checking it's still open at confirm
+        # time) -- a dict with at least {"id", "title"}, or None to
+        # simulate "no such open/non-demo/non-deleted job".
+        self.job_row = job_row
         self.executed = []
         self.inserted_token_hash = None
 
@@ -298,6 +308,9 @@ class _PublicDB:
         if "FROM talentpool_optin_requests" in sql:
             # talentpool_confirm()'s token lookup
             return self.pending_row
+        if "FROM job_orders" in sql:
+            # WS-4: job_id validation (optin) / re-check (confirm)
+            return self.job_row
         if "FROM candidates WHERE LOWER(email)" in sql:
             return self.existing_candidate
         if sql.strip().startswith("UPDATE candidates") or sql.strip().startswith("INSERT INTO candidates"):
@@ -340,12 +353,83 @@ def test_talentpool_optin_with_consent_stores_only_the_token_hash(patch_public_r
     insert_calls = [c for c in db.executed if "INSERT INTO talentpool_optin_requests" in c[0]]
     assert len(insert_calls) == 1
     _, args = insert_calls[0]
-    email, token_hash, scope, source = args
+    email, token_hash, scope, source, job_id, job_alerts = args
     assert email == "jane@example.com"
     assert scope == "matching_only" and source == "kandidaten_page"
+    # no job_id/job_alerts given -- WS-4 fields default to "not linked"
+    assert job_id is None
+    assert job_alerts is False
     # only a sha256 hex digest is stored, never a raw token
     assert len(token_hash) == 64
     assert all(c in "0123456789abcdef" for c in token_hash)
+
+
+# ── WS-4 (migrations/037): job_id / job_alerts on the talentpool opt-in ──
+
+def test_talentpool_optin_with_valid_job_id_stores_it_and_names_the_job_in_the_email(monkeypatch):
+    from models.schemas import TalentpoolOptinRequest
+    import routers.public as public_router
+
+    db = _PublicDB(job_row={"id": 55, "title": "Senior Embedded C++ Engineer"})
+    monkeypatch.setattr(public_router, "fetch_one", db.fetch_one)
+    monkeypatch.setattr(public_router, "execute", db.execute)
+
+    sent = []
+
+    async def _fake_send_email(**kwargs):
+        sent.append(kwargs)
+        return True
+    monkeypatch.setattr(public_router.email_service, "send_email", _fake_send_email)
+
+    data = TalentpoolOptinRequest(
+        email="applicant@example.com", consent=True, scope="matching_only",
+        source="vacancy_apply", job_id=55, job_alerts=True,
+    )
+    asyncio.run(public_router.talentpool_optin(request=_fake_request(ip="9.9.9.10"), data=data))
+    insert_calls = [c for c in db.executed if "INSERT INTO talentpool_optin_requests" in c[0]]
+    _, args = insert_calls[0]
+    email, token_hash, scope, source, job_id, job_alerts = args
+    assert job_id == 55
+    assert job_alerts is True
+    assert source == "vacancy_apply"
+    assert len(sent) == 1
+    assert "Senior Embedded C++ Engineer" in sent[0]["body_text"]
+
+
+def test_talentpool_optin_with_unknown_job_id_stores_no_job_id(patch_public_router):
+    """An id that doesn't resolve to an open/non-demo/non-deleted job is
+    silently ignored -- the row is still created, just without a job_id,
+    same no-enumeration posture as the rest of this endpoint."""
+    from models.schemas import TalentpoolOptinRequest
+    db = _PublicDB(job_row=None)  # simulates closed/demo/deleted/unknown job_id
+    router = patch_public_router(db)
+    data = TalentpoolOptinRequest(
+        email="applicant@example.com", consent=True, scope="matching_only",
+        source="vacancy_apply", job_id=999999,
+    )
+    result = asyncio.run(router.talentpool_optin(request=_fake_request(ip="9.9.9.11"), data=data))
+    assert "message" in result  # same generic 202 body
+    insert_calls = [c for c in db.executed if "INSERT INTO talentpool_optin_requests" in c[0]]
+    _, args = insert_calls[0]
+    email, token_hash, scope, source, job_id, job_alerts = args
+    assert job_id is None
+
+
+def test_talentpool_optin_source_accepts_vacancy_apply():
+    from models.schemas import TalentpoolOptinRequest
+    req = TalentpoolOptinRequest(
+        email="a@example.com", consent=True, scope="matching_only", source="vacancy_apply",
+    )
+    assert req.source == "vacancy_apply"
+
+
+def test_talentpool_optin_source_still_rejects_an_unknown_value():
+    from pydantic import ValidationError
+    from models.schemas import TalentpoolOptinRequest
+    with pytest.raises(ValidationError):
+        TalentpoolOptinRequest(
+            email="a@example.com", consent=True, scope="matching_only", source="not_a_real_source",
+        )
 
 
 def test_talentpool_optin_without_consent_is_a_noop(patch_public_router):
@@ -404,7 +488,8 @@ def test_talentpool_confirm_creates_new_candidate_with_no_source_url(patch_publi
     """SOP §1.5: the talentpool checkbox itself is the source -- no
     source_url required for candidates created via this channel."""
     from models.schemas import TalentpoolConfirmRequest
-    pending = {"id": 1, "email": "new@example.com", "scope": "matching_and_contact", "source": "blog_cta"}
+    pending = {"id": 1, "email": "new@example.com", "scope": "matching_and_contact",
+               "source": "blog_cta", "job_id": None}
     db = _PublicDB(pending_row=pending, existing_candidate=None)
     router = patch_public_router(db)
     result = asyncio.run(router.talentpool_confirm(request=_fake_request(), data=TalentpoolConfirmRequest(token="tok")))
@@ -422,7 +507,8 @@ def test_talentpool_confirm_updates_existing_candidate_preserving_other_basis(pa
     confirms the public talentpool opt-in keeps that basis (never
     silently overwritten) but still gets the consent columns recorded."""
     from models.schemas import TalentpoolConfirmRequest
-    pending = {"id": 1, "email": "existing@example.com", "scope": "matching_only", "source": "kandidaten_page"}
+    pending = {"id": 1, "email": "existing@example.com", "scope": "matching_only",
+               "source": "kandidaten_page", "job_id": None}
     db = _PublicDB(
         pending_row=pending,
         existing_candidate={"id": 99, "lawful_basis": "gerechtvaardigd_belang"},
@@ -442,7 +528,8 @@ def test_talentpool_confirm_never_flips_portal_registratie_lawful_basis(patch_pu
     separately confirms the public talentpool opt-in keeps that basis --
     same rule as the portal endpoint, not just 'any other basis'."""
     from models.schemas import TalentpoolConfirmRequest
-    pending = {"id": 2, "email": "portal@example.com", "scope": "matching_only", "source": "kandidaten_page"}
+    pending = {"id": 2, "email": "portal@example.com", "scope": "matching_only",
+               "source": "kandidaten_page", "job_id": None}
     db = _PublicDB(
         pending_row=pending,
         existing_candidate={"id": 100, "lawful_basis": "portal_registratie"},
@@ -457,7 +544,8 @@ def test_talentpool_confirm_never_flips_portal_registratie_lawful_basis(patch_pu
 
 def test_talentpool_confirm_marks_the_pending_request_confirmed(patch_public_router):
     from models.schemas import TalentpoolConfirmRequest
-    pending = {"id": 5, "email": "new2@example.com", "scope": "matching_only", "source": "kandidaten_page"}
+    pending = {"id": 5, "email": "new2@example.com", "scope": "matching_only",
+               "source": "kandidaten_page", "job_id": None}
     db = _PublicDB(pending_row=pending, existing_candidate=None)
     router = patch_public_router(db)
     asyncio.run(router.talentpool_confirm(request=_fake_request(), data=TalentpoolConfirmRequest(token="tok")))
@@ -467,6 +555,60 @@ def test_talentpool_confirm_marks_the_pending_request_confirmed(patch_public_rou
     ]
     assert len(confirm_calls) == 1
     assert confirm_calls[0][1] == (5,)
+
+
+# ── WS-4 (migrations/037): talentpool-confirm records the application ────
+
+def test_talentpool_confirm_with_still_open_job_creates_match_and_returns_applied_job(patch_public_router):
+    from models.schemas import TalentpoolConfirmRequest
+    pending = {"id": 6, "email": "applicant@example.com", "scope": "matching_only",
+               "source": "vacancy_apply", "job_id": 55}
+    db = _PublicDB(
+        pending_row=pending, existing_candidate=None,
+        job_row={"id": 55, "title": "Senior Embedded C++ Engineer"},
+    )
+    router = patch_public_router(db)
+    result = asyncio.run(
+        router.talentpool_confirm(request=_fake_request(), data=TalentpoolConfirmRequest(token="tok"))
+    )
+    assert result["applied_job"] == {"id": 55, "title": "Senior Embedded C++ Engineer"}
+    match_calls = [c for c in db.executed if c[0].strip().startswith("INSERT INTO matches")]
+    assert len(match_calls) == 1
+    match_sql, match_args = match_calls[0]
+    assert "ON CONFLICT (candidate_id, job_id)" in match_sql
+    assert "'applied'" in match_sql
+    assert match_args == (1, 55)  # candidate_id from the INSERT INTO candidates RETURNING id
+
+
+def test_talentpool_confirm_with_no_job_id_returns_applied_job_none(patch_public_router):
+    from models.schemas import TalentpoolConfirmRequest
+    pending = {"id": 7, "email": "plain@example.com", "scope": "matching_only",
+               "source": "kandidaten_page", "job_id": None}
+    db = _PublicDB(pending_row=pending, existing_candidate=None)
+    router = patch_public_router(db)
+    result = asyncio.run(
+        router.talentpool_confirm(request=_fake_request(), data=TalentpoolConfirmRequest(token="tok"))
+    )
+    assert result["applied_job"] is None
+    match_calls = [c for c in db.executed if c[0].strip().startswith("INSERT INTO matches")]
+    assert match_calls == []
+
+
+def test_talentpool_confirm_with_job_closed_since_optin_returns_applied_job_none(patch_public_router):
+    """The job was open when the applicant opted in, but has since closed
+    -- confirm must not create a match for a job that is no longer
+    eligible, and must say so via applied_job=None rather than an error."""
+    from models.schemas import TalentpoolConfirmRequest
+    pending = {"id": 8, "email": "late@example.com", "scope": "matching_only",
+               "source": "vacancy_apply", "job_id": 55}
+    db = _PublicDB(pending_row=pending, existing_candidate=None, job_row=None)
+    router = patch_public_router(db)
+    result = asyncio.run(
+        router.talentpool_confirm(request=_fake_request(), data=TalentpoolConfirmRequest(token="tok"))
+    )
+    assert result["applied_job"] is None
+    match_calls = [c for c in db.executed if c[0].strip().startswith("INSERT INTO matches")]
+    assert match_calls == []
 
 
 # ── Admin: PATCH /api/v1/admin/candidates/{id}/talentpool-consent ────────

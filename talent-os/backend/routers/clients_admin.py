@@ -10,6 +10,10 @@ its /{client_id}/contacts sub-routes (no path collision -- those all have
 a trailing /contacts segment).
 
 erkend_referent / notes are migrations/031_clients_erkend_referent.py.
+is_internal (migrations/037_pool_vacancies_consent_sources.py, WS-4) marks
+GSP's own two internal client rows (the demo-vacatures client and the
+anonymous-opdrachtgever pool client) so the admin panel can tell them
+apart from a real, named client.
 open_job_count and primary_contact are both computed with LEFT JOIN
 LATERAL subqueries -- one query for the whole page, no N+1 per row (the
 thing this endpoint exists to fix).
@@ -72,6 +76,7 @@ def _row_to_list_item(row: dict) -> dict:
         "domain": row.get("domain"),
         "industry": row.get("industry"),
         "erkend_referent": row["erkend_referent"],
+        "is_internal": row.get("is_internal", False),
         "open_job_count": row["open_job_count"] or 0,
         "primary_contact": primary_contact,
         "created_at": row["created_at"],
@@ -115,6 +120,7 @@ async def list_clients(
     params_ext = params + [limit, offset]
     rows = await fetch_all(
         f"""SELECT c.id, c.company_name, c.domain, c.industry, c.erkend_referent, c.created_at,
+                   c.is_internal,
                    COALESCE(oj.open_job_count, 0) AS open_job_count,
                    pc.full_name, pc.email, pc.role
             FROM clients c
@@ -141,6 +147,7 @@ async def get_client_detail(
     row = await fetch_one(
         f"""SELECT c.id, c.company_name, c.domain, c.industry, c.location,
                    c.erkend_referent, c.notes, c.created_at, c.updated_at,
+                   c.is_internal,
                    COALESCE(oj.open_job_count, 0) AS open_job_count
             FROM clients c
             {_LATERAL_JOINS}

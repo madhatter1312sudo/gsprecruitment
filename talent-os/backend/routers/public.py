@@ -284,14 +284,19 @@ async def submit_lead(request: Request, data: LeadSubmit):
 # token's sha256 hash is ever stored (core.security.hash_token); the raw
 # token exists only in the outbound e-mail.
 
-async def _send_talentpool_confirm_email(email: str, token: str) -> None:
+async def _send_talentpool_confirm_email(email: str, token: str, job_title: Optional[str] = None) -> None:
     # Security-audit fix (H1): the token goes in the URL *fragment*
     # (#token=), never a ?token= query param -- a fragment is never sent
     # to the server in the request line and never appears in access logs
     # or a Referer header. website/talentpool-confirm.html/.js reads it
     # from window.location.hash to match.
     link = f"https://gsprecruitment.nl/talentpool-confirm#token={token}"
-    body = f"""Bedankt voor je aanmelding voor de talentpool van GSP Recruitment. Bevestig via onderstaande link:
+    # WS-4: job_title is plain text only (the job_orders.title column,
+    # never HTML), and this function never logs it or the recipient's
+    # e-mail address -- see the plain logger.warning() call below.
+    job_line_nl = f"Je reageerde op de vacature: {job_title}.\n\n" if job_title else ""
+    job_line_en = f"You applied to the vacancy: {job_title}.\n\n" if job_title else ""
+    body = f"""Bedankt voor je aanmelding voor de talentpool van GSP Recruitment. {job_line_nl}Bevestig via onderstaande link:
 {link}
 
 Deze link is {TALENTPOOL_OPTIN_TOKEN_TTL_HOURS} uur geldig. Heb je dit niet aangevraagd? Dan kun je dit bericht negeren.
@@ -302,7 +307,7 @@ info@gsprecruitment.nl
 
 ---
 
-Thank you for signing up for GSP Recruitment's talent pool. Please confirm via the link below:
+Thank you for signing up for GSP Recruitment's talent pool. {job_line_en}Please confirm via the link below:
 {link}
 
 This link is valid for {TALENTPOOL_OPTIN_TOKEN_TTL_HOURS} hours. Didn't request this? You can ignore this message.
@@ -337,7 +342,14 @@ async def talentpool_optin(request: Request, data: TalentpoolOptinRequest):
         e-mail it again, on any basis);
       - an unconfirmed request for this same e-mail was already made in
         the last 10 minutes (double-submit / repeated-click guard --
-        avoids sending a fresh token + e-mail for every click)."""
+        avoids sending a fresh token + e-mail for every click).
+
+    WS-4 (migrations/037): job_id, when given, is only ever stored after
+    it resolves to a currently open, non-demo, non-deleted job order --
+    the same eligibility PUBLIC_JOB_WHERE (routers/jobs.py) uses for what
+    the public board itself shows. An unknown, closed, demo, or deleted
+    job_id is silently dropped (the row is still created without one) so
+    this endpoint keeps its no-enumeration posture for job existence too."""
     email = data.email.lower().strip()
     if data.consent:
         suppressed = await fetch_one(
@@ -350,13 +362,23 @@ async def talentpool_optin(request: Request, data: TalentpoolOptinRequest):
             email,
         )
         if not suppressed and not recent_pending:
+            job = None
+            if data.job_id is not None:
+                job = await fetch_one(
+                    "SELECT id, title FROM job_orders "
+                    "WHERE id = $1 AND status = 'open' AND is_demo = false AND deleted_at IS NULL",
+                    data.job_id,
+                )
+            job_id = job["id"] if job else None
+
             token = secrets.token_urlsafe(32)
             await execute(
-                """INSERT INTO talentpool_optin_requests (email, token_hash, scope, source)
-                   VALUES ($1, $2, $3, $4)""",
-                email, hash_token(token), data.scope, data.source,
+                """INSERT INTO talentpool_optin_requests
+                     (email, token_hash, scope, source, job_id, job_alerts)
+                   VALUES ($1, $2, $3, $4, $5, $6)""",
+                email, hash_token(token), data.scope, data.source, job_id, data.job_alerts,
             )
-            await _send_talentpool_confirm_email(email, token)
+            await _send_talentpool_confirm_email(email, token, job_title=job["title"] if job else None)
 
     return {
         "message": "If you ticked the consent box, we've sent a confirmation link to that e-mail address.",
@@ -373,10 +395,22 @@ async def talentpool_confirm(request: Request, data: TalentpoolConfirmRequest):
     otherwise. lawful_basis is set to 'opt_in_talentpool' only via the
     shared privacy.should_set_talentpool_lawful_basis() rule (H3a) --
     never silently overwriting a different lawful_basis already on file
-    (portal_registratie included -- same rule as the portal endpoint)."""
+    (portal_registratie included -- same rule as the portal endpoint).
+
+    WS-4 (migrations/037): if the original request carried a job_id, and
+    that job is still open/non-demo/non-deleted at confirm time (it may
+    have closed between opt-in and confirm), this also records the
+    application as a matches row with status='applied' -- upsert pattern
+    mirrors routers/matches.py's ON CONFLICT (candidate_id, job_id) DO
+    UPDATE ... WHERE matches.status = 'suggested', so an existing
+    'suggested' match becomes 'applied' rather than being duplicated, and
+    a match already past 'suggested' (e.g. already 'applied') is left
+    alone. Calling this endpoint twice with the same token 400s on the
+    second call (confirmed_at is no longer NULL), so the match/candidate
+    side effects only ever happen once per token."""
     token_hash = hash_token(data.token)
     pending = await fetch_one(
-        """SELECT id, email, scope, source FROM talentpool_optin_requests
+        """SELECT id, email, scope, source, job_id FROM talentpool_optin_requests
            WHERE token_hash = $1 AND confirmed_at IS NULL
              AND requested_at > NOW() - INTERVAL '24 hours'""",
         token_hash,
@@ -416,7 +450,26 @@ async def talentpool_confirm(request: Request, data: TalentpoolConfirmRequest):
             pending["email"], pending["email"], now, until, pending["scope"], pending["source"],
         )
 
+    applied_job = None
+    if pending["job_id"] is not None:
+        job = await fetch_one(
+            "SELECT id, title FROM job_orders "
+            "WHERE id = $1 AND status = 'open' AND is_demo = false AND deleted_at IS NULL",
+            pending["job_id"],
+        )
+        if job:
+            await execute(
+                """INSERT INTO matches (candidate_id, job_id, status)
+                   VALUES ($1, $2, 'applied')
+                   ON CONFLICT (candidate_id, job_id)
+                   DO UPDATE SET status = 'applied'
+                   WHERE matches.status = 'suggested'""",
+                row["id"], job["id"],
+            )
+            applied_job = {"id": job["id"], "title": job["title"]}
+
     return {
         "message": "Talentpool consent confirmed.",
         "consent_talentpool_until": row["consent_talentpool_until"],
+        "applied_job": applied_job,
     }
