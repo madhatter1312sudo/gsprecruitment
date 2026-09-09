@@ -251,14 +251,12 @@ async def harvest_candidates() -> dict:
                     apollo_ref = f"apollo:{person.get('id')}" if person.get("id") else None
 
                     try:
-                        # security-audit follow-up (WS-E.8 retention-kolommen
-                        # branch, fourth round): pool_origin='apollo' was, up
-                        # to now, only ever backfilled once by
-                        # migrations/022_apollo_pool_flag.py -- no INSERT
-                        # ever set it going forward, so
+                        # pool_origin='apollo' was only ever backfilled once
+                        # by migrations/022_apollo_pool_flag.py -- no INSERT
+                        # sets it going forward on its own, so
                         # routers/retention_admin.py's Apollo-pool-purge
-                        # selector (`c.pool_origin = 'apollo'`) has missed
-                        # every row harvested since that migration ran.
+                        # selector (`c.pool_origin = 'apollo'`) would miss
+                        # every row harvested after that migration ran.
                         # Stamped here at the one INSERT this bulk pipeline
                         # actually uses.
                         row = await fetch_one(

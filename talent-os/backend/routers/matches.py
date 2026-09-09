@@ -212,11 +212,10 @@ async def candidates_for_job(job_id: int, limit: int = Query(30, ge=1, le=100)):
     # optin() only sets lawful_basis='opt_in_talentpool') so the bare
     # source_url check silently dropped exactly the group with the
     # strongest legal basis. `pool_origin` (migration 022) was considered
-    # instead but not used here -- security-audit follow-up (WS-E.8
-    # retention-kolommen branch, fourth round): services/harvest.py and
-    # services/scheduler.py's Apollo INSERTs now do stamp pool_origin =
+    # instead but not used here -- services/harvest.py and
+    # services/scheduler.py's Apollo INSERTs do stamp pool_origin =
     # 'apollo' going forward (routers/retention_admin.py's Apollo-pool-
-    # purge selector needed that), but a pre-existing row sourced between
+    # purge selector needs that), but a pre-existing row sourced between
     # migration 022's one-time backfill and that fix would still read
     # NULL, and `pool_origin IS DISTINCT FROM 'apollo'` would silently let
     # such a row straight into matching. source_url stays the Apollo-pool

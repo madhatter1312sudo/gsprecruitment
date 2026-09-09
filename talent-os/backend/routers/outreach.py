@@ -401,12 +401,11 @@ async def approve_draft(
         # Best-effort mirror into outreach_messages, if the schema allows it
         # (some deployments have campaign_id NOT NULL there — skip gracefully).
         #
-        # WS-E.8 follow-up (chief-of-staff second FIX FIRST, retention-
-        # kolommen branch): stamp candidate_id on this mirror row when the
-        # draft targets a candidate, so the candidate side of
-        # outreach_messages gets a real, usable key too (the column
-        # already exists, migrations/000_baseline.py — nothing ever wrote
-        # it before). This does not by itself make replied_at meaningful
+        # Stamp candidate_id on this mirror row when the draft targets a
+        # candidate, so the candidate side of outreach_messages gets a
+        # real, usable key too (the column already exists,
+        # migrations/000_baseline.py — nothing ever wrote it before). This
+        # does not by itself make replied_at meaningful
         # (no mailbox integration exists to ever set that column, and none
         # is added here); the retention guards that need "was this
         # candidate approached" read outreach_drafts directly instead
