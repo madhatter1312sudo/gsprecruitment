@@ -86,11 +86,19 @@ _ALLOWLIST = {
         "branch -- same reasoning as the FK-first branch above: a "
         "requester's own row, consent_withdrawn_at does not apply to "
         "self-access.",
-    ("retention_admin.py", "SELECT id, email FROM candidates"):
-        "Apollo-pool purge dry-run/execute tooling (admin JWT only, "
-        "POST /api/v1/admin/apollo-pool/purge) -- id/email are read to "
-        "drive erase_person()/DELETE internally and are never returned in "
-        "the response body (only aggregate counts are).",
+    # WS-E.10 (owner decision, retention-kolommen branch, fifth round):
+    # the Apollo-pool query text that used to live here as a
+    # retention_admin.py literal (and needed the allowlist entry this
+    # comment replaces) moved to core/retention.py as APOLLO_POOL_ROWS_SQL/
+    # APOLLO_POOL_TARGET_SQL, so both routers/retention_admin.py's dry-run
+    # preview and services/scheduler.py's generate_retention_review() read
+    # the exact same guarded selector -- this file's AST scan (ROUTERS_DIR
+    # only) no longer sees the raw SQL text in retention_admin.py at all
+    # (just a name reference to the core.retention constant), so there is
+    # nothing left here to allowlist. The guards themselves are unchanged
+    # and still covered by tests/test_retention.py's
+    # test_apollo_pool_purge_target_sql_carries_all_six_guards and
+    # tests/test_ws_e10_no_unapproved_purge_path.py.
     ("client.py", "SELECT c.id, c.full_name, c.current_title, c.current_company,"):
         "GET /api/v1/client/candidates (search_candidates) -- deleted_at "
         "IS NULL and consent_withdrawn_at IS NULL ARE both required here "

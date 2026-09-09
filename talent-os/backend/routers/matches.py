@@ -72,12 +72,18 @@ async def _run_matching_for_job(job_id: int) -> None:
         )
 
         for r in results:
-            # match_score is stored on the 0–100 scale everywhere
+            # match_score is stored on the 0–100 scale everywhere.
+            # WS-E.8 follow-up (security-audit FIX FIRST, retention-kolommen
+            # branch, blocking point 1): updated_at is the anchor
+            # core/retention.py's rejected_applicant guard checks (a fresh
+            # match after a rejection must block the purge) -- it must be
+            # stamped on both the initial insert and every re-score, or the
+            # guard stays permanently NULL/dead.
             await execute(
-                """INSERT INTO matches (candidate_id, job_id, match_score, status)
-                   VALUES ($1, $2, $3, 'suggested')
+                """INSERT INTO matches (candidate_id, job_id, match_score, status, updated_at)
+                   VALUES ($1, $2, $3, 'suggested', NOW())
                    ON CONFLICT (candidate_id, job_id)
-                   DO UPDATE SET match_score = EXCLUDED.match_score
+                   DO UPDATE SET match_score = EXCLUDED.match_score, updated_at = NOW()
                    WHERE matches.status = 'suggested'""",
                 r["candidate_id"], job_id, r["match_score"],
             )
@@ -141,11 +147,16 @@ async def create_match(payload: MatchCreate):
     if not job:
         raise HTTPException(status_code=400, detail=f"Job {payload.job_id} not found")
 
+    # WS-E.8 follow-up (security-audit FIX FIRST, retention-kolommen branch,
+    # blocking point 1): same updated_at stamp as _run_matching_for_job --
+    # this is the endpoint an external agent uses to progress a match's
+    # status (e.g. off 'suggested'), which is exactly the activity
+    # core/retention.py's rejected_applicant guard needs to see.
     row = await fetch_one(
-        """INSERT INTO matches (candidate_id, job_id, match_score, status)
-           VALUES ($1, $2, $3, $4)
+        """INSERT INTO matches (candidate_id, job_id, match_score, status, updated_at)
+           VALUES ($1, $2, $3, $4, NOW())
            ON CONFLICT (candidate_id, job_id)
-           DO UPDATE SET match_score = EXCLUDED.match_score, status = EXCLUDED.status
+           DO UPDATE SET match_score = EXCLUDED.match_score, status = EXCLUDED.status, updated_at = NOW()
            WHERE matches.status = 'suggested'
            RETURNING *""",
         payload.candidate_id, payload.job_id, payload.match_score, payload.status,
@@ -201,14 +212,16 @@ async def candidates_for_job(job_id: int, limit: int = Query(30, ge=1, le=100)):
     # optin() only sets lawful_basis='opt_in_talentpool') so the bare
     # source_url check silently dropped exactly the group with the
     # strongest legal basis. `pool_origin` (migration 022) was considered
-    # instead, but services/harvest.py and services/scheduler.py's Apollo
-    # INSERTs never set pool_origin themselves -- it is only backfilled for
-    # rows that existed when 022 ran -- so a `pool_origin IS DISTINCT FROM
-    # 'apollo'` filter would silently let every *new* Apollo row straight
-    # into matching (NULL is distinct from 'apollo'), which is worse than
-    # today's bug. source_url stays the Apollo-pool signal; we widen it
-    # with the same opt_in_talentpool exception routers/outreach.py's
-    # _draft_refusal() already relies on (WS-C.17 / SOP §1.5).
+    # instead but not used here -- services/harvest.py and
+    # services/scheduler.py's Apollo INSERTs do stamp pool_origin =
+    # 'apollo' going forward (routers/retention_admin.py's Apollo-pool-
+    # purge selector needs that), but a pre-existing row sourced between
+    # migration 022's one-time backfill and that fix would still read
+    # NULL, and `pool_origin IS DISTINCT FROM 'apollo'` would silently let
+    # such a row straight into matching. source_url stays the Apollo-pool
+    # signal here for that reason; we widen it with the same
+    # opt_in_talentpool exception routers/outreach.py's _draft_refusal()
+    # already relies on (WS-C.17 / SOP §1.5).
     rows = await fetch_all(
         f"""SELECT * FROM (
                SELECT c.id, c.current_title, c.current_company, c.skills,

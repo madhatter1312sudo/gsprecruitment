@@ -6,6 +6,7 @@ pipeline, analytics, messages, team management.
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from core.database import fetch_one, fetch_all, execute, fetch_val
 from core.deps import require_verified_role
+from core import privacy
 from core.security import hash_password, hash_token
 from core.sources import source_family
 from models.schemas import (
@@ -49,7 +50,8 @@ async def _get_client_id(user_id: int) -> int:
             raise HTTPException(status_code=404, detail="User not found")
         client = await fetch_one(
             "INSERT INTO clients (company_name, domain) VALUES ($1, $2) RETURNING id",
-            user["full_name"], user["email"].split("@")[1] if "@" in user["email"] else "",
+            user["full_name"],
+            privacy.normalize_domain(user["email"].split("@")[1] if "@" in user["email"] else None),
         )
         await execute(
             "INSERT INTO user_clients (user_id, client_id) VALUES ($1, $2) ON CONFLICT DO NOTHING",
@@ -563,9 +565,15 @@ async def add_to_pipeline(
     if existing:
         raise HTTPException(status_code=409, detail="Candidate already in pipeline")
 
+    # WS-E.8 follow-up (security-audit FIX FIRST, retention-kolommen branch,
+    # blocking point 1): the stage-update endpoints below already stamp
+    # updated_at, but this creation INSERT never did -- a candidate
+    # re-piped for another role right after a rejection, before any stage
+    # change, still had a NULL updated_at and so wasn't visible to
+    # core/retention.py's rejected_applicant guard.
     entry = await fetch_one(
-        """INSERT INTO pipeline_entries (client_id, candidate_id, job_id, stage, notes)
-           VALUES ($1, $2, $3, $4, $5)
+        """INSERT INTO pipeline_entries (client_id, candidate_id, job_id, stage, notes, updated_at)
+           VALUES ($1, $2, $3, $4, $5, NOW())
            RETURNING *""",
         client["id"], data.candidate_id, data.job_id, data.stage, data.notes,
     )
@@ -984,10 +992,13 @@ async def update_client_profile(
     allowed = {"company_name", "industry", "location", "size_range"}
     update_dict = updates.model_dump(exclude_none=True)
 
-    # Map 'website' to 'domain' column
+    # Map 'website' to 'domain' column -- normalized (security-audit FIX
+    # FIRST, WS-E.8 retention-kolommen branch, blocking point 4): this
+    # free-text field can carry a scheme/www./path, unlike the
+    # e-mail-derived domain _get_client_id() above writes.
     if "website" in update_dict:
         set_parts.append(f"domain = ${idx}")
-        values.append(update_dict.pop("website"))
+        values.append(privacy.normalize_domain(update_dict.pop("website")))
         idx += 1
 
     for key, val in update_dict.items():

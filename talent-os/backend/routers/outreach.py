@@ -387,8 +387,31 @@ async def approve_draft(
             current_user["id"], draft_id,
         )
 
+        # WS-E.8 follow-up (migrations/032_retention_anchor_columns.py):
+        # sending to a client_prospect is itself a contact event, so stamp
+        # last_contacted_at here too, alongside the manual-status-change
+        # path in routers/prospects.py -- the anchor core/retention.py's
+        # prospect_responding row purges on.
+        if draft["target_type"] == "client_prospect" and draft["target_id"]:
+            await execute(
+                "UPDATE client_prospects SET last_contacted_at = NOW() WHERE id = $1",
+                draft["target_id"],
+            )
+
         # Best-effort mirror into outreach_messages, if the schema allows it
         # (some deployments have campaign_id NOT NULL there — skip gracefully).
+        #
+        # Stamp candidate_id on this mirror row when the draft targets a
+        # candidate, so the candidate side of outreach_messages gets a
+        # real, usable key too (the column already exists,
+        # migrations/000_baseline.py — nothing ever wrote it before). This
+        # does not by itself make replied_at meaningful
+        # (no mailbox integration exists to ever set that column, and none
+        # is added here); the retention guards that need "was this
+        # candidate approached" read outreach_drafts directly instead
+        # (core.retention.CANDIDATE_NO_REACTION_GUARD_SQL), since that is
+        # the row this endpoint actually stamps 'sent' on, independent of
+        # whether this schema-tolerant mirror insert succeeds.
         try:
             columns = await fetch_all(
                 "SELECT column_name, is_nullable FROM information_schema.columns "
@@ -397,15 +420,46 @@ async def approve_draft(
             col_names = {c["column_name"] for c in columns}
             required_missing = any(
                 c["is_nullable"] == "NO" and c["column_name"] not in
-                {"id", "created_at", "recipient_email", "subject", "body", "channel", "status"}
+                {"id", "created_at", "recipient_email", "subject", "body", "channel", "status", "candidate_id"}
                 for c in columns
             )
             if col_names and "recipient_email" in col_names and not required_missing:
-                await execute(
-                    """INSERT INTO outreach_messages (recipient_email, subject, body, channel, status)
-                       VALUES ($1, $2, $3, 'email', 'sent')""",
-                    draft["target_email"], draft["subject"], draft["body"],
-                )
+                # security-audit follow-up (WS-E.8 retention-kolommen
+                # branch, fourth round, minor point): this mirror row set
+                # status='sent' but never sent_at -- stamped alongside it
+                # now (same NOW() this endpoint already uses for
+                # outreach_drafts.sent_at above), but only when the column
+                # is actually there -- same schema-tolerance the
+                # candidate_id branch below already applies. Four literal
+                # INSERT statements (not one built from an interpolated
+                # column list) so tests/test_baseline_schema.py's static
+                # column-existence scan can still parse each one.
+                with_candidate_id = "candidate_id" in col_names and draft["target_type"] == "candidate" and draft["target_id"]
+                has_sent_at = "sent_at" in col_names
+                if with_candidate_id and has_sent_at:
+                    await execute(
+                        """INSERT INTO outreach_messages (candidate_id, recipient_email, subject, body, channel, sent_at, status)
+                           VALUES ($1, $2, $3, $4, 'email', NOW(), 'sent')""",
+                        draft["target_id"], draft["target_email"], draft["subject"], draft["body"],
+                    )
+                elif with_candidate_id:
+                    await execute(
+                        """INSERT INTO outreach_messages (candidate_id, recipient_email, subject, body, channel, status)
+                           VALUES ($1, $2, $3, $4, 'email', 'sent')""",
+                        draft["target_id"], draft["target_email"], draft["subject"], draft["body"],
+                    )
+                elif has_sent_at:
+                    await execute(
+                        """INSERT INTO outreach_messages (recipient_email, subject, body, channel, sent_at, status)
+                           VALUES ($1, $2, $3, 'email', NOW(), 'sent')""",
+                        draft["target_email"], draft["subject"], draft["body"],
+                    )
+                else:
+                    await execute(
+                        """INSERT INTO outreach_messages (recipient_email, subject, body, channel, status)
+                           VALUES ($1, $2, $3, 'email', 'sent')""",
+                        draft["target_email"], draft["subject"], draft["body"],
+                    )
         except Exception:
             logger.info("outreach: skipping outreach_messages mirror (schema mismatch)")
 

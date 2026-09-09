@@ -622,17 +622,6 @@
       },
       "ApolloPoolPurgeRequest": {
         "properties": {
-          "confirm": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Confirm"
-          },
           "dry_run": {
             "default": true,
             "title": "Dry Run",
@@ -2502,6 +2491,18 @@
       },
       "ClientAdminUpdate": {
         "properties": {
+          "account_status": {
+            "anyOf": [
+              {
+                "pattern": "^(lead|active|inactive)$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Account Status"
+          },
           "company_name": {
             "anyOf": [
               {
@@ -5164,6 +5165,28 @@
       },
       "RetentionRunRequest": {
         "properties": {
+          "dry_run": {
+            "default": true,
+            "title": "Dry Run",
+            "type": "boolean"
+          }
+        },
+        "title": "RetentionRunRequest",
+        "type": "object"
+      },
+      "ReviewBulkRequest": {
+        "properties": {
+          "category": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Category"
+          },
           "confirm": {
             "anyOf": [
               {
@@ -5175,13 +5198,79 @@
             ],
             "title": "Confirm"
           },
-          "dry_run": {
-            "default": true,
-            "title": "Dry Run",
-            "type": "boolean"
+          "decision": {
+            "title": "Decision",
+            "type": "string"
+          },
+          "expected_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected Count"
+          },
+          "ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "integer"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ids"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
           }
         },
-        "title": "RetentionRunRequest",
+        "required": [
+          "decision"
+        ],
+        "title": "ReviewBulkRequest",
+        "type": "object"
+      },
+      "ReviewDecisionRequest": {
+        "properties": {
+          "confirm": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confirm"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          }
+        },
+        "title": "ReviewDecisionRequest",
         "type": "object"
       },
       "SalaryBenchmarkResponse": {
@@ -6883,7 +6972,7 @@
         ]
       },
       "patch": {
-        "description": "Partial update of a candidate record. Soft-deleted rows and rows\nwith withdrawn consent are excluded (same guard as GET), and cv_text\nis never returned (FIX 2 follow-up, chief-of-staff ai-pseudonimisering\nbranch): this endpoint used `RETURNING *` with only `WHERE id = $n`,\nso a PATCH (e.g. the status/screening_score update the external\nroutines use) on a withdrawn-consent or soft-deleted row both\nmutated it and handed back full_name/email/phone/cv_text -- the exact\nleak GET was closed against, reachable via a different verb. cv_text\nis excluded here even though allowed_fields never includes it: the\nexplicit RETURNING column list means the database never hands the\ncolumn to the application in the first place, so the response model is\na second layer rather than the only one.",
+        "description": "Partial update of a candidate record. Soft-deleted rows and rows\nwith withdrawn consent are excluded (same guard as GET), and cv_text\nis never returned (FIX 2 follow-up, chief-of-staff ai-pseudonimisering\nbranch): this endpoint used `RETURNING *` with only `WHERE id = $n`,\nso a PATCH (e.g. the status/screening_score update the external\nroutines use) on a withdrawn-consent or soft-deleted row both\nmutated it and handed back full_name/email/phone/cv_text -- the exact\nleak GET was closed against, reachable via a different verb. cv_text\nis excluded here even though allowed_fields never includes it: the\nexplicit RETURNING column list means the database never hands the\ncolumn to the application in the first place, so the response model is\na second layer rather than the only one.\n\nWS-E.8 follow-up (migrations/032_retention_anchor_columns.py): setting\nstatus='rejected' here also stamps rejected_at=NOW() -- this endpoint\nand routers/webhook.py's candidate_updated action are the only two\nwrite paths onto candidates.status, and core/retention.py's\nrejected_applicant row purges on rejected_at, so a rejection that\nnever stamps it would silently never be purged.",
         "operationId": "update_candidate_api_candidates__candidate_id__patch",
         "parameters": [
           {
@@ -7964,7 +8053,7 @@
     },
     "/api/v1/admin/apollo-pool/purge": {
       "post": {
-        "description": "The Apollo-pool wipe/keep decision itself belongs to the owner\n(VERWERKINGSREGISTER.md \u00a72.6) \u2014 this endpoint is the tooling, never\nrun automatically, and dry_run=true by default.\n\nChoice of anonymise vs. hard-delete, per row:\n  - Has an e-mail address: anonymise via the same erase_person()\n    routine as a manual Art. 17 request (routers/gdpr.py) \u2014 this\n    preserves any matches/pipeline_entries FK history (candidates.id\n    survives, PII doesn't) and adds the person to suppression_list so\n    a future Apollo re-sync (should the owner ever re-enable it)\n    can't re-source the same person. Preferred whenever it's possible,\n    since it keeps the suppression guarantee.\n  - No e-mail address at all: hard DELETE. suppression_list is keyed\n    on email_hash, so a row with no e-mail can't be suppressed either\n    way, and (per WS-E.7's erase_person) these bulk-harvested rows\n    never had a portal account or an application tied to them \u2014\n    nothing else references the row, so there is nothing an\n    anonymise-in-place step would preserve that a DELETE doesn't\n    already achieve equally safely.",
+        "description": "dry_run=true (default, unchanged): a read-only preview, same shape\nas before WS-E.10.\n\ndry_run=false is gone outright (WS-E.10, owner decision, same as\nrun_retention()'s): this pool shares the exact CANDIDATE_NO_REACTION_\nGUARD_SQL guard family that motivated ending automatic purging\neverywhere else, so a real deletion here now only ever happens from\nan approved retention_review_items row\n(category='apollo_pool_purge', POST .../review/{item_id}/approve),\nthe same as every other category. See\ntests/test_ws_e10_no_unapproved_purge_path.py.",
         "operationId": "purge_apollo_pool_api_v1_admin_apollo_pool_purge_post",
         "requestBody": {
           "content": {
@@ -10869,9 +10958,279 @@
         ]
       }
     },
+    "/api/v1/admin/retention/review": {
+      "get": {
+        "description": "The monthly list itself \u2014 one row per person/subject currently (or\npreviously, with status != 'pending') queued, carrying exactly what\nthe owner asked for: category, term_expired_at (the date the term\nexpired), and signal_missing_nl (which protective signal was absent).\n`status=\"all\"` lists every status; the default `status=\"pending\"`\nmatches what an admin screen's default view should show.",
+        "operationId": "list_review_items_api_v1_admin_retention_review_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "default": "pending",
+              "title": "Status",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "category",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Category"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Review Items",
+        "tags": [
+          "retention-admin"
+        ]
+      }
+    },
+    "/api/v1/admin/retention/review/bulk": {
+      "post": {
+        "description": "Approve or reject several items in one call -- by explicit `ids`,\nor every currently-pending item in `category`. Still one _approve_one\n/ _reject_one call per item (never a single bulk DELETE), so a\npartial failure part-way through leaves an accurate, per-item audit\ntrail instead of an all-or-nothing black box.\n\nL1 (security-audit round 5): capped at MAX_BULK_REVIEW_ITEMS items per\ncall, and a category-wide APPROVE call must supply `expected_count`\nmatching the current pending count for that category (see\nReviewBulkRequest's own comment).\n\nM1 (security-audit round 5): catches Exception, not only HTTPException\n-- a bare exception surfacing mid-batch (e.g. a ForeignKeyViolation\nfrom a placement without ON DELETE CASCADE onto a soft-deleted\ncandidate) used to abort the whole loop and lose every result after\nit, including ones that had already succeeded moments before. Each\nitem's own outcome is independent of every other item's.",
+        "operationId": "bulk_review_decision_api_v1_admin_retention_review_bulk_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReviewBulkRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Bulk Review Decision",
+        "tags": [
+          "retention-admin"
+        ]
+      }
+    },
+    "/api/v1/admin/retention/review/generate": {
+      "post": {
+        "description": "Runs the same queue-generation logic the monthly cron uses\n(services/scheduler.py generate_retention_review()), on demand.\nRead/queue-only \u2014 see that function's own docstring: it never touches\nthe GDPR erasure routine or deletes a candidate/prospect/user row.",
+        "operationId": "generate_review_api_v1_admin_retention_review_generate_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Generate Review",
+        "tags": [
+          "retention-admin"
+        ]
+      }
+    },
+    "/api/v1/admin/retention/review/summary": {
+      "get": {
+        "description": "Counts only, per category and status \u2014 no subject rows, no e-mail\naddresses, no names. This is the shape a Telegram-facing routine may\nread (VERWERKINGSREGISTER.md \u00a76 punt 6(d): that channel carries no\npersonal data by design) to signal \"the monthly list is ready\" \u2014\na signal that a list exists is not the list itself.",
+        "operationId": "review_summary_api_v1_admin_retention_review_summary_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Review Summary",
+        "tags": [
+          "retention-admin"
+        ]
+      }
+    },
+    "/api/v1/admin/retention/review/{item_id}/approve": {
+      "post": {
+        "description": "Confirm=\"APPROVE\" required -- this is the only endpoint in this\nbackend that actually anonymises/deletes a retention-table subject.",
+        "operationId": "approve_review_item_api_v1_admin_retention_review__item_id__approve_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "title": "Item Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReviewDecisionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Approve Review Item",
+        "tags": [
+          "retention-admin"
+        ]
+      }
+    },
+    "/api/v1/admin/retention/review/{item_id}/reject": {
+      "post": {
+        "description": "No confirm required -- rejecting is the safe default (nothing\nirreversible happens); it only marks the item so it does not get\nsilently re-approved, and stays visible if it reappears later.",
+        "operationId": "reject_review_item_api_v1_admin_retention_review__item_id__reject_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "title": "Item Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReviewDecisionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Reject Review Item",
+        "tags": [
+          "retention-admin"
+        ]
+      }
+    },
     "/api/v1/admin/retention/run": {
       "post": {
-        "description": "dry_run=true (default): counts per category, no DB writes at all.\ndry_run=false: requires confirm=\"PURGE\" and actually anonymises/deletes\nper core/retention.py's table, writing one audit_log row per purged\ncategory (services/scheduler.py run_retention_purge).",
+        "description": "Counts per category, always \u2014 never writes anything. The\ndry_run=false branch that used to actually anonymise/delete here (with\na \"PURGE\" confirm string) is gone outright (WS-E.10, owner decision) --\n`confirm` was dropped from RetentionRunRequest entirely (round 6,\nM6r), not merely ignored, since no value of it has done anything since\nthis branch was removed. A real purge now only ever happens from an\napproved retention_review_items row (POST .../review/{item_id}/approve).\nSee tests/test_ws_e10_no_unapproved_purge_path.py, which fails if a\nlater change reopens a `dry_run=false` branch here.",
         "operationId": "run_retention_api_v1_admin_retention_run_post",
         "requestBody": {
           "content": {

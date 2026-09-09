@@ -945,31 +945,20 @@ class _OptinRetentionRecorder:
         return "OK"
 
 
-def test_run_retention_purge_dry_run_counts_stale_optin_requests_without_deleting(monkeypatch):
-    import services.scheduler as scheduler
-    rec = _OptinRetentionRecorder(stale_rows=[{"id": 1}, {"id": 2}])
-    monkeypatch.setattr(scheduler, "fetch_all", rec.fetch_all)
-    monkeypatch.setattr(scheduler, "execute", rec.execute)
-
-    result = asyncio.run(scheduler.run_retention_purge(dry_run=True))
-    assert result["talentpool_optin_requests_purge"] == {"status": "counted", "count": 2}
-    assert rec.execute_calls == []  # dry run never writes
-
-
-def test_run_retention_purge_real_run_deletes_stale_optin_requests_and_audits(monkeypatch):
+def test_talentpool_optin_requests_cleanup_job_deletes_stale_rows_and_audits(monkeypatch):
+    """WS-E.10 (retention-kolommen branch, fifth round): the old
+    run_retention_purge(dry_run=...) single entry point is gone --
+    talentpool_optin_requests cleanup (not one of the ten guarded
+    RETENTION_TABLE categories the owner moved to monthly human review;
+    see services/scheduler.py's own docstring on that job) now has its
+    own small, unconditional daily job."""
     import services.scheduler as scheduler
     rec = _OptinRetentionRecorder(stale_rows=[{"id": 5}])
-
-    async def _fake_erase_person(email, actor_id=None, reason="manual"):
-        return {"status": "complete"}
-
-    import routers.gdpr as gdpr
-    monkeypatch.setattr(gdpr, "erase_person", _fake_erase_person)
     monkeypatch.setattr(scheduler, "fetch_all", rec.fetch_all)
     monkeypatch.setattr(scheduler, "execute", rec.execute)
 
-    result = asyncio.run(scheduler.run_retention_purge(dry_run=False))
-    assert result["talentpool_optin_requests_purge"] == {"status": "purged", "count": 1}
+    result = asyncio.run(scheduler.talentpool_optin_requests_cleanup_job())
+    assert result == {"status": "purged", "count": 1}
     delete_calls = [c for c in rec.execute_calls if c[0].strip().startswith("DELETE FROM talentpool_optin_requests")]
     assert len(delete_calls) == 1
     assert delete_calls[0][1] == ([5],)
@@ -978,6 +967,17 @@ def test_run_retention_purge_real_run_deletes_stale_optin_requests_and_audits(mo
         if c[0].startswith("INSERT INTO audit_log") and c[1][1] == "talentpool_optin_requests"
     ]
     assert len(audit_calls) == 1
+
+
+def test_talentpool_optin_requests_cleanup_job_writes_no_audit_row_when_nothing_is_stale(monkeypatch):
+    import services.scheduler as scheduler
+    rec = _OptinRetentionRecorder(stale_rows=[])
+    monkeypatch.setattr(scheduler, "fetch_all", rec.fetch_all)
+    monkeypatch.setattr(scheduler, "execute", rec.execute)
+
+    result = asyncio.run(scheduler.talentpool_optin_requests_cleanup_job())
+    assert result == {"status": "purged", "count": 0}
+    assert rec.execute_calls == []
 
 
 def test_talentpool_optin_requests_stale_sql_uses_a_7_day_window():

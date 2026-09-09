@@ -25,6 +25,7 @@ from pydantic import BaseModel, Field, field_validator
 
 from core.database import fetch_one, fetch_all, fetch_val, execute
 from core.deps import require_role
+from core import privacy
 
 logger = logging.getLogger("talent_os.prospects")
 
@@ -62,6 +63,19 @@ class ProspectCreate(BaseModel):
         if not (s.lower().startswith("http://") or s.lower().startswith("https://")):
             raise ValueError("source_url must be a public http:// or https:// URL (SOP §2)")
         return s
+
+    # chief-of-staff FIX FIRST (retention-kolommen branch, finding 3): same
+    # reasoning as CandidateCreate._strip_email (models/schemas.py) -- an
+    # external agent submitting a padded contact_email here is otherwise
+    # the one insert path erase_person()'s LOWER(TRIM(...)) fix would still
+    # have had to compensate for.
+    @field_validator("email")
+    @classmethod
+    def _strip_email(cls, v):
+        if v is None:
+            return v
+        stripped = v.strip()
+        return stripped or None
 
 
 class ProspectUpdate(BaseModel):
@@ -147,8 +161,8 @@ async def create_prospect(
             source_url, lawful_basis)
            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,COALESCE($11,'new'),$12,$13)
            RETURNING *""",
-        payload.company, payload.website, payload.contact_name, payload.contact_title,
-        payload.email, payload.linkedin_url, payload.location, payload.industry,
+        payload.company, privacy.normalize_domain(payload.website), payload.contact_name,
+        payload.contact_title, payload.email, payload.linkedin_url, payload.location, payload.industry,
         payload.source, payload.notes, payload.status,
         payload.source_url, payload.lawful_basis,
     )
@@ -186,6 +200,15 @@ async def update_prospect(
         set_parts.append(f"{column_map[key]} = ${idx}")
         values.append(val)
         idx += 1
+
+    # WS-E.8 follow-up (migrations/032_retention_anchor_columns.py):
+    # client_prospects.status only ever moves by manual admin action (see
+    # services/scheduler.py's _count_prospect_no_response docstring) --
+    # this is the one place "we had contact with this prospect" is
+    # recorded today, so a status change also stamps last_contacted_at,
+    # the anchor core/retention.py's prospect_responding row purges on.
+    if "status" in update_dict:
+        set_parts.append("last_contacted_at = NOW()")
 
     values.append(prospect_id)
     row = await fetch_one(

@@ -300,6 +300,21 @@ class CandidateCreate(BaseModel):
     def _url_scheme_http_only(cls, v):
         return _normalize_http_url(v)
 
+    # chief-of-staff FIX FIRST (retention-kolommen branch, finding 3): a
+    # padded address ("' x@…'") stored via this, the main candidate insert
+    # path, is otherwise indistinguishable from a clean one until it
+    # meets a LOWER(TRIM(...)) comparison somewhere else in the codebase --
+    # stripping at the door means every downstream reader (including the
+    # erase_person() lookups in routers/gdpr.py) sees the same value a
+    # human typed, not a whitespace-padded variant of it.
+    @field_validator("email")
+    @classmethod
+    def _strip_email(cls, v):
+        if v is None:
+            return v
+        stripped = v.strip()
+        return stripped or None
+
     # DB rows (esp. the Apollo-bulk pool) store NULL for these array columns;
     # coerce NULL -> [] so ResponseValidationError isn't raised on read.
     @field_validator("skills", "languages", "tags", mode="before")
@@ -1116,6 +1131,10 @@ class ClientAdminUpdate(BaseModel):
     industry: Optional[str] = Field(None, max_length=255)
     erkend_referent: Optional[str] = Field(None, pattern=r"^(ja|nee|onbekend)$")
     notes: Optional[str] = None
+    # security-audit FIX FIRST (WS-E.8 retention-kolommen branch, fourth
+    # round, blocking point 3): the closed value set migrations/034 also
+    # enforces at the DB level via a CHECK constraint.
+    account_status: Optional[str] = Field(None, pattern=r"^(lead|active|inactive)$")
 
 
 # ── WS-C.5: Pipeline Stage History ───────────────────────────────────────
