@@ -4,17 +4,7 @@
    Multi-page: home, werkgevers, kandidaten, vacatures, contact
    ========================================================================== */
 
-.sr-only {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  padding: 0;
-  margin: -1px;
-  overflow: hidden;
-  clip: rect(0, 0, 0, 0);
-  white-space: nowrap;
-  border: 0;
-}
+/* .sr-only removed — confirmed 0 usage in HTML/JS (§8.x.7 census). */
 
 .skip-link {
   position: absolute;
@@ -98,7 +88,454 @@
   --radius-xs: 3px;
   --radius-full: 9999px;
   --transition: 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+
+  /* ── Kaartsysteem tokens (SITE-DESIGN-SPEC.md §8.x.2) ──────────────
+     Pure additions — nothing above is renamed or replaced. Spacing and
+     typescale values come from §1.3/§1.4 of this document; the --gray-*
+     scale below is colors_neutral from §1.2 verbatim, not the differently
+     numbered scales used in the three design canvases (see §8.x.2). */
+  --space-xs: 4px;   --space-sm: 8px;   --space-md: 16px;  --space-lg: 24px;
+  --space-xl: 32px;  --space-2xl: 48px; --space-3xl: 64px; --space-4xl: 96px; --space-5xl: 128px;
+
+  --font-size-xs: 0.75rem;  --font-size-sm: 0.875rem; --font-size-base: 1rem;
+  --font-size-lg: 1.125rem; --font-size-xl: 1.25rem;  --font-size-2xl: 1.5rem;
+  --font-size-3xl: 2rem;    --font-size-4xl: 2.5rem;  --font-size-5xl: 3.25rem; --font-size-6xl: 4rem;
+
+  --section-pad: var(--space-4xl); /* 1440 section padding; --space-2xl + --space-lg on 390 */
+  --gold-ink: #8A6800; /* the only allowed gold text color on light, 5.17:1 on white */
+
+  /* --gray-* (colors_neutral, §1.2). Text floor: never below --gray-400
+     (4.76:1) for text; -100/-200/-300 are hairline/non-text only
+     (1.23:1 / 1.49:1 / 2.56:1 — well under the 4.5:1 AA floor). */
+  --gray-50:  #F8FAFC;
+  --gray-100: #E2E8F0;
+  --gray-200: #CBD5E1;
+  --gray-300: #94A3B8;
+  --gray-400: #64748B;
+  --gray-500: #475569;
+  --gray-600: #334155;
 }
+
+/* ══════════════════════════════════════════════════════════════════════
+   KAARTSYSTEEM — zes archetypen (SITE-DESIGN-SPEC.md §8.x)
+   Gebouwd in §8.x.8 stap 1-4 (tokens/archetypen → script.js-templates →
+   per-cluster HTML → integratie, deze pas). Oude klassennamen die door
+   GEEN enkele pagina/JS meer worden gebruikt, zijn uit de selectors
+   gehaald (.path-go, .vac-card, .contact-method/.cm-label/.cm-value —
+   zie git-geschiedenis van deze regel voor de vorige vorm). Waar een oude
+   naam nog wel ergens gebruikt wordt, blijft hij bewust als alias staan:
+     - .choice-card/.choice-go (index.html, naast .card-dark/.go-link)
+     - .service-card, .story-card (index.html/werkgevers.html gebruiken
+       deze nog als ENIGE klasse op sommige kaarten, niet gecombineerd met
+       .card — geen dode alias, een levende tweede naam)
+     - .path-card (werkgevers.html, altijd samen met .card — voor de eigen
+       :focus-within-regel en flex-basis, zie archetype-2-blok)
+     - .job-card (alléén nog levend via website/client/index.html en
+       client/app.js, een ander portal-thema dat deze zelfde styles.css
+       laadt maar zijn .job-card volledig zelf overschrijft in een eigen
+       page-local <style>-blok — buiten de scope van deze migratie, zie
+       CLAUDE.md; niet verwijderen zonder dat portal apart te toetsen)
+     - .contact-detail (over-ons.html/contact.html, de niet-klikbare
+       archetype-6-variant — dit was altijd al de canonieke naam, geen
+       alias)
+   Waar de oude anatomie niet grid/archetype-compatibel is zonder
+   HTML-wijziging (.prop, .step-card) is alleen de token/kleur/radius-
+   waarde bijgewerkt, geen literal class-alias — deze twee blijven in
+   gebruik op kandidaten.html/vacatures.html (props-grid) resp. waren al
+   vervangen door .step-card-expanded (werkwijze.html) — zie de
+   toelichting bij elk blok verderop in dit bestand.
+
+   Klassen in dit blok:
+     .card-dark            — archetype 1, donkere keuzekaart   (alias: .choice-card)
+     .card                 — archetype 2, lichte inhoudskaart  (alias: .service-card, .path-card, .story-card; .blog-card leeft buiten dit bestand, zie §8.x.2-tabel)
+     .card--loading/.card--error — archetype 2 laad-/foutstaat (blog, cluster D)
+     .card-data             — archetype 3, datakaart (vacature) (alias: .job-card — zie hierboven, client-portal-only)
+     .card-data--empty/--loading/--error — archetype 3 staten
+     .go-link                — archetype 1/2/4 CTA-link         (alias: .choice-go; archetype-3's nested CTA keeps its
+                                own page-local names, .job-view-link/.vac-link — see "Job Card Links"/"Homepage vacancy module" below)
+     .step-rail / .step-row — archetype 4, compacte genummerde rij (dienstenladder, werkgevers.html)
+     .step-rail--vertical / .step-rail__item / .step-card-expanded — archetype 4, uitgeklapte rail (werkwijze.html)
+     .chip / .mark          — archetype 5, chip/badge          (alias: .trust-badge, .eco-badge, .ts-item)
+     .contact-row           — archetype 6, contactmethode      (alias: .contact-detail voor de niet-klikbare variant; .contact-method/.cm-label/.cm-value zijn retired, contact.html gebruikt de canonieke namen direct)
+     .contact-rail          — sitebrede zwevende contactrail (§8.x.4), vervangt .whatsapp-float/.mail-float (dat blok is nu ook verwijderd, zie einde van dit bestand)
+
+   §8.x.0 hard rules applied throughout this block AND at each aliased
+   page-local CTA elsewhere in the file (.job-view-link, .vac-link,
+   .service-ladder-grid .prop .choice-go): every <a>/<button> gets a
+   44px touch target via padding/min-height (never by enlarging the
+   visible glyph), and every hover effect has an identical :focus-visible
+   (direct-link cards) or :focus-within (card containing a separately
+   focusable nested link, e.g. .path-card/.card-data) companion — a card
+   whose CTA is a nested <a> never gets its hover lift from :focus-visible
+   alone, since the div/card itself is never the focused element.
+   §8.x.0's white-on-white --shadow-sm exception is applied at each
+   section background below where a card's own background otherwise
+   matches its section (see #jobs, #homeVacancies, #blogPosts,
+   .signup-card, .contact-methods). ══════════════════════════════════ */
+
+/* ── Archetype 1: donkere keuzekaart ─────────────────────── */
+.card-dark, .choice-card {
+  box-sizing: border-box;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  padding: var(--space-xl);
+  background: var(--navy-800);
+  border: 1px solid var(--navy-600);
+  border-top: 2px solid var(--gold-500);
+  border-radius: var(--radius);
+  --accent: var(--gold-500);
+  --accent-hover: var(--gold-400);
+  border-top-color: var(--accent);
+  transition: border-color 0.15s ease, transform 0.15s ease;
+}
+.choice-grid .choice-card:nth-child(2) {
+  --accent: var(--navy-300);
+  --accent-hover: var(--navy-200);
+  border-top-color: var(--accent);
+}
+.card-dark:hover, .card-dark:focus-visible,
+.choice-card:hover, .choice-card:focus-visible {
+  border-color: var(--navy-400);
+  border-top-color: var(--accent-hover);
+  transform: translateY(-2px);
+}
+.card-dark:focus-visible, .choice-card:focus-visible {
+  outline: 2px solid var(--gold-500);
+  outline-offset: 2px;
+}
+.card-dark .eyebrow {
+  font-family: var(--font-mono); font-size: var(--font-size-xs);
+  text-transform: uppercase; letter-spacing: 0.12em; color: var(--gold-500);
+  margin-bottom: var(--space-md);
+}
+.card-dark h3, .choice-card h3 {
+  font-family: var(--font-display); font-size: var(--font-size-2xl); font-weight: 500;
+  color: #fff; margin-bottom: var(--space-sm);
+}
+.card-dark p, .choice-card p {
+  font-family: var(--font); font-size: var(--font-size-base); color: var(--navy-100);
+  margin-bottom: var(--space-lg);
+}
+.card-dark .go-link, .choice-card .choice-go {
+  margin-top: auto; display: inline-flex; align-items: center; gap: 8px;
+  font-weight: 600; color: var(--gold-500); font-size: 0.9rem;
+  /* §8.x.0 44px touch target: padding on the link itself, never by
+     enlarging the visible arrow/text — min-height is enough since the
+     link is inline-flex and its text sets the width. */
+  min-height: 44px;
+}
+/* Gap-widen on the CTA arrow: :hover for mouse, :focus-within so the same
+   effect fires when Tab lands on a nested <a class="choice-go"> (the
+   werkgevers.html variant) as when the whole card is itself the <a>
+   (index.html) — :focus-within matches both the card being focused and a
+   descendant being focused, so this one declaration covers both markups
+   without a mouse-only gap (§8.x.0 hover=focus-visible rule). */
+.card-dark:hover .go-link, .card-dark:focus-within .go-link,
+.choice-card:hover .choice-go, .choice-card:focus-within .choice-go { gap: 12px; }
+@media (max-width: 390px) {
+  .card-dark, .choice-card { padding: var(--space-lg); }
+}
+
+/* ── Archetype 2: lichte inhoudskaart met rand ───────────── */
+.card, .service-card, .path-card, .story-card {
+  box-sizing: border-box;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  padding: var(--space-lg);
+  background: var(--bg-card);
+  border: 1px solid var(--gray-100);
+  border-radius: var(--radius);
+  transition: border-color 0.15s ease, transform 0.15s ease;
+}
+.card:hover, .card:focus-visible,
+.service-card:hover, .service-card:focus-visible,
+.path-card:hover, .path-card:focus-visible, .path-card:focus-within,
+.story-card:hover, .story-card:focus-visible {
+  border-color: var(--gold-ink);
+  transform: translateY(-2px);
+}
+.card:focus-visible, .service-card:focus-visible, .path-card:focus-visible, .story-card:focus-visible {
+  outline: 2px solid var(--gold-500);
+  outline-offset: 2px;
+}
+/* :focus-within on .path-card only (not .service-card/.story-card): today
+   only werkgevers.html's path-card nests a separate <a class="go-link">
+   CTA a keyboard user tabs into directly, so the div-card itself never
+   gets native :focus-visible — :focus-within is the only way its hover
+   lift also shows for keyboard focus (same reasoning as the archetype-3
+   datakaart below). service-card/story-card have no nested link today;
+   add :focus-within there too if one is added later. .path-card also
+   carries .card in HTML, so .card .go-link below already reaches its CTA
+   — the old .path-go alias name is retired (0 usage). */
+.card h3, .service-card h3, .path-card h3, .story-card h3 {
+  font-family: var(--font-display); font-size: var(--font-size-xl); font-weight: 500;
+  color: var(--navy-900); margin-bottom: var(--space-sm);
+}
+.card p, .service-card p, .path-card p, .story-card p {
+  font-family: var(--font); font-size: var(--font-size-sm); color: var(--gray-500);
+}
+.card .go-link, .service-card .go-link {
+  margin-top: auto; padding-top: var(--space-lg);
+  font-weight: 600; font-size: var(--font-size-sm); color: var(--gold-ink);
+  display: inline-flex; align-items: center; gap: 7px;
+  min-height: 44px; /* §8.x.0 44px touch target, padding-based (see archetype 1) */
+}
+.card:hover .go-link, .card:focus-within .go-link { gap: 11px; }
+/* .mark used as a card kicker (props-grid, path-grid, services-grid on
+   werkgevers.html; .step-card-expanded on werkwijze.html) had no spacing
+   of its own — cluster B's report (cluster-B.md) flagged 19 inline
+   style="margin-bottom:..." stopgaps for this (13 on werkgevers.html's
+   .card kickers at --space-md, 6 on werkwijze.html's smaller-padding
+   .step-card-expanded at --space-sm). Two shared rules, same values,
+   replace all of them (§8.x.8 stap 4 integratie); the inline styles are
+   removed from both pages in the same pass. */
+.card > .mark:first-child { margin-bottom: var(--space-md); }
+.step-card-expanded > .mark:first-child { margin-bottom: var(--space-sm); }
+/* Reusable 3-line clamp for a card body under a language toggle (blog
+   excerpt, job description) — min-height keeps the shorter (English) copy
+   from collapsing the row when Dutch runs to 3 lines. */
+.card-clamp-3 {
+  min-height: 4.65em;
+  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
+}
+/* Archetype 2 laad-/foutstaat (blog — cluster D wires this to blog-index.js).
+   Structure (kader, eyebrow) stays put; only text becomes flat blocks. */
+.card--loading h3, .card--loading p { color: transparent; background: var(--gray-50); border-radius: var(--radius); }
+.card--error { border-left: 3px solid #dc2626; } /* matches existing .form-error color; border only, never text */
+.card--error .go-link { color: var(--gold-ink); }
+@media (max-width: 390px) {
+  .card, .service-card, .path-card, .story-card { padding: var(--space-lg); }
+}
+
+/* ── Archetype 3: datakaart (vacature) — #jobsGrid, #homeVacanciesGrid ─
+   Blijft een klikbare <div> met een geneste .go-link (bestaand patroon,
+   script.js:688, stopPropagation): :focus-within i.p.v. :focus zodat
+   Tab naar de geneste link hetzelfde randsignaal geeft als hover, zonder
+   een tweede focus-doelwit toe te voegen. Geen translateY op hover (de
+   geneste link zou anders "los" van de kaart lijken te bewegen). */
+.card-data, .job-card {
+  box-sizing: border-box;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  padding: var(--space-lg);
+  background: var(--bg-card);
+  border: 1px solid var(--gray-100);
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.card-data:hover, .card-data:focus-within,
+.job-card:hover, .job-card:focus-within {
+  border-color: var(--gold-ink);
+  box-shadow: var(--shadow-sm);
+}
+.card-data h3, .job-card h3 {
+  font-family: var(--font-display); font-weight: 500; font-size: var(--font-size-xl);
+  line-height: 1.25; margin-bottom: 4px;
+}
+.card-data p, .job-card > p {
+  font-size: var(--font-size-sm); color: var(--gray-500);
+}
+/* Top mono meta line (discipline · niveau · locatie), §8.x.1 archetype 3
+   anatomie — was an inline style= in script.js's jobCardHTML()/
+   jobCardSkeleton() (templates.md §5's "known CSS gap"); now a real rule. */
+.card-data__meta-top {
+  font-family: var(--font-mono); font-size: var(--font-size-xs); color: var(--navy-300);
+  padding-bottom: var(--space-md); margin-bottom: var(--space-md);
+  border-bottom: 1px solid var(--gray-100);
+}
+.card-data__meta {
+  font-family: var(--font-mono); font-size: var(--font-size-base); font-weight: 500;
+  color: var(--navy-900); margin-top: auto; padding-top: var(--space-md);
+  border-top: 1px solid var(--gray-100);
+}
+/* Discipline label is the one color in the card; other meta stays --navy-300
+   (set on .card-data__meta-top above). */
+.card-data__discipline { color: var(--gold-ink); }
+/* .job-tag.gold previously filled the chip with --gold-light background and
+   --gold-dark text — both forbidden (gold as a fill, gold-600/700 as text).
+   Unfilled + --gold-ink brings it into the archetype-5 gold-chip rule. */
+.job-tag.gold { background: transparent; color: var(--gold-ink); border: 1px solid var(--gray-100); }
+.card-data--empty, .card-data--loading, .card-data--error { text-align: center; align-items: center; }
+.card-data--empty { padding: var(--space-2xl) var(--space-lg); }
+.card-data--empty .mark { margin: 0 auto var(--space-md); }
+.card-data--loading .card-data__skeleton { background: var(--gray-50); border-radius: var(--radius); height: 1em; }
+.card-data--error { border-left: 3px solid #dc2626; text-align: left; align-items: stretch; } /* matches .form-error color; border only */
+.card-data--error .go-link { color: var(--gold-ink); }
+
+/* ── Archetype 4: genummerde stap — compact (dienstenladder, nieuw) ──
+   Nog geen alias op .prop: .prop's huidige anatomie (icoon, geen cijfer,
+   geen classificatietag) is niet grid-compatibel zonder HTML-wijziging.
+   Cluster B (§8.x.8 stap 3, werkgevers.html) schakelt de markup om naar
+   deze klassen; .prop's tokens zijn hieronder wel al bijgewerkt. */
+.step-rail { background: var(--bg-card); border-radius: var(--radius); }
+.step-row {
+  box-sizing: border-box;
+  display: grid;
+  grid-template-columns: 48px 220px 1fr 140px;
+  gap: var(--space-lg);
+  padding: var(--space-md) var(--space-lg);
+  border-bottom: 1px solid var(--gray-100);
+  align-items: start;
+}
+.step-row:last-child { border-bottom: none; }
+.step-row__num { font-family: var(--font-display); font-size: var(--font-size-xl); font-weight: 600; color: var(--navy-300); }
+.step-row__title { font-size: var(--font-size-lg); font-weight: 700; }
+.step-row__tag { font-family: var(--font-mono); font-size: var(--font-size-xs); letter-spacing: 0.13em; text-transform: uppercase; color: var(--gold-ink); justify-self: end; }
+.step-row__lead { font-size: var(--font-size-sm); }
+.step-row__split { font-size: var(--font-size-xs); color: var(--gray-500); margin-top: var(--space-xs); }
+.step-row .go-link { display: inline-flex; align-items: center; min-height: 44px; } /* §8.x.0 touch target */
+.step-row .go-link:hover, .step-row .go-link:focus-visible { color: var(--gold-ink); }
+@media (max-width: 390px) {
+  /* cluster-B.md flagged the plain 1-column collapse: in DOM order the
+     four children (num, title, body, tag) stacked one per row put the
+     classification tag dead last, reading as the label of the NEXT row.
+     grid-template-areas decouples visual position from DOM/column order
+     without touching the 1440px 4-column definition above (that rule
+     lives outside this media block). Header row (num/title/tag) plus a
+     full-width body row underneath, indented to align with the title. */
+  .step-row {
+    grid-template-columns: auto 1fr auto;
+    grid-template-areas: "num title tag" "body body body";
+    padding: var(--space-lg);
+  }
+  .step-row__num { grid-area: num; }
+  .step-row__title { grid-area: title; }
+  .step-row__tag { grid-area: tag; }
+  .step-row__body { grid-area: body; padding-left: 48px; margin-top: var(--space-sm); }
+}
+
+/* ── Archetype 4: genummerde stap — uitgeklapt (werkwijze, nieuw) ──
+   Zie dezelfde toelichting als hierboven; .step-card (huidige werkwijze-
+   markup) krijgt hieronder alleen een tokenmigratie, geen alias. */
+.step-rail--vertical { display: flex; }
+.step-rail__item { flex: 1; padding-block: var(--space-sm); text-align: center; color: var(--navy-300); }
+.step-rail__num { font-family: var(--font-display); font-size: var(--font-size-lg); }
+.step-rail__label { font-family: var(--font-mono); font-size: var(--font-size-xs); text-transform: uppercase; letter-spacing: 0.13em; }
+.step-rail__item--active { color: var(--navy-900); }
+.step-rail__item--active .step-rail__num { text-decoration: underline solid var(--gold-500) 2px; text-underline-offset: 6px; }
+.step-card-expanded { margin-top: var(--space-2xl); padding: var(--space-xl); border-top: 2px solid var(--gold-500); background: var(--bg-card); }
+.step-card-expanded h3 { font-size: var(--font-size-2xl); }
+@media (max-width: 390px) {
+  .step-rail--vertical { flex-direction: column; }
+  .step-card-expanded { margin-top: var(--space-lg); padding: var(--space-lg); }
+}
+
+/* ── Archetype 5: chip/badge ──────────────────────────────── */
+.chip, .mark, .trust-badge, .eco-badge, .ts-item {
+  display: inline-flex; align-items: center; gap: 8px;
+  font-family: var(--font-mono); font-size: var(--font-size-xs);
+  text-transform: uppercase; letter-spacing: 0.13em;
+  color: var(--gray-500);
+}
+.chip, .mark, .trust-badge, .eco-badge {
+  padding: 7px 14px;
+  border: 1px solid var(--gray-100);
+  border-radius: var(--radius-full);
+  background: transparent;
+}
+/* "als losse tekst met een dunne scheidingslijn" (§8.x.1 archetype 5) —
+   no box, a hairline between items instead of a border-kader. */
+.ts-item { padding: 0; border: none; border-radius: 0; gap: var(--space-sm); }
+.trust-strip .ts-item:not(:first-child) { border-left: 1px solid var(--gray-100); padding-left: var(--space-lg); }
+.page-hero .trust-strip .ts-item:not(:first-child) { border-left-color: var(--navy-500); }
+/* Discipline/classification codes (C++, MT, OT, QA) — the one gold variant.
+   Never --gold-600/700 as text, never a filled --gold-300 background. */
+.mark.code { color: var(--gold-ink); }
+/* On dark surfaces (page-hero, trust strip in the hero) */
+.page-hero .trust-badge { border-color: var(--navy-500); }
+.trust-strip .ts-item { color: var(--navy-100); }
+.trust-strip--light .ts-item { color: var(--gray-500); }
+@media (max-width: 390px) {
+  .trust-badges { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-sm); }
+  .trust-badge { justify-content: center; }
+}
+
+/* ── Archetype 6: contactmethode (contact.html) ─────────────
+   .contact-method/.cm-label/.cm-value alias retired — contact.html now
+   uses the canonical names directly (integratieronde, §8.x.8 stap 4). */
+.contact-row {
+  box-sizing: border-box;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: var(--space-lg);
+  padding: var(--space-lg);
+  border-bottom: 1px solid var(--gray-100);
+  transition: border-color 0.15s ease;
+}
+.contact-methods .contact-row:last-child { border-bottom: none; }
+.contact-row__label {
+  flex: 0 0 140px;
+  font-family: var(--font-mono); font-size: var(--font-size-xs);
+  text-transform: uppercase; letter-spacing: 0.05em;
+  color: var(--gold-ink);
+}
+.contact-row__value {
+  font-family: var(--font-display); font-size: var(--font-size-lg);
+  color: var(--navy-900);
+  overflow-wrap: anywhere;
+}
+.contact-row:hover .contact-row__value, .contact-row:focus-visible .contact-row__value {
+  text-decoration: underline; text-decoration-color: var(--gold-ink); text-underline-offset: 3px;
+}
+.contact-detail {
+  box-sizing: border-box;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+  font-size: var(--font-size-sm);
+  color: var(--gray-500);
+}
+.contact-detail i { width: 20px; color: var(--gold-ink); font-size: 1rem; }
+@media (max-width: 390px) {
+  .contact-row__label { flex-basis: 84px; }
+}
+
+/* ── Contactrail (sitebreed, §8.x.4) — vervangt .whatsapp-float/.mail-float,
+   zie §8.x.7. Linksonder (niet rechtsonder — botst anders met back-to-top/
+   toast-container/cookiebanner). Twee 48x48-items, geen puls, nooit
+   #25D366; label klapt alleen desktop-hover/focus-visible uit, glyph is op
+   touch altijd zelfstandig leesbaar (aria-label draagt de betekenis). */
+.contact-rail {
+  position: fixed; left: var(--space-lg); bottom: var(--space-lg); z-index: 9995;
+  display: flex; flex-direction: column;
+  background: var(--navy-900);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+.contact-rail__item {
+  box-sizing: border-box;
+  display: flex; align-items: center; gap: var(--space-sm);
+  width: 48px; height: 48px; padding: 0 14px;
+  color: #fff; text-decoration: none;
+  overflow: hidden;
+  transition: width 0.2s ease, background 0.2s ease;
+}
+.contact-rail__item + .contact-rail__item { border-top: 1px solid var(--navy-600); }
+.contact-rail__glyph {
+  flex-shrink: 0;
+  font-family: var(--font-mono); font-size: var(--font-size-xs); font-weight: 600; letter-spacing: 0.05em;
+}
+.contact-rail__label {
+  max-width: 0; overflow: hidden; white-space: nowrap;
+  font-size: var(--font-size-sm); transition: max-width 0.2s ease;
+}
+.contact-rail__item:hover, .contact-rail__item:focus-visible {
+  width: auto;
+  background: var(--navy-800);
+  outline: none;
+}
+.contact-rail__item:hover .contact-rail__label, .contact-rail__item:focus-visible .contact-rail__label {
+  max-width: 120px;
+}
+.contact-rail__item:focus-visible { outline: 2px solid var(--gold-500); outline-offset: -2px; }
 
 /* ── Reset ──────────────────────────────────────────────── */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -172,9 +609,7 @@ section { padding: 100px 0; }
   content: none;
 }
 .page-hero .section-label,
-.hero .section-label,
-.cta-band .section-label,
-.on-dark .section-label {
+.cta-band .section-label {
   color: var(--gold);
 }
 .section-header { text-align: center; max-width: 640px; margin: 0 auto 48px; }
@@ -237,7 +672,7 @@ section { padding: 100px 0; }
   border-color: var(--text-muted);
 }
 .btn-sm { padding: 10px 22px; font-size: 0.85rem; }
-.btn-lg { padding: 16px 40px; font-size: 1.05rem; }
+/* .btn-lg removed — confirmed 0 usage in HTML/JS (§8.x.7 census). */
 
 /* ── Header ─────────────────────────────────────────────── */
 .header {
@@ -351,40 +786,9 @@ section { padding: 100px 0; }
 .hamburger.active span:nth-child(3) { transform: rotate(-45deg) translate(5px, -5px); }
 
 /* ── Hero ───────────────────────────────────────────────── */
-.hero {
-  min-height: 90vh;
-  display: flex;
-  align-items: center;
-  background:
-    radial-gradient(900px 540px at 88% -10%, rgba(232, 180, 0, 0.10), transparent 60%),
-    linear-gradient(180deg, #FFFFFF 0%, var(--bg-alt) 100%);
-  position: relative;
-  overflow: hidden;
-  padding-top: 72px;
-}
-.hero::before {
-  content: '';
-  position: absolute;
-  top: -40%;
-  right: -15%;
-  width: 700px;
-  height: 700px;
-  background: radial-gradient(circle, rgba(250, 200, 0, 0.05) 0%, transparent 65%);
-  pointer-events: none;
-}
-.hero::after {
-  content: '';
-  position: absolute;
-  bottom: -25%;
-  left: -10%;
-  width: 500px;
-  height: 500px;
-  background: radial-gradient(circle, rgba(10, 22, 40, 0.03) 0%, transparent 65%);
-  pointer-events: none;
-}
-.hero-content { position: relative; z-index: 2; max-width: 720px; }
-.hero h1 { margin-bottom: 20px; }
-.hero p { font-size: 1.15rem; margin-bottom: 36px; max-width: 600px; color: var(--text-secondary); }
+/* .hero/.hero::before/.hero::after/.hero-content removed — confirmed 0
+   usage in HTML (the live homepage hero is .page-hero); §8.x.7 census.
+   .hero-actions stays — used sitewide, independent of the dead ancestor. */
 .hero-actions { display: flex; gap: 12px; flex-wrap: wrap; }
 
 /* ── Services ───────────────────────────────────────────── */
@@ -396,31 +800,14 @@ section { padding: 100px 0; }
   gap: 24px;
   margin-top: 8px;
 }
+/* Container/h3/p/hover rules live in the archetype-2 block near the top of
+   this file (.card, .service-card); only the grid sizing stays here.
+   .service-icon removed — the expertise grid is icon-less now (.mark.code
+   chips replace it, §8.x.3), confirmed 0 usage. */
 .service-card {
   flex: 1 1 calc(25% - 18px);
   max-width: calc(25% - 18px);
-  background: var(--bg-card);
-  padding: 28px 24px;
-  border-radius: 0;
-  border: 1px solid var(--border);
-  transition: var(--transition);
-  position: relative;
 }
-.service-card:hover { border-color: var(--gold-600, var(--gold-dark)); box-shadow: var(--shadow-md); }
-.service-icon {
-  width: 26px;
-  height: 26px;
-  border-radius: 0;
-  background: transparent;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 1.1rem;
-  margin-bottom: 14px;
-  color: var(--gold-dark);
-}
-.service-card h3 { font-family: var(--font); font-size: 1rem; font-weight: 600; letter-spacing: 0; }
-.service-card p { font-size: 0.88rem; margin-top: 6px; color: var(--text-secondary); }
 @media (max-width: 1023px) { .service-card { flex-basis: calc(50% - 12px); max-width: calc(50% - 12px); } }
 @media (max-width: 560px) { .service-card { flex-basis: 100%; max-width: 100%; } }
 
@@ -439,24 +826,21 @@ section { padding: 100px 0; }
   gap: 12px 16px;
   flex-wrap: wrap;
 }
-.eco-badge {
-  display: inline-block;
-  font-weight: 600;
-  font-size: 0.85rem;
-  color: var(--navy-600, var(--text));
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  padding: 8px 20px;
-  background: var(--bg);
-  transition: var(--transition);
-}
-.eco-badge:hover {
-  border-color: var(--gold);
-  color: var(--text);
-}
+/* Container/border/radius/color now live in the archetype-5 block near the
+   top of this file (.chip, .mark, .trust-badge, .eco-badge). Chips are
+   static labels, not links (§8.x.1 archetype 5) — no hover state. */
+.eco-badge { display: inline-block; font-weight: 600; padding: 8px 20px; }
 
 /* ── Jobs ───────────────────────────────────────────────── */
-#jobs { background: var(--bg); }
+/* --gray-50, not --bg (white): §8.x.1 archetype 3 names "vacature" as one
+   of the structural-preference cases (white card on --gray-50 section) so
+   the mandatory white-on-white --shadow-sm exception (§8.x.0) isn't
+   needed here — .card-data/.job-card is white, this section was white too
+   before this change. Same fix applied to #homeVacancies below (index.html)
+   and to #blogPosts (blog/index.html, moved here from a page-local rule
+   in the integration pass — same white-.card-on-white-body case). */
+#jobs { background: var(--gray-50); }
+#blogPosts { background: var(--gray-50); padding-bottom: var(--space-4xl); }
 .jobs-header {
   margin-bottom: 32px;
   padding: 20px 0;
@@ -484,20 +868,13 @@ section { padding: 100px 0; }
 .jobs-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; }
 @media (max-width: 1023px) { .jobs-grid { grid-template-columns: repeat(2, 1fr); } }
 @media (max-width: 640px) { .jobs-grid { grid-template-columns: 1fr; } }
-.job-card {
-  padding: 28px;
-  border: 1px solid var(--border);
-  border-radius: 0;
-  cursor: pointer;
-  transition: var(--transition);
-  background: var(--bg-card);
-  display: flex;
-  flex-direction: column;
-}
-.job-card:hover { box-shadow: var(--shadow-lg); border-color: var(--gold-600, var(--gold-dark)); }
-.job-card h3 { font-family: var(--font-display); font-weight: 500; font-size: 1.3rem; margin-bottom: 4px; }
-.job-card > p { font-size: 0.9rem; margin-top: 8px; color: var(--text-secondary); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-.job-tags { display: flex; gap: 8px; flex-wrap: wrap; margin: 12px 0 8px; }
+/* Container/hover/h3/p/.job-tag.gold now live in the archetype-3 block
+   near the top of this file (.card-data, .job-card). Only the clamp
+   override stays here — 3-line clamp per §8.x.1 archetype 3, was 2-line.
+   .job-tags/.job-meta removed — confirmed 0 usage (§8.x.7 census); .job-tag
+   itself (no -s) is alive, used inline in showJobDetail()'s modal body
+   (website/script.js). */
+.job-card > p { -webkit-line-clamp: 3; min-height: 4.65em; }
 .job-tag {
   font-family: var(--font-mono);
   padding: 4px 10px;
@@ -507,13 +884,6 @@ section { padding: 100px 0; }
   background: var(--bg-alt);
   color: var(--navy-600, var(--text-secondary));
 }
-.job-tag.gold { background: var(--gold-light); color: var(--gold-dark); }
-.job-meta {
-  display: flex; justify-content: space-between; align-items: center;
-  font-family: var(--font-mono); font-size: 0.9rem; font-weight: 500;
-  color: var(--text); margin-top: auto; padding-top: 14px; border-top: 1px solid var(--bg-alt);
-}
-.job-meta span { display: flex; align-items: center; gap: 5px; }
 
 /* ── Salary Calculator ──────────────────────────────────── */
 #salary { background: var(--bg-alt); }
@@ -640,35 +1010,28 @@ section { padding: 100px 0; }
    distinct band — a hairline keeps the two sections from visually fusing. */
 #cases { border-top: 1px solid var(--border); }
 .stories-grid { display: flex; flex-wrap: wrap; justify-content: center; gap: 24px; margin-top: 8px; }
+/* Container/hover/focus-visible/h3/p now live in the archetype-2 block
+   near the top of this file (.card, .story-card). Grid sizing and the
+   .story-tag chip (archetype-5 gold-chip style — was a filled gold-light
+   background with gold-dark text, both forbidden) stay here.
+   .story-result removed — confirmed 0 usage (§8.x.7 census). */
 .story-card {
   flex: 1 1 calc(33.333% - 16px);
   max-width: calc(33.333% - 16px);
-  background: var(--bg-card);
-  padding: 36px 32px;
-  border-radius: var(--radius);
-  border: 1px solid var(--border);
-  transition: var(--transition);
 }
-.story-card:hover { transform: translateY(-4px); box-shadow: var(--shadow-lg); }
 .story-tag {
   display: inline-block;
   padding: 4px 14px;
-  border-radius: 20px;
-  font-size: 0.72rem;
+  border: 1px solid var(--gray-100);
+  border-radius: var(--radius-full);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
   font-weight: 600;
-  background: var(--gold-light);
-  color: var(--gold-dark);
+  text-transform: uppercase;
+  letter-spacing: 0.13em;
+  background: transparent;
+  color: var(--gold-ink);
   margin-bottom: 14px;
-}
-.story-card h3 { font-size: 1.1rem; margin-bottom: 8px; }
-.story-card p { font-size: 0.92rem; color: var(--text-secondary); }
-.story-result {
-  font-weight: 600;
-  color: var(--navy);
-  margin-top: 16px;
-  font-size: 0.92rem;
-  padding-top: 16px;
-  border-top: 1px solid var(--border);
 }
 
 /* Werkwijze: numbered steps — bold navy serif numerals with a short gold
@@ -696,120 +1059,6 @@ section { padding: 100px 0; }
 }
 #process .story-card h3 { font-family: var(--font); font-size: 1.05rem; font-weight: 700; margin-top: 6px; }
 #process .story-card p { font-size: 0.92rem; }
-
-/* ── Testimonials Carousel ──────────────────────────────── */
-#testimonials { background: var(--bg); overflow: hidden; }
-.testimonials-carousel {
-  position: relative;
-  max-width: 680px;
-  margin: 0 auto;
-  min-height: 280px;
-}
-.testimonial-card {
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  background: var(--bg-card);
-  padding: 40px 36px;
-  border-radius: var(--radius);
-  border: 1px solid var(--border);
-  box-shadow: var(--shadow-sm);
-  transition: opacity 0.6s ease, transform 0.6s ease;
-  opacity: 0;
-  transform: translateX(40px) scale(0.96);
-  pointer-events: none;
-}
-.testimonial-card.active {
-  opacity: 1;
-  transform: translateX(0) scale(1);
-  pointer-events: auto;
-  position: relative;
-}
-.testimonial-card.exit-left {
-  opacity: 0;
-  transform: translateX(-40px) scale(0.96);
-}
-.testimonial-card.enter-right {
-  opacity: 0;
-  transform: translateX(40px) scale(0.96);
-}
-.testimonial-card:hover {
-  box-shadow: var(--shadow-lg);
-  border-color: var(--gold-light);
-}
-.testimonial-stars {
-  color: var(--gold);
-  margin-bottom: 16px;
-  font-size: 1.1rem;
-  letter-spacing: 3px;
-}
-.testimonial-text {
-  font-size: 1.05rem;
-  font-style: italic;
-  line-height: 1.7;
-  color: var(--text-secondary);
-  margin-bottom: 24px;
-}
-.testimonial-author {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  padding-top: 20px;
-  border-top: 1px solid var(--border-light);
-}
-.testimonial-avatar {
-  width: 48px;
-  height: 48px;
-  border-radius: 50%;
-  background: var(--gold);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--navy);
-  font-weight: 700;
-  font-size: 1.1rem;
-  flex-shrink: 0;
-}
-.testimonial-author strong {
-  display: block;
-  font-size: 0.95rem;
-  font-weight: 600;
-  color: var(--text);
-  margin-bottom: 2px;
-}
-.testimonial-author span {
-  display: block;
-  font-size: 0.82rem;
-  color: var(--text-muted);
-}
-.testimonials-dots {
-  display: flex;
-  justify-content: center;
-  gap: 10px;
-  margin-top: 32px;
-}
-.testimonials-dots .dot {
-  width: 12px;
-  height: 12px;
-  border-radius: 50%;
-  background: var(--border);
-  border: none;
-  cursor: pointer;
-  transition: var(--transition);
-  padding: 0;
-}
-.testimonials-dots .dot.active {
-  background: var(--gold);
-  transform: scale(1.3);
-  box-shadow: 0 0 0 4px var(--gold-glow);
-}
-.testimonials-dots .dot:hover:not(.active) {
-  background: var(--text-muted);
-}
-#testimonials.paused .testimonial-card {
-  transition-duration: 0.01ms !important;
-}
 
 /* ── FAQ ────────────────────────────────────────────────── */
 #faq { background: var(--bg-alt); }
@@ -857,7 +1106,15 @@ section { padding: 100px 0; }
 
 /* ── Contact ────────────────────────────────────────────── */
 #contact { background: var(--bg); }
+/* min-width:0 on the grid items: without it a grid item's default
+   min-width is its content's min-content, which for .contact-form's long
+   <option> text (the "interest" select) is 500px+ — wider than the 390px
+   single mobile column, causing real horizontal overflow. Confirmed
+   pre-existing (cluster-C.md flagged this, reproduced on the unmigrated
+   file with git stash) — fixed here alongside the matching width:100% on
+   the form fields below. */
 .contact-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 48px; margin-top: 8px; }
+.contact-grid > * { min-width: 0; }
 .contact-info {
   padding: 36px;
   background: var(--bg-alt);
@@ -865,20 +1122,16 @@ section { padding: 100px 0; }
   border: 1px solid var(--border);
 }
 .contact-info h3 { font-size: 1.1rem; margin-bottom: 20px; }
-.contact-detail {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  margin-bottom: 14px;
-  font-size: 0.92rem;
-  color: var(--text-secondary);
-}
-.contact-detail i { width: 20px; color: var(--gold); font-size: 1rem; }
+/* Layout/color for .contact-detail now live in the archetype-6 block near
+   the top of this file; only the list spacing stays here. */
+.contact-detail { margin-bottom: 14px; }
 
 .contact-form { display: flex; flex-direction: column; gap: 14px; }
 .contact-form input,
 .contact-form select,
 .contact-form textarea {
+  box-sizing: border-box;
+  width: 100%;
   padding: 13px 16px;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
@@ -936,67 +1189,41 @@ section { padding: 100px 0; }
 @media (max-width: 480px) { .footer-grid-5 { grid-template-columns: 1fr; } }
 
 /* ── Trust badges row ───────────────────────────────────── */
+/* Container/border/radius/color (light + dark page-hero variant) now live
+   in the archetype-5 block near the top of this file. Only row layout and
+   the svg icon stay here. */
 .trust-badges { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 28px; position: relative; z-index: 1; }
-.trust-badge {
-  display: inline-flex; align-items: center; gap: 10px;
-  padding: 10px 18px; border-radius: var(--radius-full);
-  background: var(--bg-card); border: 1px solid var(--border);
-  font-size: 0.86rem; font-weight: 600; color: var(--text-secondary);
-}
+.trust-badge { font-weight: 600; background: var(--bg-card); }
 .trust-badge svg { flex-shrink: 0; color: var(--gold-dark); }
-.page-hero .trust-badge {
-  background: transparent; border-color: var(--navy-600, #152B4A); color: var(--navy-100, #C5D6EB);
-}
+.page-hero .trust-badge { background: transparent; }
 .page-hero .trust-badge svg { color: var(--navy-200, #7FA0C9); }
 
-/* ── Line-icon (werkwijze / services) ───────────────────── */
+/* ── Line-icon (kandidaten.html/vacatures.html props, trust-badges) ───
+   .step-icon/.service-icon-svg/.steps-list/.step-card/.step-num removed —
+   werkwijze.html's steps are .step-card-expanded now (archetype 4,
+   uitgeklapt), the expertise grid is icon-less (.mark.code); confirmed 0
+   usage. .line-icon stays: still the bare-stroke SVG icon used inside
+   .prop (kandidaten.html/vacatures.html) and inside some trust-badges
+   (werkgevers.html/over-ons.html) — out of this migration's scope. */
 .line-icon { width: 32px; height: 32px; display: block; }
-.step-icon {
-  width: 52px; height: 52px; border-radius: 14px;
-  background: var(--gold-light); display: flex; align-items: center; justify-content: center;
-  margin-bottom: 18px; color: var(--navy);
-}
-/* Expertise grid icons: bare stroke gold line icon per approved mockup —
-   no chip container, no rounded box. */
-.service-icon-svg {
-  width: 52px; height: 52px;
-  display: flex; align-items: center; justify-content: center;
-  margin-bottom: 18px; color: var(--gold-dark);
-}
-.step-icon svg, .service-icon-svg svg { width: 28px; height: 28px; }
-
-/* ── Werkwijze steps ─────────────────────────────────────── */
-.steps-list { display: flex; flex-direction: column; gap: 20px; margin-top: 8px; }
-.step-card {
-  display: flex; gap: 24px; align-items: flex-start;
-  padding: 28px 30px; background: var(--bg-card);
-  border: 1px solid var(--border); border-radius: var(--radius);
-}
-.step-num {
-  font-family: var(--font-display); font-size: 1.7rem; font-weight: 600;
-  /* Navy numeral + short gold underline, matching the homepage #process
-     treatment — var(--gold-dark) alone was 2.04:1 on white, well under the
-     3:1 AA floor for large text. Navy is ~18:1. */
-  color: var(--navy); flex-shrink: 0; width: 44px; line-height: 1;
-  position: relative; padding-bottom: 14px;
-}
-.step-num::after {
-  content: ''; position: absolute; left: 0; bottom: 0; width: 22px; height: 3px;
-  background: var(--gold);
-}
-.step-body h3 { margin-bottom: 4px; font-weight: 700; }
 
 /* ── Homepage vacancy module ────────────────────────────── */
-.vac-card { display: flex; flex-direction: column; gap: 12px; padding: 28px; border: 1px solid var(--border); border-radius: 0; background: var(--bg-subtle, var(--bg-card)); transition: var(--transition); }
-.vac-card:hover { box-shadow: var(--shadow-lg); border-color: var(--gold-600, var(--gold-dark)); }
-.vac-ref { font-family: var(--font-mono); font-size: 0.72rem; font-weight: 500; color: var(--text-muted); letter-spacing: 0.04em; }
-.vac-tags { display: flex; gap: 8px; flex-wrap: wrap; }
-.vac-chip { display: inline-block; font-family: var(--font-mono); padding: 4px 10px; border-radius: 2px; font-size: 0.72rem; font-weight: 500; background: var(--border); color: var(--navy-600, var(--text)); }
-.vac-card h3 { font-family: var(--font-display); font-weight: 500; font-size: 1.3rem; line-height: 1.25; }
-.vac-desc { font-size: 0.88rem; color: var(--text-secondary); }
-.vac-salary { font-family: var(--font-mono); font-size: 0.95rem; font-weight: 500; color: var(--text); margin-top: auto; }
-.vac-meta { font-size: 0.85rem; color: var(--text-muted); }
-.vac-link { font-weight: 600; font-size: 0.88rem; color: var(--gold-dark); }
+/* Container/hover/h3/desc-color now live in the archetype-3 block near the
+   top of this file (.card-data). .vac-ref/.vac-meta/.vac-card/.vac-tags/
+   .vac-chip/.vac-desc removed — confirmed 0 usage in HTML/JS (§8.x.7
+   census; script.js's jobCardHTML() renders #homeVacanciesGrid with the
+   same .card-data markup as #jobsGrid now, one component two contexts). */
+/* --gray-50, not the default white body background — same white-on-white
+   fix as #jobs above; this section had no background rule at all before
+   (index.html's inline style only sets display:none for the empty state). */
+#homeVacancies { background: var(--gray-50); }
+/* Same archetype-3 nested .go-link as .job-view-link above (one component,
+   two contexts, §8.x.2) — matching hover/focus-visible and 44px touch target. */
+.vac-link {
+  display: inline-flex; align-items: center; gap: 5px; min-height: 44px;
+  font-weight: 600; font-size: 0.88rem; color: var(--gold-ink); transition: var(--transition);
+}
+.vac-link:hover, .vac-link:focus-visible { gap: 8px; color: var(--navy); }
 .footer-brand img {
   height: 34px;
   width: auto;
@@ -1254,8 +1481,6 @@ section { padding: 100px 0; }
   .nav-mobile-lang-toggle { display: flex; gap: 8px; }
   .nav-mobile-lang-toggle .lang-btn { flex: 1; padding: 8px 10px; text-align: center; }
   .nav-mobile-login { border-top: none; padding-top: 0; margin-top: 8px; }
-  .hero { min-height: 85vh; }
-  .hero h1 { font-size: 2.2rem; }
   .service-card,
   .story-card { flex-basis: 100%; max-width: 100%; }
   .jobs-grid { grid-template-columns: 1fr; }
@@ -1272,7 +1497,6 @@ section { padding: 100px 0; }
 }
 
 @media (max-width: 480px) {
-  .hero h1 { font-size: 1.8rem; }
   .hero-actions { flex-direction: column; }
   .hero-actions .btn { width: 100%; justify-content: center; }
   .jobs-filters input { min-width: auto; width: 100%; }
@@ -1302,69 +1526,12 @@ section { padding: 100px 0; }
    ENHANCED COMPONENTS (added via homepage enhancement)
    ══════════════════════════════════════════════════════════════════════ */
 
-/* ── Cookie Consent Banner ─────────────────────────────── */
-.cookie-banner {
-  position: fixed;
-  bottom: 0;
-  left: 0;
-  right: 0;
-  z-index: 9997;
-  background: var(--navy);
-  color: #fff;
-  padding: 16px 24px;
-  transform: translateY(100%);
-  transition: transform 0.5s cubic-bezier(0.4, 0, 0.2, 1);
-  box-shadow: 0 -4px 24px rgba(0, 0, 0, 0.15);
-}
-.cookie-banner.show {
-  transform: translateY(0);
-}
-.cookie-content {
-  max-width: 1200px;
-  margin: 0 auto;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 20px;
-  flex-wrap: wrap;
-}
-.cookie-content p {
-  flex: 1;
-  min-width: 280px;
-  font-size: 0.88rem;
-  color: rgba(255, 255, 255, 0.8);
-  line-height: 1.5;
-  margin: 0;
-}
-.cookie-buttons {
-  display: flex;
-  gap: 10px;
-  flex-shrink: 0;
-}
-.cookie-buttons .btn-gold {
-  background: var(--gold);
-  color: var(--navy);
-  border-color: var(--gold);
-}
-.cookie-buttons .btn-gold:hover {
-  background: var(--gold-dark);
-  transform: translateY(-1px);
-}
-.cookie-buttons .btn-outline {
-  color: #fff;
-  border-color: rgba(255, 255, 255, 0.4);
-  background: transparent;
-}
-.cookie-buttons .btn-outline:hover {
-  border-color: #fff;
-  background: rgba(255, 255, 255, 0.1);
-}
-@media (max-width: 640px) {
-  .cookie-content { flex-direction: column; align-items: flex-start; }
-  .cookie-content p { min-width: auto; }
-  .cookie-buttons { width: 100%; }
-  .cookie-buttons .btn { flex: 1; justify-content: center; }
-}
+/* .cookie-banner/.cookie-content/.cookie-buttons removed — confirmed 0
+   usage in HTML/JS (§8.x.7 census). The live cookie card is built by
+   initCookieConsent() (website/script.js:1377) as #cookieConsentBanner
+   with its own inline style.cssText, not this class — verified before
+   removal, per the task's note that a red-team jury saw a "fixed cookie
+   banner element" (that element is #cookieConsentBanner, untouched). */
 
 /* ── Back to Top Button ────────────────────────────────── */
 .back-to-top {
@@ -1411,88 +1578,11 @@ section { padding: 100px 0; }
   }
 }
 
-/* ── Enhanced Animations ───────────────────────────────── */
-@keyframes float {
-  0%, 100% { transform: translateY(0); }
-  50% { transform: translateY(-8px); }
-}
-@keyframes pulse {
-  0%, 100% { transform: scale(1); }
-  50% { transform: scale(1.05); }
-}
-@keyframes shimmer {
-  0% { background-position: -200% center; }
-  100% { background-position: 200% center; }
-}
-@keyframes gradientShift {
-  0% { background-position: 0% 50%; }
-  50% { background-position: 100% 50%; }
-  100% { background-position: 0% 50%; }
-}
-@keyframes slideUpFade {
-  from { opacity: 0; transform: translateY(24px); }
-  to { opacity: 1; transform: translateY(0); }
-}
-@keyframes scaleIn {
-  from { opacity: 0; transform: scale(0.92); }
-  to { opacity: 1; transform: scale(1); }
-}
-
-/* Utility animation classes */
-.animate-float { animation: float 3s ease-in-out infinite; }
-.animate-pulse { animation: pulse 2s ease-in-out infinite; }
-.animate-shimmer {
-  background: linear-gradient(90deg, transparent 25%, rgba(255,255,255,0.15) 50%, transparent 75%);
-  background-size: 200% 100%;
-  animation: shimmer 2s linear infinite;
-}
-.animate-gradient {
-  background: linear-gradient(135deg, var(--gold), var(--gold-dark), var(--navy), var(--gold));
-  background-size: 300% 300%;
-  animation: gradientShift 6s ease infinite;
-}
-.animate-slide-up {
-  animation: slideUpFade 0.6s ease forwards;
-}
-.animate-scale-in {
-  animation: scaleIn 0.5s ease forwards;
-}
-
-/* ── Staggered fade-in for cards ───────────────────────── */
-.fade-in-stagger > * {
-  opacity: 0;
-  transform: translateY(20px);
-  transition: opacity 0.5s ease, transform 0.5s ease;
-}
-.fade-in-stagger.visible > *:nth-child(1) { transition-delay: 0.05s; }
-.fade-in-stagger.visible > *:nth-child(2) { transition-delay: 0.10s; }
-.fade-in-stagger.visible > *:nth-child(3) { transition-delay: 0.15s; }
-.fade-in-stagger.visible > *:nth-child(4) { transition-delay: 0.20s; }
-.fade-in-stagger.visible > *:nth-child(5) { transition-delay: 0.25s; }
-.fade-in-stagger.visible > *:nth-child(6) { transition-delay: 0.30s; }
-.fade-in-stagger.visible > *:nth-child(7) { transition-delay: 0.35s; }
-.fade-in-stagger.visible > *:nth-child(8) { transition-delay: 0.40s; }
-.fade-in-stagger.visible > * {
-  opacity: 1;
-  transform: translateY(0);
-}
-
-/* ── Floating shape decorations ────────────────────────── */
-.floating-shape {
-  position: absolute;
-  border-radius: 50%;
-  pointer-events: none;
-  opacity: 0.06;
-  z-index: 0;
-}
-.floating-shape.gold {
-  background: var(--gold);
-  animation: float 6s ease-in-out infinite;
-}
-.floating-shape.navy {
-  background: var(--navy);
-  animation: float 8s ease-in-out infinite reverse;
-}
+/* .animate-float/-pulse/-shimmer/-gradient/-slide-up/-scale-in,
+   .fade-in-stagger and .floating-shape (plus their now-orphaned keyframes:
+   float, pulse, shimmer, gradientShift, slideUpFade, scaleIn) removed —
+   confirmed 0 usage in HTML/JS (§8.x.7 census). .fade-in/.fade-in-left/
+   .fade-in-right (initScrollAnimations, script.js) are unrelated and stay. */
 
 /* ── Dark theme form polish ─────────────────────────────── */
 ::placeholder { color: var(--text-muted); opacity: 1; }
@@ -1504,7 +1594,6 @@ input[type="checkbox"] { accent-color: var(--gold); }
   body { background: #fff; color: #000; font-size: 11pt; }
   .header, .hamburger, .lang-btn, .modal-overlay, #preloader,
   .btn, .hero-actions, .jobs-filters, .quiz-lead-form { display: none !important; }
-  .hero { min-height: auto; padding: 40px 0; background: none !important; }
   section { padding: 20px 0; page-break-inside: avoid; }
   .container { max-width: 100%; padding: 0; }
   a[href]::after { content: " (" attr(href) ")"; font-size: 9pt; color: #666; }
@@ -1513,7 +1602,6 @@ input[type="checkbox"] { accent-color: var(--gold); }
   .footer h4 { color: #000 !important; }
   .footer-links a { color: #333 !important; }
   .footer-bottom { color: #999 !important; border-top-color: #ddd; }
-  .stat-number { color: #000; }
   .calc-metric .value { color: #000; }
 }
 
@@ -1583,64 +1671,17 @@ html[data-lang="en"] .lang-nl { display: none; }
 .page-hero .hero-actions { margin-top: 28px; }
 
 /* ── Home: two-path choice cards ────────────────────────── */
-.choice-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-top: 40px; max-width: 920px; position: relative; z-index: 1; }
-.choice-card {
-  display: flex; flex-direction: column; align-items: flex-start;
-  padding: 32px 32px 28px;
-  background: var(--navy-800, #0A1628);
-  border: 1px solid var(--navy-600, #152B4A);
-  border-top: 3px solid var(--gold);
-  border-radius: 0;
-  transition: var(--transition);
-}
-.choice-grid .choice-card:nth-child(2) { border-top-color: var(--navy-300, #4A6F9F); }
-.choice-card:hover { transform: translateY(-4px); box-shadow: var(--shadow-lg); }
-.choice-card .choice-icon {
-  width: 44px; height: 44px; border-radius: 0;
-  background: transparent; color: var(--gold);
-  display: flex; align-items: center; justify-content: center;
-  font-size: 1.3rem; margin-bottom: 4px;
-}
-.choice-card h3 { font-family: var(--font-display); font-size: 1.6rem; font-weight: 500; margin-bottom: 8px; color: #fff; }
-.choice-card p { font-size: 0.95rem; margin-bottom: 20px; color: var(--navy-100, #C5D6EB); }
-.choice-card .choice-go {
-  margin-top: auto; display: inline-flex; align-items: center; gap: 8px;
-  font-weight: 600; color: var(--gold); font-size: 0.9rem;
-}
-.choice-card:hover .choice-go { gap: 12px; }
-.choice-card .choice-go i { color: var(--gold); transition: var(--transition); }
+/* Container rules (background/border/padding/hover/focus-visible/h3/p/
+   go-link) now live in the archetype-1 block near the top of this file
+   (.card-dark, .choice-card). .choice-icon/.choice-go i removed — the
+   choice cards are icon-less now (mono eyebrow instead), confirmed 0
+   usage; the literal "→" arrow lives in the link text, not an <i>. Only
+   the page-specific grid layout stays here. */
+.choice-grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-lg); margin-top: var(--space-2xl); max-width: 920px; position: relative; z-index: 1; }
 
-/* ── Service ladder (werkgevers.html: vast / interim / uitzenden /
-   detacheren / zzp-bemiddeling) — reuses the .prop/.prop-icon card and
-   line-icon pattern, in a balanced 3+2 layout so no card sits alone on a
-   row at desktop or tablet widths. ──────────────────────── */
-.service-ladder-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 22px; margin-top: 8px; }
-.service-ladder-grid .prop { display: flex; flex-direction: column; grid-column: span 2; }
-.service-ladder-grid .prop:nth-child(4), .service-ladder-grid .prop:nth-child(5) { grid-column: span 3; }
-.service-ladder-grid .prop .service-ladder-split { font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 20px; }
-/* var(--gold) (#FAC800) measures 1.58:1 on these white/off-white .prop
-   cards — well under the 4.5:1 AA floor for this small link text. Reuse
-   the same darker gold-ochre token as .section-label (#8A6800, 4.72:1 on
-   --off-white / 5.17:1 on white) instead of the bright hero gold. */
-.service-ladder-grid .prop .choice-go { margin-top: auto; display: inline-flex; align-items: center; gap: 8px; font-weight: 600; color: #8A6800; font-size: 0.9rem; }
-.service-ladder-grid .prop:hover .choice-go,
-.service-ladder-grid .prop .choice-go:focus-visible { gap: 12px; text-decoration: underline; }
-.service-ladder-grid .prop .choice-go i { color: #8A6800; transition: var(--transition); }
-@media (max-width: 1024px) {
-  /* Explicit nth-child overrides (not just the plain .prop reset) so they
-     match the specificity of the base nth-child(4)/(5) rule above — a
-     lower-specificity reset here would lose to it and leave a stray
-     wide card, which is exactly the bug this comment is warning about. */
-  .service-ladder-grid { grid-template-columns: repeat(2, 1fr); }
-  .service-ladder-grid .prop,
-  .service-ladder-grid .prop:nth-child(4) { grid-column: span 1; }
-  .service-ladder-grid .prop:nth-child(5) { grid-column: 1 / -1; }
-}
-@media (max-width: 640px) {
-  .service-ladder-grid { grid-template-columns: 1fr; }
-  .service-ladder-grid .prop:nth-child(4),
-  .service-ladder-grid .prop:nth-child(5) { grid-column: auto; }
-}
+/* .service-ladder-grid (werkgevers.html dienstenladder's old 3+2 layout)
+   removed — replaced by .step-rail/.step-row (archetype 4, compact),
+   confirmed 0 usage in HTML (§8.x.8 stap 3, cluster B). */
 
 /* ── Candidate signup split (kandidaten.html top) ───────── */
 .signup-split {
@@ -1668,8 +1709,15 @@ html[data-lang="en"] .lang-nl { display: none; }
   font-family: var(--font-mono); font-size: 0.8rem; color: var(--navy-300, #4A6F9F);
 }
 .signup-panel { padding: 72px 48px; display: flex; align-items: center; justify-content: center; background: var(--bg); }
+/* Archetype 2's card container (bg/border/radius) is reused here per
+   §8.x.2 — the form structure inside stays its own, not migrated to the
+   mark→h3→body→go-link anatomy. .signup-panel above is --bg (white), same
+   as the card itself — the §8.x.0 mandatory white-on-white exception
+   applies: --shadow-sm alongside the hairline, not a decorative shadow. */
 .signup-card {
-  background: var(--bg-card); border: 1px solid var(--border);
+  box-sizing: border-box;
+  background: var(--bg-card); border: 1px solid var(--gray-100); border-radius: var(--radius);
+  box-shadow: var(--shadow-sm);
   padding: 48px; max-width: 480px; width: 100%;
   display: flex; flex-direction: column; gap: 18px;
 }
@@ -1710,32 +1758,37 @@ html[data-lang="en"] .lang-nl { display: none; }
   .signup-card { padding: 32px 24px; }
 }
 
-/* Trust strip beneath the homepage hero cards */
-.trust-strip { display: flex; gap: 40px; flex-wrap: wrap; margin-top: 40px; position: relative; z-index: 1; }
-.ts-item { display: flex; align-items: center; gap: 10px; font-size: 0.9rem; color: var(--navy-100, #C5D6EB); }
-.ts-item i { color: var(--navy-200, #7FA0C9); }
-/* Overridden by the higher-specificity ".trust-strip .ts-item" rule below,
-   which is the one actually rendered on the (dark) page-hero — its color
-   is what carries the WCAG AA fix. */
+/* Trust strip beneath the homepage hero cards — layout only; container
+   color/border for .ts-item now live in the archetype-5 block near the top
+   of this file. The duplicate .trust-strip/.ts-item definition that used
+   to sit here (dead for color, a lower-specificity/earlier-source-order
+   rule the block below always won over) is gone — one definition now,
+   see §8.x.7. */
+.trust-strip { position: relative; z-index: 1; }
 
 /* ── Value props row (icon + text) ──────────────────────── */
-.props-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 22px; margin-top: 8px; }
+/* .prop keeps its own icon+h3+p anatomy for now (no cijfer/classificatie-
+   tag) — not grid-compatible with archetype 4 without an HTML change, so
+   no class alias yet (see the archetype-4 note near the top of this
+   file). Tokenized here so its values are at least spec-compliant ahead
+   of the Cluster B markup migration (§8.x.8 stap 3). */
+.props-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--space-lg); margin-top: 8px; }
 .prop {
-  padding: 28px 26px; background: var(--bg-card);
-  border: 1px solid var(--border); border-radius: var(--radius);
+  padding: var(--space-lg); background: var(--bg-card);
+  border: 1px solid var(--gray-100); border-radius: var(--radius);
 }
 .prop .prop-icon {
   width: 46px; height: 46px; border-radius: 12px;
   background: var(--gold-light); color: var(--gold-dark);
   display: flex; align-items: center; justify-content: center;
-  font-size: 1.1rem; margin-bottom: 16px;
+  font-size: 1.1rem; margin-bottom: var(--space-md);
 }
 /* Content icons are inline SVG (not Font Awesome) so they never render
    empty when the FA font fails to load (e.g. ad-blockers). See
    .contact-method svg.line-icon below for the contact-card variant. */
 .prop-icon svg.line-icon { width: 22px; height: 22px; }
-.prop h3 { font-size: 1.08rem; }
-.prop p { font-size: 0.93rem; margin-top: 6px; }
+.prop h3 { font-size: var(--font-size-lg); }
+.prop p { font-size: var(--font-size-sm); color: var(--gray-500); margin-top: var(--space-sm); }
 
 /* ── CTA band ───────────────────────────────────────────── */
 .cta-band {
@@ -1759,49 +1812,36 @@ html[data-lang="en"] .lang-nl { display: none; }
   .audience-switch { display: none; }
 }
 
-/* ── Trust strip (honest props, no fake numbers) ────────── */
+/* ── Trust strip (honest props, no fake numbers) ─────────────
+   This is now the single .trust-strip/.ts-item definition (§8.x.7 —
+   used to be declared twice; the first, dead-for-color copy sat near the
+   homepage hero cards and is gone). Color/border for .ts-item live in the
+   archetype-5 block near the top of this file; only layout stays here. */
 .trust-strip { display: flex; flex-wrap: wrap; gap: 10px 26px; margin-top: 36px; }
-.trust-strip .ts-item { display: inline-flex; align-items: center; gap: 8px; font-size: 0.92rem; font-weight: 500; color: var(--navy-200, #7FA0C9); }
-.trust-strip .ts-item i { color: var(--gold-dark); font-size: 0.95rem; }
-/* Light-background variant: navy-200/gold-dark above are tuned for the dark
-   .page-hero and measure well under 4.5:1 on a light section (2.47:1 on
-   --off-white for navy-200 text). var(--text-secondary) (#4A6F9F) hits
-   4.71:1 on --off-white / 5.16:1 on white — use this modifier on any
-   .trust-strip placed on a light or --bg-alt background instead of
-   changing the dark-hero rule above. */
-.trust-strip--light .ts-item,
-.trust-strip--light .ts-item i { color: var(--text-secondary); }
 .services-more-link:hover, .services-more-link:focus-visible { text-decoration: underline; }
 
 /* ── Role/need paths ("Waar ben je naar op zoek?") ──────── */
+/* Container/hover/h3/p/.go-link color now live in the archetype-2 block
+   near the top of this file (.card, .path-card). .path-icon removed — the
+   path cards use a .mark numeral now (icon-less system, §8.x.3), confirmed
+   0 usage. Only grid layout stays here. */
 .path-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; margin-top: 8px; }
-.path-card {
-  display: flex; flex-direction: column; align-items: flex-start;
-  padding: 26px 24px; background: var(--bg-card);
-  border: 1px solid var(--border); border-radius: var(--radius);
-  transition: var(--transition);
-}
-.path-card:hover { transform: translateY(-4px); box-shadow: var(--shadow-md); border-color: var(--navy); }
-.path-card .path-icon { font-size: 1.4rem; color: var(--gold-dark); margin-bottom: 14px; }
-.path-card h3 { font-size: 1.02rem; margin-bottom: 6px; }
-.path-card p { font-size: 0.88rem; margin-bottom: 16px; }
-.path-card .path-go { margin-top: auto; font-weight: 600; font-size: 0.88rem; color: var(--navy); display: inline-flex; align-items: center; gap: 7px; }
-.path-card:hover .path-go { gap: 11px; }
 @media (max-width: 860px) { .path-grid { grid-template-columns: 1fr 1fr; } }
 @media (max-width: 560px) { .path-grid { grid-template-columns: 1fr; } }
 
-/* ── Contact methods row ────────────────────────────────── */
-.contact-methods { display: flex; gap: 14px; flex-wrap: wrap; margin-bottom: 36px; }
-.contact-method {
-  display: flex; align-items: center; gap: 14px; padding: 18px 20px;
-  border: 1px solid var(--border); border-radius: var(--radius);
-  background: var(--bg-card); flex: 1; min-width: 220px; transition: var(--transition);
-}
-.contact-method:hover { border-color: var(--navy); box-shadow: var(--shadow-sm); }
-.contact-method i,
-.contact-method svg.line-icon { width: 42px; height: 42px; border-radius: 11px; background: var(--gold-light); color: var(--gold-dark); display: flex; align-items: center; justify-content: center; font-size: 1.1rem; flex-shrink: 0; padding: 10px; box-sizing: border-box; }
-.contact-method .cm-label { font-size: 0.74rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; }
-.contact-method .cm-value { font-weight: 600; font-size: 0.95rem; color: var(--text); margin-top: 2px; }
+/* ── Contact methods row ──────────────────────────────────
+   Container/hover/label/value now live in the archetype-6 block near the
+   top of this file (.contact-row, .contact-row__label, .contact-row__value
+   — the .contact-method/.cm-label/.cm-value alias is retired). Archetype 6
+   is full-width stacked rows (not side-by-side boxes) — .contact-methods
+   changes from a wrapping flex row to a column of rows to match; the
+   border-per-item is now the shared hairline the archetype rule sets.
+   The old icon-chip rule for a leading icon inside each row is gone too —
+   contact.html's rows are icon-less (LinkedIn is the "IN" .mark.code chip
+   in the value column, see §8.x.1 archetype 6), confirmed 0 usage. */
+/* #contact is --bg (white), same as this panel — §8.x.0 mandatory
+   white-on-white exception, --shadow-sm alongside the hairline. */
+.contact-methods { display: flex; flex-direction: column; background: var(--bg-card); border: 1px solid var(--gray-100); border-radius: var(--radius); box-shadow: var(--shadow-sm); margin-bottom: 36px; }
 /* Audience links inside the mobile menu (shown only on small screens) */
 .nav-aud { display: none; }
 @media (max-width: 768px) {
@@ -1813,74 +1853,28 @@ html[data-lang="en"] .lang-nl { display: none; }
 .stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 24px; }
 @media (max-width:768px) { .stats-grid { grid-template-columns: repeat(2, 1fr); } }
 .stat-card { text-align: center; padding: 32px 16px; }
-.stat-number { font-family: var(--font-display); font-size: clamp(2.5rem,4vw,3.5rem); font-weight: 700; color: var(--navy); line-height: 1; margin-bottom: 8px; }
+/* .stat-number removed — confirmed 0 usage in HTML/JS (§8.x.7 census). */
 .stat-label { font-size: 0.85rem; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 1px; }
 
 /* ── Job Card Links ────────────────────────────── */
 .job-card { cursor: pointer; }
-.job-links { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border-light); display: flex; justify-content: flex-end; }
-.job-view-link { font-size: 0.85rem; font-weight: 600; color: var(--gold-dark); transition: var(--transition); }
-.job-view-link:hover { gap: 8px; color: var(--navy); }
+/* .job-links removed — confirmed 0 usage in HTML/JS (§8.x.7 census). */
+/* .job-view-link is the archetype-3 nested .go-link (script.js:706,
+   stopPropagation) — was --gold-dark (#D4A800, 2.04:1 on white, fails AA);
+   --gold-ink is the only allowed gold text color on light (§8.x.2), same
+   token .vac-link already uses for the identical CTA in the homepage
+   context. display/gap/min-height added so hover's gap-widen has
+   something to animate and the link meets the 44px touch target
+   (§8.x.0), padding via min-height rather than enlarging the arrow. */
+.job-view-link {
+  display: inline-flex; align-items: center; gap: 5px; min-height: 44px;
+  font-size: 0.85rem; font-weight: 600; color: var(--gold-ink); transition: var(--transition);
+}
+.job-view-link:hover, .job-view-link:focus-visible { gap: 8px; color: var(--navy); }
 
-/* ── WhatsApp Floating Button ──────────────────────── */
-.whatsapp-float {
-  position: fixed;
-  bottom: 24px;
-  right: 24px;
-  z-index: 9999;
-  width: 56px;
-  height: 56px;
-  border-radius: 50%;
-  background: #25D366;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: #fff;
-  font-size: 28px;
-  box-shadow: 0 4px 16px rgba(37, 211, 102, 0.4);
-  transition: all 0.3s ease;
-  text-decoration: none;
-  animation: whatsappPulse 2s infinite;
-}
-.whatsapp-float:hover {
-  transform: scale(1.1);
-  box-shadow: 0 6px 24px rgba(37, 211, 102, 0.6);
-  color: #fff;
-}
-@keyframes whatsappPulse {
-  0% { box-shadow: 0 0 0 0 rgba(37, 211, 102, 0.6); }
-  70% { box-shadow: 0 0 0 12px rgba(37, 211, 102, 0); }
-  100% { box-shadow: 0 0 0 0 rgba(37, 211, 102, 0); }
-}
-@media (max-width: 768px) {
-  .whatsapp-float { bottom: 16px; right: 16px; width: 48px; height: 48px; font-size: 24px; }
-}
-
-/* ── Mail Floating Button (stacks above WhatsApp when present) ── */
-.mail-float {
-  position: fixed;
-  bottom: 24px;
-  right: 24px;
-  z-index: 9998;
-  width: 56px;
-  height: 56px;
-  border-radius: 50%;
-  background: var(--navy, #0E1B2E);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: #fff;
-  font-size: 24px;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
-  transition: all 0.3s ease;
-  text-decoration: none;
-}
-.mail-float:hover {
-  transform: scale(1.1);
-  color: #fff;
-}
-.mail-float.has-whatsapp-sibling { bottom: 94px; }
-@media (max-width: 768px) {
-  .mail-float { bottom: 16px; right: 16px; width: 48px; height: 48px; font-size: 20px; }
-  .mail-float.has-whatsapp-sibling { bottom: 76px; }
-}
+/* .whatsapp-float/.mail-float (+ .has-whatsapp-sibling) removed — §8.x.4's
+   .contact-rail (see the block near the top of this file) replaced both;
+   script.js no longer creates either element (initContactRail() replaced
+   initWhatsappFloat() one-to-one, §8.x.8 stap 2) and no HTML page still
+   has a static .mail-float anchor (§8.x.8 stap 3/4, all pages checked).
+   Confirmed 0 usage in HTML/JS (§8.x.7 census). */
