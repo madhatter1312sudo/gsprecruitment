@@ -150,8 +150,27 @@ def test_table_has_exactly_the_documented_ten_rows():
 
 
 def test_three_aanname_rows_flagged():
+    """T2 (owner decision, 2026-09-08, round 6): the three periods that
+    used to carry "aanname" (sourced_no_response, prospect_responding,
+    portal_account_inactive) are now confirmed by the owner -- none of
+    the ten rows carries "aanname" any more, and VERWERKINGSREGISTER.md
+    §6 punt 4 is closed accordingly (see docs/test_retention.py's own
+    register/SOP-matching tests, which fail loudly if the register text
+    itself still called one of these an assumption)."""
     aanname = [r.key for r in retention.RETENTION_TABLE if "aanname" in r.bron_opmerking]
-    assert aanname == ["sourced_no_response", "prospect_responding", "portal_account_inactive"]
+    assert aanname == []
+    # the three periods that used to carry "aanname" now cite the owner's
+    # confirmation instead; referral cites the same date for its own
+    # separate §1.3 consent point and is not one of the original three,
+    # but was never an "aanname" row either -- included here so this test
+    # documents the full, current set rather than only the historical three.
+    confirmed = [
+        r.key for r in retention.RETENTION_TABLE
+        if "bevestigd door eigenaar 2026-09-08" in r.bron_opmerking
+    ]
+    assert confirmed == [
+        "sourced_no_response", "prospect_responding", "portal_account_inactive", "referral",
+    ]
 
 
 def test_selectors_are_strings_naming_their_anchor_column():
@@ -172,17 +191,16 @@ def test_get_row_found_and_not_found():
     assert retention.get_row("does_not_exist") is None
 
 
-# ── security-auditor follow-up (WS-E.8 HIGH #1): "no reaction" guards ────
+# ── "no reaction" guards ──────────────────────────────────────────────
 #
-# chief-of-staff second FIX FIRST (retention-kolommen branch, blocking
-# point 1): outreach_messages.replied_at is dead code -- nothing in this
-# codebase ever writes it (outreach is draft-only, a human sends from
-# their own mailbox and any reply lands there, not in this DB) -- and the
-# LOWER(email)=LOWER(email) join to users is the same unreliable match
-# PORTAL_ACCOUNT_INACTIVE_SQL's own comment rejects. Both guards below now
-# assert the real replacements: a sent outreach_drafts row keyed on
-# target_id (not free-text email), and the same candidate_profiles FK
-# join PORTAL_ACCOUNT_INACTIVE_SQL uses. See
+# outreach_messages.replied_at is dead code -- nothing in this codebase
+# ever writes it (outreach is draft-only, a human sends from their own
+# mailbox and any reply lands there, not in this DB) -- and a
+# LOWER(email)=LOWER(email) join to users would be an unreliable match
+# (PORTAL_ACCOUNT_INACTIVE_SQL's own comment explains why). Both guards
+# below assert the real signals instead: a sent outreach_drafts row keyed
+# on target_id (not free-text email), and the candidate_profiles FK join
+# PORTAL_ACCOUNT_INACTIVE_SQL also uses. See
 # tests/integration/test_retention_guards.py for the DB-backed proof.
 
 def test_sourced_no_response_sql_guards_against_every_reaction_signal():
@@ -379,7 +397,7 @@ def test_portal_account_inactive_sql_guards_against_a_linked_candidate_with_real
     the guard now joins through that same relation instead of email."""
     sql = retention.PORTAL_ACCOUNT_INACTIVE_SQL
     assert "role = 'candidate'" in sql
-    assert "last_login_at" in sql and "INTERVAL '24 months'" in sql
+    assert "last_login_at" in sql and "INTERVAL '18 months'" in sql
     assert "FROM candidate_profiles cpf" in sql
     assert "JOIN candidates c ON c.id = cpf.candidate_id" in sql
     assert "cpf.user_id = u.id" in sql
@@ -423,6 +441,7 @@ def test_sourced_no_response_query_excludes_a_candidate_with_a_progressed_match(
 
     async def _fake_fetch_all(sql, *args):
         assert sql is retention.SOURCED_NO_RESPONSE_SQL
+        assert args == ("gerechtvaardigd_belang",)
         return [
             c for cid, c in candidates.items()
             if cid not in signals["matches"] and cid not in signals["pipeline_entries"]
@@ -431,44 +450,95 @@ def test_sourced_no_response_query_excludes_a_candidate_with_a_progressed_match(
         ]
 
     monkeypatch.setattr(scheduler, "fetch_all", _fake_fetch_all)
-    rows = asyncio.run(scheduler._count_sourced_no_response("gerechtvaardigd_belang"))
+    rows = asyncio.run(scheduler._live_rows_for_category(retention.get_row("sourced_no_response")))
     assert [r["id"] for r in rows] == [1]
 
 
-def test_count_rejected_applicants_calls_the_shared_selector(monkeypatch):
+def test_live_rows_for_category_rejected_applicant_calls_the_shared_selector(monkeypatch):
     import services.scheduler as scheduler
 
     async def _fake_fetch_all(sql, *args):
         assert sql is retention.REJECTED_APPLICANT_SQL
+        assert args == ()
         return [{"id": 1, "email": "rejected@example.com"}]
 
     monkeypatch.setattr(scheduler, "fetch_all", _fake_fetch_all)
-    rows = asyncio.run(scheduler._count_rejected_applicants())
+    rows = asyncio.run(scheduler._live_rows_for_category(retention.get_row("rejected_applicant")))
     assert [r["id"] for r in rows] == [1]
 
 
-def test_count_prospect_responding_calls_the_shared_selector(monkeypatch):
+def test_live_rows_for_category_prospect_responding_calls_the_shared_selector(monkeypatch):
     import services.scheduler as scheduler
 
     async def _fake_fetch_all(sql, *args):
         assert sql is retention.PROSPECT_RESPONDING_SQL
+        assert args == ()
         return [{"id": 1, "contact_email": "prospect@example.com"}]
 
     monkeypatch.setattr(scheduler, "fetch_all", _fake_fetch_all)
-    rows = asyncio.run(scheduler._count_prospect_responding())
+    rows = asyncio.run(scheduler._live_rows_for_category(retention.get_row("prospect_responding")))
     assert [r["id"] for r in rows] == [1]
 
 
-def test_count_portal_account_inactive_calls_the_shared_selector(monkeypatch):
+def test_live_rows_for_category_portal_account_inactive_calls_the_shared_selector(monkeypatch):
     import services.scheduler as scheduler
 
     async def _fake_fetch_all(sql, *args):
         assert sql is retention.PORTAL_ACCOUNT_INACTIVE_SQL
+        assert args == ()
         return [{"id": 1, "email": "inactive@example.com"}]
 
     monkeypatch.setattr(scheduler, "fetch_all", _fake_fetch_all)
-    rows = asyncio.run(scheduler._count_portal_account_inactive())
+    rows = asyncio.run(scheduler._live_rows_for_category(retention.get_row("portal_account_inactive")))
     assert [r["id"] for r in rows] == [1]
+
+
+def test_live_rows_for_category_prospect_no_response_calls_the_shared_selector(monkeypatch):
+    """prospect_no_response used to be its own scheduler._count_* wrapper --
+    now it runs through the same generic path as every other category,
+    reading RetentionRow.subject_table/email_field/selector_params instead
+    of a per-category lookup."""
+    import services.scheduler as scheduler
+
+    async def _fake_fetch_all(sql, *args):
+        assert sql is retention.PROSPECT_NO_RESPONSE_SQL
+        assert args == ()
+        return [{"id": 1, "contact_email": "no-response@example.com"}]
+
+    monkeypatch.setattr(scheduler, "fetch_all", _fake_fetch_all)
+    rows = asyncio.run(scheduler._live_rows_for_category(retention.get_row("prospect_no_response")))
+    assert [r["id"] for r in rows] == [1]
+
+
+def test_live_rows_for_category_leads_quiz_runs_both_tables(monkeypatch):
+    import services.scheduler as scheduler
+
+    async def _fake_fetch_all(sql, *args):
+        if sql is retention.LEADS_QUIZ_SQL:
+            return [{"id": 1}]
+        assert sql is retention.CONTACT_SUBMISSIONS_SQL
+        return [{"id": 2}]
+
+    monkeypatch.setattr(scheduler, "fetch_all", _fake_fetch_all)
+    rows = asyncio.run(scheduler._live_rows_for_category(retention.get_row("leads_quiz")))
+    assert sorted(r["id"] for r in rows) == [1, 2]
+
+
+def test_live_rows_for_category_raises_for_a_row_missing_subject_table():
+    """H2r/M2r follow-up: a category reaching this function without a
+    subject_table/email_field must raise, not silently return [] -- an
+    empty list here would make generate_retention_review()'s
+    _retire_stale_pending() call mark every already-pending item in that
+    category 'no_longer_eligible', as if a protective signal had appeared
+    everywhere at once."""
+    import dataclasses
+    import services.scheduler as scheduler
+
+    bogus = dataclasses.replace(
+        retention.get_row("rejected_applicant"), key="bogus", subject_table="", email_field="",
+    )
+    with pytest.raises(ValueError):
+        asyncio.run(scheduler._live_rows_for_category(bogus))
 
 
 # ── run_retention_purge() -- stubbed DB ───────────────────────────────────
@@ -556,6 +626,38 @@ def test_generate_retention_review_covers_every_actionable_category(patch_schedu
     assert "logs" not in categories
 
 
+def test_generate_retention_review_records_error_and_skips_retire_for_a_failing_category(monkeypatch):
+    """H2r: a category whose selector raises (e.g. a foreign-key violation
+    surfacing through a soft-deleted row) must not abort the whole run and
+    must not be silently treated as an empty result -- an empty result
+    would make _retire_stale_pending() mark every already-pending item in
+    that one category 'no_longer_eligible', which means "a protective
+    signal appeared", not "the query is broken"."""
+    import services.scheduler as scheduler
+
+    executed = []
+
+    async def _fake_fetch_all(sql, *args):
+        if sql is retention.REJECTED_APPLICANT_SQL:
+            raise RuntimeError("simulated foreign-key violation")
+        return []
+
+    async def _fake_execute(sql, *args):
+        executed.append((sql, args))
+        return "OK"
+
+    monkeypatch.setattr(scheduler, "fetch_all", _fake_fetch_all)
+    monkeypatch.setattr(scheduler, "execute", _fake_execute)
+
+    result = asyncio.run(scheduler.generate_retention_review())
+    assert result["categories"]["rejected_applicant"] == {"status": "error"}
+    # every other category still ran normally
+    assert result["categories"]["sourced_no_response"] == {"queued": 0}
+    # the failing category must never have been retired/upserted against
+    touched_categories = {args[0] for _, args in executed if args}
+    assert "rejected_applicant" not in touched_categories
+
+
 def test_talentpool_optin_requests_cleanup_job_is_unaffected_by_ws_e10():
     """talentpool_optin_requests cleanup is not one of the ten guarded
     categories the owner moved to human review (see that job's own
@@ -614,7 +716,7 @@ def test_apollo_pool_purge_target_sql_carries_all_six_guards():
     from core import retention
     from routers import retention_admin
 
-    sql = retention_admin._TARGET_ROWS_SQL
+    sql = retention.APOLLO_POOL_TARGET_SQL
     assert retention.CANDIDATE_NO_REACTION_GUARD_SQL in sql
     assert "replied_at" not in sql
     assert "LOWER(u.email) = LOWER(" not in sql
@@ -622,7 +724,7 @@ def test_apollo_pool_purge_target_sql_carries_all_six_guards():
     assert sql.count("NOT EXISTS") == 6
     # the unguarded pool query is a strict prefix -- the guards are
     # additive filters on top of it, not a different candidate set
-    assert sql.startswith(retention_admin._POOL_ROWS_SQL)
+    assert sql.startswith(retention.APOLLO_POOL_ROWS_SQL)
 
 
 def test_apollo_pool_purge_dry_run_default_needs_no_confirm(monkeypatch):
@@ -647,9 +749,10 @@ def test_apollo_pool_purge_dry_run_reports_guard_skipped_rows(monkeypatch):
     from routers import retention_admin
 
     async def _fake_fetch_all(sql, *args):
-        if sql is retention_admin._POOL_ROWS_SQL:
+        from core import retention as _retention
+        if sql is _retention.APOLLO_POOL_ROWS_SQL:
             return [{"id": 1, "email": "a@example.com"}, {"id": 2, "email": "b@example.com"}]
-        assert sql is retention_admin._TARGET_ROWS_SQL
+        assert sql is _retention.APOLLO_POOL_TARGET_SQL
         return [{"id": 1, "email": "a@example.com"}]  # id=2 excluded by a guard
 
     monkeypatch.setattr(retention_admin, "fetch_all", _fake_fetch_all)
@@ -771,6 +874,31 @@ def test_migration_022_is_idempotent_and_matches_the_documented_condition():
     # PR must not delete production data by itself.
     assert "DELETE" not in sql.upper()
     assert "DROP" not in sql.upper()
+
+
+# ── Migration 034 text (L2: backfill visibility) ──────────────────────────
+
+def test_migration_034_logs_the_backfilled_client_ids_before_updating_them():
+    """L2 (security-audit round 5): migration 034's account_status
+    backfill silently reclassifies existing 'active' clients to 'lead' --
+    the affected ids must be logged to audit_log (json.dumps'd via jsonb_
+    build_object, never a raw dict) in a SELECT that runs strictly before
+    the UPDATE that changes them, so the owner can see who was touched
+    after deploying it."""
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "migrations"))
+    import importlib
+    mod = importlib.import_module("034_clients_account_status_lifecycle")
+    sql = mod.MIGRATION_SQL
+    assert mod.VERSION == "034_clients_account_status_lifecycle"
+    audit_idx = sql.index("INSERT INTO audit_log")
+    assert "retention_migration_034_backfill" in sql
+    assert "jsonb_build_object" in sql and "jsonb_agg(id)" in sql
+    update_idx = sql.index(
+        "UPDATE clients SET account_status = 'lead'\n    WHERE account_status = 'active'"
+    )
+    assert audit_idx < update_idx
+    assert "DELETE" not in sql.upper()
+    assert "DO $$" not in sql
 
 
 # ── Migration 030 text (WS-C.17) ──────────────────────────────────────────

@@ -614,17 +614,6 @@
       },
       "ApolloPoolPurgeRequest": {
         "properties": {
-          "confirm": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Confirm"
-          },
           "dry_run": {
             "default": true,
             "title": "Dry Run",
@@ -5101,17 +5090,6 @@
       },
       "RetentionRunRequest": {
         "properties": {
-          "confirm": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Confirm"
-          },
           "dry_run": {
             "default": true,
             "title": "Dry Run",
@@ -5148,6 +5126,17 @@
           "decision": {
             "title": "Decision",
             "type": "string"
+          },
+          "expected_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected Count"
           },
           "ids": {
             "anyOf": [
@@ -10847,7 +10836,7 @@
     },
     "/api/v1/admin/retention/review/bulk": {
       "post": {
-        "description": "Approve or reject several items in one call -- by explicit `ids`,\nor every currently-pending item in `category`. Still one _approve_one\n/ _reject_one call per item (never a single bulk DELETE), so a\npartial failure part-way through leaves an accurate, per-item audit\ntrail instead of an all-or-nothing black box.",
+        "description": "Approve or reject several items in one call -- by explicit `ids`,\nor every currently-pending item in `category`. Still one _approve_one\n/ _reject_one call per item (never a single bulk DELETE), so a\npartial failure part-way through leaves an accurate, per-item audit\ntrail instead of an all-or-nothing black box.\n\nL1 (security-audit round 5): capped at MAX_BULK_REVIEW_ITEMS items per\ncall, and a category-wide APPROVE call must supply `expected_count`\nmatching the current pending count for that category (see\nReviewBulkRequest's own comment).\n\nM1 (security-audit round 5): catches Exception, not only HTTPException\n-- a bare exception surfacing mid-batch (e.g. a ForeignKeyViolation\nfrom a placement without ON DELETE CASCADE onto a soft-deleted\ncandidate) used to abort the whole loop and lose every result after\nit, including ones that had already succeeded moments before. Each\nitem's own outcome is independent of every other item's.",
         "operationId": "bulk_review_decision_api_v1_admin_retention_review_bulk_post",
         "requestBody": {
           "content": {
@@ -11054,7 +11043,7 @@
     },
     "/api/v1/admin/retention/run": {
       "post": {
-        "description": "Counts per category, always \u2014 never writes anything. The\ndry_run=false + confirm=\"PURGE\" branch that used to actually\nanonymise/delete here is gone outright (WS-E.10, owner decision): a\nreal purge now only ever happens from an approved\nretention_review_items row (POST .../review/{item_id}/approve), never\nfrom this endpoint at any body value. See\ntests/test_ws_e10_no_unapproved_purge_path.py, which fails if a later\nchange reopens a `dry_run=false` branch here.",
+        "description": "Counts per category, always \u2014 never writes anything. The\ndry_run=false branch that used to actually anonymise/delete here (with\na \"PURGE\" confirm string) is gone outright (WS-E.10, owner decision) --\n`confirm` was dropped from RetentionRunRequest entirely (round 6,\nM6r), not merely ignored, since no value of it has done anything since\nthis branch was removed. A real purge now only ever happens from an\napproved retention_review_items row (POST .../review/{item_id}/approve).\nSee tests/test_ws_e10_no_unapproved_purge_path.py, which fails if a\nlater change reopens a `dry_run=false` branch here.",
         "operationId": "run_retention_api_v1_admin_retention_run_post",
         "requestBody": {
           "content": {

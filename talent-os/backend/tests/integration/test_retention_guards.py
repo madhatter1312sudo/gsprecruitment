@@ -26,6 +26,8 @@ approved outreach send; users.last_login_at via a real POST
 afterwards -- if a future edit silently drops one of those UPDATE/INSERT
 clauses again, these tests fail, not just the two-years-later purge.
 """
+import hashlib
+import hmac
 import uuid
 
 import pytest
@@ -497,15 +499,13 @@ def test_login_stamps_last_login_at(db_run, client, insert_raw_user):
     assert row["last_login_at"] is not None
 
 
-# ── chief-of-staff second FIX FIRST (WS-E.8 retention-kolommen branch) ──
-# blocking point 1: SOURCED_NO_RESPONSE_SQL and TALENTPOOL_EXPIRED_SQL used
-# to carry a dead outreach_messages.replied_at guard (nothing ever writes
-# that column) and an unreliable LOWER(email)=LOWER(email) portal-account
-# join. Both are now CANDIDATE_NO_REACTION_GUARD_SQL: a sent
-# outreach_drafts row, and the real candidate_profiles FK. Proven below
-# against real rows, plus one end-to-end test that drives the real send
-# path (routers/outreach.py approve_draft) instead of planting the
-# outreach_drafts row directly.
+# ── SOURCED_NO_RESPONSE_SQL / TALENTPOOL_EXPIRED_SQL guards ──────────────
+# Both share CANDIDATE_NO_REACTION_GUARD_SQL: a sent outreach_drafts row
+# is not itself a reaction signal, and the real reaction/portal-account
+# checks join through activities and candidate_profiles' FK, never a free-
+# text e-mail match. Proven below against real rows, plus one end-to-end
+# test that drives the real send path (routers/outreach.py approve_draft)
+# instead of planting the outreach_drafts row directly.
 
 def _sourced_candidate_id(db_run, *, suffix, lawful_basis="gerechtvaardigd_belang", date_found_ago="4 months"):
     row = db_run(
@@ -730,31 +730,44 @@ def test_outreach_approve_candidate_draft_does_not_by_itself_exclude_from_source
 
     suffix = uuid.uuid4().hex[:10]
     admin = make_admin()
-    # opt_in_talentpool: no Art.14 block or public source_url required to
-    # pass approve_draft's refusal checks, and consent_talentpool_until
-    # in the future so the talentpool-expiry check itself doesn't refuse.
+    # gerechtvaardigd_belang with a real public source_url and an Art. 14
+    # block in the body -- NOT opt_in_talentpool: H1r (sixth round) made
+    # an active consent_talentpool_until its own independent protective
+    # signal on every category here, which would otherwise make this
+    # candidate permanently excluded regardless of whether a draft is
+    # ever sent, defeating the very thing this test isolates (does
+    # SENDING alone grant immunity).
     email = f"sourced-approve-{suffix}@example.com"
     candidate = db_run(
         fetch_one,
         """INSERT INTO candidates
-             (full_name, email, status, lawful_basis, date_found, consent_talentpool_until, deleted_at)
-           VALUES ($1, $2, 'sourced', 'opt_in_talentpool',
-                   NOW() - INTERVAL '4 months', NOW() + INTERVAL '60 days', NULL)
+             (full_name, email, status, lawful_basis, date_found, source_url, deleted_at)
+           VALUES ($1, $2, 'sourced', 'gerechtvaardigd_belang',
+                   NOW() - INTERVAL '4 months', 'https://linkedin.com/in/sourced-approve-test', NULL)
            RETURNING id""",
         f"Sourced Approve Test {suffix}", email,
+    )
+    art14_body = (
+        "Dit bericht komt van GSP Recruitment (Brainport/Eindhoven), sourcing@gsprecruitment.nl. "
+        "Wij vonden uw LinkedIn-profiel via https://linkedin.com/in/sourced-approve-test op "
+        "2026-08-01 in het kader van werving voor technische functies. Grondslag: gerechtvaardigd "
+        "belang bij werving. Wij bewaren deze gegevens 3 maanden na 2026-08-01 als u niet "
+        "reageert. U heeft het recht om bezwaar te maken tegen deze verwerking (art. 21 AVG). "
+        "U kunt zich afmelden door te antwoorden met \"STOP\" -- wij verwerken dat binnen 24 uur "
+        "en uw adres blijft alleen op een blokkeerlijst staan. Een klacht over deze verwerking "
+        "kunt u indienen bij de Autoriteit Persoonsgegevens (autoriteitpersoonsgegevens.nl)."
     )
     draft = db_run(
         fetch_one,
         """INSERT INTO outreach_drafts
              (target_type, target_id, target_email, target_name, subject, body, status)
-           VALUES ('candidate', $1, $2, 'Approve Test', 'Hallo',
-                    'Dit is een testbericht. U kunt zich afmelden door te antwoorden met STOP.', 'draft')
+           VALUES ('candidate', $1, $2, 'Approve Test', 'Hallo', $3, 'draft')
            RETURNING id""",
-        candidate["id"], email,
+        candidate["id"], email, art14_body,
     )
 
     # Before sending: a genuinely untouched sourced candidate is selected.
-    rows = db_run(fetch_all, retention.SOURCED_NO_RESPONSE_SQL, "opt_in_talentpool")
+    rows = db_run(fetch_all, retention.SOURCED_NO_RESPONSE_SQL, "gerechtvaardigd_belang")
     assert candidate["id"] in [r["id"] for r in rows]
 
     resp = client.post(
@@ -764,7 +777,7 @@ def test_outreach_approve_candidate_draft_does_not_by_itself_exclude_from_source
     assert resp.status_code == 200, resp.text
     assert resp.json()["status"] == "sent"
 
-    rows = db_run(fetch_all, retention.SOURCED_NO_RESPONSE_SQL, "opt_in_talentpool")
+    rows = db_run(fetch_all, retention.SOURCED_NO_RESPONSE_SQL, "gerechtvaardigd_belang")
     assert candidate["id"] in [r["id"] for r in rows]
 
     # The mirror insert into outreach_messages now also carries
@@ -1065,3 +1078,129 @@ def test_harvest_candidates_stamps_pool_origin_apollo(db_run, monkeypatch):
     assert row is not None
     assert row["source"] == "apollo_bulk"
     assert row["pool_origin"] == "apollo"
+
+
+# ── Sixth round, security-audit round 5 (B1): five reparaties bewezen ────
+# door het echte pad, niet gestubd -- elke reparatie is zonder testfalen
+# terug te draaien tenzij een test hier het echte schrijf-/selectiepad
+# doorloopt.
+
+# B1(a): PROSPECT_NO_RESPONSE_SQL's sent-draft guard, through a real
+# outreach_drafts row (not planted purely to exercise the SELECT).
+
+def test_prospect_no_response_excludes_a_prospect_with_a_sent_draft(db_run):
+    suffix = uuid.uuid4().hex[:10]
+    email = f"prospect-no-response-{suffix}@example.com"
+    prospect = db_run(
+        fetch_one,
+        """INSERT INTO client_prospects (company_name, contact_email, status, created_at)
+           VALUES ($1, $2, 'new', NOW() - INTERVAL '13 months') RETURNING id""",
+        f"No Response Prospect {suffix}", email,
+    )
+
+    rows = db_run(fetch_all, retention.PROSPECT_NO_RESPONSE_SQL)
+    assert prospect["id"] in [r["id"] for r in rows]
+
+    db_run(
+        execute,
+        """INSERT INTO outreach_drafts (target_type, target_id, target_email, subject, body, status)
+           VALUES ('client_prospect', $1, $2, 'Hallo', 'Testbericht', 'sent')""",
+        prospect["id"], email,
+    )
+
+    rows = db_run(fetch_all, retention.PROSPECT_NO_RESPONSE_SQL)
+    assert prospect["id"] not in [r["id"] for r in rows]
+
+
+# B1(b): candidates.rejected_at via the real Hermes webhook write path,
+# not the admin-facing PATCH (already covered above).
+
+def _signed_hermes_post(client, body: bytes):
+    from core.config import settings
+
+    sig = hmac.new(settings.webhook_secret.encode("utf-8"), body, hashlib.sha256).hexdigest()
+    return client.post(
+        "/api/hermes/webhook",
+        content=body,
+        headers={"X-Hermes-Signature": sig, "Content-Type": "application/json"},
+    )
+
+
+def test_hermes_webhook_candidate_updated_rejected_stamps_rejected_at(db_run, client):
+    import json
+
+    suffix = uuid.uuid4().hex[:10]
+    candidate = db_run(
+        fetch_one,
+        "INSERT INTO candidates (full_name, email, status) VALUES ('Hermes Reject Candidate', $1, 'screening') "
+        "RETURNING id",
+        f"hermes-reject-{suffix}@example.com",
+    )
+
+    body = json.dumps({
+        "action": "candidate_updated",
+        "agent": "hermes-test",
+        "data": {"id": candidate["id"], "status": "rejected"},
+    }).encode("utf-8")
+    resp = _signed_hermes_post(client, body)
+    assert resp.status_code == 200, resp.text
+
+    row = db_run(fetch_one, "SELECT status, rejected_at FROM candidates WHERE id = $1", candidate["id"])
+    assert row["status"] == "rejected"
+    assert row["rejected_at"] is not None
+
+
+# B1(c): users.last_login_at via the real MFA-completion path
+# (POST /api/auth/mfa/verify, not the plain-password login already
+# covered above) -- the TOTP code itself is stubbed (verify_totp_code is
+# a pure crypto function unrelated to what this guard proves: that
+# completing a login stamps last_login_at, regardless of factor count).
+
+def test_mfa_verify_completes_login_and_stamps_last_login_at(db_run, client, insert_raw_user, monkeypatch):
+    from cryptography.fernet import Fernet
+    import routers.mfa as mfa_router
+    from core.config import settings
+    from core.mfa import encrypt_secret, issue_mfa_pending_token
+
+    monkeypatch.setattr(settings, "mfa_enc_key", Fernet.generate_key().decode("utf-8"))
+
+    user = insert_raw_user("admin", totp_enabled=True)
+    db_run(
+        execute, "UPDATE users SET totp_secret_enc = $1 WHERE id = $2",
+        encrypt_secret("JBSWY3DPEHPK3PXP"), user["id"],
+    )
+    monkeypatch.setattr(mfa_router, "verify_totp_code", lambda raw_secret, code, last_used_step: 1)
+
+    token = issue_mfa_pending_token(user["id"])
+    resp = client.post("/api/auth/mfa/verify", json={"mfa_token": token, "code": "123456"})
+    assert resp.status_code == 200, resp.text
+
+    row = db_run(fetch_one, "SELECT last_login_at FROM users WHERE id = $1", user["id"])
+    assert row["last_login_at"] is not None
+
+
+# B1(e): M1 -- the placement guard drops its `deleted_at IS NULL` filter,
+# so a placement that is later soft-deleted (the real DELETE endpoint,
+# not a planted UPDATE) still counts as "ever placed" -- the 7-year
+# fiscal floor a placement documents does not un-apply just because the
+# placement record itself was soft-deleted later.
+
+def test_rejected_applicant_still_excludes_a_candidate_after_the_placement_is_soft_deleted(
+    db_run, client, make_admin,
+):
+    suffix = uuid.uuid4().hex[:10]
+    admin = make_admin()
+    cid = _candidate_id(db_run, suffix=suffix)
+    job_id, client_id = _job_id(db_run, suffix=suffix)
+
+    placement = _create_placement_via_api(client, admin, candidate_id=cid, job_id=job_id, client_id=client_id)
+    rows = db_run(fetch_all, retention.REJECTED_APPLICANT_SQL)
+    assert cid not in [r["id"] for r in rows]
+
+    resp = client.delete(f"/api/v1/admin/placements/{placement['id']}", headers=admin["headers"])
+    assert resp.status_code == 204, resp.text
+    deleted = db_run(fetch_one, "SELECT deleted_at FROM placements WHERE id = $1", placement["id"])
+    assert deleted["deleted_at"] is not None
+
+    rows = db_run(fetch_all, retention.REJECTED_APPLICANT_SQL)
+    assert cid not in [r["id"] for r in rows]  # still excluded -- "ooit geplaatst" is the floor
