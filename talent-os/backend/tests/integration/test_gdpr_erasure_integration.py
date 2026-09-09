@@ -160,3 +160,77 @@ def test_erase_person_scrubs_pii_from_every_registered_table(db_run):
 
     suppression = db_run(fetch_one, "SELECT email_hash FROM suppression_list WHERE email_hash = $1", email_hash)
     assert suppression is not None, "erase_person() must add the person to suppression_list"
+
+
+def test_scoped_erasure_does_not_follow_a_users_row_to_an_unrelated_fk_linked_candidate(db_run):
+    """Retention-kolommen round 6 (code-review, WS-E.10 approval queue):
+    proves erase_person()'s own scope_table/scope_id narrowing directly,
+    bypassing routers/retention_admin.py's guard entirely -- so this
+    fails if a future change lets `scope_table` stop actually
+    constraining the WS-C.16 extra_ids expansion (the round-6 "R7"
+    finding: no test covered this, and forcing scope_table to None in
+    routers/retention_admin.py's own call site left the whole suite
+    green).
+
+    A `users` row shares its address with the SCOPED subject candidate,
+    but its own candidate_profiles.candidate_id FK points at a
+    completely different, different-address candidate with an active
+    placement (the 7-year fiscal floor). A scoped call
+    (scope_table='candidates', scope_id=subject's id) must anonymise
+    only the subject candidate -- never follow that FK."""
+    from core.database import execute, fetch_one
+    from routers.gdpr import erase_person
+
+    subject_email = f"scope-erase-subject-{uuid.uuid4().hex[:10]}@example.com"
+    linked_email = f"scope-erase-linked-{uuid.uuid4().hex[:10]}@example.com"
+
+    subject_candidate = db_run(
+        fetch_one,
+        "INSERT INTO candidates (full_name, email, deleted_at) VALUES ($1, $2, NULL) RETURNING id",
+        "Scope Erase Subject", subject_email,
+    )
+    linked_candidate = db_run(
+        fetch_one,
+        "INSERT INTO candidates (full_name, email, deleted_at) VALUES ($1, $2, NULL) RETURNING id",
+        "Scope Erase Linked (unrelated)", linked_email,
+    )
+    client_row = db_run(
+        fetch_one,
+        "INSERT INTO clients (company_name, domain, account_status) VALUES ($1, 'example.com', 'active') RETURNING id",
+        f"Scope Erase Client {uuid.uuid4().hex[:8]}",
+    )
+    job = db_run(
+        fetch_one, "INSERT INTO job_orders (client_id, title) VALUES ($1, 'Embedded Engineer') RETURNING id",
+        client_row["id"],
+    )
+    db_run(
+        execute,
+        "INSERT INTO placements (candidate_id, job_id, client_id, placement_type, status) "
+        "VALUES ($1, $2, $3, 'werving_selectie', 'actief')",
+        linked_candidate["id"], job["id"], client_row["id"],
+    )
+    portal_user = db_run(
+        fetch_one,
+        """INSERT INTO users (email, password_hash, full_name, role, is_verified, password_changed_at)
+           VALUES ($1, 'x', 'Scope Erase Portal', 'candidate', TRUE, NOW()) RETURNING id""",
+        subject_email,
+    )
+    db_run(
+        execute,
+        "INSERT INTO candidate_profiles (user_id, candidate_id) VALUES ($1, $2)",
+        portal_user["id"], linked_candidate["id"],
+    )
+
+    result = db_run(
+        erase_person, subject_email, None, "test: scoped erasure R7",
+        scope_table="candidates", scope_id=subject_candidate["id"],
+    )
+    assert result["status"] == "complete"
+
+    subject_row = db_run(fetch_one, "SELECT email, deleted_at FROM candidates WHERE id = $1", subject_candidate["id"])
+    assert subject_row["email"] != subject_email  # the scoped subject IS erased
+    assert subject_row["deleted_at"] is not None
+
+    linked_row = db_run(fetch_one, "SELECT email, deleted_at FROM candidates WHERE id = $1", linked_candidate["id"])
+    assert linked_row["email"] == linked_email  # the FK-linked, unrelated candidate is NOT touched
+    assert linked_row["deleted_at"] is None

@@ -356,26 +356,44 @@ async def erase_person(
     survive); the Apollo bulk pool decision (WS-E.8) is the owner's, out
     of scope here.
 
-    `scope_table`/`scope_id` (retention-kolommen H1/H2 follow-up): when
-    given, they name the exact retention_review_items subject
-    (subject_table, subject_id) this call is erasing on behalf of, and
-    constrain the matching *identity* row in that one table (candidates/
-    users/client_prospects) to that id -- not merely to "whatever row(s)
-    currently carry this e-mail address". This matters specifically
-    because `email` here is re-read from the subject row immediately
-    before the call (routers/retention_admin.py's `_approve_one()`), not
-    trusted from the (possibly stale) retention_review_items.email column
-    -- but the unique constraint on candidates.email/users.email is what
-    normally makes "this e-mail" and "this row" the same thing, and
-    scope_id is the belt-and-braces check for the case where it isn't
-    (two rows racing to the same freshly-changed address, a client_
-    prospects.contact_email that carries no uniqueness constraint at
-    all). Every side-table cleanup below (outreach, quiz/contact
-    submissions, audit_log redaction, suppression_list, ...) stays
-    e-mail-wide regardless of scope -- those are traces of communication
-    with that address, not a second identity row a scope could
-    misattribute erasure to. Self-service/admin erasure never pass these
-    (scope_table=None), preserving today's e-mail-wide behaviour exactly.
+    `scope_table`/`scope_id` (retention-kolommen H1/H2 follow-up, round 6
+    security-audit/code-review): when given, they name the exact
+    retention_review_items subject (subject_table, subject_id) this call
+    is erasing on behalf of, and constrain the matching *identity* row in
+    that one table (candidates/users/client_prospects) to that id -- not
+    merely to "whatever row(s) currently carry this e-mail address". This
+    matters specifically because `email` here is re-read from the
+    subject row immediately before the call (routers/retention_admin.py's
+    `_approve_one()`), not trusted from the (possibly stale)
+    retention_review_items.email column -- but the unique constraint on
+    candidates.email/users.email is what normally makes "this e-mail" and
+    "this row" the same thing, and scope_id is the belt-and-braces check
+    for the case where it isn't (two rows racing to the same
+    freshly-changed address, a client_prospects.contact_email that
+    carries no uniqueness constraint at all).
+
+    The other two identity tables besides the one scope_table names still
+    read e-mail-wide here, same as every side-table cleanup below
+    (outreach, quiz/contact submissions, audit_log redaction,
+    suppression_list, ...) -- but that is safe ONLY because
+    routers/retention_admin.py's `_refuse_if_email_belongs_to_an_
+    unrelated_account()` has, by this point, already confirmed no OTHER
+    row on ANY of the three identity tables carries this address; a
+    conflict there refuses (409) before erase_person() is ever called.
+    Do not call this function with a scope_table/scope_id pair without
+    running that check (or an equivalent one) immediately before it, on
+    a freshly-read address, or this e-mail-wide read becomes exactly the
+    unscoped wipe scope_table exists to prevent.
+
+    The WS-C.16 extra_ids expansion below (a users row's
+    candidate_profiles.candidate_id FK, followed regardless of that
+    candidate's own e-mail address) is skipped entirely whenever
+    scope_table is given, for the same reason -- that FK can point at a
+    candidate row with a wholly different address than the one being
+    erased, which no amount of e-mail-based conflict-checking would ever
+    catch (round 6 code-review finding). Self-service/admin erasure never
+    pass these (scope_table=None), preserving today's e-mail-wide
+    behaviour, extra_ids included, exactly as before.
     """
     email_norm = privacy.normalize_email(email)
     if not email_norm:
@@ -416,8 +434,21 @@ async def erase_person(
     # to the e-mail-based lookup above, never a replacement for it, so
     # erasure still works purely on e-mail across both records even if
     # the FK is unset or points somewhere the email match wouldn't reach.
+    #
+    # round 6 (code-review, WS-E.10 approval queue): skipped entirely
+    # when `scope_table` is given. A scoped call names ONE identity row
+    # as its subject; this FK follows to whatever candidate a matching
+    # users row happens to be linked to today, regardless of that
+    # candidate's own e-mail address or of scope -- proven reachable via
+    # routers/retention_admin.py's approval path (a users row sharing
+    # the subject's address but linked to a wholly different,
+    # different-e-mail candidate got swept in, unscoped, even though
+    # _refuse_if_email_belongs_to_an_unrelated_account had already run).
+    # Self-service/admin erasure (scope_table=None) is a real person
+    # asking to be forgotten everywhere they can be found, so this stays
+    # exactly as e-mail-wide as before for that case.
     extra_ids = []
-    if user_ids:
+    if user_ids and scope_table is None:
         linked_rows = await fetch_all(
             "SELECT candidate_id FROM candidate_profiles WHERE user_id = ANY($1::int[]) AND candidate_id IS NOT NULL",
             user_ids,

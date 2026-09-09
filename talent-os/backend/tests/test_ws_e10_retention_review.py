@@ -77,15 +77,26 @@ class _FakeItemsDB:
     behaviour needs no extra setup; a test proving H1 (stale snapshot)
     overrides one entry to something other than the item's own `email`.
 
-    conflicting_users: rows _refuse_if_email_belongs_to_an_unrelated_
-    account()'s query should return -- empty by default (no conflict)."""
+    conflicting_users/conflicting_candidates/conflicting_prospects: rows
+    _refuse_if_email_belongs_to_an_unrelated_account()'s three per-table
+    queries should return -- empty by default (no conflict) for each.
+    own_linked_candidate_id: what the fake candidate_profiles lookup
+    returns for the subject's OWN FK link (used only when subject_table
+    is 'users') -- None by default (no link)."""
 
-    def __init__(self, items: dict, subject_emails: dict = None, conflicting_users: list = None):
+    def __init__(
+        self, items: dict, subject_emails: dict = None,
+        conflicting_users: list = None, conflicting_candidates: list = None,
+        conflicting_prospects: list = None, own_linked_candidate_id: int = None,
+    ):
         self.items = items  # id -> dict
         self.subject_emails = subject_emails if subject_emails is not None else {
             (row["subject_table"], row["subject_id"]): row["email"] for row in items.values()
         }
         self.conflicting_users = conflicting_users if conflicting_users is not None else []
+        self.conflicting_candidates = conflicting_candidates if conflicting_candidates is not None else []
+        self.conflicting_prospects = conflicting_prospects if conflicting_prospects is not None else []
+        self.own_linked_candidate_id = own_linked_candidate_id
         self.decisions = []
         self.audit_log = []
 
@@ -102,6 +113,10 @@ class _FakeItemsDB:
         if m:
             table = m.group(2)
             return {"email": self.subject_emails.get((table, args[0]))}
+        if "SELECT candidate_id FROM candidate_profiles WHERE user_id" in sql:
+            if self.own_linked_candidate_id is None:
+                return None
+            return {"candidate_id": self.own_linked_candidate_id}
         raise AssertionError(f"unexpected fetch_one: {sql}")
 
     async def fetch_all(self, sql, *args):
@@ -111,8 +126,15 @@ class _FakeItemsDB:
                 {"id": i} for i, row in self.items.items()
                 if row["category"] == category and row["status"] == "pending"
             ]
-        if "SELECT id, role FROM users WHERE LOWER(email)" in sql:
+        # round 6 (security-auditor + code-reviewer): H2's guard now
+        # checks all three identity tables, any role -- see
+        # _refuse_if_email_belongs_to_an_unrelated_account().
+        if "SELECT id FROM users WHERE LOWER(email)" in sql:
             return list(self.conflicting_users)
+        if "SELECT id FROM candidates WHERE LOWER(email)" in sql:
+            return list(self.conflicting_candidates)
+        if "SELECT id FROM client_prospects WHERE LOWER(contact_email)" in sql:
+            return list(self.conflicting_prospects)
         raise AssertionError(f"unexpected fetch_all: {sql}")
 
     async def execute(self, sql, *args):
@@ -270,6 +292,70 @@ def test_approve_refuses_when_address_belongs_to_an_unrelated_admin_account(monk
     # never claimed, never decided -- the refusal happens before either
     assert db.items[1]["status"] == "pending"
     assert db.decisions == []
+
+
+def test_approve_refuses_when_address_belongs_to_an_unrelated_candidate_row(monkeypatch):
+    """round 6 (security-auditor): H2's guard only checked `users` before
+    -- a subject on any table (here client_prospects) sharing its
+    address with an unrelated, unscoped `candidates` row must refuse the
+    same way (P1/P3 of the round-6 report)."""
+    db = _FakeItemsDB(
+        {1: _pending_item(category="prospect_responding", subject_table="client_prospects", subject_id=7)},
+        conflicting_candidates=[{"id": 501}],
+    )
+    retention_admin = _install(monkeypatch, db)
+
+    payload = retention_admin.ReviewDecisionRequest(confirm="APPROVE")
+    with pytest.raises(HTTPException) as exc_info:
+        asyncio.run(retention_admin.approve_review_item(1, payload, current_user={"id": 9, "role": "admin"}))
+    assert exc_info.value.status_code == 409
+    assert exc_info.value.detail["code"] == "retention_purge_blocked_unrelated_account"
+    assert db.items[1]["status"] == "pending"
+    assert db.decisions == []
+
+
+def test_approve_refuses_when_address_belongs_to_an_unrelated_prospect_contact(monkeypatch):
+    """round 6 (security-auditor, P2): a candidate subject sharing its
+    address with an unrelated, still-live client_prospects contact must
+    refuse, not silently opt that contact out."""
+    db = _FakeItemsDB(
+        {1: _pending_item()},  # subject_table="candidates", subject_id=42
+        conflicting_prospects=[{"id": 88}],
+    )
+    retention_admin = _install(monkeypatch, db)
+
+    payload = retention_admin.ReviewDecisionRequest(confirm="APPROVE")
+    with pytest.raises(HTTPException) as exc_info:
+        asyncio.run(retention_admin.approve_review_item(1, payload, current_user={"id": 9, "role": "admin"}))
+    assert exc_info.value.status_code == 409
+    assert exc_info.value.detail["code"] == "retention_purge_blocked_unrelated_account"
+    assert db.items[1]["status"] == "pending"
+    assert db.decisions == []
+
+
+def test_approve_does_not_refuse_a_portal_accounts_own_linked_candidate(monkeypatch):
+    """round 6 (code-reviewer, false-positive guard): a portal_account_
+    inactive subject (subject_table='users') whose candidate_profiles.
+    candidate_id genuinely points at the one candidates row sharing its
+    own address is the ordinary case this category exists for -- not a
+    conflict. Only an UNLINKED candidates row sharing the address (a
+    coincidence, per P3) should ever be refused."""
+    item = _pending_item(category="portal_account_inactive", subject_table="users", subject_id=77)
+    db = _FakeItemsDB(
+        {1: item},
+        conflicting_candidates=[{"id": 501}],  # this is the subject's OWN link
+        own_linked_candidate_id=501,
+    )
+    retention_admin = _install(monkeypatch, db)
+
+    erased = []
+    import routers.gdpr as gdpr
+    monkeypatch.setattr(gdpr, "erase_person", _fake_erase_person_recorder(erased))
+
+    payload = retention_admin.ReviewDecisionRequest(confirm="APPROVE")
+    result = asyncio.run(retention_admin.approve_review_item(1, payload, current_user={"id": 9, "role": "admin"}))
+    assert result == {"id": 1, "status": "purged"}
+    assert erased[0][3:] == ("users", 77)  # scope_table, scope_id
 
 
 def test_approve_hard_deletes_when_action_is_hard_delete(monkeypatch):

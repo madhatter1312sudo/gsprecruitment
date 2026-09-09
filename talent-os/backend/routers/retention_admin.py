@@ -38,9 +38,14 @@ level. What is left:
      appeared since the item was queued -- checked per-id, `_row_still_
      due()`), re-reads the subject's e-mail fresh off its own source row
      (never the retention_review_items.email snapshot -- security-audit
-     round 5, H1), refuses if that address also belongs to an unrelated
-     admin/client account (H2), then claims the item atomically before
-     anonymising (erase_person(), scoped to this exact subject row) or
+     round 5, H1), refuses if that address also belongs to another row on
+     any of the three identity tables erase_person() touches -- users
+     (any role), candidates, or client_prospects (H2, broadened round 6
+     to every role/table after two rounds of adversarial probes found
+     the admin/client-only version still let an unrelated placement,
+     live candidate-role login, or active client contact through) --
+     then claims the item atomically before anonymising (erase_person(),
+     scoped to this exact subject row) or
      hard-deleting per the item's own `action`. Writes one
      retention_review_decisions row (who/when, note redacted of any
      e-mail-shaped text -- audit-trail pattern of routers/admin.py's
@@ -312,30 +317,86 @@ async def _is_still_eligible(item: dict) -> bool:
 async def _refuse_if_email_belongs_to_an_unrelated_account(
     email: str, subject_table: str, subject_id: int,
 ) -> None:
-    """H2 (security-audit round 5, BLOCKING): routers.gdpr's erase_person
-    anonymises EVERY users row sharing `email` -- including an unlinked
-    admin or client account that simply happens to carry the same address
-    today.
-    A routine candidate/prospect retention purge must never take out
-    platform-admin access or a client's portal login as a side effect.
-    Refuse (409) instead. The subject's own linked users row (when the
-    item's subject_table IS 'users', i.e. category='portal_account_
-    inactive') is not "unrelated" -- excluded from the check."""
-    conflicting = await fetch_all(
-        "SELECT id, role FROM users WHERE LOWER(email) = LOWER($1) AND role IN ('admin', 'client')",
-        email,
+    """H2 (security-audit round 5) + round 6 follow-up (security-auditor
+    + code-reviewer, WS-E.10 approval queue): routers.gdpr's erasure
+    routine narrows only the ONE identity table (candidates/users/client_
+    prospects) named by `scope_table` to the exact subject row -- the
+    other two identity tables it also touches stay e-mail-wide, by
+    design (see that routine's own docstring: side-table cleanup and
+    the two non-scoped identity tables are traces of the same address,
+    not narrowed to one row). That is only safe when no OTHER row, on
+    ANY of the three identity tables, currently carries this address --
+    so this guard checks all three, not just `users` (round 5's H2
+    covered only `users`), and on `users` it checks every role, not only
+    admin/client (round 6 finding: a candidate-role portal account still
+    in daily use is just as real a login as an admin or client one, and
+    a routine candidate/prospect purge must never deactivate it as a
+    side effect either). Refuse (409) whenever a row other than the
+    subject itself turns up on any of:
+      - users (ANY role) sharing `email` and not soft-deleted.
+      - candidates sharing `email` and not soft-deleted -- except, when
+        the subject IS a users row (subject_table='users', i.e.
+        category='portal_account_inactive'), that users row's OWN
+        candidate_profiles.candidate_id link: a portal account
+        legitimately linked to its own (necessarily same-address)
+        candidate is the ordinary case this category exists for, not an
+        unrelated collision.
+      - client_prospects sharing `contact_email`, opt_out_at IS NULL (an
+        already opted-out contact is not a live competing identity).
+    Excludes the subject's own row on whichever table subject_table
+    names -- that row IS the thing about to be purged, not "unrelated"
+    to itself.
+
+    Deliberately not checked here: a users row's FK to a candidate whose
+    OWN address differs from `email` (the case that erasure routine's
+    extra_ids/WS-C.16 expansion used to follow regardless of scope,
+    round 6 code-review finding) -- routers/gdpr.py's erase-person
+    routine now skips that expansion outright whenever `scope_table` is
+    given, so a scoped call never reaches that row at all; there is
+    nothing left here to refuse it for."""
+    conflicts = []
+
+    user_rows = await fetch_all(
+        "SELECT id FROM users WHERE LOWER(email) = LOWER($1) AND deleted_at IS NULL", email,
     )
     if subject_table == "users":
-        conflicting = [u for u in conflicting if u["id"] != subject_id]
-    if conflicting:
+        user_rows = [u for u in user_rows if u["id"] != subject_id]
+    conflicts.extend(user_rows)
+
+    own_linked_candidate_id = None
+    if subject_table == "users":
+        linked = await fetch_one(
+            "SELECT candidate_id FROM candidate_profiles WHERE user_id = $1 AND candidate_id IS NOT NULL",
+            subject_id,
+        )
+        own_linked_candidate_id = linked["candidate_id"] if linked else None
+
+    candidate_rows = await fetch_all(
+        "SELECT id FROM candidates WHERE LOWER(email) = LOWER($1) AND deleted_at IS NULL", email,
+    )
+    if subject_table == "candidates":
+        candidate_rows = [c for c in candidate_rows if c["id"] != subject_id]
+    elif subject_table == "users":
+        candidate_rows = [c for c in candidate_rows if c["id"] != own_linked_candidate_id]
+    conflicts.extend(candidate_rows)
+
+    prospect_rows = await fetch_all(
+        "SELECT id FROM client_prospects WHERE LOWER(contact_email) = LOWER($1) AND opt_out_at IS NULL",
+        email,
+    )
+    if subject_table == "client_prospects":
+        prospect_rows = [p for p in prospect_rows if p["id"] != subject_id]
+    conflicts.extend(prospect_rows)
+
+    if conflicts:
         raise HTTPException(
             status_code=409,
             detail={
                 "code": "retention_purge_blocked_unrelated_account",
                 "message": (
-                    "Dit e-mailadres hoort ook bij een admin- of klantaccount dat geen onderdeel is van "
-                    "deze bewaartermijn-rij -- niet gewist. Los het adresconflict handmatig op voordat u "
-                    "opnieuw goedkeurt."
+                    "Dit e-mailadres hoort ook bij een kandidaat-, portal- of prospectrecord dat geen "
+                    "onderdeel is van deze bewaartermijn-rij -- niet gewist. Los het adresconflict "
+                    "handmatig op voordat u opnieuw goedkeurt."
                 ),
             },
         )
@@ -365,8 +426,9 @@ async def _approve_one(item_id: int, actor_id: int, note: Optional[str]) -> dict
       1. Re-verify eligibility against the item as currently stored.
       2. Re-read the subject's CURRENT e-mail from its own source row
          (H1) -- never the possibly-stale retention_review_items.email.
-      3. Refuse if that address also belongs to an unrelated admin/client
-         account (H2).
+      3. Refuse if that address also belongs to another row on any of
+         the three identity tables erase_person() touches -- users (any
+         role), candidates, or client_prospects (H2, round 6).
       4. Claim the item atomically (`status='purging' WHERE status IN
          ('pending','rejected') RETURNING id`, M2) -- a concurrent second
          approve on the same item gets an empty RETURNING and stops,
