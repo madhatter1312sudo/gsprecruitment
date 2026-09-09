@@ -3,6 +3,8 @@ from pydantic import BaseModel, EmailStr, Field, field_validator, model_validato
 from typing import Optional, List, Any, Literal
 from datetime import datetime, date
 from decimal import Decimal
+import re
+from urllib.parse import parse_qs
 
 
 # ── Auth / Users ─────────────────────────────────────────────────────────
@@ -590,6 +592,12 @@ class HealthResponse(BaseModel):
     apollo: str = "unknown"
     candidates_count: Optional[int] = None
     open_jobs: Optional[int] = None
+    # WS2: count of candidate_id values in candidate_profiles that are
+    # linked from more than one profile row (see routers/health.py) --
+    # should always be 0; a nonzero count flags a data-integrity issue
+    # the admin.py candidates-list dedup (branch B NOT EXISTS) does not
+    # itself fix.
+    duplicate_profile_links: Optional[int] = None
 
 
 # ── Candidate Portal Schemas ────────────────────────────────────────────
@@ -843,6 +851,41 @@ _LEGACY_INTEREST_TYPE_MAP = {
 }
 
 
+# ── WS2 / migrations/038_leads_origin.py: shared source_page +
+# referrer_host validation for LeadSubmit and QuizSubmitRequest below.
+# source_page is a same-site path only (never a full URL/host) so it can
+# never carry an open-redirect-shaped or cross-site value into the DB;
+# its querystring -- if any -- may only carry the keys the site itself
+# actually appends (job-board 'type' filter, vacature 'job' id), never
+# arbitrary caller-supplied keys. referrer_host is a bare hostname only
+# (no scheme/path/port). Both are optional: a caller that omits them
+# simply gets NULL columns (migrations/038 adds no NOT NULL/DEFAULT), so
+# neither validator runs on an unsupplied default (no validate_default).
+_SOURCE_PAGE_ALLOWED_QUERY_KEYS = {"type", "job"}
+_REFERRER_HOST_RE = re.compile(r"^(?!-)[A-Za-z0-9-]{1,63}(?:\.(?!-)[A-Za-z0-9-]{1,63})*$")
+
+
+def _validate_source_page(v: Optional[str]) -> Optional[str]:
+    if v is None:
+        return None
+    if len(v) > 200 or not v.startswith("/"):
+        raise ValueError("source_page must start with '/' and be at most 200 characters")
+    _, _, query = v.partition("?")
+    if query:
+        keys = set(parse_qs(query, keep_blank_values=True).keys())
+        if not keys <= _SOURCE_PAGE_ALLOWED_QUERY_KEYS:
+            raise ValueError("source_page querystring may only contain 'type' and/or 'job'")
+    return v
+
+
+def _validate_referrer_host(v: Optional[str]) -> Optional[str]:
+    if v is None:
+        return None
+    if len(v) > 100 or not _REFERRER_HOST_RE.match(v):
+        raise ValueError("referrer_host must be a bare hostname, at most 100 characters")
+    return v
+
+
 class LeadSubmit(BaseModel):
     name: str = Field(..., min_length=1)
     email: EmailStr
@@ -854,6 +897,10 @@ class LeadSubmit(BaseModel):
     # only when an explicit bad value is sent -- pydantic v2 skips
     # validators on unsupplied defaults otherwise.
     interest_type: Optional[str] = Field(None, validate_default=True)
+    # WS2: optional lead-origin fields, see migrations/038_leads_origin.py
+    # and the shared validators above.
+    source_page: Optional[str] = Field(None, max_length=200)
+    referrer_host: Optional[str] = Field(None, max_length=100)
 
     @field_validator("interest_type")
     @classmethod
@@ -870,6 +917,16 @@ class LeadSubmit(BaseModel):
         if v is None or v.strip() == "" or v not in LEAD_INTEREST_TYPES:
             return "overig"
         return v
+
+    @field_validator("source_page")
+    @classmethod
+    def _check_source_page(cls, v):
+        return _validate_source_page(v)
+
+    @field_validator("referrer_host")
+    @classmethod
+    def _check_referrer_host(cls, v):
+        return _validate_referrer_host(v)
 
 
 # ── Generic Pagination ─────────────────────────────────────────────────
@@ -927,6 +984,20 @@ class QuizAnswerItem(BaseModel):
 class QuizSubmitRequest(BaseModel):
     email: Optional[EmailStr] = None
     answers: List[QuizAnswerItem] = Field(..., min_length=1)
+    # WS2: optional lead-origin fields, see migrations/038_leads_origin.py
+    # and LeadSubmit's shared validators above.
+    source_page: Optional[str] = Field(None, max_length=200)
+    referrer_host: Optional[str] = Field(None, max_length=100)
+
+    @field_validator("source_page")
+    @classmethod
+    def _check_source_page(cls, v):
+        return _validate_source_page(v)
+
+    @field_validator("referrer_host")
+    @classmethod
+    def _check_referrer_host(cls, v):
+        return _validate_referrer_host(v)
 
 
 # ── WS-C.4: Client Contacts ──────────────────────────────────────────────

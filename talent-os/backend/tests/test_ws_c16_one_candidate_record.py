@@ -159,10 +159,24 @@ def test_migration_023_uses_schema_migrations_version_guard():
 _SQL_UNION_RE = re.compile(r"\bUNION\s+(?:ALL|SELECT)\b")
 
 
-def test_no_union_left_in_routers():
+def test_no_candidate_email_join_union_left_in_routers():
     """Matches the actual SQL keyword combination (`UNION ALL` / `UNION
     SELECT`), not just the bare word `UNION` -- a comment or docstring
-    prose mentioning "not a SQL UNION" or similar must not trip this."""
+    prose mentioning "not a SQL UNION" or similar must not trip this.
+
+    Scoped (WS2, 2026-09) to the specific regression this guards against:
+    a UNION that joins `candidates` and `candidate_profiles` keyed on a
+    case-insensitive e-mail match -- the exact pattern this workstream
+    replaced with the candidate_profiles.candidate_id FK (migrations/023).
+    routers/admin.py's WS2 leads listing (GET /v1/admin/leads) is a
+    real, deliberate SQL UNION ALL too, but over contact_submissions +
+    quiz_submissions -- an unrelated pair of tables, with no candidate
+    e-mail join in sight -- so a blanket "no UNION anywhere in routers/"
+    check would block that unrelated, legitimate feature without adding
+    any protection against the candidate-dedup regression it was written
+    for. The window search below still fails loudly if a future change
+    reintroduces the original pattern anywhere, including a new UNION
+    added right next to the leads one."""
     offenders = []
     for fname in os.listdir(ROUTERS_DIR):
         if not fname.endswith(".py"):
@@ -170,9 +184,14 @@ def test_no_union_left_in_routers():
         path = os.path.join(ROUTERS_DIR, fname)
         with open(path, encoding="utf-8") as fh:
             text = fh.read()
-        if _SQL_UNION_RE.search(text):
-            offenders.append(fname)
-    assert not offenders, f"UNION still present in: {offenders}"
+        for m in _SQL_UNION_RE.finditer(text):
+            window = text[max(0, m.start() - 1500): m.end() + 1500]
+            if "candidate_profiles" in window and re.search(
+                r"LOWER\([A-Za-z0-9_.]*email\)\s*=\s*LOWER\(", window
+            ):
+                offenders.append(fname)
+                break
+    assert not offenders, f"candidate/candidate_profiles e-mail-join UNION reintroduced in: {offenders}"
 
 
 # ── services/candidate_link.py -- FK-first / legacy-fallback / create ─────
