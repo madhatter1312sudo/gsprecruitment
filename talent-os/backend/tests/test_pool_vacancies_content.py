@@ -44,6 +44,9 @@ FORBIDDEN_WORDS = [
     "onze opdrachtgever",
     "wij zoeken voor",  # "we are looking [for our client]"
     "op korte termijn starten bij",  # implies a concrete, imminent placement
+    "de concrete opdracht",  # chief-of-staff FIX FIRST: implies an existing
+    # assignment sits behind this specific vacancy rather than GSP sourcing
+    # for its own account (VERWERKINGSREGISTER.md, section 6, punt 11)
 ]
 
 # A closing paragraph must exist and read as an honest, faceless

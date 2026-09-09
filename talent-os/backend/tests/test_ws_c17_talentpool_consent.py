@@ -474,6 +474,90 @@ def test_talentpool_optin_skips_sending_when_a_recent_unconfirmed_request_exists
     assert db.executed == []
 
 
+class _StatefulOptinDB:
+    """Chief-of-staff FIX FIRST regression: unlike _PublicDB's canned
+    `recent_pending` flag, this fake actually implements the guard's SQL
+    semantics (a per-(email, job_id) lookup against previously inserted
+    rows) so the (email, job_id) key change can be proven end to end
+    instead of just exercised query-string-first."""
+
+    def __init__(self, job_rows=None):
+        self.job_rows = job_rows or {}  # job_id -> {"id", "title"}
+        self.rows = []  # inserted talentpool_optin_requests rows
+
+    async def fetch_one(self, sql, *args):
+        if "FROM suppression_list" in sql:
+            return None
+        if "FROM job_orders" in sql:
+            return self.job_rows.get(args[0])
+        if "FROM talentpool_optin_requests" in sql and "LOWER(email)" in sql:
+            email, job_id = args
+            for row in self.rows:
+                if row["email"] == email and row["job_id"] == job_id and not row["confirmed"]:
+                    return {"id": row["id"]}
+            return None
+        return None
+
+    async def execute(self, sql, *args):
+        if "INSERT INTO talentpool_optin_requests" in sql:
+            email, token_hash, scope, source, job_id, job_alerts = args
+            self.rows.append({"id": len(self.rows) + 1, "email": email, "job_id": job_id, "confirmed": False})
+        return "OK"
+
+
+def test_talentpool_optin_second_role_within_ten_minutes_gets_its_own_row(monkeypatch):
+    """Chief-of-staff FIX FIRST: the repeated-click guard used to key
+    only on e-mail, so a candidate applying to a second role shortly
+    after the first (e.g. the junior/medior/senior variants of the same
+    title) got the same generic 202 back but no second row, no second
+    job_id and no confirmation e-mail -- the application looked accepted
+    and silently wasn't. The guard now keys on (email, job_id): a
+    different job_id is a different application and gets its own row and
+    e-mail, while a genuine repeat click on the SAME job is still
+    deduped."""
+    from models.schemas import TalentpoolOptinRequest
+    import routers.public as public_router
+
+    db = _StatefulOptinDB(job_rows={
+        55: {"id": 55, "title": "RTOS-software engineer (junior)"},
+        56: {"id": 56, "title": "RTOS-software engineer (medior)"},
+    })
+    monkeypatch.setattr(public_router, "fetch_one", db.fetch_one)
+    monkeypatch.setattr(public_router, "execute", db.execute)
+
+    sent = []
+
+    async def _fake_send_email(**kwargs):
+        sent.append(kwargs)
+        return True
+    monkeypatch.setattr(public_router.email_service, "send_email", _fake_send_email)
+
+    data1 = TalentpoolOptinRequest(
+        email="dubbel@example.com", consent=True, scope="matching_only",
+        source="vacancy_apply", job_id=55,
+    )
+    data2 = TalentpoolOptinRequest(
+        email="dubbel@example.com", consent=True, scope="matching_only",
+        source="vacancy_apply", job_id=56,
+    )
+    asyncio.run(public_router.talentpool_optin(request=_fake_request(ip="9.9.9.20"), data=data1))
+    asyncio.run(public_router.talentpool_optin(request=_fake_request(ip="9.9.9.20"), data=data2))
+
+    assert len(db.rows) == 2
+    assert {r["job_id"] for r in db.rows} == {55, 56}
+    assert len(sent) == 2
+
+    # A genuine repeat submit for the SAME job within ten minutes is
+    # still deduped -- the guard isn't disabled, only correctly scoped.
+    data3 = TalentpoolOptinRequest(
+        email="dubbel@example.com", consent=True, scope="matching_only",
+        source="vacancy_apply", job_id=55,
+    )
+    asyncio.run(public_router.talentpool_optin(request=_fake_request(ip="9.9.9.20"), data=data3))
+    assert len(db.rows) == 2
+    assert len(sent) == 2
+
+
 def test_talentpool_confirm_rejects_invalid_or_expired_token(patch_public_router):
     from fastapi import HTTPException
     from models.schemas import TalentpoolConfirmRequest

@@ -343,28 +343,34 @@ async def talentpool_optin(request: Request, data: TalentpoolOptinRequest):
     either holds:
       - the address is on suppression_list (STOP received -- never
         e-mail it again, on any basis);
-      - an unconfirmed request for this same e-mail was already made in
-        the last 10 minutes (double-submit / repeated-click guard --
-        avoids sending a fresh token + e-mail for every click).
+      - an unconfirmed request for this same (e-mail, job_id) pair was
+        already made in the last 10 minutes (double-submit / repeated-
+        click guard -- avoids sending a fresh token + e-mail for every
+        click on the same apply button).
 
     WS-4 (migrations/037): job_id, when given, is only ever stored after
     it resolves to a currently open, non-demo, non-deleted job order --
     the same eligibility PUBLIC_JOB_WHERE (routers/jobs.py) uses for what
     the public board itself shows. An unknown, closed, demo, or deleted
     job_id is silently dropped (the row is still created without one) so
-    this endpoint keeps its no-enumeration posture for job existence too."""
+    this endpoint keeps its no-enumeration posture for job existence too.
+
+    Chief-of-staff FIX FIRST: the repeated-click guard used to key only
+    on e-mail, so a candidate applying to a second vacancy within ten
+    minutes of the first (e.g. the junior/medior/senior variants of the
+    same title) got the same generic 202 back but no second row, no
+    second job_id and no confirmation e-mail for that second role -- the
+    application looked accepted and silently wasn't. The guard now keys
+    on (e-mail, resolved job_id) instead, with `IS NOT DISTINCT FROM` so
+    NULL job_id (a general, not-tied-to-one-vacancy signup) still
+    dedupes against NULL job_id the same as before; a different job_id
+    is a different application and gets its own row and e-mail."""
     email = data.email.lower().strip()
     if data.consent:
         suppressed = await fetch_one(
             "SELECT 1 FROM suppression_list WHERE email_hash = $1", privacy.email_hash(email),
         )
-        recent_pending = await fetch_one(
-            """SELECT id FROM talentpool_optin_requests
-               WHERE LOWER(email) = $1 AND confirmed_at IS NULL
-                 AND requested_at > NOW() - INTERVAL '10 minutes'""",
-            email,
-        )
-        if not suppressed and not recent_pending:
+        if not suppressed:
             job = None
             if data.job_id is not None:
                 job = await fetch_one(
@@ -374,14 +380,22 @@ async def talentpool_optin(request: Request, data: TalentpoolOptinRequest):
                 )
             job_id = job["id"] if job else None
 
-            token = secrets.token_urlsafe(32)
-            await execute(
-                """INSERT INTO talentpool_optin_requests
-                     (email, token_hash, scope, source, job_id, job_alerts)
-                   VALUES ($1, $2, $3, $4, $5, $6)""",
-                email, hash_token(token), data.scope, data.source, job_id, data.job_alerts,
+            recent_pending = await fetch_one(
+                """SELECT id FROM talentpool_optin_requests
+                   WHERE LOWER(email) = $1 AND job_id IS NOT DISTINCT FROM $2
+                     AND confirmed_at IS NULL
+                     AND requested_at > NOW() - INTERVAL '10 minutes'""",
+                email, job_id,
             )
-            await _send_talentpool_confirm_email(email, token, job_title=job["title"] if job else None)
+            if not recent_pending:
+                token = secrets.token_urlsafe(32)
+                await execute(
+                    """INSERT INTO talentpool_optin_requests
+                         (email, token_hash, scope, source, job_id, job_alerts)
+                       VALUES ($1, $2, $3, $4, $5, $6)""",
+                    email, hash_token(token), data.scope, data.source, job_id, data.job_alerts,
+                )
+                await _send_talentpool_confirm_email(email, token, job_title=job["title"] if job else None)
 
     return {
         "message": "If you ticked the consent box, we've sent a confirmation link to that e-mail address.",
