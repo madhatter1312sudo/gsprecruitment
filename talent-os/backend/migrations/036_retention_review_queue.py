@@ -25,11 +25,20 @@ Two tables:
     subject_id, because "leads_quiz" alone spans two unrelated tables
     (quiz_submissions and contact_submissions) whose ids are not
     comparable to each other.
-    `status`: pending | rejected | purged | no_longer_eligible.
+    `status`: pending | rejected | purging | purged | no_longer_eligible.
     'no_longer_eligible' is set when a 'pending' item drops out of the
     live selector on a later run (the person picked up a protective
     signal since being queued) -- kept for visibility, not deleted,
-    same reasoning as a rejection.
+    same reasoning as a rejection. 'purging' (round 5, M2) is a short-
+    lived claim state: `routers/retention_admin.py`'s `_approve_one()`
+    moves a 'pending'/'rejected' item there via an atomic
+    `UPDATE ... WHERE status IN ('pending','rejected') RETURNING id`
+    before acting, so a second concurrent approve on the same item finds
+    no row to claim and stops instead of racing the first one's
+    erase_person()/DELETE. Once handled, the row's `email` column is
+    nulled (routers/retention_admin.py, routers/gdpr.py's erase_person())
+    for every status except 'pending' -- see VERWERKINGSREGISTER.md §1.2
+    for the row-level retention that column-level nulling is part of.
     This table itself holds personal data (email, a category, a reason
     a person is due for deletion) -- it is therefore covered by the same
     admin-JWT auth as every other admin endpoint (require_role("admin"),
@@ -49,19 +58,30 @@ Two tables:
   - retention_review_decisions: append-only audit trail of who approved
     or rejected which item and when, in the same spirit as the audit_log
     rows the consent endpoints already write (routers/admin.py
-    admin_update_talentpool_consent) — never UPDATEd or DELETEd, so the
-    full history of a reopened item survives a later re-approval/
-    re-rejection. Deliberately a *dedicated* table rather than only an
-    audit_log row: retention_review_items.status needs to look up "was
-    this ever rejected before" cheaply and the decisions table is that
-    lookup, while the existing audit_log INSERT (routers/retention_admin.py
-    approve_review_item(), json.dumps'd, counts/keys only per commit
-    72b4bcd) still records the actual purge action for the
-    register/security-audit trail every other admin mutation uses.
+    admin_update_talentpool_consent). Deliberately a *dedicated* table
+    rather than only an audit_log row: retention_review_items.status
+    needs to look up "was this ever rejected before" cheaply and the
+    decisions table is that lookup, while the existing audit_log INSERT
+    (routers/retention_admin.py approve_review_item(), json.dumps'd,
+    counts/keys only per commit 72b4bcd) still records the actual purge
+    action for the register/security-audit trail every other admin
+    mutation uses.
+
+    security-audit follow-up (M4, round 5): "append-only" used to be only
+    a comment, not something the database enforced -- any code with
+    write access could UPDATE or DELETE a decision row and there would be
+    no trace. Migration 037 is reserved for another track, so this fixes
+    it here, in 036 itself (not yet applied to production): two rules
+    make UPDATE and DELETE against retention_review_decisions silent
+    no-ops at the database level, regardless of which application code
+    (or a future bug in it) attempts one. `CREATE OR REPLACE RULE` is
+    itself idempotent, matching the CREATE TABLE IF NOT EXISTS/ADD COLUMN
+    IF NOT EXISTS pattern the rest of this file follows.
 
 Pattern of 030/032/033/034: idempotent (CREATE TABLE IF NOT EXISTS, ADD
-COLUMN IF NOT EXISTS, CREATE INDEX IF NOT EXISTS), no DO $$ ... END $$
-blocks (migrations/_runner.py splits on a literal ";"), no DELETE/DROP.
+COLUMN IF NOT EXISTS, CREATE INDEX IF NOT EXISTS, CREATE OR REPLACE RULE),
+no DO $$ ... END $$ blocks (migrations/_runner.py splits on a literal
+";"), no DELETE/DROP.
 """
 import asyncio
 import os
@@ -83,7 +103,7 @@ CREATE TABLE IF NOT EXISTS retention_review_items (
     term_expired_at                 TIMESTAMPTZ,
     signal_missing_nl               TEXT NOT NULL DEFAULT '',
     status                          TEXT NOT NULL DEFAULT 'pending'
-                                      CHECK (status IN ('pending', 'rejected', 'purged', 'no_longer_eligible')),
+                                      CHECK (status IN ('pending', 'rejected', 'purging', 'purged', 'no_longer_eligible')),
     first_seen_at                   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     last_seen_at                    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     reappeared_after_rejection_at   TIMESTAMPTZ,
@@ -102,6 +122,11 @@ CREATE TABLE IF NOT EXISTS retention_review_decisions (
     note             TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_retention_review_decisions_item ON retention_review_decisions(review_item_id);
+
+CREATE OR REPLACE RULE retention_review_decisions_no_update AS
+    ON UPDATE TO retention_review_decisions DO INSTEAD NOTHING;
+CREATE OR REPLACE RULE retention_review_decisions_no_delete AS
+    ON DELETE TO retention_review_decisions DO INSTEAD NOTHING;
 """
 
 if __name__ == "__main__":

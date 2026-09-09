@@ -5,10 +5,11 @@ core/retention.py's bewaartabel names three anchor columns that don't
 exist yet on `main`: `candidates.rejected_at`, a "last contact" column on
 `client_prospects`, and a "last login" column on `users`. Their rows
 (`rejected_applicant`, `prospect_responding`, `portal_account_inactive`)
-carry `schema_ready=False` and the daily purge job
-(services/scheduler.py `run_retention_purge()`) skips them outright --
-`_category_result()` never issues a query against a column that isn't
-there. This migration adds the three columns so those categories can run.
+carry `schema_ready=False`, and the monthly review-queue job
+(services/scheduler.py `generate_retention_review()`) skips a row
+outright unless `schema_ready` is True -- it never issues a query
+against a column that isn't there. This migration adds the three
+columns so those categories can run.
 
 Columns:
   - candidates.rejected_at TIMESTAMPTZ — stamped the moment
@@ -41,11 +42,11 @@ splits on a literal ";").
 
 Not in scope: `matches.updated_at`-adjacent invoice-date column the
 `placed_candidate` row's docstring also flags as missing. That row's
-`action` is "retain" -- services/scheduler.py's `_category_result()`
-returns `not_applicable` for every "retain"/"infra_only" row *before* it
-ever looks at `schema_ready`, so the purge job would never query a
-dedicated invoice-date column even if one existed (7 years is a floor on
-data this job never purges, not a purge trigger). Adding a column nothing
+`action` is "retain" -- generate_retention_review() skips every
+"retain"/"infra_only" row before it ever looks at `schema_ready`, so
+the review job would never query a dedicated invoice-date column even
+if one existed (7 years is a floor on data this job never purges, not
+a purge trigger). Adding a column nothing
 would ever write to or query defeats the point of this PR (see the task
 note: a column that never gets filled is worse than no column, since
 schema_ready would then claim executability the job still can't act on)

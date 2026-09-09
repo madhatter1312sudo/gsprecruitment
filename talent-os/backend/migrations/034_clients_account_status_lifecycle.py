@@ -1,6 +1,6 @@
 """
-Talent OS — WS-E.8 retention-kolommen, fourth round: give
-clients.account_status a real write path and a closed value set.
+Talent OS — WS-E.8 retention-kolommen: give clients.account_status a real
+write path and a closed value set.
 
 security-auditor FIX FIRST (blocking point 3): `clients.account_status`
 (migrations/000_baseline.py, DEFAULT 'active') is read by
@@ -60,6 +60,20 @@ This migration:
      signal this migration has no reason to override, unlike the DEFAULT
      every stub row got with no signal behind it at all.
 
+     security-audit follow-up (L2, round 5): the backfill in #3 changes
+     `account_status` on existing rows without a human clicking anything --
+     the one bulk write in this whole migration set that silently
+     reclassifies live data. The affected client ids are therefore logged
+     to `audit_log` (action='retention_migration_034_backfill',
+     json.dumps'd via jsonb_build_object/jsonb_agg — never a raw dict,
+     commit 72b4bcd) in a SELECT run immediately before the UPDATE, so the
+     owner can see exactly who was moved to 'lead' by this migration
+     after deploying it, via the same audit trail every other admin
+     mutation uses (actor_id NULL — a migration, not an admin action).
+     After this migration, `account_status` is only ever set again via
+     `PATCH /api/v1/admin/clients/{id}` (routers/clients_admin.py
+     update_client) — an admin action, audit-logged the normal way.
+
 Pattern of 026 (interest_type): normalise data first (idempotent,
 `WHERE` narrows it to rows the CHECK would otherwise reject or the
 backfill targets, so a re-run is a no-op), then ALTER COLUMN SET
@@ -80,6 +94,13 @@ MIGRATION_SQL = """
 UPDATE clients SET account_status = 'lead'
     WHERE account_status IS NULL
        OR account_status NOT IN ('lead', 'active', 'inactive');
+
+INSERT INTO audit_log (action, actor_id, target_type, target_id, changes)
+    SELECT 'retention_migration_034_backfill', NULL, 'client', NULL,
+           jsonb_build_object('degraded_to_lead_client_ids', COALESCE(jsonb_agg(id), '[]'::jsonb))
+      FROM clients
+     WHERE account_status = 'active'
+       AND NOT EXISTS (SELECT 1 FROM job_orders j WHERE j.client_id = clients.id);
 
 UPDATE clients SET account_status = 'lead'
     WHERE account_status = 'active'
