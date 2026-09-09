@@ -62,18 +62,23 @@ class _FakeDB:
     themselves)."""
 
     # Round 6 re-check (security-auditor + code-reviewer): erase_person()'s
-    # identity-table lookups (candidates/client_prospects) now compare
-    # LOWER(TRIM(column)), not plain LOWER(column) -- the side-table
-    # lookups below them (quiz/contact submissions, outreach, data_subject_
-    # requests) are unchanged.
+    # identity-table lookups (candidates/client_prospects) compare
+    # LOWER(TRIM(column)), not plain LOWER(column).
+    #
+    # chief-of-staff FIX FIRST (retention-kolommen branch, finding 3): the
+    # side-table lookups below them (quiz/contact submissions, outreach,
+    # data_subject_requests) now do too -- these prefixes assert the exact
+    # SQL text erase_person() must issue; a future edit that drops TRIM()
+    # from any one of these fails here, not just in production against a
+    # padded address.
     _ONE_ROW_SELECTS = (
         "SELECT id FROM candidates WHERE LOWER(TRIM(email))",
-        "SELECT id FROM quiz_submissions WHERE LOWER(email)",
-        "SELECT id FROM contact_submissions WHERE LOWER(email)",
-        "SELECT id FROM outreach_drafts WHERE LOWER(target_email)",
-        "SELECT id FROM outreach_messages WHERE LOWER(recipient_email)",
+        "SELECT id FROM quiz_submissions WHERE LOWER(TRIM(email))",
+        "SELECT id FROM contact_submissions WHERE LOWER(TRIM(email))",
+        "SELECT id FROM outreach_drafts WHERE LOWER(TRIM(target_email))",
+        "SELECT id FROM outreach_messages WHERE LOWER(TRIM(recipient_email))",
         "SELECT id FROM client_prospects WHERE LOWER(TRIM(contact_email))",
-        "SELECT id FROM data_subject_requests WHERE LOWER(request_email)",
+        "SELECT id FROM data_subject_requests WHERE LOWER(TRIM(request_email))",
     )
 
     def __init__(self):
@@ -238,6 +243,25 @@ def test_erase_person_sets_client_prospects_opt_out_at(fake_db):
     assert "opt_out_at" in prospect_updates[0]
     assert "contact_name" in prospect_updates[0]
     assert "contact_linkedin" in prospect_updates[0]
+
+
+def test_erase_person_nulls_retention_review_items_email_via_trimmed_comparison(fake_db):
+    """chief-of-staff FIX FIRST (retention-kolommen branch, finding 3):
+    this UPDATE is a straight execute(), not routed through
+    _anonymize_by_id (retention_review_items has no per-row anonymising
+    UPDATE, only a NULL-out) -- assert its WHERE clause is TRIM'd too, or
+    a queued row with a padded stored address survives an otherwise-
+    complete erasure."""
+    import routers.gdpr as gdpr
+
+    asyncio.run(gdpr.erase_person("Person@Example.com", actor_id=7, reason="unit-test"))
+
+    review_updates = [
+        sql for sql, _args in fake_db.statements
+        if sql.strip().startswith("UPDATE retention_review_items")
+    ]
+    assert review_updates, "expected an UPDATE retention_review_items statement"
+    assert "LOWER(TRIM(email))" in review_updates[0], review_updates[0]
 
 
 def test_anonymize_by_id_generates_a_distinct_placeholder_per_row(monkeypatch):
@@ -422,6 +446,34 @@ def test_admin_erase_allows_ordinary_sourced_person_without_confirm(patch_users_
     ))
     assert result["status"] == "complete"
     assert len(calls) == 1
+
+
+def test_admin_erase_person_users_lookup_uses_trimmed_comparison(monkeypatch):
+    """chief-of-staff FIX FIRST (retention-kolommen branch, finding 3):
+    the admin/self-erasure guard's own users lookup must compare
+    LOWER(TRIM(email)), same as every other lookup this fix touched --
+    a padded stored address on an admin or the caller's own account must
+    still trip the confirm gate, not slip through as 'no match'."""
+    import routers.gdpr as gdpr
+
+    captured_sql = []
+
+    async def fake_fetch_all(sql, *args):
+        captured_sql.append(sql)
+        return []
+
+    async def fake_erase_person(email, actor_id=None, reason="manual"):
+        return {"status": "complete", "email_hash": "x", "cv_files_deleted": [], "cv_files_failed": []}
+
+    monkeypatch.setattr(gdpr, "fetch_all", fake_fetch_all)
+    monkeypatch.setattr(gdpr, "erase_person", fake_erase_person)
+
+    asyncio.run(gdpr.admin_erase_person(
+        gdpr.AdminEraseRequest(email="target@example.com", confirm=False),
+        current_user={"id": 1, "role": "admin"},
+    ))
+    assert captured_sql, "expected a users lookup"
+    assert "LOWER(TRIM(email))" in captured_sql[0], captured_sql[0]
 
 
 # ── _redact_audit_log_email() -- asyncpg jsonb-as-string bug ─────────────

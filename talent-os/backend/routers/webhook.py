@@ -84,6 +84,13 @@ async def hermes_webhook(request: Request):
                 status_code=422,
                 detail="candidate_found requires a valid data.lawful_basis (SOP §2)",
             )
+        # chief-of-staff FIX FIRST (retention-kolommen branch, finding 3):
+        # this insert bypasses CandidateCreate (data is a raw dict, see
+        # WebhookPayload above) so its email-strip validator never runs
+        # here -- strip inline, same reasoning as
+        # CandidateCreate._strip_email (models/schemas.py).
+        raw_email = data.get("email")
+        email = (raw_email.strip() or None) if isinstance(raw_email, str) else raw_email
         row = await fetch_one(
             """INSERT INTO candidates
                (full_name, email, current_company, current_title, skills, source,
@@ -91,7 +98,7 @@ async def hermes_webhook(request: Request):
                 source_url, lawful_basis, date_found)
                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,COALESCE($13::date, CURRENT_DATE))
                RETURNING id""",
-            data.get("name"), data.get("email"), data.get("company"),
+            data.get("name"), email, data.get("company"),
             data.get("title"), data.get("skills", []), data.get("source", "agent"),
             agent, data.get("strength_score", 0),
             data.get("switch_readiness", "UNKNOWN"),

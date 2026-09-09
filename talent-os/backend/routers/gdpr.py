@@ -400,10 +400,17 @@ async def erase_person(
     erased, which no amount of e-mail-based conflict-checking would ever
     catch (round 6 code-review finding). Self-service/admin erasure never
     pass these (scope_table=None), preserving today's e-mail-wide
-    behaviour, extra_ids included, exactly as before -- except that the
-    three identity-table lookups now compare LOWER(TRIM(column)) rather
-    than plain LOWER(column), so a padded address on some OTHER row no
-    longer hides it from an otherwise-legitimate unscoped erasure either.
+    behaviour, extra_ids included, exactly as before -- except that every
+    e-mail lookup this function makes -- the three identity tables and
+    every secondary table below them (quiz_submissions,
+    contact_submissions, outreach_drafts, outreach_messages,
+    data_subject_requests, retention_review_items) -- now compares
+    LOWER(TRIM(column)) rather than plain LOWER(column), so a padded
+    address on some OTHER row no longer hides it from an otherwise-
+    legitimate unscoped erasure, and a padded address on the SUBJECT's
+    own row no longer leaves a residue in one of the secondary tables
+    after an approved erasure reports success everywhere else (chief-of-
+    staff FIX FIRST, retention-kolommen branch).
     """
     email_norm = privacy.normalize_email(email)
     if not email_norm:
@@ -428,9 +435,13 @@ async def erase_person(
     # mismatch, as a structural matter rather than a matching detail. Only
     # the unscoped path (scope_table=None -- self-service/admin erasure)
     # still matches e-mail-wide, and now does so via LOWER(TRIM(column))
-    # rather than plain LOWER(column), so a stray space on some OTHER
-    # row's stored address doesn't hide it from an otherwise-legitimate
-    # e-mail-wide erasure either.
+    # rather than plain LOWER(column) on every table this function
+    # touches -- identity tables and secondary tables alike, plus the
+    # admin_erase_person() admin/self guard below -- so a stray space on
+    # some OTHER row's stored address doesn't hide it from an otherwise-
+    # legitimate e-mail-wide erasure, and a stray space on the SUBJECT's
+    # own address doesn't leave PII behind in a secondary table while
+    # this call reports a clean purge.
     if scope_table == "users":
         users_rows = await fetch_all("SELECT id FROM users WHERE id = $1", scope_id)
     elif scope_table is None:
@@ -564,22 +575,22 @@ async def erase_person(
         await execute("UPDATE pipeline_entries SET notes = NULL WHERE candidate_id = $1", cid)
 
     await _anonymize_by_id(
-        "SELECT id FROM quiz_submissions WHERE LOWER(email) = $1",
+        "SELECT id FROM quiz_submissions WHERE LOWER(TRIM(email)) = $1",
         "UPDATE quiz_submissions SET email = $2, referrer_host = NULL WHERE id = $1",
         email_norm, email_hash,
     )
     await _anonymize_by_id(
-        "SELECT id FROM contact_submissions WHERE LOWER(email) = $1",
+        "SELECT id FROM contact_submissions WHERE LOWER(TRIM(email)) = $1",
         "UPDATE contact_submissions SET name = 'Erased', email = $2, phone = NULL, referrer_host = NULL WHERE id = $1",
         email_norm, email_hash,
     )
     await _anonymize_by_id(
-        "SELECT id FROM outreach_drafts WHERE LOWER(target_email) = $1",
+        "SELECT id FROM outreach_drafts WHERE LOWER(TRIM(target_email)) = $1",
         "UPDATE outreach_drafts SET target_email = $2, target_name = 'Erased' WHERE id = $1",
         email_norm, email_hash,
     )
     await _anonymize_by_id(
-        "SELECT id FROM outreach_messages WHERE LOWER(recipient_email) = $1",
+        "SELECT id FROM outreach_messages WHERE LOWER(TRIM(recipient_email)) = $1",
         "UPDATE outreach_messages SET recipient_email = $2 WHERE id = $1",
         email_norm, email_hash,
     )
@@ -601,7 +612,7 @@ async def erase_person(
             _CLIENT_PROSPECTS_ANONYMIZE_UPDATE_SQL, email_norm, email_hash,
         )
     await _anonymize_by_id(
-        "SELECT id FROM data_subject_requests WHERE LOWER(request_email) = $1",
+        "SELECT id FROM data_subject_requests WHERE LOWER(TRIM(request_email)) = $1",
         "UPDATE data_subject_requests SET request_email = $2 WHERE id = $1",
         email_norm, email_hash,
     )
@@ -618,7 +629,7 @@ async def erase_person(
     # row -- a different category, or a stale one never approved -- that
     # still carries the same address).
     await execute(
-        "UPDATE retention_review_items SET email = NULL WHERE LOWER(email) = $1", email_norm,
+        "UPDATE retention_review_items SET email = NULL WHERE LOWER(TRIM(email)) = $1", email_norm,
     )
 
     # WS-C.17 security-audit follow-up (LOW, post-APPROVED): a lapsed
@@ -716,7 +727,7 @@ async def admin_erase_person(
     explicitly opts in with confirm=true."""
     email_norm = privacy.normalize_email(payload.email)
     matching_users = await fetch_all(
-        "SELECT id, role FROM users WHERE LOWER(email) = $1", email_norm,
+        "SELECT id, role FROM users WHERE LOWER(TRIM(email)) = $1", email_norm,
     )
     is_admin_or_self = any(
         u["role"] == "admin" or u["id"] == current_user["id"] for u in matching_users

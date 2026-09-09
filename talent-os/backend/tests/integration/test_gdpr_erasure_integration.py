@@ -184,6 +184,94 @@ def test_erase_person_scrubs_pii_from_every_registered_table(db_run):
     assert suppression is not None, "erase_person() must add the person to suppression_list"
 
 
+def test_erase_person_scrubs_a_padded_address_from_every_secondary_table(db_run):
+    """chief-of-staff FIX FIRST (retention-kolommen branch, finding 3):
+    erase_person() has compared the three IDENTITY tables (candidates,
+    users, client_prospects) via LOWER(TRIM(...)) since 7fab750, but the
+    six SECONDARY lookups below (plus the admin-erase guard's own users
+    lookup, covered separately in test_gdpr_erasure.py's stubbed suite)
+    still compared plain LOWER(...) -- a stored address padded with
+    whitespace on any one of them would leave that row untouched while
+    erase_person() still reported the purge complete everywhere else.
+
+    Every row here is seeded with a PADDED address via raw SQL -- exactly
+    what a row written before this fix, or by a path that bypasses
+    CandidateCreate/ProspectCreate's own strip validators (a raw INSERT,
+    e.g. services/harvest.py), can still look like -- and erase_person()
+    is called with the CLEAN address, the way a real Art. 17 request
+    names the person by the address they typed. Every one of the six
+    tables must come back empty of the plaintext address afterwards.
+
+    Plain spaces only, deliberately: Postgres's default TRIM(x) (no
+    explicit character set) strips spaces, not tabs or NBSP -- a known,
+    documented boundary (see gdpr.py's erase_person docstring and the
+    chief-of-staff FIX FIRST note this fix responds to) that a tab/NBSP-
+    padded address, however it got that way, would still fall through.
+    Normalising every real insert path (this fix's CandidateCreate/
+    ProspectCreate/webhook.py strips) is what keeps that gap from ever
+    being reachable in practice, not this SQL-level TRIM."""
+    from core.database import execute, fetch_all, fetch_one
+    from routers.gdpr import erase_person
+
+    clean_email = f"pad-erase-{uuid.uuid4().hex[:10]}@example.com"
+    padded_email = f"  {clean_email}  "  # leading and trailing spaces
+
+    db_run(
+        execute,
+        "INSERT INTO quiz_submissions (email, answers) VALUES ($1, '{}'::jsonb)",
+        padded_email,
+    )
+    db_run(
+        execute,
+        "INSERT INTO contact_submissions (name, email, message) VALUES ('Pad Erase', $1, 'hello')",
+        padded_email,
+    )
+    db_run(
+        execute,
+        "INSERT INTO outreach_drafts (target_type, target_email, target_name) VALUES ('candidate', $1, 'Pad Erase')",
+        padded_email,
+    )
+    db_run(
+        execute,
+        "INSERT INTO outreach_messages (recipient_email, subject, body) VALUES ($1, 'hi', 'body')",
+        padded_email,
+    )
+    db_run(
+        execute,
+        "INSERT INTO data_subject_requests (request_type, request_email) VALUES ('access', $1)",
+        padded_email,
+    )
+    review_item = db_run(
+        fetch_one,
+        """INSERT INTO retention_review_items
+               (category, subject_table, subject_id, email, action, signal_missing_nl)
+           VALUES ('leads_quiz', 'quiz_submissions', 999999999, $1, 'anonymise', 'test seed')
+           RETURNING id""",
+        padded_email,
+    )
+
+    result = db_run(erase_person, clean_email, None, "padded-address integration test")
+    assert result["status"] == "complete", result
+
+    quiz = db_run(fetch_all, "SELECT id, email FROM quiz_submissions WHERE email ILIKE $1", f"%{clean_email}%")
+    assert quiz == [], f"quiz_submissions still carries the padded address: {quiz}"
+
+    contact = db_run(fetch_all, "SELECT id, email FROM contact_submissions WHERE email ILIKE $1", f"%{clean_email}%")
+    assert contact == [], f"contact_submissions still carries the padded address: {contact}"
+
+    draft = db_run(fetch_all, "SELECT id, target_email FROM outreach_drafts WHERE target_email ILIKE $1", f"%{clean_email}%")
+    assert draft == [], f"outreach_drafts still carries the padded address: {draft}"
+
+    message = db_run(fetch_all, "SELECT id, recipient_email FROM outreach_messages WHERE recipient_email ILIKE $1", f"%{clean_email}%")
+    assert message == [], f"outreach_messages still carries the padded address: {message}"
+
+    dsr = db_run(fetch_all, "SELECT id, request_email FROM data_subject_requests WHERE request_email ILIKE $1", f"%{clean_email}%")
+    assert dsr == [], f"data_subject_requests still carries the padded address: {dsr}"
+
+    review_row = db_run(fetch_one, "SELECT email FROM retention_review_items WHERE id = $1", review_item["id"])
+    assert review_row["email"] is None, "retention_review_items.email must be nulled, padded address or not"
+
+
 def test_scoped_erasure_does_not_follow_a_users_row_to_an_unrelated_fk_linked_candidate(db_run):
     """Retention-kolommen round 6 (code-review, WS-E.10 approval queue):
     proves erase_person()'s own scope_table/scope_id narrowing directly,

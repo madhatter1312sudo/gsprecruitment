@@ -430,12 +430,21 @@ async def _refuse_if_email_belongs_to_an_unrelated_account(
 async def _current_subject_email(subject_table: str, subject_id: int) -> Optional[str]:
     """H1 (security-audit round 5, BLOCKING): retention_review_items.email
     is a snapshot taken at monthly generation time. If the subject's own
-    address changes in between (e.g. PATCH /api/candidates/{id}), acting
-    on that stale snapshot would anonymise/suppress whoever the OLD
-    address now belongs to instead of the actually-due person, while the
-    person this row is really about keeps their new address and is never
-    touched -- yet the review item still reports "purged". Re-read the
-    address straight from the source row immediately before acting."""
+    address changes in between, acting on that stale snapshot would
+    anonymise/suppress whoever the OLD address now belongs to instead of
+    the actually-due person, while the person this row is really about
+    keeps their new address and is never touched -- yet the review item
+    still reports "purged". Re-read the address straight from the source
+    row immediately before acting.
+
+    chief-of-staff FIX FIRST (retention-kolommen branch, finding 4):
+    corrected the example write path this docstring used to name --
+    CandidateAdminUpdate (PATCH /api/candidates/{id}) carries no `email`
+    field, so that endpoint can never change an existing candidates.email.
+    The real path (see test_ws_e10_round6_probes.py's own note on the same
+    gap) is PUT /api/v1/admin/users/{id} (routers/admin.py update_user,
+    `email` is in its own `allowed` set) -- exactly the anchor
+    `portal_account_inactive` (subject_table='users') uses."""
     column = _SUBJECT_EMAIL_COLUMN.get(subject_table)
     if column is None:
         return None

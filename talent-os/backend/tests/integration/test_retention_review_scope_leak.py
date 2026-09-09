@@ -314,12 +314,20 @@ def test_approving_a_rejected_candidate_does_not_follow_an_fk_linked_unrelated_p
 #    compare the RAW subject address (LOWER(email) = LOWER($1)) while
 #    erase_person() compared the NORMALISED one (strip+lower) -- a subject
 #    whose own stored address carries whitespace made the guard blind to a
-#    real conflict elsewhere. Both scenarios below create the SUBJECT
-#    through the real, unstripped write path (POST /api/candidates,
-#    POST /api/v1/admin/prospects -- neither strips e-mail today) with a
-#    padded address, and a genuine conflict sharing the CLEAN version of
-#    that same address -- reproducing S2b/S3b via address padding rather
-#    than via a missing scope check. ─────────────────────────────────────
+#    real conflict elsewhere.
+#
+#    chief-of-staff FIX FIRST (retention-kolommen branch, finding 3):
+#    ProspectCreate.email and CandidateCreate.email now strip on input
+#    (models/schemas.py, routers/prospects.py), so POST /api/candidates
+#    and POST /api/v1/admin/prospects can no longer be used to store a
+#    padded address themselves -- both scenarios below instead write the
+#    padding directly via SQL, right after creation, to reproduce the one
+#    remaining way a stored address still ends up padded: a row written
+#    before this fix, or by a path that bypasses these pydantic models
+#    entirely (a raw INSERT, e.g. services/harvest.py). The guard itself
+#    (LOWER(TRIM(...)) throughout routers/gdpr.py and
+#    routers/retention_admin.py) still has to catch that row regardless of
+#    how it got padded -- that is what these two tests prove. ────────────
 
 def test_approving_a_padded_prospect_subject_still_detects_a_real_conflict(db_run, make_admin, client, api_key_headers):
     import services.scheduler as scheduler
@@ -329,7 +337,7 @@ def test_approving_a_padded_prospect_subject_still_detects_a_real_conflict(db_ru
     admin = make_admin()
     suffix = uuid.uuid4().hex[:10]
     clean_email = f"scope-leak-pad-a-{suffix}@example.com"
-    padded_email = clean_email + " "  # trailing space -- exactly what ProspectCreate.email accepts unstripped
+    padded_email = clean_email + " "  # trailing space
 
     resp = client.post(
         "/api/v1/admin/prospects",
@@ -344,6 +352,14 @@ def test_approving_a_padded_prospect_subject_still_detects_a_real_conflict(db_ru
     )
     assert resp.status_code == 201, resp.text
     prospect_id = resp.json()["id"]
+    created_row = db_run(fetch_one, "SELECT contact_email FROM client_prospects WHERE id = $1", prospect_id)
+    assert created_row["contact_email"] == clean_email, (
+        "ProspectCreate.email should have stripped the padding at the door"
+    )
+    # Simulate a row that still carries a padded address regardless (a
+    # pre-fix row, or a write path that bypasses ProspectCreate) -- this
+    # is the scenario the guard itself must still cover.
+    db_run(execute, "UPDATE client_prospects SET contact_email = $2 WHERE id = $1", prospect_id, padded_email)
     # last_contacted_at has no create-time field (routers/prospects.py) --
     # only PUT status changes / an approved outreach draft stamp it --
     # backdate it directly so PROSPECT_RESPONDING_SQL sees it as due.
@@ -393,7 +409,7 @@ def test_approving_a_padded_candidate_subject_still_detects_a_real_conflict(db_r
     admin = make_admin()
     suffix = uuid.uuid4().hex[:10]
     clean_email = f"scope-leak-pad-b-{suffix}@example.com"
-    padded_email = " " + clean_email  # leading space -- CandidateCreate.email accepts unstripped
+    padded_email = " " + clean_email  # leading space
 
     resp = client.post(
         "/api/candidates",
@@ -407,6 +423,15 @@ def test_approving_a_padded_candidate_subject_still_detects_a_real_conflict(db_r
     )
     assert resp.status_code == 201, resp.text
     subject_id = resp.json()["id"]
+    created_row = db_run(fetch_one, "SELECT email FROM candidates WHERE id = $1", subject_id)
+    assert created_row["email"] == clean_email, (
+        "CandidateCreate.email should have stripped the padding at the door"
+    )
+    # Simulate a row that still carries a padded address regardless (a
+    # pre-fix row, or a write path that bypasses CandidateCreate, e.g.
+    # services/harvest.py's raw INSERTs) -- this is the scenario the
+    # guard itself must still cover.
+    db_run(execute, "UPDATE candidates SET email = $2 WHERE id = $1", subject_id, padded_email)
     # rejected_at/status have no create-time field on this endpoint either
     # -- backdate directly so REJECTED_APPLICANT_SQL sees it as due.
     db_run(

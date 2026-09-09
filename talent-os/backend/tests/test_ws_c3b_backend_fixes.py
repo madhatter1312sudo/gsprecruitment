@@ -7,6 +7,7 @@ rejects a bad body / an unsupported action before ever touching the DB.
 """
 import hashlib
 import hmac
+import json
 import os
 import sys
 
@@ -132,3 +133,61 @@ def test_webhook_rejects_bad_signature_before_validation():
         headers={"X-Hermes-Signature": "not-a-real-signature", "Content-Type": "application/json"},
     )
     assert r.status_code == 401
+
+
+def test_webhook_candidate_found_strips_padded_email(monkeypatch):
+    """chief-of-staff FIX FIRST (retention-kolommen branch, finding 3):
+    action=candidate_found inserts straight from the raw `data` dict
+    (WebhookPayload.data is a plain dict, see models/schemas.py), so
+    CandidateCreate's own email-strip validator never runs for this
+    write path -- confirm the inline strip in routers/webhook.py instead
+    (a padded address stored via this route is exactly what erase_person()'s
+    LOWER(TRIM(...)) fix has to compensate for elsewhere)."""
+    import routers.webhook as webhook_router
+
+    captured = {}
+
+    async def fake_fetch_one(sql, *args):
+        captured["args"] = args
+        return {"id": 123}
+
+    monkeypatch.setattr(webhook_router, "fetch_one", fake_fetch_one)
+
+    padded = "  padded-hermes@example.com  "  # leading and trailing spaces
+    payload = {
+        "action": "candidate_found", "agent": "hermes-1",
+        "data": {
+            "name": "Padded Hermes", "email": padded,
+            "source_url": "https://example.com/profile", "lawful_basis": "gerechtvaardigd_belang",
+        },
+    }
+    body = json.dumps(payload).encode()
+    r = _signed_post(body)
+    assert r.status_code == 200, r.text
+
+    # args order: full_name, email, current_company, current_title, skills, source, ...
+    stored_email = captured["args"][1]
+    assert stored_email == "padded-hermes@example.com", repr(stored_email)
+
+
+def test_webhook_candidate_found_tolerates_a_missing_email(monkeypatch):
+    """data.get("email") can legitimately be None/absent -- the inline
+    strip must not blow up on a non-string value."""
+    import routers.webhook as webhook_router
+
+    captured = {}
+
+    async def fake_fetch_one(sql, *args):
+        captured["args"] = args
+        return {"id": 124}
+
+    monkeypatch.setattr(webhook_router, "fetch_one", fake_fetch_one)
+
+    body = (
+        b'{"action": "candidate_found", "agent": "hermes-1", "data": '
+        b'{"name": "No Email Hermes", '
+        b'"source_url": "https://example.com/profile", "lawful_basis": "gerechtvaardigd_belang"}}'
+    )
+    r = _signed_post(body)
+    assert r.status_code == 200, r.text
+    assert captured["args"][1] is None

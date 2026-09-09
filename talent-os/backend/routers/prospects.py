@@ -64,6 +64,19 @@ class ProspectCreate(BaseModel):
             raise ValueError("source_url must be a public http:// or https:// URL (SOP §2)")
         return s
 
+    # chief-of-staff FIX FIRST (retention-kolommen branch, finding 3): same
+    # reasoning as CandidateCreate._strip_email (models/schemas.py) -- an
+    # external agent submitting a padded contact_email here is otherwise
+    # the one insert path erase_person()'s LOWER(TRIM(...)) fix would still
+    # have had to compensate for.
+    @field_validator("email")
+    @classmethod
+    def _strip_email(cls, v):
+        if v is None:
+            return v
+        stripped = v.strip()
+        return stripped or None
+
 
 class ProspectUpdate(BaseModel):
     status: Optional[str] = None
