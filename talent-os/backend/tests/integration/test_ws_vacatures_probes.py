@@ -301,6 +301,59 @@ def test_optin_invalid_job_id_silently_ignored(db_run, client, kind):
     _cleanup(db_run, job_ids, [c["id"]])
 
 
+def test_optin_job_id_out_of_int32_range_no_enumeration_oracle(db_run, client):
+    """Security-audit fix (schemas.py TalentpoolOptinRequest.job_id):
+    job_id buiten int4-bereik (hier 2**31) moet op de pydantic-validatie
+    stranden, voordat de suppressie-check en de job-lookup draaien. Vóór
+    de fix bereikte zo'n job_id de job-lookup alleen op het pad zonder
+    suppressie-hit (de gesuppressed-tak slaat de lookup over) en
+    asyncpg's DataError op die lookup gaf een 500 -- dus gesuppressed gaf
+    202 en een vers adres gaf 500, wat suppressiestatus per adres
+    verraadde. Met de ge/le-grens op het veld geeft elk van de twee
+    adressen dezelfde 422, vóór enige DB-toegang."""
+    from core.database import execute, fetch_one
+    from core.privacy import email_hash
+
+    suppressed_email = f"sonde-oob-suppressed-{uuid.uuid4().hex[:10]}@example.com"
+    fresh_email = f"sonde-oob-fresh-{uuid.uuid4().hex[:10]}@example.com"
+    db_run(
+        execute,
+        "INSERT INTO suppression_list (email_hash, reason) VALUES ($1, 'sonde')",
+        email_hash(suppressed_email),
+    )
+
+    def _payload(email):
+        return {
+            "email": email, "consent": True, "scope": "matching_only",
+            "source": "vacancy_apply", "job_id": 2 ** 31,
+        }
+
+    resp_suppressed = client.post("/api/public/talentpool-optin", json=_payload(suppressed_email))
+    resp_fresh = client.post("/api/public/talentpool-optin", json=_payload(fresh_email))
+
+    assert resp_suppressed.status_code == 422, (
+        f"job_id=2**31 hoort op validatie te stranden (422), kreeg {resp_suppressed.status_code}: "
+        f"{resp_suppressed.text}"
+    )
+    assert resp_fresh.status_code == 422, (
+        f"job_id=2**31 hoort op validatie te stranden (422) ongeacht suppressiestatus, kreeg "
+        f"{resp_fresh.status_code}: {resp_fresh.text}"
+    )
+    assert resp_fresh.status_code == resp_suppressed.status_code
+    assert resp_fresh.json() == resp_suppressed.json(), (
+        "een gesuppressed en een vers adres moeten identieke status/body geven voor een "
+        "out-of-range job_id -- elk verschil is een suppressie-orakel"
+    )
+
+    row = db_run(
+        fetch_one,
+        "SELECT id FROM talentpool_optin_requests WHERE LOWER(email) = $1", fresh_email.lower(),
+    )
+    assert row is None, "een 422 op validatie mag geen rij in talentpool_optin_requests aanmaken"
+
+    db_run(execute, "DELETE FROM suppression_list WHERE email_hash = $1", email_hash(suppressed_email))
+
+
 def test_optin_without_job_id_unchanged(db_run, client):
     """Bestaande aanroep zonder job_id blijft werken -- geen regressie op
     het pad zonder vacaturekoppeling."""

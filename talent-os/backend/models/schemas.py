@@ -106,14 +106,19 @@ class TalentpoolOptinRequest(BaseModel):
     only stored when it resolves to an open, non-demo, non-deleted job at
     submit time (see talentpool_optin()); an unknown or non-public job_id
     is silently ignored rather than rejected, same no-enumeration posture
-    as the rest of this endpoint. job_alerts: whether the applicant also
-    wants general vacancy alerts -- stored on talentpool_optin_requests
-    only, `candidates` has no job_alerts column yet."""
+    as the rest of this endpoint. Bounded to postgres int4 (1..2^31-1) so
+    an out-of-range value 422s here, before the suppression-list check --
+    otherwise a value like 2**31 reaches the job lookup only when the
+    address is not suppressed, which would make the 500/202 split an
+    e-mail-enumeration oracle for suppression state. job_alerts: whether
+    the applicant also wants general vacancy alerts -- stored on
+    talentpool_optin_requests only, `candidates` has no job_alerts column
+    yet."""
     email: EmailStr
     consent: bool
     scope: str
     source: str
-    job_id: Optional[int] = None
+    job_id: Optional[int] = Field(None, ge=1, le=2147483647)
     job_alerts: bool = False
 
     @field_validator("scope")

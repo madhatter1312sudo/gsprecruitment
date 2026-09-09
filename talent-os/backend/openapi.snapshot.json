@@ -5402,7 +5402,7 @@
         "type": "object"
       },
       "TalentpoolOptinRequest": {
-        "description": "Public: POST /api/public/talentpool-optin -- e-mail + consent tick\nfrom website/kandidaten.html, website/blog/post.html's CTA, or (WS-4,\nmigrations/037) a vacancy page's apply button. Does not itself set\nanything on `candidates`; only issues a confirmation e-mail\n(routers/public.py talentpool_public_router). Consent only becomes\neffective once the token is confirmed via talentpool-confirm.\n\njob_id (WS-4): optional link to the job order the request came from --\nonly stored when it resolves to an open, non-demo, non-deleted job at\nsubmit time (see talentpool_optin()); an unknown or non-public job_id\nis silently ignored rather than rejected, same no-enumeration posture\nas the rest of this endpoint. job_alerts: whether the applicant also\nwants general vacancy alerts -- stored on talentpool_optin_requests\nonly, `candidates` has no job_alerts column yet.",
+        "description": "Public: POST /api/public/talentpool-optin -- e-mail + consent tick\nfrom website/kandidaten.html, website/blog/post.html's CTA, or (WS-4,\nmigrations/037) a vacancy page's apply button. Does not itself set\nanything on `candidates`; only issues a confirmation e-mail\n(routers/public.py talentpool_public_router). Consent only becomes\neffective once the token is confirmed via talentpool-confirm.\n\njob_id (WS-4): optional link to the job order the request came from --\nonly stored when it resolves to an open, non-demo, non-deleted job at\nsubmit time (see talentpool_optin()); an unknown or non-public job_id\nis silently ignored rather than rejected, same no-enumeration posture\nas the rest of this endpoint. Bounded to postgres int4 (1..2^31-1) so\nan out-of-range value 422s here, before the suppression-list check --\notherwise a value like 2**31 reaches the job lookup only when the\naddress is not suppressed, which would make the 500/202 split an\ne-mail-enumeration oracle for suppression state. job_alerts: whether\nthe applicant also wants general vacancy alerts -- stored on\ntalentpool_optin_requests only, `candidates` has no job_alerts column\nyet.",
         "properties": {
           "consent": {
             "title": "Consent",
@@ -5421,6 +5421,8 @@
           "job_id": {
             "anyOf": [
               {
+                "maximum": 2147483647.0,
+                "minimum": 1.0,
                 "type": "integer"
               },
               {

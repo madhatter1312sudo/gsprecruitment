@@ -102,9 +102,10 @@ function renderVacancyApplyPanel(job, lang) {
   const panel = document.getElementById('vacancyApplyPanel');
   if (!panel) return;
   panel.style.display = 'flex';
+  const emailLabel = lang === 'nl' ? 'E-mailadres' : 'Email address';
   panel.innerHTML = `
     <div class="talentpool-optin-row">
-      <input type="email" id="vacancyOptinEmail" placeholder="Email address" data-lang-en="Email address" data-lang-nl="E-mailadres" aria-label="Email address">
+      <input type="email" id="vacancyOptinEmail" placeholder="${emailLabel}" data-lang-en="Email address" data-lang-nl="E-mailadres" aria-label="${emailLabel}">
     </div>
     <p class="lang-nl">Ja, neem mij op in de talentpool van GSP Recruitment voor passende rollen. Bewaartermijn 12 maanden; een maand voor het einde vragen wij per e-mail of je wilt verlengen. Zonder verlenging verwijderen wij je gegevens uit de talentpool. Intrekken kan altijd via info@gsprecruitment.nl.</p>
     <p class="lang-en">Yes, add me to GSP Recruitment's talent pool for suitable roles. Retention period 12 months; one month before it ends we'll e-mail you to ask whether you want to renew. Without renewal we delete your data from the talent pool. You can withdraw at any time via info@gsprecruitment.nl.</p>

@@ -726,7 +726,7 @@ const GSP_WHATSAPP = '31617913965';
           </div>
           <p>${GSP.esc(job.description || '')}</p>
           <div class="job-meta">
-            <span><i class="fas fa-euro-sign"></i> €${(job.salary_min / 1000).toFixed(0)}k – €${(job.salary_max / 1000).toFixed(0)}k</span>
+            <span><i class="fas fa-euro-sign"></i> ${(job.salary_min != null && job.salary_max != null) ? `€${(job.salary_min / 1000).toFixed(0)}k – €${(job.salary_max / 1000).toFixed(0)}k` : `<span class="lang-nl">Salaris op aanvraag</span><span class="lang-en">Salary on request</span>`}</span>
             <span><i class="fas fa-map-marker-alt"></i> ${GSP.esc(job.location_type || 'Netherlands')}</span>
           </div>
           <div class="job-links">
@@ -760,7 +760,7 @@ const GSP_WHATSAPP = '31617913965';
         </div>
         <div style="background:var(--bg-alt);padding:16px;border-radius:var(--radius-sm);margin-bottom:16px">
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
-            <div><strong>Salary:</strong> €${(job.salary_min/1000).toFixed(0)}k – €${(job.salary_max/1000).toFixed(0)}k</div>
+            <div><strong>Salary:</strong> ${(job.salary_min != null && job.salary_max != null) ? `€${(job.salary_min/1000).toFixed(0)}k – €${(job.salary_max/1000).toFixed(0)}k` : `<span class="lang-nl">Salaris op aanvraag</span><span class="lang-en">Salary on request</span>`}</div>
             <div><strong>Location:</strong> ${GSP.esc(job.location_type || 'Netherlands')}</div>
           </div>
         </div>
