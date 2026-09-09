@@ -285,7 +285,9 @@ async def _redact_audit_log_email(email: str, replacement: str) -> int:
     return redacted
 
 
-async def _anonymize_by_id(select_sql: str, update_sql: str, select_param, email_hash: str) -> int:
+async def _anonymize_by_id(
+    select_sql: str, update_sql: str, select_param, email_hash: str, id_filter: Optional[int] = None,
+) -> int:
     """Fetch matching row ids (select_sql, filtered to select_param as $1
     -- normally email_norm, but any value select_sql's $1 expects works,
     e.g. WS-C.16's FK-linked-candidates lookup below passes an id list
@@ -297,15 +299,32 @@ async def _anonymize_by_id(select_sql: str, update_sql: str, select_param, email
     uniqueness constraint (candidates.email, users.email) when more than
     one row matches the same original address, and keep every anonymised
     row individually distinguishable even where no such constraint
-    exists."""
-    rows = await fetch_all(select_sql, select_param)
+    exists.
+
+    `id_filter` (retention-kolommen H1/H2 follow-up) narrows select_sql
+    with an extra `AND id = $2` -- used by erase_person()'s `scope_table`/
+    `scope_id` below to constrain the *identity* row (candidates/users/
+    client_prospects matching subject_table) to exactly the retention-
+    review subject, instead of every row that happens to share the same
+    e-mail address today."""
+    if id_filter is not None:
+        rows = await fetch_all(select_sql + " AND id = $2", select_param, id_filter)
+    else:
+        rows = await fetch_all(select_sql, select_param)
     for row in rows:
         anon = f"erased-{email_hash[:16]}-{row['id']}@erased.invalid"
         await execute(update_sql, row["id"], anon)
     return len(rows)
 
 
-async def erase_person(email: str, actor_id: Optional[int] = None, reason: str = "manual") -> dict:
+async def erase_person(
+    email: str,
+    actor_id: Optional[int] = None,
+    reason: str = "manual",
+    *,
+    scope_table: Optional[str] = None,
+    scope_id: Optional[int] = None,
+) -> dict:
     """Art. 17 erasure (WS-E.7). Anonymises/removes PII for `email` across
     every table in the Verwerkingsregister (docs/VERWERKINGSREGISTER.md
     §1.2) and adds its hash to suppression_list so the person is never
@@ -336,6 +355,27 @@ async def erase_person(email: str, actor_id: Optional[int] = None, reason: str =
     above is anonymised — placement/fiscal records need the id to
     survive); the Apollo bulk pool decision (WS-E.8) is the owner's, out
     of scope here.
+
+    `scope_table`/`scope_id` (retention-kolommen H1/H2 follow-up): when
+    given, they name the exact retention_review_items subject
+    (subject_table, subject_id) this call is erasing on behalf of, and
+    constrain the matching *identity* row in that one table (candidates/
+    users/client_prospects) to that id -- not merely to "whatever row(s)
+    currently carry this e-mail address". This matters specifically
+    because `email` here is re-read from the subject row immediately
+    before the call (routers/retention_admin.py's `_approve_one()`), not
+    trusted from the (possibly stale) retention_review_items.email column
+    -- but the unique constraint on candidates.email/users.email is what
+    normally makes "this e-mail" and "this row" the same thing, and
+    scope_id is the belt-and-braces check for the case where it isn't
+    (two rows racing to the same freshly-changed address, a client_
+    prospects.contact_email that carries no uniqueness constraint at
+    all). Every side-table cleanup below (outreach, quiz/contact
+    submissions, audit_log redaction, suppression_list, ...) stays
+    e-mail-wide regardless of scope -- those are traces of communication
+    with that address, not a second identity row a scope could
+    misattribute erasure to. Self-service/admin erasure never pass these
+    (scope_table=None), preserving today's e-mail-wide behaviour exactly.
     """
     email_norm = privacy.normalize_email(email)
     if not email_norm:
@@ -343,7 +383,13 @@ async def erase_person(email: str, actor_id: Optional[int] = None, reason: str =
     email_hash = privacy.email_hash(email_norm)
     email_domain = privacy.email_domain(email_norm)
 
-    users_rows = await fetch_all("SELECT id FROM users WHERE LOWER(email) = $1", email_norm)
+    users_id_filter = scope_id if scope_table == "users" else None
+    if users_id_filter is not None:
+        users_rows = await fetch_all(
+            "SELECT id FROM users WHERE LOWER(email) = $1 AND id = $2", email_norm, users_id_filter,
+        )
+    else:
+        users_rows = await fetch_all("SELECT id FROM users WHERE LOWER(email) = $1", email_norm)
     user_ids = [u["id"] for u in users_rows]
 
     profile_rows = []
@@ -351,9 +397,16 @@ async def erase_person(email: str, actor_id: Optional[int] = None, reason: str =
         p = await fetch_one("SELECT cv_file_path FROM candidate_profiles WHERE user_id = $1", uid)
         if p:
             profile_rows.append(p)
-    candidate_rows = await fetch_all(
-        "SELECT id, cv_file_path FROM candidates WHERE LOWER(email) = $1", email_norm,
-    )
+    candidates_id_filter = scope_id if scope_table == "candidates" else None
+    if candidates_id_filter is not None:
+        candidate_rows = await fetch_all(
+            "SELECT id, cv_file_path FROM candidates WHERE LOWER(email) = $1 AND id = $2",
+            email_norm, candidates_id_filter,
+        )
+    else:
+        candidate_rows = await fetch_all(
+            "SELECT id, cv_file_path FROM candidates WHERE LOWER(email) = $1", email_norm,
+        )
     candidate_ids = [c["id"] for c in candidate_rows]
 
     # WS-C.16 (migrations/023): also pick up any candidates row this
@@ -398,7 +451,7 @@ async def erase_person(email: str, actor_id: Optional[int] = None, reason: str =
              kennismigrant_status = NULL, ruling_30pct_status = NULL, ind_case_number = NULL,
              deleted_at = NOW(), consent_withdrawn_at = COALESCE(consent_withdrawn_at, NOW())
            WHERE id = $1""",
-        email_norm, email_hash,
+        email_norm, email_hash, id_filter=candidates_id_filter,
     )
     # WS-C.16 extra: anonymise the FK-linked candidates rows the e-mail
     # match above wouldn't have reached (see extra_ids above) -- reuses
@@ -430,7 +483,7 @@ async def erase_person(email: str, actor_id: Optional[int] = None, reason: str =
     await _anonymize_by_id(
         "SELECT id FROM users WHERE LOWER(email) = $1",
         "UPDATE users SET full_name = 'Erased', email = $2, deleted_at = NOW() WHERE id = $1",
-        email_norm, email_hash,
+        email_norm, email_hash, id_filter=users_id_filter,
     )
 
     # pipeline_entries.notes is free text a client wrote about a specific
@@ -466,7 +519,7 @@ async def erase_person(email: str, actor_id: Optional[int] = None, reason: str =
         "SELECT id FROM client_prospects WHERE LOWER(contact_email) = $1",
         "UPDATE client_prospects SET contact_name = 'Erased', contact_email = $2, contact_linkedin = NULL, "
         "opt_out_at = COALESCE(opt_out_at, NOW()) WHERE id = $1",
-        email_norm, email_hash,
+        email_norm, email_hash, id_filter=(scope_id if scope_table == "client_prospects" else None),
     )
     await _anonymize_by_id(
         "SELECT id FROM data_subject_requests WHERE LOWER(request_email) = $1",
@@ -474,6 +527,20 @@ async def erase_person(email: str, actor_id: Optional[int] = None, reason: str =
         email_norm, email_hash,
     )
     audit_redacted = await _redact_audit_log_email(email_norm, email_hash)
+
+    # H3 (retention-kolommen, security-audit round 5): retention_review_items
+    # carries a plaintext e-mail column of its own (migrations/
+    # 036_retention_review_queue.py) -- an erasure (this call, from any of
+    # the three callers) must scrub that too, including when it is
+    # triggered by the person's OWN Art. 17 request via the self-service
+    # portal, not only when the retention flow purges the row that
+    # prompted it (routers/retention_admin.py's `_approve_one()` already
+    # nulls the row it just acted on directly; this catches every OTHER
+    # row -- a different category, or a stale one never approved -- that
+    # still carries the same address).
+    await execute(
+        "UPDATE retention_review_items SET email = NULL WHERE LOWER(email) = $1", email_norm,
+    )
 
     # WS-C.17 security-audit follow-up (LOW, post-APPROVED): a lapsed
     # talentpool consent is erased the same way as any other retention
