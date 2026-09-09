@@ -38,7 +38,8 @@ async def get_health_detail() -> HealthResponse:
     if db_status == "connected":
         candidates_count = await fetch_val("SELECT COUNT(*) FROM candidates")
         open_jobs = await fetch_val(
-            "SELECT COUNT(*) FROM job_orders WHERE status = 'open' AND is_demo = false"
+            "SELECT COUNT(*) FROM job_orders WHERE status = 'open' AND is_demo = false "
+            "AND deleted_at IS NULL"
         )
         # WS2: candidate_profiles.candidate_id values shared by more than
         # one profile row -- should always be 0 (routers/admin.py's

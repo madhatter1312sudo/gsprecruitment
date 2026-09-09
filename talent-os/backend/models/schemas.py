@@ -96,14 +96,30 @@ class TalentpoolConsentUpdate(BaseModel):
 
 class TalentpoolOptinRequest(BaseModel):
     """Public: POST /api/public/talentpool-optin -- e-mail + consent tick
-    from website/kandidaten.html or website/blog/post.html's CTA. Does not
-    itself set anything on `candidates`; only issues a confirmation e-mail
+    from website/kandidaten.html, website/blog/post.html's CTA, or (WS-4,
+    migrations/037) a vacancy page's apply button. Does not itself set
+    anything on `candidates`; only issues a confirmation e-mail
     (routers/public.py talentpool_public_router). Consent only becomes
-    effective once the token is confirmed via talentpool-confirm."""
+    effective once the token is confirmed via talentpool-confirm.
+
+    job_id (WS-4): optional link to the job order the request came from --
+    only stored when it resolves to an open, non-demo, non-deleted job at
+    submit time (see talentpool_optin()); an unknown or non-public job_id
+    is silently ignored rather than rejected, same no-enumeration posture
+    as the rest of this endpoint. Bounded to postgres int4 (1..2^31-1) so
+    an out-of-range value 422s here, before the suppression-list check --
+    otherwise a value like 2**31 reaches the job lookup only when the
+    address is not suppressed, which would make the 500/202 split an
+    e-mail-enumeration oracle for suppression state. job_alerts: whether
+    the applicant also wants general vacancy alerts -- stored on
+    talentpool_optin_requests only, `candidates` has no job_alerts column
+    yet."""
     email: EmailStr
     consent: bool
     scope: str
     source: str
+    job_id: Optional[int] = Field(None, ge=1, le=2147483647)
+    job_alerts: bool = False
 
     @field_validator("scope")
     @classmethod
@@ -115,8 +131,8 @@ class TalentpoolOptinRequest(BaseModel):
     @field_validator("source")
     @classmethod
     def _source_in_set(cls, v):
-        if v not in ("kandidaten_page", "blog_cta"):
-            raise ValueError("source must be one of ('kandidaten_page', 'blog_cta')")
+        if v not in ("kandidaten_page", "blog_cta", "vacancy_apply"):
+            raise ValueError("source must be one of ('kandidaten_page', 'blog_cta', 'vacancy_apply')")
         return v
 
 
@@ -518,6 +534,28 @@ class JobOrderResponse(JobOrderCreate):
     model_config = {"from_attributes": True}
 
 
+# job_orders.status values actually written anywhere in this repo (WS-4):
+# 'draft'  -- default for an admin-phoned-in job (AdminJobCreate) and every
+#             client-created job (routers/client.py create_client_job,
+#             hardcoded, never client-settable to anything else on create);
+# 'open'   -- published to the public board (routers/jobs.py
+#             PUBLIC_JOB_COLUMNS query, migrations/000_baseline.py default);
+# 'paused' -- a client can pause their own posting
+#             (routers/client.py CLIENT_ALLOWED_STATUSES);
+# 'closed' -- client or admin closes a posting (routers/client.py
+#             CLIENT_ALLOWED_STATUSES, website/admin/index.html);
+# 'filled' -- job_orders tracks "filled" via the filled_at timestamp
+#             column, not this status column, but website/client/app.js's
+#             badge map already reserves and displays this status value,
+#             so it must keep validating rather than 422 the day something
+#             starts setting it;
+# 'deleted'-- soft-delete alongside deleted_at (routers/client.py
+#             delete_client_job).
+# An unknown status now 422s instead of silently writing an arbitrary
+# string to the column.
+JobOrderStatus = Literal["draft", "open", "paused", "closed", "filled", "deleted"]
+
+
 class JobOrderUpdate(BaseModel):
     title: Optional[str] = Field(None, min_length=1)
     department: Optional[str] = None
@@ -529,7 +567,7 @@ class JobOrderUpdate(BaseModel):
     description: Optional[str] = None
     requirements: Optional[str] = None
     nice_to_have: Optional[str] = None
-    status: Optional[str] = None
+    status: Optional[JobOrderStatus] = None
     urgency: Optional[str] = None
     city: Optional[str] = None
     company_display: Optional[str] = None
@@ -737,7 +775,7 @@ class AdminUserUpdate(BaseModel):
 
 
 class AdminJobUpdate(BaseModel):
-    status: Optional[str] = None
+    status: Optional[JobOrderStatus] = None  # see JobOrderStatus above
     title: Optional[str] = None
     department: Optional[str] = None
     seniority: Optional[str] = None

@@ -519,7 +519,7 @@ const Admin = {
       const res = await Auth.fetch('/v1/admin/clients?limit=200');
       if (!res?.ok) return this._data.clientOptions || [];
       const data = await res.json();
-      this._data.clientOptions = (data.items || []).map(c => ({ id: c.id, company_name: c.company_name || 'Onbekend' }));
+      this._data.clientOptions = (data.items || []).map(c => ({ id: c.id, company_name: c.company_name || 'Onbekend', is_internal: !!c.is_internal }));
     } catch {
       this._data.clientOptions = this._data.clientOptions || [];
     }
@@ -536,7 +536,7 @@ const Admin = {
       <div class="form-group">
         <label>Opdrachtgever</label>
         <select id="newJobClient" ${raw(!clients.length ? 'disabled' : '')}>
-          ${clients.map(c => html`<option value="${c.id}">${c.company_name}</option>`)}
+          ${clients.map(c => html`<option value="${c.id}">${c.company_name}${c.is_internal ? ' (intern)' : ''}</option>`)}
         </select>
       </div>
       <div class="form-group">
