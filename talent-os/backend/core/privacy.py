@@ -56,3 +56,32 @@ def redact_emails(text: Optional[str]) -> Optional[str]:
 # changes lawful_basis, and never silently overwrites a different one.
 def should_set_talentpool_lawful_basis(current_lawful_basis: Optional[str]) -> bool:
     return current_lawful_basis in (None, "opt_in_talentpool")
+
+
+# ── security-audit FIX FIRST (WS-E.8 retention-kolommen branch, fourth
+# round, blocking point 4) ────────────────────────────────────────────
+# `clients.domain` and `client_prospects.domain` are filled by independent
+# code paths in incompatible shapes: routers/auth.py and routers/client.py
+# take the part after "@" in a user's e-mail address, while
+# routers/client.py's client-portal profile update, routers/prospects.py's
+# admin create, and services/harvest.py's Apollo prospect harvest all take
+# a free-text "website" field that may carry a scheme (http(s)://), a
+# "www." prefix, a path, or simply be "" (harvest.py's
+# `org.get("primary_domain") or org.get("website_url") or ""`). Comparing
+# these directly (or with a bare `IS NOT NULL`, which does not exclude "")
+# either never matches a same-company row written through the other path,
+# or -- worse -- matches every row that happens to share the same empty
+# string. normalize_domain() is the one place both the write paths above
+# and core/retention.py's PROSPECT_RESPONDING_SQL comparison agree on:
+# lower-case, no scheme, no "www.", no path/query/fragment, and "" is
+# None, never a comparable value.
+_DOMAIN_SCHEME_WWW_RE = re.compile(r"^(?:https?://)?(?:www\.)?", re.IGNORECASE)
+
+
+def normalize_domain(value: Optional[str]) -> Optional[str]:
+    v = (value or "").strip().lower()
+    if not v:
+        return None
+    v = _DOMAIN_SCHEME_WWW_RE.sub("", v)
+    v = v.split("/", 1)[0].split("?", 1)[0].split("#", 1)[0].strip()
+    return v or None

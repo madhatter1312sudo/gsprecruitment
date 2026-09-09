@@ -1,33 +1,94 @@
 """
-Talent OS — WS-E.8 retention/purge admin endpoints (JWT-protected,
+Talent OS — WS-E.8/WS-E.10 retention admin endpoints (JWT-protected,
 role='admin').
 
-Two independent tools, both dry-run by default and never triggered by
-anything other than an explicit admin request or the RETENTION_PURGE_ENABLED
-daily cron (services/scheduler.py):
+Owner decision (WS-E.10): every "no reaction" signal core/retention.py's
+selectors can check lives in a channel this backend does not reliably
+record — the actual work (a phone call, a LinkedIn thread, a reply
+landing in a recruiter's own mailbox) happens outside this system. The
+owner therefore ended automatic purging entirely, at any confidence
+level. What is left:
 
-  1. POST /api/v1/admin/retention/run — the bewaartabel purge
-     (core/retention.py). dry_run=true (default) returns counts only, no
-     DB writes. dry_run=false additionally requires confirm="PURGE".
-  2. POST /api/v1/admin/apollo-pool/purge — the separate, one-off Apollo
-     bulk-pool cleanup (VERWERKINGSREGISTER.md §2.6, §5.7). dry_run=true
-     (default) returns counts only. dry_run=false additionally requires
-     confirm="DELETE APOLLO POOL".
+  1. GET  /api/v1/admin/retention/table — unchanged: the bewaartabel as
+     structured rows plus the exact Markdown the register/SOP carry.
+  2. POST /api/v1/admin/retention/run — counts only, always. The
+     dry_run=false branch that used to actually purge is gone outright
+     (not merely defaulted off) — see run_retention() below and
+     tests/test_ws_e10_no_unapproved_purge_path.py, which fails if a
+     later change reopens it.
+  3. GET  /api/v1/admin/retention/review — the monthly review queue
+     (services/scheduler.py generate_retention_review(),
+     retention_review_items via migrations/036_retention_review_queue.py):
+     per person/row, the category, the date the term expired
+     (term_expired_at), and which protective signal was absent
+     (signal_missing_nl) — exactly what the owner asked the monthly list
+     to show.
+  4. GET  /api/v1/admin/retention/review/summary — counts per category/
+     status only, no subject rows — safe to feed to a Telegram-facing
+     routine (VERWERKINGSREGISTER.md §6 punt 6(d): that channel carries
+     no personal data by design; a count of how many people are waiting
+     for review is not the list itself).
+  5. POST /api/v1/admin/retention/review/generate — runs the same
+     generation logic on demand (in addition to the monthly cron) —
+     read/queue-only, deletes nothing.
+  6. POST /api/v1/admin/retention/review/{item_id}/approve — THE ONLY
+     PATH IN THIS BACKEND THAT ACTUALLY ANONYMISES/DELETES A RETENTION-
+     TABLE SUBJECT. Requires confirm="APPROVE", re-verifies the subject
+     is still eligible right before acting (a protective signal can have
+     appeared since the item was queued -- checked per-id, `_row_still_
+     due()`), re-reads the subject's e-mail fresh off its own source row
+     (never the retention_review_items.email snapshot -- security-audit
+     round 5, H1), refuses if that address also belongs to another row on
+     any of the three identity tables erase_person() touches -- users
+     (any role), candidates, or client_prospects (H2, broadened round 6
+     to every role/table after two rounds of adversarial probes found
+     the admin/client-only version still let an unrelated placement,
+     live candidate-role login, or active client contact through) --
+     then claims the item atomically before anonymising (erase_person(),
+     scoped to this exact subject row) or
+     hard-deleting per the item's own `action`. Writes one
+     retention_review_decisions row (who/when, note redacted of any
+     e-mail-shaped text -- audit-trail pattern of routers/admin.py's
+     consent endpoints) BEFORE the action runs, and one audit_log row
+     (json.dumps'd, counts/keys only, never PII — commit 72b4bcd)
+     together with the final status transition, in one transaction, once
+     it succeeds. See `_approve_one()`'s own docstring for the full
+     ordering.
+  7. POST /api/v1/admin/retention/review/{item_id}/reject — no confirm
+     needed (nothing irreversible happens): marks the item 'rejected'.
+     If the same subject is queued again on a later monthly run, the
+     existing row is reopened rather than silently re-inserted --
+     `reappeared_after_rejection_at` makes a previously-skipped person
+     visible again, not just present.
+  8. POST /api/v1/admin/retention/review/bulk — approve/reject several
+     items (by id list, capped at MAX_BULK_REVIEW_ITEMS, or by category
+     with a matching `expected_count` -- security-audit round 5, L1) in
+     one call; each item still goes through the exact same per-item
+     re-verify+act path as #6/#7 above, just looped — never a single bulk
+     DELETE, and one item's unexpected failure never aborts the rest of
+     the batch (M1).
 
-Neither endpoint runs automatically. This PR never deletes production
-data by itself — see the module docstrings on core/retention.py and
-services/scheduler.py for the daily job's own dry-run default.
+Apollo bulk-pool cleanup (VERWERKINGSREGISTER.md §2.6, §5.7) used to be
+its own direct-delete endpoint here (POST /api/v1/admin/apollo-pool/purge,
+dry_run=false + a confirm string). It shares the exact same guard family
+(core.retention.
+CANDIDATE_NO_REACTION_GUARD_SQL) that motivated this whole redesign, so
+WS-E.10 folds its real deletion into the SAME review queue instead
+(category='apollo_pool_purge', generated by
+services/scheduler.py generate_retention_review()) — the endpoint below
+keeps its dry-run preview (harmless, read-only) but the dry_run=false
+branch is gone outright, same as run_retention()'s.
 """
 import json
 import logging
-from typing import Optional
+from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from core.database import fetch_all, execute
+from core.database import fetch_all, fetch_one, execute, get_pool
 from core.deps import require_role
-from core import retention
+from core import privacy, retention
 from services import scheduler as scheduler_service
 
 logger = logging.getLogger("talent_os.retention_admin")
@@ -35,10 +96,41 @@ logger = logging.getLogger("talent_os.retention_admin")
 router = APIRouter(prefix="/api/v1/admin/retention", tags=["retention-admin"])
 apollo_pool_router = APIRouter(prefix="/api/v1/admin/apollo-pool", tags=["retention-admin"])
 
+# Whitelist of tables an approve/reject-driven DELETE is ever allowed to
+# name -- every one of these is a value this router's own generation code
+# wrote into retention_review_items.subject_table, never user input, but
+# kept as a closed set anyway so a hard_delete branch can never be pointed
+# at an arbitrary table string.
+_HARD_DELETE_TABLES = frozenset({"quiz_submissions", "contact_submissions", "candidates", "client_prospects"})
+
+# The e-mail column on each table retention_review_items.subject_table can
+# name -- security-audit round 5 (H1): used to re-read the CURRENT address
+# off the subject row itself right before acting, rather than trusting the
+# (possibly stale) retention_review_items.email snapshot taken at monthly
+# generation time. quiz_submissions/contact_submissions aren't listed here
+# -- their category (leads_quiz) is always action="hard_delete", which
+# never needs an e-mail at all.
+_SUBJECT_EMAIL_COLUMN = {"candidates": "email", "client_prospects": "contact_email", "users": "email"}
+
+# Round 6 re-check (code-reviewer, WS-E.10 approval queue): the column on
+# each table that erase_person() sets on the SUBJECT's own row when it
+# actually anonymises it -- checked immediately after erase_person()
+# returns (see _approve_one()'s postcondition below) so "this item is
+# marked purged" can never again mean anything other than "this row is
+# actually anonymised", regardless of what caused a mismatch (an address
+# normalisation gap, a future refactor, anything else this dict doesn't
+# need to know about).
+_SUBJECT_ERASED_MARKER_COLUMN = {"candidates": "deleted_at", "client_prospects": "opt_out_at", "users": "deleted_at"}
+
+# L1: a bulk decision (by explicit id list, or by category) is capped at
+# this many items -- large enough for a real monthly backlog, small enough
+# that a mistaken bulk call cannot fan out into thousands of individual
+# erase_person() calls in one request.
+MAX_BULK_REVIEW_ITEMS = 200
+
 
 class RetentionRunRequest(BaseModel):
     dry_run: bool = True
-    confirm: Optional[str] = None
 
 
 @router.get("/table")
@@ -58,6 +150,7 @@ async def get_retention_table(current_user: dict = Depends(require_role("admin")
                 "anchor_column": r.anchor_column,
                 "action": r.action,
                 "schema_ready": r.schema_ready,
+                "signal_missing_nl": r.signal_missing_nl,
             }
             for r in retention.RETENTION_TABLE
         ],
@@ -69,67 +162,673 @@ async def run_retention(
     payload: RetentionRunRequest,
     current_user: dict = Depends(require_role("admin")),
 ):
-    """dry_run=true (default): counts per category, no DB writes at all.
-    dry_run=false: requires confirm="PURGE" and actually anonymises/deletes
-    per core/retention.py's table, writing one audit_log row per purged
-    category (services/scheduler.py run_retention_purge)."""
-    if not payload.dry_run and payload.confirm != "PURGE":
+    """Counts per category, always — never writes anything. The
+    dry_run=false branch that used to actually anonymise/delete here (with
+    a "PURGE" confirm string) is gone outright (WS-E.10, owner decision) --
+    `confirm` was dropped from RetentionRunRequest entirely (round 6,
+    M6r), not merely ignored, since no value of it has done anything since
+    this branch was removed. A real purge now only ever happens from an
+    approved retention_review_items row (POST .../review/{item_id}/approve).
+    See tests/test_ws_e10_no_unapproved_purge_path.py, which fails if a
+    later change reopens a `dry_run=false` branch here."""
+    if not payload.dry_run:
+        raise HTTPException(
+            status_code=410,
+            detail={
+                "code": "retention_run_no_longer_purges",
+                "message": (
+                    "Dit endpoint wist niets meer, ongeacht de waarde van dry_run. "
+                    "Een echte verwijdering loopt sinds WS-E.10 uitsluitend via "
+                    "POST /api/v1/admin/retention/review/{item_id}/approve, na goedkeuring van de "
+                    "maandelijkse beoordelingslijst (GET /api/v1/admin/retention/review)."
+                ),
+            },
+        )
+    categories = []
+    for row in retention.RETENTION_TABLE:
+        if row.action in ("retain", "infra_only"):
+            categories.append({"key": row.key, "status": "not_applicable", "count": None})
+        elif not row.schema_ready:
+            categories.append({"key": row.key, "status": "schema_not_ready", "count": None})
+        else:
+            try:
+                count = len(await scheduler_service._live_rows_for_category(row))
+                categories.append({"key": row.key, "status": "counted", "count": count})
+            except Exception:
+                logger.exception("run_retention: category %s failed", row.key)
+                categories.append({"key": row.key, "status": "error", "count": None})
+    return {"dry_run": True, "categories": categories}
+
+
+# ── Monthly review queue (WS-E.10) ───────────────────────────────────────
+
+class ReviewDecisionRequest(BaseModel):
+    confirm: Optional[str] = None
+    note: Optional[str] = None
+
+
+class ReviewBulkRequest(BaseModel):
+    decision: str  # "approved" | "rejected"
+    ids: Optional[List[int]] = None
+    category: Optional[str] = None
+    # L1 (security-audit round 5): required for a category-wide APPROVE
+    # call (not for reject, and not for an explicit `ids` list) and must
+    # equal the number of currently-pending items in that category,
+    # checked right before acting -- an admin who reviewed the list a few
+    # minutes ago and the actual pending count at approval time must
+    # agree, or the call is refused rather than silently approving
+    # whatever now matches (including rows that were not on the list the
+    # admin actually saw). Reject stays confirm-free and count-free -- it
+    # is the safe, reversible default the rest of this module already
+    # treats that way.
+    expected_count: Optional[int] = None
+    confirm: Optional[str] = None
+    note: Optional[str] = None
+
+
+REVIEW_APPROVE_CONFIRM = "APPROVE"
+
+
+@router.get("/review")
+async def list_review_items(
+    status: str = "pending",
+    category: Optional[str] = None,
+    current_user: dict = Depends(require_role("admin")),
+):
+    """The monthly list itself — one row per person/subject currently (or
+    previously, with status != 'pending') queued, carrying exactly what
+    the owner asked for: category, term_expired_at (the date the term
+    expired), and signal_missing_nl (which protective signal was absent).
+    `status="all"` lists every status; the default `status="pending"`
+    matches what an admin screen's default view should show."""
+    where = []
+    params: list = []
+    if status != "all":
+        params.append(status)
+        where.append(f"status = ${len(params)}")
+    if category:
+        params.append(category)
+        where.append(f"category = ${len(params)}")
+    where_sql = f"WHERE {' AND '.join(where)}" if where else ""
+    rows = await fetch_all(
+        f"""SELECT id, category, subject_table, subject_id, email, action, term_expired_at,
+                   signal_missing_nl, status, first_seen_at, last_seen_at,
+                   reappeared_after_rejection_at, purged_at
+            FROM retention_review_items {where_sql}
+            ORDER BY term_expired_at ASC NULLS LAST, id ASC""",
+        *params,
+    )
+    return {"items": rows}
+
+
+@router.get("/review/summary")
+async def review_summary(current_user: dict = Depends(require_role("admin"))):
+    """Counts only, per category and status — no subject rows, no e-mail
+    addresses, no names. This is the shape a Telegram-facing routine may
+    read (VERWERKINGSREGISTER.md §6 punt 6(d): that channel carries no
+    personal data by design) to signal "the monthly list is ready" —
+    a signal that a list exists is not the list itself."""
+    rows = await fetch_all(
+        "SELECT category, status, COUNT(*) AS n FROM retention_review_items GROUP BY category, status"
+    )
+    pending_total = sum(r["n"] for r in rows if r["status"] == "pending")
+    return {"pending_total": pending_total, "by_category": rows}
+
+
+@router.post("/review/generate")
+async def generate_review(current_user: dict = Depends(require_role("admin"))):
+    """Runs the same queue-generation logic the monthly cron uses
+    (services/scheduler.py generate_retention_review()), on demand.
+    Read/queue-only — see that function's own docstring: it never touches
+    the GDPR erasure routine or deletes a candidate/prospect/user row."""
+    return await scheduler_service.generate_retention_review()
+
+
+async def _row_still_due(selector_sql: str, selector_params: tuple, subject_id: int) -> bool:
+    """L1 (security-audit round 5): re-check eligibility for exactly ONE id
+    via `SELECT 1 FROM (<selector>) s WHERE s.id = $n`, instead of pulling
+    the selector's entire live result set into Python (scheduler_service.
+    _live_rows_for_category()) just to test membership -- same guarded
+    query, scoped to a single row server-side, so it cannot diverge from
+    what a full run would find due and stays cheap regardless of how many
+    other rows happen to be due right now. selector_params' own
+    placeholders come first ($1, $2, ...); the id filter always gets the
+    next placeholder number."""
+    placeholder = len(selector_params) + 1
+    sql = f"SELECT 1 FROM ({selector_sql}) s WHERE s.id = ${placeholder}"
+    row = await fetch_one(sql, *selector_params, subject_id)
+    return row is not None
+
+
+async def _is_still_eligible(item: dict) -> bool:
+    """Re-verify right before acting that the subject is still actually
+    due -- a protective signal (a match, a reply logged in `activities`,
+    an active client relationship, ...) can have appeared between the
+    monthly generation run and the moment an admin clicks approve.
+    Prevents a stale queue row from ever being the sole basis for a real
+    deletion."""
+    category = item["category"]
+    subject_id = item["subject_id"]
+    if category == "leads_quiz":
+        table = item["subject_table"]
+        if table == "quiz_submissions":
+            return await _row_still_due(retention.LEADS_QUIZ_SQL, (), subject_id)
+        if table == "contact_submissions":
+            return await _row_still_due(retention.CONTACT_SUBMISSIONS_SQL, (), subject_id)
+        return False
+    if category == "apollo_pool_purge":
+        return await _row_still_due(retention.APOLLO_POOL_TARGET_SQL, (), subject_id)
+    row_def = retention.get_row(category)
+    if row_def is None:
+        return False
+    return await _row_still_due(row_def.selector_sql, row_def.selector_params, subject_id)
+
+
+async def _refuse_if_email_belongs_to_an_unrelated_account(
+    email: str, subject_table: str, subject_id: int,
+) -> None:
+    """H2 (security-audit round 5) + round 6 follow-up (security-auditor
+    + code-reviewer, WS-E.10 approval queue): routers.gdpr's erasure
+    routine narrows only the ONE identity table (candidates/users/client_
+    prospects) named by `scope_table` to the exact subject row -- the
+    other two identity tables it also touches stay e-mail-wide, by
+    design (see that routine's own docstring: side-table cleanup and
+    the two non-scoped identity tables are traces of the same address,
+    not narrowed to one row). That is only safe when no OTHER row, on
+    ANY of the three identity tables, currently carries this address --
+    so this guard checks all three, not just `users` (round 5's H2
+    covered only `users`), and on `users` it checks every role, not only
+    admin/client (round 6 finding: a candidate-role portal account still
+    in daily use is just as real a login as an admin or client one, and
+    a routine candidate/prospect purge must never deactivate it as a
+    side effect either). Refuse (409) whenever a row other than the
+    subject itself turns up on any of:
+      - users (ANY role) sharing `email` and not soft-deleted.
+      - candidates sharing `email` and not soft-deleted -- except, when
+        the subject IS a users row (subject_table='users', i.e.
+        category='portal_account_inactive'), that users row's OWN
+        candidate_profiles.candidate_id link: a portal account
+        legitimately linked to its own (necessarily same-address)
+        candidate is the ordinary case this category exists for, not an
+        unrelated collision.
+      - client_prospects sharing `contact_email`, opt_out_at IS NULL (an
+        already opted-out contact is not a live competing identity).
+    Excludes the subject's own row on whichever table subject_table
+    names -- that row IS the thing about to be purged, not "unrelated"
+    to itself.
+
+    Deliberately not checked here: a users row's FK to a candidate whose
+    OWN address differs from `email` (the case that erasure routine's
+    extra_ids/WS-C.16 expansion used to follow regardless of scope,
+    round 6 code-review finding) -- routers/gdpr.py's erase-person
+    routine now skips that expansion outright whenever `scope_table` is
+    given, so a scoped call never reaches that row at all; there is
+    nothing left here to refuse it for.
+
+    Round 6 re-check (security-auditor + code-reviewer, adversarial
+    address-padding probes): `email` is normalised (core.privacy.
+    normalize_email -- strip+lower) here again, defensively, even though
+    every call site already does this first -- a guard whose own
+    correctness depends on a caller convention it cannot enforce is not
+    actually enforcing anything. Every query below compares
+    LOWER(TRIM(column)) to that normalised value, not just LOWER(column)
+    -- a real write path (POST /api/candidates' CandidateCreate.email,
+    POST /api/v1/admin/prospects' ProspectCreate.email; neither strips
+    whitespace) can and does store a padded address today, and this
+    guard must see that row as the same identity the erasure routine's own
+    (equally TRIM'd) matching will see it as -- a guard comparing a
+    different key than the erasure it guards is not a guard at all."""
+    email = privacy.normalize_email(email)
+    conflicts = []
+
+    user_rows = await fetch_all(
+        "SELECT id FROM users WHERE LOWER(TRIM(email)) = $1 AND deleted_at IS NULL", email,
+    )
+    if subject_table == "users":
+        user_rows = [u for u in user_rows if u["id"] != subject_id]
+    conflicts.extend(user_rows)
+
+    own_linked_candidate_id = None
+    if subject_table == "users":
+        linked = await fetch_one(
+            "SELECT candidate_id FROM candidate_profiles WHERE user_id = $1 AND candidate_id IS NOT NULL",
+            subject_id,
+        )
+        own_linked_candidate_id = linked["candidate_id"] if linked else None
+
+    candidate_rows = await fetch_all(
+        "SELECT id FROM candidates WHERE LOWER(TRIM(email)) = $1 AND deleted_at IS NULL", email,
+    )
+    if subject_table == "candidates":
+        candidate_rows = [c for c in candidate_rows if c["id"] != subject_id]
+    elif subject_table == "users":
+        candidate_rows = [c for c in candidate_rows if c["id"] != own_linked_candidate_id]
+    conflicts.extend(candidate_rows)
+
+    prospect_rows = await fetch_all(
+        "SELECT id FROM client_prospects WHERE LOWER(TRIM(contact_email)) = $1 AND opt_out_at IS NULL",
+        email,
+    )
+    if subject_table == "client_prospects":
+        prospect_rows = [p for p in prospect_rows if p["id"] != subject_id]
+    conflicts.extend(prospect_rows)
+
+    if conflicts:
         raise HTTPException(
             status_code=409,
             detail={
-                "code": "retention_purge_requires_confirm",
-                "message": 'dry_run=false requires confirm: "PURGE".',
+                "code": "retention_purge_blocked_unrelated_account",
+                "message": (
+                    "Dit e-mailadres hoort ook bij een kandidaat-, portal- of prospectrecord dat geen "
+                    "onderdeel is van deze bewaartermijn-rij -- niet gewist. Los het adresconflict "
+                    "handmatig op voordat u opnieuw goedkeurt."
+                ),
             },
         )
-    result = await scheduler_service.run_retention_purge(dry_run=payload.dry_run)
-    if not payload.dry_run:
-        logger.warning(
-            "Retention purge run by admin user_id=%s: %s",
-            current_user["id"], {c["key"]: c["count"] for c in result["categories"]},
+
+
+async def _current_subject_email(subject_table: str, subject_id: int) -> Optional[str]:
+    """H1 (security-audit round 5, BLOCKING): retention_review_items.email
+    is a snapshot taken at monthly generation time. If the subject's own
+    address changes in between, acting on that stale snapshot would
+    anonymise/suppress whoever the OLD address now belongs to instead of
+    the actually-due person, while the person this row is really about
+    keeps their new address and is never touched -- yet the review item
+    still reports "purged". Re-read the address straight from the source
+    row immediately before acting.
+
+    chief-of-staff FIX FIRST (retention-kolommen branch, finding 4):
+    corrected the example write path this docstring used to name --
+    CandidateAdminUpdate (PATCH /api/candidates/{id}) carries no `email`
+    field, so that endpoint can never change an existing candidates.email.
+    The real path (see test_ws_e10_round6_probes.py's own note on the same
+    gap) is PUT /api/v1/admin/users/{id} (routers/admin.py update_user,
+    `email` is in its own `allowed` set) -- exactly the anchor
+    `portal_account_inactive` (subject_table='users') uses."""
+    column = _SUBJECT_EMAIL_COLUMN.get(subject_table)
+    if column is None:
+        return None
+    row = await fetch_one(f"SELECT {column} AS email FROM {subject_table} WHERE id = $1", subject_id)
+    return row["email"] if row else None
+
+
+async def _approve_one(item_id: int, actor_id: int, note: Optional[str]) -> dict:
+    """The one and only place in this backend that anonymises/deletes a
+    retention-table subject.
+
+    Order of operations (security-audit round 5, H1/H2/M2):
+      1. Re-verify eligibility against the item as currently stored.
+      2. Re-read the subject's CURRENT e-mail from its own source row
+         (H1) -- never the possibly-stale retention_review_items.email.
+      3. Refuse if that address also belongs to another row on any of
+         the three identity tables erase_person() touches -- users (any
+         role), candidates, or client_prospects (H2, round 6).
+      4. Claim the item atomically (`status='purging' WHERE status IN
+         ('pending','rejected') RETURNING id`, M2) -- a concurrent second
+         approve on the same item gets an empty RETURNING and stops,
+         instead of both racing erase_person()/DELETE against the same
+         row.
+      5. Write the retention_review_decisions row BEFORE performing the
+         action (M2) -- a durable "an admin approved this" record even if
+         the process dies mid-erasure, rather than one that only ever
+         appears after a purge that may never finish.
+      6. Perform the action (erase_person(), scoped to this exact subject
+         row -- routers/gdpr.py's `scope_table`/`scope_id` -- or a hard
+         DELETE).
+      7. Record purged_at/status='purged' and the audit_log row together
+         in one transaction (B2) -- either both land or neither does."""
+    item = await fetch_one("SELECT * FROM retention_review_items WHERE id = $1", item_id)
+    if not item:
+        raise HTTPException(status_code=404, detail="Review item not found")
+    if item["status"] not in ("pending", "rejected"):
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "retention_review_item_not_actionable",
+                "message": f"Item {item_id} has status '{item['status']}', cannot approve.",
+            },
         )
-    return result
+
+    if not await _is_still_eligible(item):
+        await execute(
+            "UPDATE retention_review_items SET status = 'no_longer_eligible', last_seen_at = NOW(), email = NULL "
+            "WHERE id = $1",
+            item_id,
+        )
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "retention_review_item_no_longer_eligible",
+                "message": (
+                    f"Item {item_id} is niet meer in aanmerking gekomen (een beschermend signaal is "
+                    "sindsdien verschenen) -- niet gewist."
+                ),
+            },
+        )
+
+    current_email = None
+    if item["action"] == "anonymise":
+        # round 6 re-check (security-auditor + code-reviewer): normalise
+        # (strip+lower, core.privacy.normalize_email) BEFORE this address
+        # goes anywhere near the guard or erase_person() -- both of those
+        # already normalise/compare on a stripped address internally, so
+        # a raw, possibly-padded read here (a leading/trailing space on
+        # the subject's OWN stored address, reachable via the real
+        # POST /api/candidates and POST /api/v1/admin/prospects write
+        # paths, neither of which strips e-mail today) used to make this
+        # exact address the ONE thing the guard and erase_person() did
+        # NOT agree on: the guard compared the raw address, erase_person()
+        # the normalised one, so the guard could see "no conflict" while
+        # erase_person() then matched (and anonymised) a completely
+        # different, unpadded row sharing the clean address -- leaving
+        # the actual subject untouched and the item reported "purged"
+        # regardless. One normalised value, used everywhere below, closes
+        # that gap at the source rather than in either callee.
+        current_email = privacy.normalize_email(
+            await _current_subject_email(item["subject_table"], item["subject_id"])
+        )
+        if not current_email:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "retention_review_subject_missing_email",
+                    "message": f"Item {item_id}'s subject row carries no e-mail address any more -- not purged.",
+                },
+            )
+        await _refuse_if_email_belongs_to_an_unrelated_account(
+            current_email, item["subject_table"], item["subject_id"],
+        )
+
+    original_status = item["status"]
+    claimed = await fetch_one(
+        "UPDATE retention_review_items SET status = 'purging', last_seen_at = NOW() "
+        "WHERE id = $1 AND status IN ('pending', 'rejected') RETURNING id",
+        item_id,
+    )
+    if not claimed:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "retention_review_item_already_processing",
+                "message": f"Item {item_id} is already being processed (or was already processed) elsewhere.",
+            },
+        )
+
+    # M2: decision recorded BEFORE the action -- see the docstring above.
+    # M4: the free-text note is redacted the same way admin.py's consent
+    # evidence field already is (core.privacy.redact_emails) -- an admin
+    # could otherwise paste the subject's own e-mail into `note`, defeating
+    # the erasure this same call is about to perform.
+    await execute(
+        "INSERT INTO retention_review_decisions (review_item_id, decision, actor_id, note) VALUES ($1, $2, $3, $4)",
+        item_id, "approved", actor_id, privacy.redact_emails(note),
+    )
+
+    from routers.gdpr import erase_person
+
+    try:
+        if item["action"] == "anonymise":
+            # H1/H2 (round 5): current_email (re-read above), never
+            # item["email"]; scope_table/scope_id (routers/gdpr.py's
+            # erase_person()) constrain the identity-row anonymisation to
+            # exactly this subject, not merely "whoever has this address
+            # now".
+            await erase_person(
+                current_email, actor_id=actor_id, reason=f"retention_purge:{item['category']}",
+                scope_table=item["subject_table"], scope_id=item["subject_id"],
+            )
+            # Postcondition (round 6, code-reviewer): erase_person()
+            # having returned without raising is not, by itself, proof
+            # that THIS subject row is the one it anonymised -- that is
+            # precisely the invariant an address-normalisation mismatch
+            # broke before (the guard and the erasure disagreeing on
+            # what "this e-mail" meant let the subject survive intact
+            # while a second, unrelated row silently absorbed the
+            # anonymisation). Re-read the subject's own erased-marker
+            # column right off its source row and refuse to report
+            # "purged" unless it is actually set -- this makes the whole
+            # class of "reported as purged while the subject is intact"
+            # bug structurally impossible here, independent of whatever
+            # future mismatch might otherwise cause it. The except clause
+            # below unclaims the item back to original_status exactly as
+            # it would for any other failure in this block.
+            marker_column = _SUBJECT_ERASED_MARKER_COLUMN[item["subject_table"]]
+            marker_row = await fetch_one(
+                f"SELECT {marker_column} AS marker FROM {item['subject_table']} WHERE id = $1",
+                item["subject_id"],
+            )
+            if marker_row is None or marker_row["marker"] is None:
+                raise HTTPException(
+                    status_code=500,
+                    detail=(
+                        f"erase_person() returned without anonymising subject "
+                        f"{item['subject_table']}.id={item['subject_id']} -- refusing to report 'purged'."
+                    ),
+                )
+        elif item["action"] == "hard_delete":
+            table = item["subject_table"]
+            if table not in _HARD_DELETE_TABLES:
+                raise HTTPException(status_code=500, detail=f"unexpected subject_table {table!r}")
+            await execute(f"DELETE FROM {table} WHERE id = $1", item["subject_id"])
+        else:
+            raise HTTPException(status_code=500, detail=f"unexpected action {item['action']!r}")
+    except Exception:
+        # M1/M2 follow-up: the claim above already moved this item out of
+        # ('pending', 'rejected') -- if the action itself fails (a
+        # foreign-key violation on a soft-deleted placement, a transient
+        # DB error, ...) the item must not be left stuck at 'purging'
+        # forever, unreachable by any future approve/reject call. Unclaim
+        # it back to whatever it was before this call, so a retry (or the
+        # next monthly run) can pick it up again; the decision row already
+        # written above is left in place as-is (it recorded a real
+        # approval attempt, not a fabricated one).
+        await execute(
+            "UPDATE retention_review_items SET status = $2, last_seen_at = NOW() WHERE id = $1",
+            item_id, original_status,
+        )
+        raise
+
+    # B2: the final status transition and the audit_log row are written
+    # together, in one transaction, via a single held connection -- a
+    # partial write here (e.g. the audit_log INSERT failing) must never
+    # leave the item 'purged' with no audit trail, or vice versa.
+    # H3: e-mail is nulled once the item is handled (data minimisation --
+    # see VERWERKINGSREGISTER.md §1.2's own row-retention entry for this
+    # table).
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            await conn.execute(
+                "UPDATE retention_review_items SET status = 'purged', purged_at = NOW(), "
+                "last_seen_at = NOW(), email = NULL WHERE id = $1",
+                item_id,
+            )
+            await conn.execute(
+                "INSERT INTO audit_log (action, actor_id, target_type, target_id, changes) "
+                "VALUES ($1, $2, $3, $4, $5::jsonb)",
+                "retention_review_approve", actor_id, "retention_review_item", item_id,
+                json.dumps({"category": item["category"], "action": item["action"]}),
+            )
+    logger.warning(
+        "Retention review item approved by admin user_id=%s: item_id=%s category=%s action=%s",
+        actor_id, item_id, item["category"], item["action"],
+    )
+    return {"id": item_id, "status": "purged"}
 
 
-# ── Apollo bulk-pool purge (VERWERKINGSREGISTER.md §2.6, §5.7) ───────────
+async def _reject_one(item_id: int, actor_id: int, note: Optional[str]) -> dict:
+    item = await fetch_one("SELECT * FROM retention_review_items WHERE id = $1", item_id)
+    if not item:
+        raise HTTPException(status_code=404, detail="Review item not found")
+    if item["status"] in ("purged", "purging"):
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "retention_review_item_already_purged",
+                "message": f"Item {item_id} was already purged (or is being purged right now).",
+            },
+        )
+    # H3: e-mail nulled once the item leaves 'pending' -- data
+    # minimisation for a row that no longer needs the address to be
+    # actionable (a later monthly run re-supplies it if the subject
+    # reappears, per _upsert_review_item()'s ON CONFLICT DO UPDATE).
+    await execute(
+        "UPDATE retention_review_items SET status = 'rejected', last_seen_at = NOW(), email = NULL WHERE id = $1",
+        item_id,
+    )
+    # M4: redact any e-mail-shaped substring out of the free-text note --
+    # same reasoning as _approve_one()'s.
+    await execute(
+        "INSERT INTO retention_review_decisions (review_item_id, decision, actor_id, note) VALUES ($1, $2, $3, $4)",
+        item_id, "rejected", actor_id, privacy.redact_emails(note),
+    )
+    return {"id": item_id, "status": "rejected"}
+
+
+@router.post("/review/{item_id}/approve")
+async def approve_review_item(
+    item_id: int,
+    payload: ReviewDecisionRequest,
+    current_user: dict = Depends(require_role("admin")),
+):
+    """Confirm="APPROVE" required -- this is the only endpoint in this
+    backend that actually anonymises/deletes a retention-table subject."""
+    if payload.confirm != REVIEW_APPROVE_CONFIRM:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "retention_review_approve_requires_confirm",
+                "message": f'confirm: "{REVIEW_APPROVE_CONFIRM}" is required.',
+            },
+        )
+    return await _approve_one(item_id, current_user["id"], payload.note)
+
+
+@router.post("/review/{item_id}/reject")
+async def reject_review_item(
+    item_id: int,
+    payload: ReviewDecisionRequest,
+    current_user: dict = Depends(require_role("admin")),
+):
+    """No confirm required -- rejecting is the safe default (nothing
+    irreversible happens); it only marks the item so it does not get
+    silently re-approved, and stays visible if it reappears later."""
+    return await _reject_one(item_id, current_user["id"], payload.note)
+
+
+@router.post("/review/bulk")
+async def bulk_review_decision(
+    payload: ReviewBulkRequest,
+    current_user: dict = Depends(require_role("admin")),
+):
+    """Approve or reject several items in one call -- by explicit `ids`,
+    or every currently-pending item in `category`. Still one _approve_one
+    / _reject_one call per item (never a single bulk DELETE), so a
+    partial failure part-way through leaves an accurate, per-item audit
+    trail instead of an all-or-nothing black box.
+
+    L1 (security-audit round 5): capped at MAX_BULK_REVIEW_ITEMS items per
+    call, and a category-wide APPROVE call must supply `expected_count`
+    matching the current pending count for that category (see
+    ReviewBulkRequest's own comment).
+
+    M1 (security-audit round 5): catches Exception, not only HTTPException
+    -- a bare exception surfacing mid-batch (e.g. a ForeignKeyViolation
+    from a placement without ON DELETE CASCADE onto a soft-deleted
+    candidate) used to abort the whole loop and lose every result after
+    it, including ones that had already succeeded moments before. Each
+    item's own outcome is independent of every other item's."""
+    if payload.decision not in ("approved", "rejected"):
+        raise HTTPException(status_code=422, detail="decision must be 'approved' or 'rejected'")
+    if payload.decision == "approved" and payload.confirm != REVIEW_APPROVE_CONFIRM:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "retention_review_approve_requires_confirm",
+                "message": f'confirm: "{REVIEW_APPROVE_CONFIRM}" is required.',
+            },
+        )
+
+    if payload.ids:
+        ids = payload.ids
+    elif payload.category:
+        rows = await fetch_all(
+            "SELECT id FROM retention_review_items WHERE category = $1 AND status = 'pending' ORDER BY id",
+            payload.category,
+        )
+        ids = [r["id"] for r in rows]
+        if payload.decision == "approved":
+            if payload.expected_count is None:
+                raise HTTPException(
+                    status_code=422,
+                    detail="expected_count is required for a category-wide approve -- "
+                           "refresh GET .../review and pass the pending count you actually reviewed.",
+                )
+            if len(ids) != payload.expected_count:
+                raise HTTPException(
+                    status_code=409,
+                    detail={
+                        "code": "retention_review_bulk_expected_count_mismatch",
+                        "message": (
+                            f"expected_count={payload.expected_count} but category={payload.category!r} "
+                            f"currently has {len(ids)} pending item(s) -- the list changed since you "
+                            "reviewed it; refresh and retry."
+                        ),
+                    },
+                )
+    else:
+        raise HTTPException(status_code=422, detail="either ids or category is required")
+
+    if len(ids) > MAX_BULK_REVIEW_ITEMS:
+        raise HTTPException(
+            status_code=422,
+            detail=f"{len(ids)} items exceed the {MAX_BULK_REVIEW_ITEMS}-item bulk cap -- "
+                   "approve/reject in smaller batches.",
+        )
+
+    results = []
+    for item_id in ids:
+        try:
+            if payload.decision == "approved":
+                results.append(await _approve_one(item_id, current_user["id"], payload.note))
+            else:
+                results.append(await _reject_one(item_id, current_user["id"], payload.note))
+        except HTTPException as exc:
+            results.append({"id": item_id, "status": "error", "detail": exc.detail})
+        except Exception:
+            # M1: never log the exception text itself here -- it can carry
+            # an interpolated e-mail address or other PII pulled from the
+            # row the query was acting on. The item id and category name
+            # (looked up separately, not from the exception) are enough
+            # for an admin to find and retry it.
+            logger.exception("bulk_review_decision: item %s failed unexpectedly", item_id)
+            results.append({"id": item_id, "status": "error", "detail": "unexpected_error"})
+    return {"results": results}
+
+
+# ── Apollo bulk-pool cleanup (VERWERKINGSREGISTER.md §2.6, §5.7) ─────────
+#
+# security-auditor follow-up (WS-E.8 HIGH): pool_origin='apollo' plus a
+# missing source_url is not by itself proof the row is inert bulk-harvest
+# noise -- an Apollo-sourced candidate can still have picked up a real
+# match, a client pipeline entry, a recorded activity, a portal account,
+# a placement, or be the (anonymised) subject of a presented-candidate
+# outreach draft to a client_prospect, all independent of source_url ever
+# being backfilled.
+#
+# WS-E.10 (owner decision): the guarded selectors live in core/retention.py
+# (APOLLO_POOL_ROWS_SQL / APOLLO_POOL_TARGET_SQL) so
+# services/scheduler.py's generate_retention_review() can queue this same
+# pool into retention_review_items under category='apollo_pool_purge' --
+# this module's own dry-run preview below reads those same two constants
+# directly (round 6, M6r: no local alias -- one name, one place to look).
 
 
 class ApolloPoolPurgeRequest(BaseModel):
     dry_run: bool = True
-    confirm: Optional[str] = None
 
 
 APOLLO_POOL_CONFIRM = "DELETE APOLLO POOL"
-
-# Rows without an http(s) source_url never passed the LIA (§2.6) — those
-# are the pool this endpoint considers. A row that later gained a real
-# public source_url (the owner's other option besides wiping the pool,
-# §5.7) is left alone entirely, at both queries below.
-_POOL_ROWS_SQL = """
-    SELECT id, email FROM candidates
-    WHERE pool_origin = 'apollo'
-      AND deleted_at IS NULL
-      AND (source_url IS NULL OR source_url !~* '^https?://')
-"""
-
-# security-auditor follow-up (WS-E.8 HIGH): pool_origin='apollo' plus a
-# missing source_url is not by itself proof the row is inert bulk-harvest
-# noise -- an Apollo-sourced candidate can still have picked up a real
-# match, a client pipeline entry, an outreach reply, a portal account, or
-# be the (anonymised) subject of a presented-candidate outreach draft to
-# a client_prospect, all independent of source_url ever being backfilled.
-# Same five guards as core/retention.SOURCED_NO_RESPONSE_SQL, plus a
-# fifth specific to this pool: outreach_drafts.presented_candidate_id
-# (SOP §5 spec-candidate presentation), which points at a candidate row
-# without going through target_email/target_id at all. Applied to BOTH
-# the anonymise and the hard-delete branches -- neither is safe to run
-# against a row any of these five reference.
-_TARGET_ROWS_SQL = _POOL_ROWS_SQL + """
-      AND NOT EXISTS (SELECT 1 FROM matches m WHERE m.candidate_id = candidates.id AND m.status <> 'suggested')
-      AND NOT EXISTS (SELECT 1 FROM pipeline_entries p WHERE p.candidate_id = candidates.id)
-      AND NOT EXISTS (SELECT 1 FROM outreach_messages o WHERE o.candidate_id = candidates.id AND o.replied_at IS NOT NULL)
-      AND NOT EXISTS (SELECT 1 FROM users u WHERE LOWER(u.email) = LOWER(candidates.email) AND u.deleted_at IS NULL)
-      AND NOT EXISTS (SELECT 1 FROM outreach_drafts d WHERE d.presented_candidate_id = candidates.id)
-"""
 
 
 @apollo_pool_router.post("/purge")
@@ -137,37 +836,20 @@ async def purge_apollo_pool(
     payload: ApolloPoolPurgeRequest,
     current_user: dict = Depends(require_role("admin")),
 ):
-    """The Apollo-pool wipe/keep decision itself belongs to the owner
-    (VERWERKINGSREGISTER.md §2.6) — this endpoint is the tooling, never
-    run automatically, and dry_run=true by default.
+    """dry_run=true (default, unchanged): a read-only preview, same shape
+    as before WS-E.10.
 
-    Choice of anonymise vs. hard-delete, per row:
-      - Has an e-mail address: anonymise via the same erase_person()
-        routine as a manual Art. 17 request (routers/gdpr.py) — this
-        preserves any matches/pipeline_entries FK history (candidates.id
-        survives, PII doesn't) and adds the person to suppression_list so
-        a future Apollo re-sync (should the owner ever re-enable it)
-        can't re-source the same person. Preferred whenever it's possible,
-        since it keeps the suppression guarantee.
-      - No e-mail address at all: hard DELETE. suppression_list is keyed
-        on email_hash, so a row with no e-mail can't be suppressed either
-        way, and (per WS-E.7's erase_person) these bulk-harvested rows
-        never had a portal account or an application tied to them —
-        nothing else references the row, so there is nothing an
-        anonymise-in-place step would preserve that a DELETE doesn't
-        already achieve equally safely.
+    dry_run=false is gone outright (WS-E.10, owner decision, same as
+    run_retention()'s): this pool shares the exact CANDIDATE_NO_REACTION_
+    GUARD_SQL guard family that motivated ending automatic purging
+    everywhere else, so a real deletion here now only ever happens from
+    an approved retention_review_items row
+    (category='apollo_pool_purge', POST .../review/{item_id}/approve),
+    the same as every other category. See
+    tests/test_ws_e10_no_unapproved_purge_path.py.
     """
-    if not payload.dry_run and payload.confirm != APOLLO_POOL_CONFIRM:
-        raise HTTPException(
-            status_code=409,
-            detail={
-                "code": "apollo_pool_purge_requires_confirm",
-                "message": f'dry_run=false requires confirm: "{APOLLO_POOL_CONFIRM}".',
-            },
-        )
-
-    pool_rows = await fetch_all(_POOL_ROWS_SQL)
-    rows = await fetch_all(_TARGET_ROWS_SQL)
+    pool_rows = await fetch_all(retention.APOLLO_POOL_ROWS_SQL)
+    rows = await fetch_all(retention.APOLLO_POOL_TARGET_SQL)
     skipped = len(pool_rows) - len(rows)
     with_email = [r for r in rows if r["email"]]
     without_email = [r for r in rows if not r["email"]]
@@ -181,39 +863,15 @@ async def purge_apollo_pool(
             "skipped": skipped,
         }
 
-    from routers.gdpr import erase_person
-
-    # security-auditor follow-up (WS-E.8 HIGH): the audit row records
-    # whatever actually completed, written from a `finally` so a failure
-    # partway through the anonymise loop or the hard-delete still leaves
-    # an accurate audit_log entry rather than none at all.
-    anonymised = 0
-    deleted = 0
-    try:
-        for row in with_email:
-            await erase_person(row["email"], actor_id=current_user["id"], reason="apollo_pool_purge")
-            anonymised += 1
-
-        if without_email:
-            ids = [r["id"] for r in without_email]
-            await execute("DELETE FROM candidates WHERE id = ANY($1::int[])", ids)
-            deleted = len(ids)
-    finally:
-        await execute(
-            "INSERT INTO audit_log (action, actor_id, target_type, target_id, changes) "
-            "VALUES ($1, $2, $3, NULL, $4::jsonb)",
-            "apollo_pool_purge", current_user["id"], "candidates_pool",
-            json.dumps({
-                "anonymised": anonymised, "hard_deleted": deleted,
-                "total": len(rows), "skipped": skipped,
-            }),
-        )
-        logger.warning(
-            "Apollo pool purge run by admin user_id=%s: anonymised=%s hard_deleted=%s skipped=%s",
-            current_user["id"], anonymised, deleted, skipped,
-        )
-
-    return {
-        "dry_run": False, "total": len(rows), "anonymised": anonymised,
-        "hard_deleted": deleted, "skipped": skipped,
-    }
+    raise HTTPException(
+        status_code=410,
+        detail={
+            "code": "apollo_pool_purge_no_longer_deletes",
+            "message": (
+                "Dit endpoint wist niets meer, ongeacht de waarde van dry_run. Een echte verwijdering "
+                "loopt sinds WS-E.10 via de maandelijkse beoordelingslijst "
+                "(GET /api/v1/admin/retention/review, category=apollo_pool_purge) en "
+                "POST /api/v1/admin/retention/review/{item_id}/approve."
+            ),
+        },
+    )

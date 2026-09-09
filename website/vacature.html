@@ -8,11 +8,11 @@
 <meta name="googlebot" content="index, follow, max-snippet:-1, max-image-preview:large">
 <meta name="author" content="GSP Recruitment">
 <title>Vacature — GSP Recruitment | Tech & IT Vacatures Nederland</title>
-<meta name="description" content="Bekijk deze tech & IT vacature. GSP Recruitment verbindt tech-professionals met topbedrijven in de Brainport regio.">
+<meta name="description" content="Bekijk deze tech & IT vacature. GSP Recruitment verbindt tech-professionals met opdrachtgevers in de Brainport-regio.">
 <link rel="canonical" href="https://gsprecruitment.nl/vacature">
 <meta property="og:type" content="website">
 <meta property="og:title" id="ogTitle" content="Vacature — GSP Recruitment">
-<meta property="og:description" id="ogDescription" content="Bekijk deze tech & IT vacature. GSP Recruitment verbindt tech-professionals met topbedrijven in de Brainport regio.">
+<meta property="og:description" id="ogDescription" content="Bekijk deze tech & IT vacature. GSP Recruitment verbindt tech-professionals met opdrachtgevers in de Brainport-regio.">
 <meta property="og:url" content="https://gsprecruitment.nl/vacature">
 <meta property="og:image" content="https://gsprecruitment.nl/og-image.png">
 <meta property="og:locale" content="nl_NL">
@@ -93,10 +93,20 @@
     <h3><span class="lang-en">Interested in this role?</span><span class="lang-nl">Interesse in deze rol?</span></h3>
     <p class="lang-en">Send your CV or ask us a question — we'll reply within 24 hours.</p>
     <p class="lang-nl">Stuur je CV of stel een vraag — we reageren binnen 24 uur.</p>
+    <p id="anonClientNote" style="display:none;font-size:0.9rem;color:var(--text-muted);margin:0 0 16px">
+      <span class="lang-en">The client remains anonymous until a first conversation.</span>
+      <span class="lang-nl">De opdrachtgever blijft anoniem tot een eerste gesprek.</span>
+    </p>
     <div class="hero-actions" style="justify-content:center;margin-top:16px">
       <a href="contact.html" class="btn btn-gold" id="applyBtn"><i class="fas fa-paper-plane"></i> <span class="lang-en">Apply now</span><span class="lang-nl">Solliciteer direct</span></a>
       <a href="vacatures.html" class="btn btn-outline"><i class="fas fa-briefcase"></i> <span class="lang-en">All vacancies</span><span class="lang-nl">Alle vacatures</span></a>
     </div>
+    <!-- Anonymous-client vacancy, no logged-in candidate: filled by
+         renderVacancyApplyPanel() in vacature.js. Reuses the existing
+         .talentpool-optin / .talentpool-optin-row / .talentpool-optin-check
+         / .form-error / .form-success classes from styles.css (kandidaten.html
+         signup panel) -- no new CSS. -->
+    <div class="talentpool-optin" id="vacancyApplyPanel" style="display:none;margin-left:auto;margin-right:auto;text-align:left"></div>
   </div>
 </section>
 <section style="padding-top:0;display:none" id="jobNotFound">

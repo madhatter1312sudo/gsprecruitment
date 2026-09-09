@@ -70,10 +70,19 @@ def test_erase_person_scrubs_pii_from_every_registered_table(db_run):
         client_row["id"], candidate["id"], job["id"], f"Notes mentioning {email} directly",
     )
 
-    db_run(execute, "INSERT INTO quiz_submissions (email, answers) VALUES ($1, '{}'::jsonb)", email)
+    # source_page/referrer_host (migrations/038_leads_origin.py) -- a lead
+    # submitted with a referrer must have that origin scrubbed on erasure
+    # too, not just the obviously-PII columns (security-auditor WS2 finding).
     db_run(
         execute,
-        "INSERT INTO contact_submissions (name, email, message) VALUES ('Erase Me', $1, 'hello')",
+        "INSERT INTO quiz_submissions (email, answers, source_page, referrer_host) "
+        "VALUES ($1, '{}'::jsonb, '/vacatures?job=7', 'intranet.some-employer.example')",
+        email,
+    )
+    db_run(
+        execute,
+        "INSERT INTO contact_submissions (name, email, message, source_page, referrer_host) "
+        "VALUES ('Erase Me', $1, 'hello', '/vacatures?job=7', 'intranet.some-employer.example')",
         email,
     )
     db_run(
@@ -143,6 +152,19 @@ def test_erase_person_scrubs_pii_from_every_registered_table(db_run):
     contact = db_run(fetch_one, "SELECT name, email FROM contact_submissions WHERE email ILIKE $1", f"%{email}%")
     assert contact is None
 
+    # The rows survive erasure (pseudonymised to erased-<hash prefix>-<id>@
+    # erased.invalid, not deleted, see _anonymize_by_id) -- referrer_host
+    # must be scrubbed off them too, since it can carry a person's current
+    # employer's intranet hostname.
+    erased_pattern = f"erased-{email_hash[:16]}-%"
+    quiz_row = db_run(fetch_one, "SELECT email, referrer_host FROM quiz_submissions WHERE email ILIKE $1", erased_pattern)
+    assert quiz_row is not None, "quiz_submissions row should survive erasure, pseudonymised"
+    assert quiz_row["referrer_host"] is None
+
+    contact_row = db_run(fetch_one, "SELECT email, referrer_host FROM contact_submissions WHERE email ILIKE $1", erased_pattern)
+    assert contact_row is not None, "contact_submissions row should survive erasure, pseudonymised"
+    assert contact_row["referrer_host"] is None
+
     draft = db_run(fetch_one, "SELECT target_email, target_name FROM outreach_drafts WHERE target_email ILIKE $1", f"%{email}%")
     assert draft is None
 
@@ -160,3 +182,206 @@ def test_erase_person_scrubs_pii_from_every_registered_table(db_run):
 
     suppression = db_run(fetch_one, "SELECT email_hash FROM suppression_list WHERE email_hash = $1", email_hash)
     assert suppression is not None, "erase_person() must add the person to suppression_list"
+
+
+def test_erase_person_scrubs_a_padded_address_from_every_secondary_table(db_run):
+    """chief-of-staff FIX FIRST (retention-kolommen branch, finding 3):
+    erase_person() has compared the three IDENTITY tables (candidates,
+    users, client_prospects) via LOWER(TRIM(...)) since 7fab750, but the
+    six SECONDARY lookups below (plus the admin-erase guard's own users
+    lookup, covered separately in test_gdpr_erasure.py's stubbed suite)
+    still compared plain LOWER(...) -- a stored address padded with
+    whitespace on any one of them would leave that row untouched while
+    erase_person() still reported the purge complete everywhere else.
+
+    Every row here is seeded with a PADDED address via raw SQL -- exactly
+    what a row written before this fix, or by a path that bypasses
+    CandidateCreate/ProspectCreate's own strip validators (a raw INSERT,
+    e.g. services/harvest.py), can still look like -- and erase_person()
+    is called with the CLEAN address, the way a real Art. 17 request
+    names the person by the address they typed. Every one of the six
+    tables must come back empty of the plaintext address afterwards.
+
+    Plain spaces only, deliberately: Postgres's default TRIM(x) (no
+    explicit character set) strips spaces, not tabs or NBSP -- a known,
+    documented boundary (see gdpr.py's erase_person docstring and the
+    chief-of-staff FIX FIRST note this fix responds to) that a tab/NBSP-
+    padded address, however it got that way, would still fall through.
+    Normalising every real insert path (this fix's CandidateCreate/
+    ProspectCreate/webhook.py strips) is what keeps that gap from ever
+    being reachable in practice, not this SQL-level TRIM."""
+    from core.database import execute, fetch_all, fetch_one
+    from routers.gdpr import erase_person
+
+    clean_email = f"pad-erase-{uuid.uuid4().hex[:10]}@example.com"
+    padded_email = f"  {clean_email}  "  # leading and trailing spaces
+
+    db_run(
+        execute,
+        "INSERT INTO quiz_submissions (email, answers) VALUES ($1, '{}'::jsonb)",
+        padded_email,
+    )
+    db_run(
+        execute,
+        "INSERT INTO contact_submissions (name, email, message) VALUES ('Pad Erase', $1, 'hello')",
+        padded_email,
+    )
+    db_run(
+        execute,
+        "INSERT INTO outreach_drafts (target_type, target_email, target_name) VALUES ('candidate', $1, 'Pad Erase')",
+        padded_email,
+    )
+    db_run(
+        execute,
+        "INSERT INTO outreach_messages (recipient_email, subject, body) VALUES ($1, 'hi', 'body')",
+        padded_email,
+    )
+    db_run(
+        execute,
+        "INSERT INTO data_subject_requests (request_type, request_email) VALUES ('access', $1)",
+        padded_email,
+    )
+    review_item = db_run(
+        fetch_one,
+        """INSERT INTO retention_review_items
+               (category, subject_table, subject_id, email, action, signal_missing_nl)
+           VALUES ('leads_quiz', 'quiz_submissions', 999999999, $1, 'anonymise', 'test seed')
+           RETURNING id""",
+        padded_email,
+    )
+
+    result = db_run(erase_person, clean_email, None, "padded-address integration test")
+    assert result["status"] == "complete", result
+
+    quiz = db_run(fetch_all, "SELECT id, email FROM quiz_submissions WHERE email ILIKE $1", f"%{clean_email}%")
+    assert quiz == [], f"quiz_submissions still carries the padded address: {quiz}"
+
+    contact = db_run(fetch_all, "SELECT id, email FROM contact_submissions WHERE email ILIKE $1", f"%{clean_email}%")
+    assert contact == [], f"contact_submissions still carries the padded address: {contact}"
+
+    draft = db_run(fetch_all, "SELECT id, target_email FROM outreach_drafts WHERE target_email ILIKE $1", f"%{clean_email}%")
+    assert draft == [], f"outreach_drafts still carries the padded address: {draft}"
+
+    message = db_run(fetch_all, "SELECT id, recipient_email FROM outreach_messages WHERE recipient_email ILIKE $1", f"%{clean_email}%")
+    assert message == [], f"outreach_messages still carries the padded address: {message}"
+
+    dsr = db_run(fetch_all, "SELECT id, request_email FROM data_subject_requests WHERE request_email ILIKE $1", f"%{clean_email}%")
+    assert dsr == [], f"data_subject_requests still carries the padded address: {dsr}"
+
+    review_row = db_run(fetch_one, "SELECT email FROM retention_review_items WHERE id = $1", review_item["id"])
+    assert review_row["email"] is None, "retention_review_items.email must be nulled, padded address or not"
+
+
+def test_scoped_erasure_does_not_follow_a_users_row_to_an_unrelated_fk_linked_candidate(db_run):
+    """Retention-kolommen round 6 (code-review, WS-E.10 approval queue):
+    proves erase_person()'s own scope_table/scope_id narrowing directly,
+    bypassing routers/retention_admin.py's guard entirely -- so this
+    fails if a future change lets `scope_table` stop actually
+    constraining the WS-C.16 extra_ids expansion (the round-6 "R7"
+    finding: no test covered this, and forcing scope_table to None in
+    routers/retention_admin.py's own call site left the whole suite
+    green).
+
+    A `users` row shares its address with the SCOPED subject candidate,
+    but its own candidate_profiles.candidate_id FK points at a
+    completely different, different-address candidate with an active
+    placement (the 7-year fiscal floor). A scoped call
+    (scope_table='candidates', scope_id=subject's id) must anonymise
+    only the subject candidate -- never follow that FK."""
+    from core.database import execute, fetch_one
+    from routers.gdpr import erase_person
+
+    subject_email = f"scope-erase-subject-{uuid.uuid4().hex[:10]}@example.com"
+    linked_email = f"scope-erase-linked-{uuid.uuid4().hex[:10]}@example.com"
+
+    subject_candidate = db_run(
+        fetch_one,
+        "INSERT INTO candidates (full_name, email, deleted_at) VALUES ($1, $2, NULL) RETURNING id",
+        "Scope Erase Subject", subject_email,
+    )
+    linked_candidate = db_run(
+        fetch_one,
+        "INSERT INTO candidates (full_name, email, deleted_at) VALUES ($1, $2, NULL) RETURNING id",
+        "Scope Erase Linked (unrelated)", linked_email,
+    )
+    client_row = db_run(
+        fetch_one,
+        "INSERT INTO clients (company_name, domain, account_status) VALUES ($1, 'example.com', 'active') RETURNING id",
+        f"Scope Erase Client {uuid.uuid4().hex[:8]}",
+    )
+    job = db_run(
+        fetch_one, "INSERT INTO job_orders (client_id, title) VALUES ($1, 'Embedded Engineer') RETURNING id",
+        client_row["id"],
+    )
+    db_run(
+        execute,
+        "INSERT INTO placements (candidate_id, job_id, client_id, placement_type, status) "
+        "VALUES ($1, $2, $3, 'werving_selectie', 'actief')",
+        linked_candidate["id"], job["id"], client_row["id"],
+    )
+    portal_user = db_run(
+        fetch_one,
+        """INSERT INTO users (email, password_hash, full_name, role, is_verified, password_changed_at)
+           VALUES ($1, 'x', 'Scope Erase Portal', 'candidate', TRUE, NOW()) RETURNING id""",
+        subject_email,
+    )
+    db_run(
+        execute,
+        "INSERT INTO candidate_profiles (user_id, candidate_id) VALUES ($1, $2)",
+        portal_user["id"], linked_candidate["id"],
+    )
+
+    result = db_run(
+        erase_person, subject_email, None, "test: scoped erasure R7",
+        scope_table="candidates", scope_id=subject_candidate["id"],
+    )
+    assert result["status"] == "complete"
+
+    subject_row = db_run(fetch_one, "SELECT email, deleted_at FROM candidates WHERE id = $1", subject_candidate["id"])
+    assert subject_row["email"] != subject_email  # the scoped subject IS erased
+    assert subject_row["deleted_at"] is not None
+
+    linked_row = db_run(fetch_one, "SELECT email, deleted_at FROM candidates WHERE id = $1", linked_candidate["id"])
+    assert linked_row["email"] == linked_email  # the FK-linked, unrelated candidate is NOT touched
+    assert linked_row["deleted_at"] is None
+
+
+def test_scoped_erasure_erases_the_subject_despite_a_padded_stored_address(db_run):
+    """Round 6 re-check (security-auditor + code-reviewer, WS-E.10
+    approval queue): the subject row's own stored address can carry
+    whitespace a caller already stripped before comparing (a real gap --
+    POST /api/candidates' CandidateCreate.email and POST /api/v1/admin/
+    prospects' ProspectCreate.email neither strip nor validate the
+    address). A scoped call (scope_table='candidates', scope_id=this
+    row's id) must still anonymise THIS row, selected by id alone --
+    never by re-deriving "the row with this e-mail" from an address that
+    no longer matches what's actually stored, which is exactly how a
+    prior round-6 fix (`... AND id = $2` on an e-mail-filtered SELECT)
+    silently matched nothing and left the subject untouched."""
+    from core.database import execute, fetch_one
+    from routers.gdpr import erase_person
+
+    padded_email = f"  scope-erase-padded-{uuid.uuid4().hex[:10]}@example.com  "  # leading AND trailing space
+    normalized_email = padded_email.strip().lower()
+
+    subject_candidate = db_run(
+        fetch_one,
+        "INSERT INTO candidates (full_name, email, deleted_at) VALUES ($1, $2, NULL) RETURNING id",
+        "Scope Erase Padded Subject", padded_email,
+    )
+    stored = db_run(fetch_one, "SELECT email FROM candidates WHERE id = $1", subject_candidate["id"])
+    assert stored["email"] == padded_email, "the padded address must actually be what's stored"
+
+    # erase_person() is called with the NORMALISED address -- exactly what
+    # routers/retention_admin.py's _approve_one() now does (privacy.
+    # normalize_email() applied before the call) -- never the raw,
+    # padded one this row happens to carry.
+    result = db_run(
+        erase_person, normalized_email, None, "test: scoped erasure despite padded address",
+        scope_table="candidates", scope_id=subject_candidate["id"],
+    )
+    assert result["status"] == "complete"
+
+    subject_row = db_run(fetch_one, "SELECT email, deleted_at FROM candidates WHERE id = $1", subject_candidate["id"])
+    assert subject_row["email"] != padded_email  # the scoped subject IS erased, id-only match
+    assert subject_row["deleted_at"] is not None

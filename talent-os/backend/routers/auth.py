@@ -8,6 +8,7 @@ from core.database import fetch_one, fetch_all, execute
 from core.security import hash_password, verify_password, create_access_token, decode_token, hash_token
 from core.deps import get_current_user, get_optional_user, require_role, _token_predates_password_change
 from core.mfa import mfa_required_for_user, issue_mfa_pending_token
+from core import privacy
 from core.config import settings
 from models.schemas import (
     UserRegister, UserLogin, TokenResponse, UserResponse, UserUpdate,
@@ -163,7 +164,7 @@ async def register(request: Request, data: UserRegister):
         # ever created this linkage for a client signup.
         client = await fetch_one(
             "INSERT INTO clients (company_name, domain) VALUES ($1, $2) RETURNING id",
-            user["full_name"], email.split("@")[1] if "@" in email else "",
+            user["full_name"], privacy.normalize_domain(email.split("@")[1] if "@" in email else None),
         )
         if client:
             await execute(
@@ -260,6 +261,29 @@ async def login(request: Request, data: UserLogin):
 
     if mfa_required_for_user(user):
         return {"mfa_required": True, "mfa_token": issue_mfa_pending_token(user["id"])}
+
+    # WS-E.8 follow-up (migrations/032_retention_anchor_columns.py):
+    # last_login_at is the anchor core/retention.py's portal_account_
+    # inactive row purges on -- stamped here (a real, non-MFA-pending
+    # login), in mfa_verify()/mfa_recovery() (routers/mfa.py, the
+    # completion of a login that required a second factor) and in
+    # google_signin() below, but never on /register (a new account isn't
+    # a login yet) or /refresh (reuses an existing session).
+    #
+    # FIX (security-audit FIX FIRST, retention-kolommen branch, blocking
+    # point 7): this used to swallow every exception here ("best-effort,
+    # a DB hiccup must never turn a login into a 500") -- but that silent
+    # catch was masking a missing test stub, not a real production
+    # failure mode (tests/test_ws_e12_mfa.py's
+    # test_login_issues_normal_tokens_for_admin_without_mfa only patched
+    # _get_user_by_email, leaving this UPDATE to hit the real pool; see
+    # that test's fix). A swallowed failure here is also dangerous in the
+    # wrong direction: it lets a login report success while quietly never
+    # stamping last_login_at, so a candidate who logs in every single day
+    # would still drift toward the purge window with nobody able to tell.
+    # last_login_at is a plain UPDATE on an existing row (no jsonb, no FK
+    # it could violate) -- there is no expected failure mode left to catch.
+    await execute("UPDATE users SET last_login_at = NOW() WHERE id = $1", user["id"])
 
     return _build_token_response(user)
 
@@ -717,6 +741,10 @@ async def google_callback(
             "INSERT INTO candidate_profiles (user_id) VALUES ($1) ON CONFLICT DO NOTHING",
             user["id"],
         )
+
+    # WS-E.8 follow-up -- see login()'s comment above (blocking point 7:
+    # no more try/except here either).
+    await execute("UPDATE users SET last_login_at = NOW() WHERE id = $1", user["id"])
 
     token_response = _build_token_response(user)
     # Fragment, not query string -- see the module-level comment above.

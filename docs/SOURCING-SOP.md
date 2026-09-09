@@ -36,6 +36,8 @@ Alleen de kanalen hieronder zijn toegestaan. Alles daarbuiten is verboden totdat
 - Verlopen of ingetrokken toestemming = direct geen contact meer op deze grondslag.
 - Zelfde uitzondering als §1.4: herkomst is de eigen site (het vinkje zelf), dus `source_url` is niet vereist voor talentpool-contact — de grondslag is `opt_in_talentpool`, niet een gesourcete `source_url`.
 
+**Sollicitatie vanaf een vacaturepagina (WS-4, `migrations/037_pool_vacancies_consent_sources.py`).** Een bezoeker die op een vacature (mogelijk een vacature met anonieme opdrachtgever, §6 punt 11 van `VERWERKINGSREGISTER.md`) op "solliciteer" klikt, doorloopt hetzelfde dubbele-opt-in-formulier als §1.4/§1.5 hierboven, met twee toevoegingen: `source`/`consent_source` wordt `vacancy_apply` in plaats van `kandidaten_page` of `blog_cta`, en het formulier draagt het gekozen `job_id` mee. Alleen een `job_id` dat op het moment van aanmelden nog naar een open, niet-demo, niet-verwijderde vacature verwijst wordt opgeslagen; anders gaat de aanmelding gewoon door zonder vacaturekoppeling. Er bestaat geen direct sollicitatieformulier buiten deze talentpool-route om. Bij bevestiging (het tweede opt-in-mailtje) maakt de backend, als de vacature op dat moment nog open is, een sollicitatie aan (`matches`-rij, status `applied`) op dezelfde vacature; er is geen apart sollicitatieformulier of aparte tabel voor nodig.
+
 ### 1.6 Meetups en community's
 - Fysieke of online aanwezigheid bij 040coders, Bits&Chips Event, DSPE, ICS-security-meetup (Amsterdam Cyber Security for Control Systems) en vergelijkbare vakcommunity's.
 - Contact dat daar ontstaat, wordt behandeld als een normale eerstecontact-situatie (§2, §3): ook een gesprek op een meetup vervangt geen logregel.
@@ -142,24 +144,24 @@ Een anonieme presentatie aan een klant (spec-candidate / MPC-outreach) mag allee
 
 ---
 
-## 6. Bewaartermijnen (WS-E.8, aangevuld met drie rijen als aanname, ter bevestiging door de eigenaar)
+## 6. Bewaartermijnen (WS-E.8; alle tien periodes bevestigd door de eigenaar, 2026-09-08)
 
-Eén bewaartabel, identiek in code (purge-job) en op `privacy.html`:
+Eén bewaartabel, identiek in code en op `privacy.html`:
 
 | Categorie | Bewaartermijn | Bron/opmerking |
 |---|---|---|
 | Afgewezen sollicitant | 4 weken na `rejected_at` | bron: AP/Recruitee |
 | Talentpool met expliciete toestemming | 12 maanden, verlengbaar | WS-C.17 |
-| Gesourcete persoon zonder reactie | 3 maanden na `date_found` zonder reactie | aanname, strenger dan de 2 jaar in privacy.html |
+| Gesourcete persoon zonder reactie | 3 maanden na `date_found` zonder reactie | bevestigd door eigenaar 2026-09-08; strenger dan de 2 jaar in privacy.html |
 | Prospect zonder reactie | 12 maanden | |
-| Prospect die wel reageert (relatie) | zolang actief + 12 maanden na laatste contact | aanname |
-| Actief portalaccount zonder sollicitatie | zolang account actief; 24 maanden inactiviteit → verwijderen | aanname |
-| Referral | zoals gesourcet (3 maanden na `date_found` zonder reactie); herkomst = referrer | zie §1.3 |
+| Prospect die wel reageert (relatie) | zolang actief + 12 maanden na laatste contact | bevestigd door eigenaar 2026-09-08 |
+| Actief portalaccount zonder sollicitatie | zolang account actief; 18 maanden inactiviteit → verwijderen, waarschuwing 30 dagen vooraf | bevestigd door eigenaar 2026-09-08 |
+| Referral | zoals gesourcet (3 maanden na `date_found` zonder reactie); herkomst = referrer | bevestigd door eigenaar 2026-09-08; zie §1.3 |
 | Leads/quiz | 12 maanden | |
 | Geplaatste kandidaat (contract- en factuurdata) | 7 jaar | fiscale bewaarplicht |
 | Logs | 30 dagen (doel) | vandaag: max 5×20 MB per container, rotatie, geen vaste tijd (Docker json-file `max-size`/`max-file`, WS-E.6) |
 
-**Bij het verstrijken van de termijn**: de apscheduler purge-job (`run_retention_purge()`, dagelijks 04:00 Europe/Amsterdam) verwijdert of anonimiseert de persoon automatisch volgens dezelfde `erase_person`-logica als een handmatig AVG-verzoek (alle tabellen, inclusief CV-bestand op R2/legacy-pad), of verwijdert de rij hard waar dat is aangemerkt (VERWERKINGSREGISTER.md §1.4). Talentpool-personen met `consent_talentpool_until` in de toekomst worden door de purge-job overgeslagen; bij het verstrijken van die datum zonder verlenging volgt automatische verwijdering. **Deze purge-job bestaat sinds WS-E.8, maar staat standaard uit (`RETENTION_PURGE_ENABLED=false`) totdat de eigenaar hem inschakelt; tot dan telt de dagelijkse run alleen per categorie en schrijft niets weg.** Bron van waarheid voor deze tabel: `talent-os/backend/core/retention.py` (VERWERKINGSREGISTER.md §1.4). De 14.687 Apollo-rijen vallen niet onder deze tabel — die worden gewist of krijgen per persoon een echte publieke `source_url`, een losstaand eenmalig traject (WS-E.8, `POST /api/v1/admin/apollo-pool/purge`).
+**Bij het verstrijken van de termijn** (WS-E.10 — besluit van de eigenaar): geen automatische verwijdering. De apscheduler-job (`generate_retention_review()`, maandelijks op de 1e om 04:00 Europe/Amsterdam) zet iedereen die volgens de guards in deze tabel in aanmerking komt op een interne wachtlijst (`retention_review_items`), met de categorie, de verstreken datum en welk beschermend signaal ontbrak. Pas als de eigenaar of een beheerder een rij goedkeurt (`POST /api/v1/admin/retention/review/{id}/approve`, verplicht `confirm:"APPROVE"`) volgt de daadwerkelijke anonimisering (dezelfde `erase_person`-logica als een handmatig AVG-verzoek — alle tabellen, inclusief CV-bestand op R2/legacy-pad, afgebakend tot precies het onderwerp van die rij — de identiteitsrij in de tabel van dat onderwerp wordt nooit e-mailbreed gewist) of harde verwijdering, met een controle vlak voor die actie of het adres opnieuw uit de brontabel gelezen is, of de persoon niet inmiddels alsnog beschermd is, en of dat adres ook op een andere rij voorkomt in één van de drie identiteitstabellen die deze wissing raakt (kandidaten, portalaccounts — elke rol, niet alleen admin/klant — of prospectcontactpersonen); komt het adres ook ergens anders voor, dan weigert het systeem (409) in plaats van die andere, niet-goedgekeurde rij mee te wissen. Afwijzen is vrijblijvend; wie is afgewezen en later opnieuw op de lijst verschijnt, blijft zichtbaar gemarkeerd in plaats van stilzwijgend terug te keren. Talentpool-personen met `consent_talentpool_until` in de toekomst komen niet op deze lijst; pas bij het verstrijken van die datum zonder verlenging (plus een marge van 30 dagen voor de herinneringsmail) verschijnen zij erop — een goedgekeurde wissing op deze grond is geen opt-out en komt daarom, als enige uitzondering, niet op de suppressielijst. Bron van waarheid voor deze tabel: `talent-os/backend/core/retention.py` (VERWERKINGSREGISTER.md §1.4, waar ook de wachtlijst zelf als eigen verwerking met eigen bewaartermijn staat, §1.2 rij 19). De 14.687 Apollo-rijen vallen niet onder deze tabel als apart onderwerp, maar delen sinds WS-E.10 dezelfde maandelijkse lijst (categorie `apollo_pool_purge`) in plaats van het vroegere losstaande endpoint `POST /api/v1/admin/apollo-pool/purge`, dat nu alleen nog een preview teruggeeft.
 
 ---
 

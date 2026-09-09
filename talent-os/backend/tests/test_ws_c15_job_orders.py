@@ -101,12 +101,22 @@ def test_public_job_row_does_not_mutate_the_input_row():
 
 def test_public_job_columns_excludes_is_demo():
     """is_demo itself must never leak to the public API -- only used to
-    filter the WHERE clause."""
+    filter the WHERE clause. WS-4: PUBLIC_JOB_COLUMNS now qualifies every
+    job_orders column with "j." and includes a COALESCE(...) expression
+    for anonymous_client, so a naive split(",") would cut that expression
+    in two -- match on substrings of the raw string instead."""
     from routers.jobs import PUBLIC_JOB_COLUMNS
-    cols = {c.strip() for c in PUBLIC_JOB_COLUMNS.split(",")}
-    assert "is_demo" not in cols
-    for expected in ("city", "company_display", "employment_type", "sponsorship_possible"):
-        assert expected in cols
+    assert "is_demo" not in PUBLIC_JOB_COLUMNS
+    for expected in ("j.city", "j.company_display", "j.employment_type", "j.sponsorship_possible"):
+        assert expected in PUBLIC_JOB_COLUMNS
+
+
+def test_public_job_columns_includes_anonymous_client():
+    """WS-4 (migrations/037): anonymous_client is clients.is_internal,
+    joined in -- never derived from company_display (a real, named client
+    can also leave that blank)."""
+    from routers.jobs import PUBLIC_JOB_COLUMNS
+    assert "COALESCE(cl.is_internal, false) AS anonymous_client" in PUBLIC_JOB_COLUMNS
 
 
 # ── AdminJobUpdate validation ────────────────────────────────────────────

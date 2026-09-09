@@ -39,7 +39,12 @@
 
     if (!loaded.has(section) && sectionLoaders[section]) {
       loaded.add(section);
-      sectionLoaders[section]();
+      // Every loadXxx() is async (returns a promise) -- a section whose
+      // load rejects (e.g. loadAnalytics() on a failed fetch, WS2) is
+      // un-cached again here so revisiting the tab retries the load,
+      // instead of being stuck "loaded" against an empty/error panel
+      // forever after one bad request.
+      Promise.resolve(sectionLoaders[section]()).catch(() => { loaded.delete(section); });
     }
   }
 
