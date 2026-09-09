@@ -61,6 +61,17 @@ def _build_user_prompt(target: Dict[str, Any], context: Dict[str, Any], language
         lines.append(f"Job title to mention: {context['job_title']}")
     if context.get("job_company"):
         lines.append(f"Hiring company: {context['job_company']}")
+    if context.get("anonymous_client"):
+        # WS-4 (migrations/037_pool_vacancies_consent_sources.py): for a
+        # job posted by one of GSP's own internal client rows, job_company
+        # above is already the literal "anonieme opdrachtgever" -- this
+        # extra line makes the constraint explicit so the model doesn't
+        # try to be helpful and invent, infer, or guess a real company
+        # name from the job title or description.
+        lines.append(
+            "The hiring company for this role is anonymous by design. Do not name it, "
+            "guess it, or speculate about who it might be, anywhere in the email."
+        )
     if context.get("job_description"):
         lines.append(f"Job context: {context['job_description'][:800]}")
     if context.get("notes"):

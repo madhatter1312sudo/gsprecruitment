@@ -3,6 +3,8 @@ from pydantic import BaseModel, EmailStr, Field, field_validator, model_validato
 from typing import Optional, List, Any, Literal
 from datetime import datetime, date
 from decimal import Decimal
+import re
+from urllib.parse import parse_qs
 
 
 # ── Auth / Users ─────────────────────────────────────────────────────────
@@ -94,14 +96,30 @@ class TalentpoolConsentUpdate(BaseModel):
 
 class TalentpoolOptinRequest(BaseModel):
     """Public: POST /api/public/talentpool-optin -- e-mail + consent tick
-    from website/kandidaten.html or website/blog/post.html's CTA. Does not
-    itself set anything on `candidates`; only issues a confirmation e-mail
+    from website/kandidaten.html, website/blog/post.html's CTA, or (WS-4,
+    migrations/037) a vacancy page's apply button. Does not itself set
+    anything on `candidates`; only issues a confirmation e-mail
     (routers/public.py talentpool_public_router). Consent only becomes
-    effective once the token is confirmed via talentpool-confirm."""
+    effective once the token is confirmed via talentpool-confirm.
+
+    job_id (WS-4): optional link to the job order the request came from --
+    only stored when it resolves to an open, non-demo, non-deleted job at
+    submit time (see talentpool_optin()); an unknown or non-public job_id
+    is silently ignored rather than rejected, same no-enumeration posture
+    as the rest of this endpoint. Bounded to postgres int4 (1..2^31-1) so
+    an out-of-range value 422s here, before the suppression-list check --
+    otherwise a value like 2**31 reaches the job lookup only when the
+    address is not suppressed, which would make the 500/202 split an
+    e-mail-enumeration oracle for suppression state. job_alerts: whether
+    the applicant also wants general vacancy alerts -- stored on
+    talentpool_optin_requests only, `candidates` has no job_alerts column
+    yet."""
     email: EmailStr
     consent: bool
     scope: str
     source: str
+    job_id: Optional[int] = Field(None, ge=1, le=2147483647)
+    job_alerts: bool = False
 
     @field_validator("scope")
     @classmethod
@@ -113,8 +131,8 @@ class TalentpoolOptinRequest(BaseModel):
     @field_validator("source")
     @classmethod
     def _source_in_set(cls, v):
-        if v not in ("kandidaten_page", "blog_cta"):
-            raise ValueError("source must be one of ('kandidaten_page', 'blog_cta')")
+        if v not in ("kandidaten_page", "blog_cta", "vacancy_apply"):
+            raise ValueError("source must be one of ('kandidaten_page', 'blog_cta', 'vacancy_apply')")
         return v
 
 
@@ -516,6 +534,28 @@ class JobOrderResponse(JobOrderCreate):
     model_config = {"from_attributes": True}
 
 
+# job_orders.status values actually written anywhere in this repo (WS-4):
+# 'draft'  -- default for an admin-phoned-in job (AdminJobCreate) and every
+#             client-created job (routers/client.py create_client_job,
+#             hardcoded, never client-settable to anything else on create);
+# 'open'   -- published to the public board (routers/jobs.py
+#             PUBLIC_JOB_COLUMNS query, migrations/000_baseline.py default);
+# 'paused' -- a client can pause their own posting
+#             (routers/client.py CLIENT_ALLOWED_STATUSES);
+# 'closed' -- client or admin closes a posting (routers/client.py
+#             CLIENT_ALLOWED_STATUSES, website/admin/index.html);
+# 'filled' -- job_orders tracks "filled" via the filled_at timestamp
+#             column, not this status column, but website/client/app.js's
+#             badge map already reserves and displays this status value,
+#             so it must keep validating rather than 422 the day something
+#             starts setting it;
+# 'deleted'-- soft-delete alongside deleted_at (routers/client.py
+#             delete_client_job).
+# An unknown status now 422s instead of silently writing an arbitrary
+# string to the column.
+JobOrderStatus = Literal["draft", "open", "paused", "closed", "filled", "deleted"]
+
+
 class JobOrderUpdate(BaseModel):
     title: Optional[str] = Field(None, min_length=1)
     department: Optional[str] = None
@@ -527,7 +567,7 @@ class JobOrderUpdate(BaseModel):
     description: Optional[str] = None
     requirements: Optional[str] = None
     nice_to_have: Optional[str] = None
-    status: Optional[str] = None
+    status: Optional[JobOrderStatus] = None
     urgency: Optional[str] = None
     city: Optional[str] = None
     company_display: Optional[str] = None
@@ -590,6 +630,12 @@ class HealthResponse(BaseModel):
     apollo: str = "unknown"
     candidates_count: Optional[int] = None
     open_jobs: Optional[int] = None
+    # WS2: count of candidate_id values in candidate_profiles that are
+    # linked from more than one profile row (see routers/health.py) --
+    # should always be 0; a nonzero count flags a data-integrity issue
+    # the admin.py candidates-list dedup (branch B NOT EXISTS) does not
+    # itself fix.
+    duplicate_profile_links: Optional[int] = None
 
 
 # ── Candidate Portal Schemas ────────────────────────────────────────────
@@ -729,7 +775,7 @@ class AdminUserUpdate(BaseModel):
 
 
 class AdminJobUpdate(BaseModel):
-    status: Optional[str] = None
+    status: Optional[JobOrderStatus] = None  # see JobOrderStatus above
     title: Optional[str] = None
     department: Optional[str] = None
     seniority: Optional[str] = None
@@ -843,6 +889,41 @@ _LEGACY_INTEREST_TYPE_MAP = {
 }
 
 
+# ── WS2 / migrations/038_leads_origin.py: shared source_page +
+# referrer_host validation for LeadSubmit and QuizSubmitRequest below.
+# source_page is a same-site path only (never a full URL/host) so it can
+# never carry an open-redirect-shaped or cross-site value into the DB;
+# its querystring -- if any -- may only carry the keys the site itself
+# actually appends (job-board 'type' filter, vacature 'job' id), never
+# arbitrary caller-supplied keys. referrer_host is a bare hostname only
+# (no scheme/path/port). Both are optional: a caller that omits them
+# simply gets NULL columns (migrations/038 adds no NOT NULL/DEFAULT), so
+# neither validator runs on an unsupplied default (no validate_default).
+_SOURCE_PAGE_ALLOWED_QUERY_KEYS = {"type", "job"}
+_REFERRER_HOST_RE = re.compile(r"^(?!-)[A-Za-z0-9-]{1,63}(?:\.(?!-)[A-Za-z0-9-]{1,63})*$")
+
+
+def _validate_source_page(v: Optional[str]) -> Optional[str]:
+    if v is None:
+        return None
+    if len(v) > 200 or not v.startswith("/"):
+        raise ValueError("source_page must start with '/' and be at most 200 characters")
+    _, _, query = v.partition("?")
+    if query:
+        keys = set(parse_qs(query, keep_blank_values=True).keys())
+        if not keys <= _SOURCE_PAGE_ALLOWED_QUERY_KEYS:
+            raise ValueError("source_page querystring may only contain 'type' and/or 'job'")
+    return v
+
+
+def _validate_referrer_host(v: Optional[str]) -> Optional[str]:
+    if v is None:
+        return None
+    if len(v) > 100 or not _REFERRER_HOST_RE.match(v):
+        raise ValueError("referrer_host must be a bare hostname, at most 100 characters")
+    return v
+
+
 class LeadSubmit(BaseModel):
     name: str = Field(..., min_length=1)
     email: EmailStr
@@ -854,6 +935,10 @@ class LeadSubmit(BaseModel):
     # only when an explicit bad value is sent -- pydantic v2 skips
     # validators on unsupplied defaults otherwise.
     interest_type: Optional[str] = Field(None, validate_default=True)
+    # WS2: optional lead-origin fields, see migrations/038_leads_origin.py
+    # and the shared validators above.
+    source_page: Optional[str] = Field(None, max_length=200)
+    referrer_host: Optional[str] = Field(None, max_length=100)
 
     @field_validator("interest_type")
     @classmethod
@@ -870,6 +955,16 @@ class LeadSubmit(BaseModel):
         if v is None or v.strip() == "" or v not in LEAD_INTEREST_TYPES:
             return "overig"
         return v
+
+    @field_validator("source_page")
+    @classmethod
+    def _check_source_page(cls, v):
+        return _validate_source_page(v)
+
+    @field_validator("referrer_host")
+    @classmethod
+    def _check_referrer_host(cls, v):
+        return _validate_referrer_host(v)
 
 
 # ── Generic Pagination ─────────────────────────────────────────────────
@@ -927,6 +1022,20 @@ class QuizAnswerItem(BaseModel):
 class QuizSubmitRequest(BaseModel):
     email: Optional[EmailStr] = None
     answers: List[QuizAnswerItem] = Field(..., min_length=1)
+    # WS2: optional lead-origin fields, see migrations/038_leads_origin.py
+    # and LeadSubmit's shared validators above.
+    source_page: Optional[str] = Field(None, max_length=200)
+    referrer_host: Optional[str] = Field(None, max_length=100)
+
+    @field_validator("source_page")
+    @classmethod
+    def _check_source_page(cls, v):
+        return _validate_source_page(v)
+
+    @field_validator("referrer_host")
+    @classmethod
+    def _check_referrer_host(cls, v):
+        return _validate_referrer_host(v)
 
 
 # ── WS-C.4: Client Contacts ──────────────────────────────────────────────

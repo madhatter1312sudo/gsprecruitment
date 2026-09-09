@@ -137,5 +137,42 @@ console.log('\nFixture 3: interim, only salary_min set (no baseSalary), explicit
   ok('fixture3 passed');
 }
 
+console.log('\nFixture 4: anonymous_client true -> no JobPosting JSON-LD (WS4)');
+{
+  const job = {
+    id: 4,
+    title: 'Mechatronica Engineer',
+    description: 'Opdracht bij een anonieme opdrachtgever in de Brainport regio.',
+    created_at: '2026-09-01T09:00:00Z',
+    city: 'Eindhoven',
+    location_type: 'on-site',
+    company_display: null,
+    employment_type: 'vast',
+    anonymous_client: true,
+  };
+  const ld = buildJobPostingLd(job);
+  assert(ld === null, 'fixture4: anonymous_client true -> buildJobPostingLd returns null');
+  ok('fixture4 passed');
+}
+
+console.log('\nFixture 5: anonymous_client false -> unchanged JobPosting JSON-LD behaviour');
+{
+  const job = {
+    id: 5,
+    title: 'C++ Software Engineer',
+    description: 'Vacature bij een genoemde opdrachtgever.',
+    created_at: '2026-09-01T09:00:00Z',
+    city: 'Eindhoven',
+    location_type: 'on-site',
+    company_display: 'confidential',
+    employment_type: 'vast',
+    anonymous_client: false,
+  };
+  const ld = buildJobPostingLd(job);
+  assertRequiredShape(ld, 'fixture5');
+  assert(ld.title === 'C++ Software Engineer', 'fixture5: anonymous_client false behaves exactly as before');
+  ok('fixture5 passed');
+}
+
 console.log(`\n${failures === 0 ? 'PASS' : 'FAIL'}: ${failures} assertion failure(s).`);
 process.exit(failures === 0 ? 0 : 1);

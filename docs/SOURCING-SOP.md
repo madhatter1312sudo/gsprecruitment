@@ -36,6 +36,8 @@ Alleen de kanalen hieronder zijn toegestaan. Alles daarbuiten is verboden totdat
 - Verlopen of ingetrokken toestemming = direct geen contact meer op deze grondslag.
 - Zelfde uitzondering als §1.4: herkomst is de eigen site (het vinkje zelf), dus `source_url` is niet vereist voor talentpool-contact — de grondslag is `opt_in_talentpool`, niet een gesourcete `source_url`.
 
+**Sollicitatie vanaf een vacaturepagina (WS-4, `migrations/037_pool_vacancies_consent_sources.py`).** Een bezoeker die op een vacature (mogelijk een vacature met anonieme opdrachtgever, §6 punt 11 van `VERWERKINGSREGISTER.md`) op "solliciteer" klikt, doorloopt hetzelfde dubbele-opt-in-formulier als §1.4/§1.5 hierboven, met twee toevoegingen: `source`/`consent_source` wordt `vacancy_apply` in plaats van `kandidaten_page` of `blog_cta`, en het formulier draagt het gekozen `job_id` mee. Alleen een `job_id` dat op het moment van aanmelden nog naar een open, niet-demo, niet-verwijderde vacature verwijst wordt opgeslagen; anders gaat de aanmelding gewoon door zonder vacaturekoppeling. Er bestaat geen direct sollicitatieformulier buiten deze talentpool-route om. Bij bevestiging (het tweede opt-in-mailtje) maakt de backend, als de vacature op dat moment nog open is, een sollicitatie aan (`matches`-rij, status `applied`) op dezelfde vacature; er is geen apart sollicitatieformulier of aparte tabel voor nodig.
+
 ### 1.6 Meetups en community's
 - Fysieke of online aanwezigheid bij 040coders, Bits&Chips Event, DSPE, ICS-security-meetup (Amsterdam Cyber Security for Control Systems) en vergelijkbare vakcommunity's.
 - Contact dat daar ontstaat, wordt behandeld als een normale eerstecontact-situatie (§2, §3): ook een gesprek op een meetup vervangt geen logregel.

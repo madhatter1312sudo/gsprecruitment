@@ -26,6 +26,33 @@ const GSP_WHATSAPP = '31617913965';
     return fetch(url, { ...options, signal: options.signal || controller.signal }).finally(() => clearTimeout(t));
   }
 
+  // Lead-origin fields (WS2) for POST /api/v1/public/lead — shared by the
+  // contact form and the quiz's e-mail-capture submit, both of which post
+  // to that same endpoint. Mirrors the backend validation exactly
+  // (models/schemas.py's LeadSubmit): source_page is the current path
+  // plus only the 'type'/'job' query keys (never an arbitrary caller-
+  // supplied one), referrer_host is a bare hostname. referrer_host is
+  // left undefined (not '') when there is no referrer, so JSON.stringify
+  // drops the key entirely instead of sending a value that would fail the
+  // backend's "at least one character" hostname check.
+  function getLeadOrigin() {
+    let sourcePage;
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const allowed = new URLSearchParams();
+      ['type', 'job'].forEach((k) => { if (params.has(k)) allowed.set(k, params.get(k)); });
+      const q = allowed.toString();
+      sourcePage = (q ? `${window.location.pathname}?${q}` : window.location.pathname).slice(0, 200);
+    } catch (e) { sourcePage = undefined; }
+
+    let referrerHost;
+    if (document.referrer) {
+      try { referrerHost = new URL(document.referrer).hostname.slice(0, 100) || undefined; } catch (e) { referrerHost = undefined; }
+    }
+
+    return { source_page: sourcePage, referrer_host: referrerHost };
+  }
+
   // ── Language Toggle ────────────────────────────────────
   function initLang() {
     let currentLang = localStorage.getItem('gsp_lang') || 'nl';
@@ -699,7 +726,7 @@ const GSP_WHATSAPP = '31617913965';
           </div>
           <p>${GSP.esc(job.description || '')}</p>
           <div class="job-meta">
-            <span><i class="fas fa-euro-sign"></i> €${(job.salary_min / 1000).toFixed(0)}k – €${(job.salary_max / 1000).toFixed(0)}k</span>
+            <span><i class="fas fa-euro-sign"></i> ${(job.salary_min != null && job.salary_max != null) ? `€${(job.salary_min / 1000).toFixed(0)}k – €${(job.salary_max / 1000).toFixed(0)}k` : `<span class="lang-nl">Salaris op aanvraag</span><span class="lang-en">Salary on request</span>`}</span>
             <span><i class="fas fa-map-marker-alt"></i> ${GSP.esc(job.location_type || 'Netherlands')}</span>
           </div>
           <div class="job-links">
@@ -733,7 +760,7 @@ const GSP_WHATSAPP = '31617913965';
         </div>
         <div style="background:var(--bg-alt);padding:16px;border-radius:var(--radius-sm);margin-bottom:16px">
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
-            <div><strong>Salary:</strong> €${(job.salary_min/1000).toFixed(0)}k – €${(job.salary_max/1000).toFixed(0)}k</div>
+            <div><strong>Salary:</strong> ${(job.salary_min != null && job.salary_max != null) ? `€${(job.salary_min/1000).toFixed(0)}k – €${(job.salary_max/1000).toFixed(0)}k` : `<span class="lang-nl">Salaris op aanvraag</span><span class="lang-en">Salary on request</span>`}</div>
             <div><strong>Location:</strong> ${GSP.esc(job.location_type || 'Netherlands')}</div>
           </div>
         </div>
@@ -1085,7 +1112,8 @@ const GSP_WHATSAPP = '31617913965';
               email,
               name: 'Quiz Lead',
               message: `Quiz score: ${pct}% - ${label}`,
-              interest_type: 'kandidaat'
+              interest_type: 'kandidaat',
+              ...getLeadOrigin(),
             })
           });
           if (res.ok) {
@@ -1145,6 +1173,7 @@ const GSP_WHATSAPP = '31617913965';
         delete data.interest;
       }
       delete data.gdpr;
+      Object.assign(data, getLeadOrigin());
 
       try {
         const res = await fetch(`${API}/api/v1/public/lead`, {

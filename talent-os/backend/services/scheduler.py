@@ -237,7 +237,8 @@ async def draft_outreach() -> dict:
         """SELECT m.candidate_id, m.job_id, m.match_score,
                   c.full_name, c.email, c.current_company,
                   j.title AS job_title, j.description AS job_description,
-                  cl.company_name AS job_company
+                  cl.company_name AS job_company,
+                  COALESCE(cl.is_internal, false) AS job_client_internal
            FROM matches m
            JOIN candidates c ON c.id = m.candidate_id
            JOIN job_orders j ON j.id = m.job_id
@@ -278,6 +279,16 @@ async def draft_outreach() -> dict:
     errors = 0
     for row in candidates:
         try:
+            # WS-4 (migrations/037): the client for this job is one of
+            # GSP's own internal rows (demo client or the anonymous-
+            # opdrachtgever pool client) -- never draft outreach that
+            # names or implies a real hiring company for it. job_company
+            # becomes the literal 'anonieme opdrachtgever', and the
+            # prompt itself (outreach_ai._build_user_prompt) is told the
+            # client is anonymous so it won't invent or guess a name.
+            job_company = (
+                "anonieme opdrachtgever" if row["job_client_internal"] else row["job_company"]
+            )
             draft = await outreach_ai.draft_email(
                 target={
                     "name": row["full_name"],
@@ -285,8 +296,9 @@ async def draft_outreach() -> dict:
                 },
                 context={
                     "job_title": row["job_title"],
-                    "job_company": row["job_company"],
+                    "job_company": job_company,
                     "job_description": row["job_description"],
+                    "anonymous_client": row["job_client_internal"],
                 },
                 language="nl",
             )

@@ -8,6 +8,7 @@ from core.database import fetch_one, fetch_all, execute, fetch_val
 from core.deps import require_verified_role
 from core import privacy
 from core.security import hash_password, hash_token
+from core.sources import source_family
 from models.schemas import (
     ClientDashboard, ClientJobCreate, ClientJobUpdate, JobOrderResponse,
     CandidateSearchParams, PipelineAdd, ClientAnalytics, TeamInvite,
@@ -755,7 +756,10 @@ async def get_client_analytics(current_user: dict = Depends(require_verified_rol
     for s in stages:
         analytics.pipeline_funnel[s["stage"]] = s["count"]
 
-    # Source breakdown
+    # Source breakdown -- grouped by SOURCE_FAMILY (core/sources.py) so
+    # e.g. 'apollo' and 'apollo_bulk' (two write paths for the same
+    # vendor, see migrations/022_apollo_pool_flag.py) report as one
+    # 'apollo' bucket instead of two, each dwarfed by the other.
     analytics.source_breakdown = {}
     sources = await fetch_all(
         """SELECT c.source, COUNT(*) as count FROM matches m
@@ -765,7 +769,8 @@ async def get_client_analytics(current_user: dict = Depends(require_verified_rol
         cid,
     )
     for s in sources:
-        analytics.source_breakdown[s["source"]] = s["count"]
+        family = source_family(s["source"])
+        analytics.source_breakdown[family] = analytics.source_breakdown.get(family, 0) + s["count"]
 
     # Offer rate
     total_applied = await fetch_val(
