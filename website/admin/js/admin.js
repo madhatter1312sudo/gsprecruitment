@@ -53,13 +53,27 @@ const Admin = {
     return this.formatDate(d);
   },
   badge(status) {
-    const map = { active: 'green', open: 'green', placed: 'blue',
+    const map = { active: 'green', open: 'green', placed: 'green',
       pending: 'blue', suspended: 'red', closed: 'red',
       draft: 'blue', admin: 'red', candidate: 'gold', client: 'blue',
       sent: 'green', rejected: 'default', failed: 'red',
-      published: 'green', archived: 'default' };
+      published: 'green', archived: 'default',
+      // Candidate pipeline statuses (WS2) — the raw values GET
+      // /v1/admin/candidates actually returns, not the old active/
+      // placed/inactive guess.
+      sourced: 'default', new: 'gold', contacted: 'blue', screening: 'gold',
+      inactive: 'default' };
     const colors = { green: 'bg-green-lt', blue: 'bg-blue-lt', gold: 'bg-yellow-lt', red: 'bg-red-lt', default: 'bg-secondary-lt' };
     return `badge ${colors[map[status?.toLowerCase()] || 'default']}`;
+  },
+  // Dutch label for a candidate-pipeline status word (badge() above picks
+  // the color; this picks the text) — an unrecognised value still shows
+  // itself (escaped by html``, never hidden) rather than falling back to
+  // a silent "—".
+  statusLabel(status) {
+    const map = { sourced: 'Gesourced', new: 'Nieuw', contacted: 'Benaderd',
+      screening: 'Screening', active: 'Actief', placed: 'Geplaatst', inactive: 'Inactief' };
+    return map[status?.toLowerCase()] || status || 'Actief';
   },
   // esc()/safeUrl() delegate to the shared GSP.esc/GSP.safeUrl (gsp-util.js,
   // loaded before this file) so the public site and admin panel share one
@@ -189,16 +203,19 @@ const Admin = {
     const icons = { user_update: 'fa-user-pen', user_delete: 'fa-user-xmark', impersonate: 'fa-mask',
       job_update: 'fa-briefcase', content_update: 'fa-newspaper', settings_update: 'fa-gear',
       placement: 'fa-calendar-check' };
-    mount(el, html`${items.map(e => html`
+    mount(el, html`${items.map(e => {
+      const changeKeys = (e.changes && typeof e.changes === 'object') ? Object.keys(e.changes).slice(0, 2) : [];
+      return html`
       <div class="activity-item">
         <div class="activity-icon" style="background:rgba(250,200,0,0.1);color:var(--gold-400);">
           <i class="fa-regular ${icons[e.action] || 'fa-circle-dot'}"></i>
         </div>
         <div class="activity-content" style="flex:1;">
-          <div class="activity-text">${e.action?.replace(/_/g, ' ')} <span style="color:var(--navy-300);">by ${e.actor_email || 'system'}</span></div>
+          <div class="activity-text">${e.action?.replace(/_/g, ' ')} <span style="color:var(--navy-300);">by ${e.actor_email || 'system'}</span>${changeKeys.length ? html` <span style="color:var(--navy-300);">(${changeKeys.join(', ')})</span>` : ''}</div>
           <div class="activity-time">${this.timeAgo(e.created_at)}</div>
         </div>
-      </div>`)}`);
+      </div>`;
+    })}`);
   },
 
   renderPendingRegistrations(items) {
@@ -643,11 +660,12 @@ const Admin = {
     }
   },
 
-  // "sourced" (blue) came in via our own search/outreach pipeline;
-  // "self-registered" (green) signed up on the candidate portal themselves.
+  // "sourced" (blue, "Via GSP") came in via our own search/outreach
+  // pipeline; "self-registered" (green, "Zelf aangemeld") signed up on the
+  // candidate portal themselves.
   kindBadge(kind) {
-    if (kind === 'self-registered') return { cls: 'badge bg-green-lt', label: 'Zelf geregistreerd' };
-    return { cls: 'badge bg-blue-lt', label: 'Gesourced' };
+    if (kind === 'self-registered') return { cls: 'badge bg-green-lt', label: 'Zelf aangemeld' };
+    return { cls: 'badge bg-blue-lt', label: 'Via GSP' };
   },
 
   renderCandidates(data) {
@@ -680,7 +698,7 @@ const Admin = {
         </td>
         <td><span class="${kb.cls}" title="${c.source ? 'Bron: ' + c.source : ''}">${kb.label}</span></td>
         <td>
-          <span class="${this.badge(c.status || 'active')}">${c.status || 'active'}</span>
+          <span class="${this.badge(c.status || 'active')}">${this.statusLabel(c.status || 'active')}</span>
         </td>
         <td>
           <button class="btn btn-sm btn-ghost-secondary" data-action="view-candidate" data-kind="${effKind === 'self-registered' ? 'self-registered' : 'sourced'}" data-id="${itemId}" title="View profile">
@@ -1180,17 +1198,30 @@ const Admin = {
   /* ============================================================
      ANALYTICS
      ============================================================ */
+  // WS2 fix: never touch #analyticsContent (the shared parent of both
+  // panels) with innerHTML again — a failed fetch used to nuke both the
+  // chart card AND the summary card's markup permanently (a later retry
+  // had nothing left to mount into). Load/error state is set on
+  // #userGrowthChart and #analyticsSummary independently instead, and
+  // loadAnalytics() itself rethrows on failure so nav.js's sectionLoaders
+  // promise sees the rejection and un-caches the section (retrying it
+  // reloads on the next visit, not just via the in-panel retry link).
   async loadAnalytics() {
-    const container = document.getElementById('analyticsContent');
-    if (container) container.innerHTML = '<div style="text-align:center;padding:3rem;color:var(--navy-300);"><i class="fa-solid fa-spinner fa-spin"></i> Loading analytics…</div>';
+    const growthEl = document.getElementById('userGrowthChart');
+    const summaryEl = document.getElementById('analyticsSummary');
+    const spinner = html`<div style="text-align:center;padding:1rem 0;color:var(--navy-300);"><i class="fa-solid fa-spinner fa-spin"></i></div>`;
+    mount(growthEl, spinner);
+    mount(summaryEl, spinner);
     try {
       const res = await Auth.fetch('/v1/admin/analytics');
       if (!res?.ok) throw new Error('Failed');
       const data = await res.json();
       this._data.analytics = data;
       this.renderAnalytics(data);
-    } catch {
-      if (container) container.innerHTML = '<div style="text-align:center;padding:3rem;color:#f87171;">Failed to load analytics</div>';
+    } catch (err) {
+      this.setContainerLoadError(growthEl, () => this.loadAnalytics());
+      this.setContainerLoadError(summaryEl, () => this.loadAnalytics());
+      throw err;
     }
   },
 
@@ -1199,43 +1230,62 @@ const Admin = {
     document.getElementById('kpiClientRetention').textContent = (data.client_retention_rate ?? 0) + '%';
     document.getElementById('kpiCandidatePlacement').textContent = (data.candidate_satisfaction ?? 0) + '%';
 
-    const growthEl = document.getElementById('userGrowthChart');
-    if (growthEl && data.user_growth) {
-      const entries = Object.entries(data.user_growth).sort(([a], [b]) => a.localeCompare(b));
-      if (!entries.length) { growthEl.innerHTML = '<div style="color:var(--navy-300);font-size:var(--font-size-sm);">No data yet</div>'; return; }
+    this.renderAnalyticsSummary(data);
 
-      if (window.ApexCharts) {
-        growthEl.innerHTML = '';
-        growthEl.style.display = '';
-        const labels = entries.map(([month]) => new Date(month).toLocaleDateString('en-GB', { month: 'short' }));
-        const values = entries.map(([, count]) => count);
-        if (this._growthChart) { this._growthChart.destroy(); this._growthChart = null; }
-        this._growthChart = new ApexCharts(growthEl, {
-          chart: { type: 'bar', height: 200, background: 'transparent', toolbar: { show: false } },
-          series: [{ name: 'Users', data: values }],
-          xaxis: { categories: labels, axisBorder: { show: false }, axisTicks: { show: false } },
-          colors: ['#E8B400'],
-          plotOptions: { bar: { borderRadius: 4, columnWidth: '55%' } },
-          dataLabels: { enabled: false },
-          grid: { borderColor: 'rgba(255,255,255,0.06)' },
-          theme: { mode: 'dark' },
-        });
-        this._growthChart.render();
-      } else {
-        const max = Math.max(...entries.map(([, v]) => v), 1);
-        mount(growthEl, html`<div style="display:flex;align-items:flex-end;gap:6px;height:120px;width:100%;">
-          ${entries.map(([month, count]) => {
-            const h = Math.round((count / max) * 110);
-            const label = new Date(month).toLocaleDateString('en-GB', { month: 'short' });
-            return html`<div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:4px;">
-              <div style="font-size:9px;color:var(--navy-300);">${count}</div>
-              <div style="width:100%;border-radius:4px 4px 0 0;background:var(--gold-gradient);height:${h}px;"></div>
-              <div style="font-size:9px;color:var(--navy-300);">${label}</div>
-            </div>`;
-          })}
-        </div>`);
-      }
+    const growthEl = document.getElementById('userGrowthChart');
+    if (!growthEl || !data.user_growth) return;
+    const entries = Object.entries(data.user_growth).sort(([a], [b]) => a.localeCompare(b));
+    if (!entries.length) { mount(growthEl, html`<div style="color:var(--navy-300);font-size:var(--font-size-sm);">No data yet</div>`); return; }
+
+    if (window.ApexCharts) {
+      mount(growthEl, raw(''));
+      growthEl.style.display = '';
+      const labels = entries.map(([month]) => new Date(month).toLocaleDateString('en-GB', { month: 'short' }));
+      const values = entries.map(([, count]) => count);
+      if (this._growthChart) { this._growthChart.destroy(); this._growthChart = null; }
+      this._growthChart = new ApexCharts(growthEl, {
+        chart: { type: 'bar', height: 200, background: 'transparent', toolbar: { show: false } },
+        series: [{ name: 'Users', data: values }],
+        xaxis: { categories: labels, axisBorder: { show: false }, axisTicks: { show: false } },
+        colors: ['#E8B400'],
+        plotOptions: { bar: { borderRadius: 4, columnWidth: '55%' } },
+        dataLabels: { enabled: false },
+        grid: { borderColor: 'rgba(255,255,255,0.06)' },
+        theme: { mode: 'dark' },
+      });
+      this._growthChart.render();
+    } else {
+      const max = Math.max(...entries.map(([, v]) => v), 1);
+      mount(growthEl, html`<div style="display:flex;align-items:flex-end;gap:6px;height:120px;width:100%;">
+        ${entries.map(([month, count]) => {
+          const h = Math.round((count / max) * 110);
+          const label = new Date(month).toLocaleDateString('en-GB', { month: 'short' });
+          return html`<div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:4px;">
+            <div style="font-size:9px;color:var(--navy-300);">${count}</div>
+            <div style="width:100%;border-radius:4px 4px 0 0;background:var(--gold-gradient);height:${h}px;"></div>
+            <div style="font-size:9px;color:var(--navy-300);">${label}</div>
+          </div>`;
+        })}
+      </div>`);
     }
+  },
+
+  // Platform Summary card — fill rate, client retention and
+  // candidate_satisfaction (API field name unchanged; the UI label is
+  // "Plaatsingsratio", matching the KPI card above it).
+  renderAnalyticsSummary(data) {
+    const el = document.getElementById('analyticsSummary');
+    if (!el) return;
+    const row = (label, value) => html`
+      <div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid rgba(74,111,159,0.15);">
+        <span style="color:var(--navy-300);">${label}</span>
+        <strong style="color:var(--white);">${value}%</strong>
+      </div>`;
+    mount(el, html`
+      ${row('Fill rate', data.job_fill_rate ?? 0)}
+      ${row('Klantretentie', data.client_retention_rate ?? 0)}
+      ${row('Plaatsingsratio', data.candidate_satisfaction ?? 0)}
+    `);
   },
 
   /* ============================================================
@@ -1250,7 +1300,7 @@ const Admin = {
     qs.set('limit', limit);
     qs.set('offset', offset);
 
-    this.setLoading('#section-audit table tbody', 4);
+    this.setLoading('#section-audit table tbody', 5);
     try {
       const res = await Auth.fetch(`/v1/admin/audit-log?${qs}`);
       if (!res) return;
@@ -1260,15 +1310,32 @@ const Admin = {
       this.renderAuditLog(data);
       this.renderPagination('auditPagination', data.total, limit, this._currentPage.audit, 'audit');
     } catch {
-      this.setEmpty('#section-audit table tbody', 4, 'Failed to load audit log');
+      this.setEmpty('#section-audit table tbody', 5, 'Failed to load audit log');
     }
+  },
+
+  // `changes` (models/schemas.py AuditLogEntry.changes) is a free-form
+  // dict written by whichever admin action logged the entry -- a scalar
+  // value renders as an escaped "key: value" line, an object/array value
+  // is JSON.stringify'd and truncated at 300 chars inside a <details> so
+  // one bulky diff never blows out the row height.
+  auditChangesHtml(changes) {
+    if (!changes || typeof changes !== 'object' || !Object.keys(changes).length) return raw('—');
+    return html`<ul style="margin:0;padding-left:1.1em;list-style:disc;">${Object.entries(changes).map(([k, v]) => {
+      if (v !== null && typeof v === 'object') {
+        const str = JSON.stringify(v);
+        const truncated = str.length > 300 ? str.slice(0, 300) + '…' : str;
+        return html`<li><strong>${k}</strong>: <details><summary style="cursor:pointer;color:var(--navy-300);">JSON</summary><pre style="white-space:pre-wrap;word-break:break-all;margin:4px 0 0;font-size:var(--font-size-xs);">${truncated}</pre></details></li>`;
+      }
+      return html`<li><strong>${k}</strong>: ${v}</li>`;
+    })}</ul>`;
   },
 
   renderAuditLog(data) {
     const tbody = document.querySelector('#section-audit table tbody');
     if (!tbody) return;
     const items = data.items || [];
-    if (!items.length) { this.setEmpty('#section-audit table tbody', 4, 'Nog geen audit-log entries voor dit filter.'); return; }
+    if (!items.length) { this.setEmpty('#section-audit table tbody', 5, 'Nog geen audit-log entries voor dit filter.'); return; }
     const colors = { user_delete: '#f87171', impersonate: '#fb923c', settings_update: '#a78bfa' };
     mount(tbody, html`${items.map(e => html`
       <tr>
@@ -1276,6 +1343,7 @@ const Admin = {
         <td><span style="color:${colors[e.action] || 'var(--gold-400)'};">${e.action?.replace(/_/g, ' ')}</span></td>
         <td style="font-size:var(--font-size-xs);color:var(--navy-200);">${e.actor_email || 'system'}</td>
         <td style="font-size:var(--font-size-xs);color:var(--navy-300);">${e.target_type ? e.target_type + ' #' + e.target_id : '—'}</td>
+        <td style="font-size:var(--font-size-xs);color:var(--navy-300);">${this.auditChangesHtml(e.changes)}</td>
       </tr>`)}`);
   },
 
@@ -1782,7 +1850,7 @@ const Admin = {
     qs.set('limit', limit);
     qs.set('offset', offset);
 
-    this.setLoading('#section-leads table tbody', 6);
+    this.setLoading('#section-leads table tbody', 7);
     try {
       const res = await Auth.fetch(`/v1/admin/leads?${qs}`);
       if (!res) return;
@@ -1792,7 +1860,7 @@ const Admin = {
       this.renderLeads(data);
       this.renderPagination('leadsPagination', data.total, limit, this._currentPage.leads, 'leads');
     } catch {
-      this.setLoadError('#section-leads table tbody', 6, () => this.loadLeads(params));
+      this.setLoadError('#section-leads table tbody', 7, () => this.loadLeads(params));
     }
   },
 
@@ -1821,18 +1889,29 @@ const Admin = {
     return map[type] || type || 'onbekend';
   },
 
+  // source_page + referrer_host (WS2, migrations/038_leads_origin.py) as
+  // one compact column — a lead with neither renders "—" rather than an
+  // empty cell.
+  leadOriginText(l) {
+    const parts = [];
+    if (l.source_page) parts.push(l.source_page);
+    if (l.referrer_host) parts.push(`via ${l.referrer_host}`);
+    return parts.length ? parts.join(' · ') : '—';
+  },
+
   renderLeads(data) {
     const tbody = document.querySelector('#section-leads table tbody');
     if (!tbody) return;
     const items = data.items || [];
-    if (!items.length) { this.setEmpty('#section-leads table tbody', 6, 'Geen leads gevonden voor deze filters.'); return; }
+    if (!items.length) { this.setEmpty('#section-leads table tbody', 7, 'Geen leads gevonden voor deze filters.'); return; }
     mount(tbody, html`${items.map(l => html`
-      <tr data-action="toggle-lead-read" data-source="${l.source}" data-id="${l.id}" data-read="${l.is_read ? '1' : '0'}"
+      <tr data-action="view-lead" data-source="${l.source}" data-id="${l.id}"
         style="cursor:pointer;${raw(l.is_read ? '' : 'font-weight:600;')}">
         <td><span class="badge ${l.source === 'quiz_submissions' ? 'bg-yellow-lt' : 'bg-blue-lt'}">${l.source === 'quiz_submissions' ? 'Quiz' : 'Contact'}</span></td>
         <td style="color:var(--white);">${l.name || '—'}</td>
         <td style="color:var(--navy-200);">${l.email || '—'}</td>
         <td>${l.interest_type ? html`<span class="badge bg-secondary-lt">${this.leadInterestLabel(l.interest_type)}</span>` : '—'}</td>
+        <td style="color:var(--navy-300);font-size:var(--font-size-xs);">${this.leadOriginText(l)}</td>
         <td style="color:var(--navy-200);">${this.formatDate(l.created_at)}</td>
         <td>${l.is_read
           ? html`<span class="badge bg-secondary-lt">Gelezen</span>`
@@ -1840,13 +1919,98 @@ const Admin = {
       </tr>`)}`);
   },
 
+  /* ---- Lead detail modal (WS2) ---- */
+  async viewLeadDetail(source, leadId) {
+    this.openModal('leadDetailModal', html`
+      <div style="text-align:center;padding:2rem 0;color:var(--navy-300);">
+        <i class="fa-solid fa-spinner fa-spin"></i> Laden…
+      </div>`);
+    try {
+      const res = await Auth.fetch(`/v1/admin/leads/${source}/${leadId}`);
+      if (!res?.ok) {
+        const d = await res?.json().catch(() => null);
+        this.openModal('leadDetailModal', html`
+          <h3 style="color:var(--white);margin-bottom:var(--space-md);">Kon lead niet laden</h3>
+          <p style="color:var(--navy-300);">${d?.detail || 'Er ging iets mis bij het ophalen van deze lead.'}</p>
+          <div style="display:flex;gap:var(--space-md);margin-top:var(--space-lg);">
+            <button class="btn btn-primary btn-sm" data-action="view-lead" data-source="${source}" data-id="${leadId}">Opnieuw proberen</button>
+            <button class="btn btn-ghost-secondary btn-sm" data-action="close-modal">Sluiten</button>
+          </div>`);
+        return;
+      }
+      const detail = await res.json();
+      this._data.leadDetail = detail;
+      this.renderLeadDetailModal(detail);
+    } catch {
+      this.openModal('leadDetailModal', html`
+        <h3 style="color:var(--white);margin-bottom:var(--space-md);">Netwerkfout</h3>
+        <p style="color:var(--navy-300);">Kon geen verbinding maken met de server.</p>
+        <div style="display:flex;gap:var(--space-md);margin-top:var(--space-lg);">
+          <button class="btn btn-primary btn-sm" data-action="view-lead" data-source="${source}" data-id="${leadId}">Opnieuw proberen</button>
+          <button class="btn btn-ghost-secondary btn-sm" data-action="close-modal">Sluiten</button>
+        </div>`);
+    }
+  },
+
+  // detail is the full row GET /v1/admin/leads/{source}/{id} returns --
+  // contact_submissions rows carry message/company/phone/interest_type,
+  // quiz_submissions rows carry score/max_score/tier/domain_scores instead
+  // (neither table has both, see routers/admin.py's _leads_union_sql).
+  renderLeadDetailModal(detail) {
+    const isQuiz = detail.source === 'quiz_submissions';
+    const field = (label, value) => html`
+      <div style="margin-bottom:var(--space-md);">
+        <div style="font-size:var(--font-size-xs);color:var(--navy-300);margin-bottom:4px;">${label}</div>
+        <div style="color:var(--white);">${value}</div>
+      </div>`;
+    const domainScores = (detail.domain_scores && typeof detail.domain_scores === 'object')
+      ? html`<ul style="margin:0;padding-left:1.1em;">${Object.entries(detail.domain_scores).map(([k, v]) => html`<li>${k}: ${v}</li>`)}</ul>`
+      : raw('—');
+
+    this.openModal('leadDetailModal', html`
+      <h3 style="color:var(--white);margin-bottom:var(--space-lg);">${isQuiz ? 'Quiz-inzending' : (detail.name || 'Lead')}</h3>
+      ${field('E-mail', detail.email || '—')}
+      ${isQuiz ? html`
+        ${field('Score', (detail.score != null && detail.max_score != null) ? `${detail.score} / ${detail.max_score}` : '—')}
+        ${field('Tier', detail.tier || '—')}
+        ${field('Domeinscores', domainScores)}
+      ` : html`
+        ${field('Bedrijf', detail.company || '—')}
+        ${field('Telefoon', detail.phone || '—')}
+        ${field('Categorie', detail.interest_type ? this.leadInterestLabel(detail.interest_type) : '—')}
+        ${field('Bericht', detail.message || '—')}
+      `}
+      ${field('Herkomst', this.leadOriginText(detail))}
+      ${field('Datum', this.formatDate(detail.created_at))}
+      ${field('Status', detail.is_read
+        ? html`<span class="badge bg-secondary-lt">Gelezen</span>`
+        : html`<span class="badge bg-green-lt">Ongelezen</span>`)}
+      <div style="display:flex;gap:var(--space-md);margin-top:var(--space-lg);">
+        <button class="btn btn-sm ${detail.is_read ? 'btn-ghost-secondary' : 'btn-primary'}"
+          data-action="toggle-lead-read" data-source="${detail.source}" data-id="${detail.id}" data-read="${detail.is_read ? '1' : '0'}">
+          ${detail.is_read ? 'Markeer als ongelezen' : 'Markeer als gelezen'}
+        </button>
+        <button class="btn btn-ghost-secondary btn-sm" data-action="close-modal">Sluiten</button>
+      </div>`);
+  },
+
+  // Called from the explicit modal button only (never from a row click —
+  // that accidental toggle-on-click was the WS2 defect). Updates the open
+  // modal in place from the PATCH response, then refreshes the leads list
+  // in the background so the row/unread badges/Rapportage counter stay in
+  // sync without re-fetching the detail itself.
   async toggleLeadRead(source, leadId, currentlyRead) {
     try {
       const res = await Auth.fetch(`/v1/admin/leads/${source}/${leadId}`, {
         method: 'PATCH', body: JSON.stringify({ is_read: !currentlyRead }),
       });
       if (res?.ok) {
-        await this.loadLeads(this._lastParams.leads || {});
+        const updated = await res.json().catch(() => null);
+        if (this._data.leadDetail && this._data.leadDetail.source === source && this._data.leadDetail.id === leadId) {
+          this._data.leadDetail.is_read = updated ? !!updated.is_read : !currentlyRead;
+          this.renderLeadDetailModal(this._data.leadDetail);
+        }
+        this.loadLeads(this._lastParams.leads || {});
       } else {
         Auth.toast('Bijwerken mislukt', 'error');
       }
@@ -2249,6 +2413,9 @@ const Admin = {
         break;
       case 'client-contact-delete':
         this.deleteClientContact(Number(el.dataset.clientId), Number(id));
+        break;
+      case 'view-lead':
+        this.viewLeadDetail(el.dataset.source, Number(id));
         break;
       case 'toggle-lead-read':
         this.toggleLeadRead(el.dataset.source, Number(id), el.dataset.read === '1');

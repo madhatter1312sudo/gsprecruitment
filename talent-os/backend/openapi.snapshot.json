@@ -3295,6 +3295,17 @@
             "title": "Database",
             "type": "string"
           },
+          "duplicate_profile_links": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duplicate Profile Links"
+          },
           "open_jobs": {
             "anyOf": [
               {
@@ -3745,6 +3756,30 @@
               }
             ],
             "title": "Phone"
+          },
+          "referrer_host": {
+            "anyOf": [
+              {
+                "maxLength": 100,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Referrer Host"
+          },
+          "source_page": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Page"
           }
         },
         "required": [
@@ -5061,6 +5096,30 @@
               }
             ],
             "title": "Email"
+          },
+          "referrer_host": {
+            "anyOf": [
+              {
+                "maxLength": 100,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Referrer Host"
+          },
+          "source_page": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Page"
           }
         },
         "required": [
@@ -9537,7 +9596,7 @@
     },
     "/api/v1/admin/leads": {
       "get": {
-        "description": "Unified leads list across contact_submissions + quiz_submissions.\n`type` filters by interest_type (contact_submissions only -- quiz_submissions\nrows never match a type filter, since they have no interest_type column).\n`unread` filters by is_read on whichever table each row is from.",
+        "description": "Unified, paginated leads list across contact_submissions +\nquiz_submissions -- a real SQL UNION ALL (ORDER BY/LIMIT/OFFSET applied\nto the union as a whole) rather than fetching every matching row from\nboth tables and paginating in Python, so `total` and each page are\nexact and consistent even as the underlying tables grow.",
         "operationId": "list_leads_api_v1_admin_leads_get",
         "parameters": [
           {
@@ -9628,6 +9687,59 @@
       }
     },
     "/api/v1/admin/leads/{source}/{lead_id}": {
+      "get": {
+        "description": "Full detail for one lead, addressed by the (source, id) pair GET\n/leads returns. contact_submissions rows return every column on the\ntable; quiz_submissions rows additionally decode answers/domain_scores\n-- jsonb columns asyncpg returns as raw JSON text on this connection\n(no codec registered, same as routers/public.py's get_quiz()).",
+        "operationId": "get_lead_detail_api_v1_admin_leads__source___lead_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "source",
+            "required": true,
+            "schema": {
+              "title": "Source",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "lead_id",
+            "required": true,
+            "schema": {
+              "title": "Lead Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Lead Detail",
+        "tags": [
+          "admin-portal"
+        ]
+      },
       "patch": {
         "operationId": "update_lead_read_state_api_v1_admin_leads__source___lead_id__patch",
         "parameters": [

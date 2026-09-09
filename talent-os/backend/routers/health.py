@@ -34,11 +34,24 @@ async def get_health_detail() -> HealthResponse:
 
     candidates_count = None
     open_jobs = None
+    duplicate_profile_links = None
     if db_status == "connected":
         candidates_count = await fetch_val("SELECT COUNT(*) FROM candidates")
         open_jobs = await fetch_val(
             "SELECT COUNT(*) FROM job_orders WHERE status = 'open' AND is_demo = false "
             "AND deleted_at IS NULL"
+        )
+        # WS2: candidate_profiles.candidate_id values shared by more than
+        # one profile row -- should always be 0 (routers/admin.py's
+        # candidates-list branch B NOT EXISTS prevents new duplicates in
+        # the *listing*, it does not repair existing candidate_profiles
+        # data, so this is a separate integrity signal).
+        duplicate_profile_links = await fetch_val(
+            """SELECT COUNT(*) FROM (
+                   SELECT candidate_id FROM candidate_profiles
+                   WHERE candidate_id IS NOT NULL
+                   GROUP BY candidate_id HAVING COUNT(*) > 1
+               ) dup"""
         )
 
     openrouter_status = "configured" if settings.openrouter_api_key else "not configured"
@@ -52,6 +65,7 @@ async def get_health_detail() -> HealthResponse:
         apollo=apollo_status,
         candidates_count=candidates_count,
         open_jobs=open_jobs,
+        duplicate_profile_links=duplicate_profile_links,
     )
 
 
