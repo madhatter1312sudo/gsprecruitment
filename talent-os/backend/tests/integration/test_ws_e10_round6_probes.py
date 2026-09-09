@@ -51,10 +51,23 @@ def _rejected_candidate(db_run, *, suffix, email=None, weeks_ago=5):
     return row["id"]
 
 
-async def _insert_portal_candidate(email: str, *, last_login_at, consent_talentpool_until=None):
+async def _insert_portal_candidate(
+    email: str, *, last_login_at, consent_talentpool_until=None, dormant_warning_sent_at="default",
+):
     """A real candidate row + a linked users/candidate_profiles portal
     account -- the exact shape PORTAL_ACCOUNT_INACTIVE_SQL selects
-    against (candidate_profiles -> users, joined, never by e-mail)."""
+    against (candidate_profiles -> users, joined, never by e-mail).
+
+    chief-of-staff FIX FIRST (finding 2, after this file's own round):
+    PORTAL_ACCOUNT_INACTIVE_SQL now also requires dormant_warning_sent_at
+    to be set and >=30 days old. Every probe in this file is about some
+    OTHER condition (the FK, the 18-month boundary, talentpool-consent
+    immunity) so the default here (60 days ago) satisfies the new gate
+    without changing what each probe actually tests -- pass
+    dormant_warning_sent_at=None explicitly for a probe about the warning
+    gate itself (see test_probe8_five_year_dormant_account_without_warning_stamp_is_never_queued below)."""
+    if dormant_warning_sent_at == "default":
+        dormant_warning_sent_at = datetime.now(timezone.utc) - timedelta(days=60)
     cand = await fetch_one(
         """INSERT INTO candidates (full_name, email, status, consent_talentpool_until)
            VALUES ($1, $2, 'sourced', $3) RETURNING id""",
@@ -62,9 +75,9 @@ async def _insert_portal_candidate(email: str, *, last_login_at, consent_talentp
         consent_talentpool_until,
     )
     user = await fetch_one(
-        """INSERT INTO users (email, password_hash, full_name, role, is_verified, last_login_at)
-           VALUES ($1, 'x', 'Portal User', 'candidate', TRUE, $2) RETURNING id""",
-        email, last_login_at,
+        """INSERT INTO users (email, password_hash, full_name, role, is_verified, last_login_at, dormant_warning_sent_at)
+           VALUES ($1, 'x', 'Portal User', 'candidate', TRUE, $2, $3) RETURNING id""",
+        email, last_login_at, dormant_warning_sent_at,
     )
     await execute(
         "INSERT INTO candidate_profiles (user_id, candidate_id) VALUES ($1, $2)",
@@ -510,3 +523,87 @@ def test_probe7_rejected_item_reappearance_is_recorded_and_survives_a_failed_rea
 
     candidate_row = db_run(fetch_one, "SELECT id FROM candidates WHERE id = $1", cid)
     assert candidate_row is not None  # never actually deleted -- the FK violation rolled it back
+
+
+# ── Probe 8: dormant-warning gate (chief-of-staff FIX FIRST, finding 2) ──
+
+def test_probe8_five_year_dormant_account_without_warning_stamp_is_never_queued(db_run):
+    """The public promise (VERWERKINGSREGISTER §1.4, privacy.html,
+    privacy-kandidaten.html, SOURCING-SOP) is "18 maanden inactiviteit ->
+    verwijderen, waarschuwing 30 dagen vooraf". Before this fix,
+    PORTAL_ACCOUNT_INACTIVE_SQL ignored users.dormant_warning_sent_at
+    entirely (migrations/039_users_dormant_warning.py added the column
+    but nothing read it) -- a account dormant for *years*, never warned,
+    would already have reached the monthly review list, half the
+    promised notice silently skipped. Wildly overdue on last_login_at
+    (5 years, not just 18 months) and dormant_warning_sent_at left NULL
+    (no warning job exists yet to have stamped it): must not be queued."""
+    import services.scheduler as scheduler
+
+    never_warned = db_run(
+        _insert_portal_candidate,
+        f"round6-neverwarned-{_suffix()}@example.com",
+        last_login_at=datetime.now(timezone.utc) - timedelta(days=5 * 365),
+        dormant_warning_sent_at=None,
+    )
+
+    db_run(scheduler.generate_retention_review)
+
+    row = db_run(
+        fetch_one,
+        "SELECT 1 FROM retention_review_items WHERE category = 'portal_account_inactive' AND subject_id = $1",
+        never_warned["user_id"],
+    )
+    assert row is None, (
+        "a portal account with no dormant_warning_sent_at stamp must never be queued, "
+        "however long it has been inactive -- the public 30-day-advance-warning promise "
+        "must hold by construction"
+    )
+
+
+def test_probe8_warning_sent_less_than_thirty_days_ago_is_not_yet_queued(db_run):
+    """The 30-day advance-warning window itself: a warning stamped only
+    yesterday has not yet run its full 30 days, so the account must not
+    be queued even though last_login_at is far past the 18-month cutoff."""
+    import services.scheduler as scheduler
+
+    just_warned = db_run(
+        _insert_portal_candidate,
+        f"round6-justwarned-{_suffix()}@example.com",
+        last_login_at=datetime.now(timezone.utc) - timedelta(days=5 * 365),
+        dormant_warning_sent_at=datetime.now(timezone.utc) - timedelta(days=1),
+    )
+
+    db_run(scheduler.generate_retention_review)
+
+    row = db_run(
+        fetch_one,
+        "SELECT 1 FROM retention_review_items WHERE category = 'portal_account_inactive' AND subject_id = $1",
+        just_warned["user_id"],
+    )
+    assert row is None, "a warning sent less than 30 days ago must not yet result in queueing"
+
+
+def test_probe8_warning_sent_over_thirty_days_ago_is_queued(db_run):
+    """Mirror of the two probes above: once the warning is both present
+    and old enough (>30 days), the otherwise-qualifying dormant account
+    is queued exactly as before this fix."""
+    import services.scheduler as scheduler
+
+    warned_long_ago = db_run(
+        _insert_portal_candidate,
+        f"round6-warnedlongago-{_suffix()}@example.com",
+        last_login_at=datetime.now(timezone.utc) - timedelta(days=5 * 365),
+        dormant_warning_sent_at=datetime.now(timezone.utc) - timedelta(days=31),
+    )
+
+    db_run(scheduler.generate_retention_review)
+
+    row = db_run(
+        fetch_one,
+        "SELECT 1 FROM retention_review_items WHERE category = 'portal_account_inactive' AND subject_id = $1",
+        warned_long_ago["user_id"],
+    )
+    assert row is not None, (
+        "a dormant account whose warning was sent over 30 days ago must still be queued"
+    )

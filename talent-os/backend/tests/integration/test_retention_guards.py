@@ -223,8 +223,8 @@ def test_portal_account_inactive_excludes_linked_candidate_with_different_email(
     suffix = uuid.uuid4().hex[:10]
     user = db_run(
         fetch_one,
-        """INSERT INTO users (email, password_hash, full_name, role, last_login_at)
-           VALUES ($1, 'x', 'Portal User', 'candidate', NOW() - INTERVAL '25 months')
+        """INSERT INTO users (email, password_hash, full_name, role, last_login_at, dormant_warning_sent_at)
+           VALUES ($1, 'x', 'Portal User', 'candidate', NOW() - INTERVAL '25 months', NOW() - INTERVAL '2 months')
            RETURNING id""",
         f"portal-private-{suffix}@example.com",
     )
@@ -260,8 +260,8 @@ def test_portal_account_inactive_still_purges_a_truly_unengaged_account(db_run):
     suffix = uuid.uuid4().hex[:10]
     user = db_run(
         fetch_one,
-        """INSERT INTO users (email, password_hash, full_name, role, last_login_at)
-           VALUES ($1, 'x', 'Idle Portal User', 'candidate', NOW() - INTERVAL '25 months')
+        """INSERT INTO users (email, password_hash, full_name, role, last_login_at, dormant_warning_sent_at)
+           VALUES ($1, 'x', 'Idle Portal User', 'candidate', NOW() - INTERVAL '25 months', NOW() - INTERVAL '2 months')
            RETURNING id""",
         f"portal-idle-{suffix}@example.com",
     )
@@ -883,8 +883,8 @@ def test_portal_account_inactive_excludes_a_linked_candidate_with_a_real_placeme
     admin = make_admin()
     user = db_run(
         fetch_one,
-        """INSERT INTO users (email, password_hash, full_name, role, last_login_at)
-           VALUES ($1, 'x', 'Portal Placed User', 'candidate', NOW() - INTERVAL '25 months')
+        """INSERT INTO users (email, password_hash, full_name, role, last_login_at, dormant_warning_sent_at)
+           VALUES ($1, 'x', 'Portal Placed User', 'candidate', NOW() - INTERVAL '25 months', NOW() - INTERVAL '2 months')
            RETURNING id""",
         f"portal-placed-{suffix}@example.com",
     )

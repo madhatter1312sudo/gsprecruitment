@@ -12,12 +12,18 @@ candidates.consent_reminder_sent_at, so a future dormant-account warning
 job can be written the same way: select who is due, send, stamp this
 column, never re-send within the same cycle).
 
-Not read by PORTAL_ACCOUNT_INACTIVE_SQL or by any other selector in
-core/retention.py today -- the 18-month cutoff there is unconditional on
-last_login_at alone, unaffected by whether a warning was ever sent. A
-column nothing yet reads or writes is deliberately not itself claimed as
-"schema_ready" for anything: it exists purely so the warning job, once
-built, has somewhere to write.
+chief-of-staff FIX FIRST (retention-kolommen branch, finding 2, after this
+migration first landed): PORTAL_ACCOUNT_INACTIVE_SQL now DOES read this
+column -- an account only qualifies for the monthly review list once
+`dormant_warning_sent_at` is set and at least 30 days old, so the
+public "waarschuwing 30 dagen vooraf" promise (VERWERKINGSREGISTER §1.4,
+privacy.html, privacy-kandidaten.html, SOURCING-SOP) holds by
+construction instead of silently. This migration still only adds the
+column -- nothing yet WRITES it (the warning job itself, same shape as
+talentpool_reminder_job in services/scheduler.py, is a separate,
+not-yet-built track) -- so until that job ships, no account can ever
+satisfy the new condition and none reaches the list, which is the
+correct fail-closed behaviour for a promise nothing yet fulfils.
 
 Pattern of 030/032/033/034/036: idempotent (ADD COLUMN IF NOT EXISTS,
 CREATE INDEX IF NOT EXISTS), no DO $$ ... END $$ blocks

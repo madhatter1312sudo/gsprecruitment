@@ -210,8 +210,9 @@ def test_approving_a_dormant_portal_account_does_not_purge_an_unlinked_placed_ca
 
     dormant_user = db_run(
         fetch_one,
-        """INSERT INTO users (email, password_hash, full_name, role, is_verified, password_changed_at, last_login_at)
-           VALUES ($1, 'x', $2, 'candidate', TRUE, NOW(), NOW() - INTERVAL '19 months')
+        """INSERT INTO users (email, password_hash, full_name, role, is_verified, password_changed_at,
+                              last_login_at, dormant_warning_sent_at)
+           VALUES ($1, 'x', $2, 'candidate', TRUE, NOW(), NOW() - INTERVAL '19 months', NOW() - INTERVAL '2 months')
            RETURNING id""",
         shared_email, f"Dormant Portal Account {suffix}",
     )

@@ -301,16 +301,32 @@ PROSPECT_RESPONDING_SQL = f"""
 # `_CANDIDATE_LIVE_PORTAL_ACCOUNT_GUARD_SQL` (see that constant's own
 # comment: it would always find the very account being evaluated).
 #
-# Owner decision (2026-09-08): 24 months becomes 18.
-# A dormant-account warning e-mail (30 days ahead of the 18-month cutoff)
-# is a separate track; when it ships it stamps
-# `users.dormant_warning_sent_at` (migrations/039_users_dormant_warning.py --
-# the column exists so that job has somewhere to write, the job itself
-# does not).
+# Owner decision (2026-09-08): 24 months becomes 18, with a 30-day
+# advance warning e-mail before the cutoff (VERWERKINGSREGISTER §1.4,
+# privacy.html, privacy-kandidaten.html, SOURCING-SOP all promise this).
+#
+# chief-of-staff FIX FIRST (retention-kolommen branch, finding 2): that
+# public promise needs a warning to actually have gone out before this
+# selector treats an account as due -- migrations/039_users_dormant_
+# warning.py added `users.dormant_warning_sent_at` for exactly that
+# purpose but this selector never read it, so a 5-year-dormant account
+# with no warning ever sent would already have landed on the monthly
+# review list, half the promised 18-months-plus-30-days notice quietly
+# gone. This selector is now the one place that promise is enforced: an
+# account only qualifies once `dormant_warning_sent_at` is set AND at
+# least 30 days old, which is also, deliberately, the ONLY thing this
+# column does today -- gate this selector. A warning job that stamps it
+# (same shape as talentpool_reminder_job in services/scheduler.py) is
+# still a separate, not-yet-built track; until it exists, no row can ever
+# satisfy this condition, so no account (dormant however long) reaches
+# the review list without one -- the selector fails closed rather than
+# silently keeping the pre-fix behaviour of ignoring the warning.
 PORTAL_ACCOUNT_INACTIVE_SQL = f"""
     SELECT id, email, last_login_at + INTERVAL '18 months' AS term_expired_op
       FROM users u WHERE u.role = 'candidate' AND u.deleted_at IS NULL
       AND u.last_login_at IS NOT NULL AND u.last_login_at <= (NOW() - INTERVAL '18 months')
+      AND u.dormant_warning_sent_at IS NOT NULL
+      AND u.dormant_warning_sent_at < (NOW() - INTERVAL '30 days')
       AND NOT EXISTS (
           SELECT 1 FROM candidate_profiles cpf
           JOIN candidates c ON c.id = cpf.candidate_id
