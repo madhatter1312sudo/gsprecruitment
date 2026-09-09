@@ -89,11 +89,13 @@ async def export_my_data(current_user: dict = Depends(get_current_user)):
         email,
     )
     quiz = await fetch_all(
-        "SELECT score, max_score, tier, domain_scores, created_at FROM quiz_submissions WHERE LOWER(email) = LOWER($1)",
+        "SELECT score, max_score, tier, domain_scores, source_page, referrer_host, created_at "
+        "FROM quiz_submissions WHERE LOWER(email) = LOWER($1)",
         email,
     )
     contact = await fetch_all(
-        "SELECT company, phone, message, interest_type, created_at FROM contact_submissions WHERE LOWER(email) = LOWER($1)",
+        "SELECT company, phone, message, interest_type, source_page, referrer_host, created_at "
+        "FROM contact_submissions WHERE LOWER(email) = LOWER($1)",
         email,
     )
     push_tokens = await fetch_all(
@@ -440,12 +442,12 @@ async def erase_person(email: str, actor_id: Optional[int] = None, reason: str =
 
     await _anonymize_by_id(
         "SELECT id FROM quiz_submissions WHERE LOWER(email) = $1",
-        "UPDATE quiz_submissions SET email = $2 WHERE id = $1",
+        "UPDATE quiz_submissions SET email = $2, referrer_host = NULL WHERE id = $1",
         email_norm, email_hash,
     )
     await _anonymize_by_id(
         "SELECT id FROM contact_submissions WHERE LOWER(email) = $1",
-        "UPDATE contact_submissions SET name = 'Erased', email = $2, phone = NULL WHERE id = $1",
+        "UPDATE contact_submissions SET name = 'Erased', email = $2, phone = NULL, referrer_host = NULL WHERE id = $1",
         email_norm, email_hash,
     )
     await _anonymize_by_id(

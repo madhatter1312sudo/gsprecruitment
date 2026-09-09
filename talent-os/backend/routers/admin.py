@@ -9,6 +9,7 @@ from core.database import fetch_one, fetch_all, execute, fetch_val
 from core.deps import get_current_user, require_role
 from core.security import create_access_token
 from core import privacy
+from core.sources import PORTAL_REGISTRATION
 from models.schemas import (
     AdminDashboard, AdminUserUpdate, AdminJobUpdate, AdminJobCreate, AdminAnalytics,
     AuditLogEntry, ContentItem, ContentUpdate, SystemSettings, SystemSettingsUpdate,
@@ -529,7 +530,28 @@ async def list_all_candidates(
     a_conditions = ["c.deleted_at IS NULL"]
     a_params = []
     idx = 1
-    kind_sql = "CASE WHEN c.source = 'portal_registration' THEN 'self-registered' ELSE 'sourced' END"
+    # WS2: a linked candidate_profiles row (cp.user_id IS NOT NULL) is the
+    # stronger truth for "self-registered" -- a candidate can be sourced
+    # first (c.source stays whatever it originally was) and later create
+    # a portal account that WS-C.16's candidate_link.py links to this same
+    # candidates row, without c.source itself ever being rewritten. source
+    # keeps its original sourcing-provenance meaning (see core/sources.py);
+    # it's just no longer the only signal `kind` derives from.
+    #
+    # A third case (code-reviewer WS2 finding): an e-mail-matched candidate
+    # portal account whose candidate_profiles row is NOT linked yet
+    # (cp.candidate_id IS NULL) -- exactly the row branch B's NOT EXISTS
+    # guard below excludes, to avoid double-listing it. Without also
+    # counting it here, that person is neither branch A's self-registered
+    # nor branch B's -- they vanish from kind=self-registered entirely.
+    # The EXISTS keeps this in one CASE (no extra join needed) so it works
+    # in both the COUNT and the row query.
+    kind_sql = (
+        "CASE WHEN cp.user_id IS NOT NULL OR c.source = '{portal}' "
+        "OR EXISTS (SELECT 1 FROM users ux WHERE LOWER(ux.email) = LOWER(c.email) "
+        "AND ux.role = 'candidate' AND ux.deleted_at IS NULL) "
+        "THEN 'self-registered' ELSE 'sourced' END"
+    ).format(portal=PORTAL_REGISTRATION)
 
     if status:
         a_conditions.append(f"c.status = ${idx}")
@@ -551,7 +573,16 @@ async def list_all_candidates(
 
     fetch_cap = offset + limit  # enough rows from each branch to merge+slice correctly
 
-    a_total = await fetch_val(f"SELECT COUNT(*) FROM candidates c WHERE {a_where}", *a_params) or 0
+    # LEFT JOIN candidate_profiles here too: kind_sql (used in a_where
+    # whenever a `kind` filter is passed) references cp.user_id, so the
+    # count query needs the same join as the row query below or that
+    # reference would fail whenever a kind filter is active.
+    a_total = await fetch_val(
+        f"""SELECT COUNT(*) FROM candidates c
+            LEFT JOIN candidate_profiles cp ON cp.candidate_id = c.id
+            WHERE {a_where}""",
+        *a_params,
+    ) or 0
     a_rows = await fetch_all(
         f"""SELECT c.id AS candidate_id,
                    u.id AS user_id,
@@ -579,7 +610,18 @@ async def list_all_candidates(
     b_rows = []
     b_total = 0
     if _unlinked_self_registered_applicable(status, source, kind):
-        b_conditions = ["u.role = 'candidate'", "u.deleted_at IS NULL", "cp.candidate_id IS NULL"]
+        b_conditions = [
+            "u.role = 'candidate'", "u.deleted_at IS NULL", "cp.candidate_id IS NULL",
+            # WS2: cp.candidate_id IS NULL only means *this* candidate_profiles
+            # row has no FK link yet -- it does not mean no candidates row
+            # exists for the same person. Branch A's e-mail-fallback JOIN
+            # (LEFT JOIN users u ON u.id = COALESCE(cp.user_id, (SELECT id
+            # FROM users WHERE LOWER(email) = LOWER(c.email) ...))) already
+            # surfaces such a person there, so without this guard they'd be
+            # listed twice. Same case-insensitive match, scoped to
+            # non-deleted candidates rows.
+            "NOT EXISTS (SELECT 1 FROM candidates c2 WHERE LOWER(c2.email) = LOWER(u.email) AND c2.deleted_at IS NULL)",
+        ]
         b_params = []
         bidx = 1
         if search:
@@ -670,7 +712,14 @@ async def get_candidate_detail(
                 "SELECT id, is_verified FROM users WHERE LOWER(email) = LOWER($1) AND deleted_at IS NULL",
                 candidate["email"],
             )
-        candidate["kind"] = "self-registered" if candidate["source"] == "portal_registration" else "sourced"
+        # WS2: same stronger-truth rule as list's kind_sql above -- a
+        # linked candidate_profiles row means self-registered regardless
+        # of this row's original c.source, so the detail view's `kind`
+        # can't disagree with what GET /candidates just showed for the
+        # same person. `user` here already covers the third case
+        # (e-mail-matched account, cp row not linked yet) via the
+        # fallback lookup a few lines up -- no extra query needed.
+        candidate["kind"] = "self-registered" if (linked_profile or user or candidate["source"] == PORTAL_REGISTRATION) else "sourced"
         candidate["user_id"] = user["id"] if user else None
         candidate["is_verified"] = user["is_verified"] if user else None
         return candidate
@@ -964,6 +1013,13 @@ async def get_audit_log(
         *params_ext,
     )
 
+    # `changes` is jsonb but asyncpg returns raw JSON text on this
+    # connection (no codec registered) -- same pattern as get_lead_detail.
+    for row in rows:
+        val = row.get("changes")
+        if isinstance(val, str):
+            row["changes"] = json.loads(val)
+
     return {"items": rows, "total": total, "limit": limit, "offset": offset}
 
 
@@ -1133,19 +1189,76 @@ async def admin_get_pipeline_stage_history(
     return {"items": rows, "total": len(rows)}
 
 
-# ── Leads (WS-C.10) ───────────────────────────────────────────────────────
+# ── Leads (WS-C.10 / WS2) ─────────────────────────────────────────────────
 # Unified view over contact_submissions (the site contact/lead form) and
 # quiz_submissions (the public skill quiz) -- two physically separate
 # tables (migrations/002_portal_tables.py, migrations/012_mobile_growth.py)
 # with no shared id space, so "source" + the table's own id together
-# identify a row; PATCH takes both back. quiz_submissions has no
-# name/interest_type columns at all (it's the skill-quiz table, not a lead
-# form) -- NULL literals in its SELECT keep the unified query's column
-# count/types aligned with contact_submissions.
+# identify a row; PATCH/detail take both back. Neither table has every
+# column the other does (contact_submissions has no score/max_score/tier;
+# quiz_submissions has no name/company/phone/message/interest_type) --
+# typed NULL literals in each SELECT keep a real SQL UNION ALL's column
+# count/types aligned so Postgres can execute it as one query.
 #
 # Only these two literal table names are ever interpolated into SQL below
 # (never request input) -- ``source not in _LEAD_SOURCES`` gates every use.
 _LEAD_SOURCES = ("contact_submissions", "quiz_submissions")
+
+
+def _leads_union_sql(type: Optional[str], unread: Optional[bool]) -> tuple[str, list]:
+    """Build the WHERE-filtered `SELECT ... UNION ALL SELECT ...` over
+    contact_submissions + quiz_submissions, both sides aliased to the same
+    column names/types, and the positional params for it. Callers wrap this in
+    `SELECT ... FROM (<sql>) u` for both the COUNT(*) and the paginated
+    row fetch, so the two never drift apart -- same total the page was
+    sliced from.
+
+    `type` filters by interest_type -- contact_submissions only, since
+    quiz_submissions has no such column; passing a type currently drops
+    the quiz_submissions branch entirely (a type filter can never match a
+    quiz row, so there's nothing that branch could contribute).
+    `unread` filters by is_read on whichever table each row is from.
+    """
+    params: list = []
+    idx = 1
+
+    contact_conditions = []
+    if type is not None:
+        contact_conditions.append(f"interest_type = ${idx}")
+        params.append(type)
+        idx += 1
+    if unread is not None:
+        contact_conditions.append(f"is_read = ${idx}")
+        params.append(not unread)
+        idx += 1
+    contact_where = f"WHERE {' AND '.join(contact_conditions)}" if contact_conditions else ""
+
+    contact_select = f"""SELECT id, 'contact_submissions'::text AS source, name, email,
+               company, phone, message, interest_type,
+               NULL::int AS score, NULL::int AS max_score, NULL::text AS tier,
+               is_read, created_at, source_page, referrer_host
+        FROM contact_submissions {contact_where}"""
+
+    if type is not None:
+        # quiz_submissions has no interest_type -- a type filter never
+        # matches any quiz row, so skip that branch (and the union)
+        # entirely rather than emit a query that can never return one.
+        return contact_select, params
+
+    quiz_conditions = []
+    if unread is not None:
+        quiz_conditions.append(f"is_read = ${idx}")
+        params.append(not unread)
+        idx += 1
+    quiz_where = f"WHERE {' AND '.join(quiz_conditions)}" if quiz_conditions else ""
+
+    quiz_select = f"""SELECT id, 'quiz_submissions'::text AS source, NULL::text AS name, email,
+               NULL::text AS company, NULL::text AS phone, NULL::text AS message,
+               NULL::text AS interest_type, score, max_score, tier,
+               is_read, created_at, source_page, referrer_host
+        FROM quiz_submissions {quiz_where}"""
+
+    return f"{contact_select}\nUNION ALL\n{quiz_select}", params
 
 
 @router.get("/leads")
@@ -1156,59 +1269,54 @@ async def list_leads(
     offset: int = Query(0, ge=0),
     current_user: dict = Depends(require_role("admin")),
 ):
-    """Unified leads list across contact_submissions + quiz_submissions.
-    `type` filters by interest_type (contact_submissions only -- quiz_submissions
-    rows never match a type filter, since they have no interest_type column).
-    `unread` filters by is_read on whichever table each row is from."""
+    """Unified, paginated leads list across contact_submissions +
+    quiz_submissions -- a real SQL UNION ALL (ORDER BY/LIMIT/OFFSET applied
+    to the union as a whole) rather than fetching every matching row from
+    both tables and paginating in Python, so `total` and each page are
+    exact and consistent even as the underlying tables grow."""
     if type is not None and type not in LEAD_INTEREST_TYPES:
         raise HTTPException(status_code=400, detail=f"Invalid type. Must be one of: {', '.join(LEAD_INTEREST_TYPES)}")
 
-    contact_conditions = []
-    contact_params: list = []
-    idx = 1
-    if type is not None:
-        contact_conditions.append(f"interest_type = ${idx}")
-        contact_params.append(type)
-        idx += 1
-    if unread is not None:
-        contact_conditions.append(f"is_read = ${idx}")
-        contact_params.append(not unread)
-        idx += 1
-    contact_where = f"WHERE {' AND '.join(contact_conditions)}" if contact_conditions else ""
+    union_sql, params = _leads_union_sql(type, unread)
 
-    contact_rows = await fetch_all(
-        f"""SELECT id, 'contact_submissions'::text AS source, name, email,
-                   interest_type, is_read, created_at
-            FROM contact_submissions {contact_where}
-            ORDER BY created_at DESC""",
-        *contact_params,
+    total = await fetch_val(f"SELECT COUNT(*) FROM ({union_sql}) u", *params) or 0
+
+    limit_idx = len(params) + 1
+    offset_idx = len(params) + 2
+    items = await fetch_all(
+        f"SELECT * FROM ({union_sql}) u ORDER BY created_at DESC LIMIT ${limit_idx} OFFSET ${offset_idx}",
+        *params, limit, offset,
     )
 
-    quiz_rows = []
-    if type is None:
-        # quiz_submissions has no interest_type -- a type filter never
-        # matches any quiz row, so skip the query entirely in that case.
-        quiz_conditions = []
-        quiz_params: list = []
-        idx = 1
-        if unread is not None:
-            quiz_conditions.append(f"is_read = ${idx}")
-            quiz_params.append(not unread)
-            idx += 1
-        quiz_where = f"WHERE {' AND '.join(quiz_conditions)}" if quiz_conditions else ""
-        quiz_rows = await fetch_all(
-            f"""SELECT id, 'quiz_submissions'::text AS source, NULL::text AS name, email,
-                       NULL::text AS interest_type, is_read, created_at
-                FROM quiz_submissions {quiz_where}
-                ORDER BY created_at DESC""",
-            *quiz_params,
-        )
+    return {"items": items, "total": total, "limit": limit, "offset": offset}
 
-    items = sorted(contact_rows + quiz_rows, key=lambda r: r["created_at"], reverse=True)
-    total = len(items)
-    page = items[offset:offset + limit]
 
-    return {"items": page, "total": total, "limit": limit, "offset": offset}
+@router.get("/leads/{source}/{lead_id}")
+async def get_lead_detail(
+    source: str,
+    lead_id: int,
+    current_user: dict = Depends(require_role("admin")),
+):
+    """Full detail for one lead, addressed by the (source, id) pair GET
+    /leads returns. contact_submissions rows return every column on the
+    table; quiz_submissions rows additionally decode answers/domain_scores
+    -- jsonb columns asyncpg returns as raw JSON text on this connection
+    (no codec registered, same as routers/public.py's get_quiz())."""
+    if source not in _LEAD_SOURCES:
+        raise HTTPException(status_code=404, detail="Unknown lead source")
+
+    row = await fetch_one(f"SELECT * FROM {source} WHERE id = $1", lead_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="Lead not found")
+
+    if source == "quiz_submissions":
+        for col in ("answers", "domain_scores"):
+            val = row.get(col)
+            if isinstance(val, str):
+                row[col] = json.loads(val)
+
+    row["source"] = source
+    return row
 
 
 @router.patch("/leads/{source}/{lead_id}")

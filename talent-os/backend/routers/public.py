@@ -228,12 +228,14 @@ async def submit_quiz(
     email = data.email.lower().strip() if data.email else None
 
     await execute(
-        """INSERT INTO quiz_submissions (email, user_id, answers, score, max_score, tier, domain_scores)
-           VALUES ($1, $2, $3::jsonb, $4, $5, $6, $7::jsonb)""",
+        """INSERT INTO quiz_submissions
+           (email, user_id, answers, score, max_score, tier, domain_scores, source_page, referrer_host)
+           VALUES ($1, $2, $3::jsonb, $4, $5, $6, $7::jsonb, $8, $9)""",
         email, user_id,
         json.dumps([a.model_dump() for a in data.answers]),
         score, max_score, tier,
         json.dumps(domain_scores),
+        data.source_page, data.referrer_host,
     )
 
     return {
@@ -252,11 +254,12 @@ async def submit_lead(request: Request, data: LeadSubmit):
     # Store the lead submission
     lead = await fetch_one(
         """INSERT INTO contact_submissions
-           (name, email, company, phone, message, interest_type)
-           VALUES ($1, $2, $3, $4, $5, $6)
+           (name, email, company, phone, message, interest_type, source_page, referrer_host)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
            RETURNING id, created_at""",
         data.name, data.email.lower().strip(), data.company,
         data.phone, data.message, data.interest_type,
+        data.source_page, data.referrer_host,
     )
     if not lead:
         raise HTTPException(status_code=500, detail="Failed to submit lead")

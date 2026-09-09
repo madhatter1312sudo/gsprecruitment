@@ -114,14 +114,29 @@ ACTIVITIES_BY_CLIENT = {
 
 LEADS = [
     {"id": 1, "source": "contact_submissions", "name": "Lead One", "email": "lead1@example.com",
-     "interest_type": "werving_selectie", "is_read": False, "created_at": "2026-09-01T09:00:00Z"},
+     "company": "Example Engineering B.V.", "phone": "+31600000099", "message": "Op zoek naar een embedded engineer.",
+     "interest_type": "werving_selectie", "is_read": False, "created_at": "2026-09-01T09:00:00Z",
+     "source_page": "/vacatures/201?job=201", "referrer_host": "www.example-referrer.invalid"},
     {"id": 2, "source": "contact_submissions", "name": "Lead Two", "email": "lead2@example.com",
-     "interest_type": "kandidaat", "is_read": True, "created_at": "2026-08-15T09:00:00Z"},
+     "company": None, "phone": None, "message": "Interesse in een gesprek.",
+     "interest_type": "kandidaat", "is_read": True, "created_at": "2026-08-15T09:00:00Z",
+     "source_page": "/kandidaten", "referrer_host": None},
     {"id": 3, "source": "quiz_submissions", "name": None, "email": "quiz1@example.com",
-     "interest_type": None, "is_read": False, "created_at": "2026-09-02T09:00:00Z"},
+     "interest_type": None, "is_read": False, "created_at": "2026-09-02T09:00:00Z",
+     "score": 8, "max_score": 10, "tier": "senior", "domain_scores": {"embedded": 4, "ot_security": 4},
+     "source_page": "/quiz", "referrer_host": None},
 ]
 
 OPEN_JOBS_TOTAL_BY_CLIENT = {1: 1, 2: 0}
+
+# GET /v1/admin/analytics (WS2) -- ANALYTICS_STATE["mode"] flips between
+# "ok" and "error" mid-test to exercise loadAnalytics()'s per-panel
+# load/error states and its retry link, independent of the other stubs.
+ANALYTICS_STATE = {"mode": "ok"}
+ANALYTICS_DATA = {
+    "job_fill_rate": 82, "client_retention_rate": 91, "candidate_satisfaction": 76,
+    "user_growth": {"2026-07-01": 4, "2026-08-01": 6, "2026-09-01": 9},
+}
 
 
 def qint(qs, key, default):
@@ -149,7 +164,25 @@ def route_admin_api(route, request):
                         "active_clients": 2, "placements_this_week": 0})
         return
     if path == "/api/v1/admin/audit-log":
-        json_response({"items": [], "total": 0})
+        # `changes` here is a plain JS object -- the shape the fixed
+        # get_audit_log() now guarantees after decoding asyncpg's raw
+        # jsonb text (code-reviewer WS2 finding: the old stub had no
+        # `changes` field at all, so admin.js's `typeof e.changes ===
+        # 'object'` gate was never exercised and the "always shows a
+        # dash" regression slipped through).
+        json_response({
+            "items": [{
+                "id": 1,
+                "action": "user_update",
+                "actor_id": 1,
+                "actor_email": "admin@example.invalid",
+                "target_type": "user",
+                "target_id": 42,
+                "changes": {"status": "actief", "role": "candidate"},
+                "created_at": "2026-09-01T10:00:00Z",
+            }],
+            "total": 1,
+        })
         return
 
     # ---- Users list / detail (unrelated to the Opdrachtgevers roster
@@ -258,6 +291,14 @@ def route_admin_api(route, request):
         json_response({"items": items[offset:offset + limit], "total": len(items), "limit": limit, "offset": offset})
         return
     m = re.match(r"^/api/v1/admin/leads/([a-z_]+)/(\d+)$", path)
+    if m and method == "GET":
+        source, lead_id = m.group(1), int(m.group(2))
+        for l in LEADS:
+            if l["source"] == source and l["id"] == lead_id:
+                json_response(l)
+                return
+        json_response({"detail": "Not found"}, status=404)
+        return
     if m and method == "PATCH":
         source, lead_id = m.group(1), int(m.group(2))
         for l in LEADS:
@@ -270,7 +311,10 @@ def route_admin_api(route, request):
         return
 
     if path == "/api/v1/admin/analytics":
-        json_response({"job_fill_rate": 0, "client_retention_rate": 0, "candidate_satisfaction": 0, "user_growth": {}})
+        if ANALYTICS_STATE["mode"] == "error":
+            json_response({"detail": "Server error"}, status=500)
+        else:
+            json_response(ANALYTICS_DATA)
         return
     if path == "/api/v1/admin/settings":
         json_response([])
@@ -336,6 +380,14 @@ def main():
 
         page.goto(base, wait_until="domcontentloaded", timeout=15000)
         page.wait_for_timeout(800)
+
+        # ---- Dashboard: recent activity changeKeys (code-reviewer WS2) ----
+        # The stubbed audit-log item's `changes` is a real object, matching
+        # the fixed get_audit_log() contract -- this must render the
+        # "(status, role)" suffix, not silently show nothing.
+        activity_text = page.eval_on_selector('#recentActivityList', "el => el.textContent") or ""
+        if "(status, role)" not in activity_text:
+            failures.append(f"dashboard: recent activity did not render changeKeys — got: {activity_text[:200]!r}")
 
         # ---- Opdrachtgevers ----
         errors_before = len(console_errors)
@@ -435,11 +487,116 @@ def main():
         page.uncheck('#leadUnreadFilter')
         page.wait_for_timeout(500)
 
+        badges2 = page.eval_on_selector_all('#section-leads table tbody tr td:nth-child(5)', "els => els.map(e => e.textContent.trim())")
+        if not any("example-referrer.invalid" in b for b in badges2):
+            failures.append(f"leads: Herkomst column missing referrer_host — got {badges2}")
+
+        # Row click opens the detail modal (GET /v1/admin/leads/{source}/{id})
+        # rather than toggling read state directly — that accidental
+        # toggle-on-click was the WS2 defect.
         page.click('#section-leads table tbody tr')
         page.wait_for_timeout(500)
+        modal_text = page.eval_on_selector('#adminModalOverlay', "el => el.textContent") or ""
+        if "Example Engineering B.V." not in modal_text or "Op zoek naar een embedded engineer" not in modal_text:
+            failures.append(f"leads: detail modal missing company/message — got: {modal_text[:200]!r}")
+        if LEADS[0]["is_read"]:
+            failures.append("leads: opening the detail modal must not itself mark the lead read")
+
+        # The explicit button, not the row click, is what marks it read.
+        page.click('[data-action="toggle-lead-read"]')
+        page.wait_for_timeout(500)
+        if not LEADS[0]["is_read"]:
+            failures.append("leads: 'Markeer als gelezen' button in the modal did not PATCH is_read")
+        modal_text2 = page.eval_on_selector('#adminModalOverlay', "el => el.textContent") or ""
+        if "Markeer als ongelezen" not in modal_text2:
+            failures.append(f"leads: modal button did not flip to 'Markeer als ongelezen' after marking read — got: {modal_text2[:200]!r}")
+
+        page.click('[data-action="close-modal"]')
+        page.wait_for_timeout(300)
+
+        # A quiz_submissions row's detail must show score/tier, not the
+        # contact-form fields it has none of.
+        page.click('#section-leads table tbody tr:nth-child(3)')
+        page.wait_for_timeout(500)
+        quiz_modal_text = page.eval_on_selector('#adminModalOverlay', "el => el.textContent") or ""
+        if "8 / 10" not in quiz_modal_text or "senior" not in quiz_modal_text:
+            failures.append(f"leads: quiz lead detail missing score/tier — got: {quiz_modal_text[:200]!r}")
+        page.click('[data-action="close-modal"]')
+        page.wait_for_timeout(300)
+
         new_errors = console_errors[errors_before:]
         if new_errors:
             failures.append(f"leads: {len(new_errors)} console error(s): {new_errors[:3]}")
+
+        # ---- Analytics ----
+        errors_before = len(console_errors)
+        ANALYTICS_STATE["mode"] = "ok"
+        page.click('.nav-link[data-section="analytics"]')
+        page.wait_for_timeout(700)
+        summary_text = page.eval_on_selector('#analyticsSummary', "el => el.textContent") or ""
+        if "Loading" in summary_text:
+            failures.append("analytics: summary still shows literal 'Loading' after data loaded")
+        for expected in ("82", "91", "76"):
+            if expected not in summary_text:
+                failures.append(f"analytics: summary missing expected KPI value {expected!r} — got {summary_text!r}")
+        has_apex = page.query_selector('#userGrowthChart .apexcharts-canvas, #userGrowthChart canvas') is not None
+        has_fallback = page.eval_on_selector_all('#userGrowthChart > div > div', "els => els.length") > 0
+        if not (has_apex or has_fallback):
+            failures.append("analytics: user growth chart/fallback did not render")
+
+        # Force a failure and reset the section's cache via a full reload
+        # (nav.js's `loaded` set is in-memory) so revisiting the tab
+        # re-fetches against the now-erroring stub.
+        ANALYTICS_STATE["mode"] = "error"
+        page.reload(wait_until="domcontentloaded")
+        page.wait_for_timeout(800)
+        page.click('.nav-link[data-section="analytics"]')
+        page.wait_for_timeout(700)
+        growth_err = page.eval_on_selector('#userGrowthChart', "el => el.textContent") or ""
+        summary_err = page.eval_on_selector('#analyticsSummary', "el => el.textContent") or ""
+        if "probeer opnieuw" not in growth_err.lower() and "probeer opnieuw" not in summary_err.lower():
+            failures.append(f"analytics: error state missing a retry link — chart: {growth_err[:120]!r}, summary: {summary_err[:120]!r}")
+
+        # The deliberately-stubbed 500s above log their own "Failed to load
+        # resource" console errors -- expected noise from this negative
+        # test, not an app bug, so the boundary resets past them here
+        # rather than teaching on_console to ignore 500s globally.
+        errors_before = len(console_errors)
+
+        # Fix the stub, then use the retry link (not another nav click —
+        # a nav click on an already-attempted section, successful or not,
+        # is a separate concern from the retry link this panel renders).
+        ANALYTICS_STATE["mode"] = "ok"
+        retry_link = page.query_selector('#analyticsSummary a') or page.query_selector('#userGrowthChart a')
+        if retry_link is None:
+            failures.append("analytics: no retry link found in the error state to recover from")
+        else:
+            retry_link.click()
+            page.wait_for_timeout(700)
+            recovered_summary = page.eval_on_selector('#analyticsSummary', "el => el.textContent") or ""
+            if "Loading" in recovered_summary or "Kon niet laden" in recovered_summary:
+                failures.append(f"analytics: did not recover after retry — got {recovered_summary!r}")
+            if "76" not in recovered_summary:
+                failures.append(f"analytics: recovered summary missing expected KPI value — got {recovered_summary!r}")
+        new_errors = console_errors[errors_before:]
+        if new_errors:
+            failures.append(f"analytics: {len(new_errors)} console error(s): {new_errors[:3]}")
+
+        # ---- Audit Log: Details column (code-reviewer WS2) ----
+        errors_before = len(console_errors)
+        page.click('.nav-link[data-section="audit"]')
+        page.wait_for_timeout(600)
+        audit_rows = page.eval_on_selector_all('#section-audit table tbody tr', "els => els.length")
+        if audit_rows != 1:
+            failures.append(f"audit: table rendered {audit_rows} rows, expected 1")
+        details_text = page.eval_on_selector('#section-audit table tbody tr td:last-child', "el => el.textContent") or ""
+        if "status" not in details_text or "actief" not in details_text:
+            failures.append(f"audit: Details column did not render the changes object — got: {details_text[:200]!r}")
+        if details_text.strip() == "—":
+            failures.append("audit: Details column showed the empty-state dash instead of the changes object")
+        new_errors = console_errors[errors_before:]
+        if new_errors:
+            failures.append(f"audit: {len(new_errors)} console error(s): {new_errors[:3]}")
 
         # ---- Rapportage ----
         errors_before = len(console_errors)

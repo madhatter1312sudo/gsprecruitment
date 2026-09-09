@@ -26,6 +26,33 @@ const GSP_WHATSAPP = '31617913965';
     return fetch(url, { ...options, signal: options.signal || controller.signal }).finally(() => clearTimeout(t));
   }
 
+  // Lead-origin fields (WS2) for POST /api/v1/public/lead — shared by the
+  // contact form and the quiz's e-mail-capture submit, both of which post
+  // to that same endpoint. Mirrors the backend validation exactly
+  // (models/schemas.py's LeadSubmit): source_page is the current path
+  // plus only the 'type'/'job' query keys (never an arbitrary caller-
+  // supplied one), referrer_host is a bare hostname. referrer_host is
+  // left undefined (not '') when there is no referrer, so JSON.stringify
+  // drops the key entirely instead of sending a value that would fail the
+  // backend's "at least one character" hostname check.
+  function getLeadOrigin() {
+    let sourcePage;
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const allowed = new URLSearchParams();
+      ['type', 'job'].forEach((k) => { if (params.has(k)) allowed.set(k, params.get(k)); });
+      const q = allowed.toString();
+      sourcePage = (q ? `${window.location.pathname}?${q}` : window.location.pathname).slice(0, 200);
+    } catch (e) { sourcePage = undefined; }
+
+    let referrerHost;
+    if (document.referrer) {
+      try { referrerHost = new URL(document.referrer).hostname.slice(0, 100) || undefined; } catch (e) { referrerHost = undefined; }
+    }
+
+    return { source_page: sourcePage, referrer_host: referrerHost };
+  }
+
   // ── Language Toggle ────────────────────────────────────
   function initLang() {
     let currentLang = localStorage.getItem('gsp_lang') || 'nl';
@@ -1085,7 +1112,8 @@ const GSP_WHATSAPP = '31617913965';
               email,
               name: 'Quiz Lead',
               message: `Quiz score: ${pct}% - ${label}`,
-              interest_type: 'kandidaat'
+              interest_type: 'kandidaat',
+              ...getLeadOrigin(),
             })
           });
           if (res.ok) {
@@ -1145,6 +1173,7 @@ const GSP_WHATSAPP = '31617913965';
         delete data.interest;
       }
       delete data.gdpr;
+      Object.assign(data, getLeadOrigin());
 
       try {
         const res = await fetch(`${API}/api/v1/public/lead`, {

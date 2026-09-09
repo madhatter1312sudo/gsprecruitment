@@ -70,10 +70,19 @@ def test_erase_person_scrubs_pii_from_every_registered_table(db_run):
         client_row["id"], candidate["id"], job["id"], f"Notes mentioning {email} directly",
     )
 
-    db_run(execute, "INSERT INTO quiz_submissions (email, answers) VALUES ($1, '{}'::jsonb)", email)
+    # source_page/referrer_host (migrations/038_leads_origin.py) -- a lead
+    # submitted with a referrer must have that origin scrubbed on erasure
+    # too, not just the obviously-PII columns (security-auditor WS2 finding).
     db_run(
         execute,
-        "INSERT INTO contact_submissions (name, email, message) VALUES ('Erase Me', $1, 'hello')",
+        "INSERT INTO quiz_submissions (email, answers, source_page, referrer_host) "
+        "VALUES ($1, '{}'::jsonb, '/vacatures?job=7', 'intranet.some-employer.example')",
+        email,
+    )
+    db_run(
+        execute,
+        "INSERT INTO contact_submissions (name, email, message, source_page, referrer_host) "
+        "VALUES ('Erase Me', $1, 'hello', '/vacatures?job=7', 'intranet.some-employer.example')",
         email,
     )
     db_run(
@@ -142,6 +151,19 @@ def test_erase_person_scrubs_pii_from_every_registered_table(db_run):
 
     contact = db_run(fetch_one, "SELECT name, email FROM contact_submissions WHERE email ILIKE $1", f"%{email}%")
     assert contact is None
+
+    # The rows survive erasure (pseudonymised to erased-<hash prefix>-<id>@
+    # erased.invalid, not deleted, see _anonymize_by_id) -- referrer_host
+    # must be scrubbed off them too, since it can carry a person's current
+    # employer's intranet hostname.
+    erased_pattern = f"erased-{email_hash[:16]}-%"
+    quiz_row = db_run(fetch_one, "SELECT email, referrer_host FROM quiz_submissions WHERE email ILIKE $1", erased_pattern)
+    assert quiz_row is not None, "quiz_submissions row should survive erasure, pseudonymised"
+    assert quiz_row["referrer_host"] is None
+
+    contact_row = db_run(fetch_one, "SELECT email, referrer_host FROM contact_submissions WHERE email ILIKE $1", erased_pattern)
+    assert contact_row is not None, "contact_submissions row should survive erasure, pseudonymised"
+    assert contact_row["referrer_host"] is None
 
     draft = db_run(fetch_one, "SELECT target_email, target_name FROM outreach_drafts WHERE target_email ILIKE $1", f"%{email}%")
     assert draft is None
