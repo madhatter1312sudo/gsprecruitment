@@ -19,7 +19,7 @@ httpx>=0.26.0,<1.0.0
 # the codebase imports passlib -- it was a dead transitive dependency that
 # also dragged in an unmaintained passlib release. bcrypt is now a direct,
 # explicit dependency instead of riding along inside passlib[bcrypt].
-bcrypt>=4.1.0,<5.0.0
+bcrypt>=5.0.0,<6.0.0
 # python-jose CVE-2024-33663 (algorithm confusion) / CVE-2024-33664 (DoS
 # via crafted JWE) are fixed in 3.4.0+.
 python-jose[cryptography]>=3.4.0,<4.0.0
