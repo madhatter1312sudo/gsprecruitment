@@ -334,9 +334,14 @@ def patch_public_router(monkeypatch):
         monkeypatch.setattr(public_router, "fetch_one", db.fetch_one)
         monkeypatch.setattr(public_router, "execute", db.execute)
 
-        async def _fake_send_email(**kwargs):
+        # WS3: _send_talentpool_confirm_email() now renders through
+        # send_template() (services/email_templates.py's
+        # "talentpool_confirm") instead of building its own body_text and
+        # calling send_email() directly -- patch the method actually
+        # called.
+        async def _fake_send_template(name, to_email, ctx, lang="nl"):
             return send_ok
-        monkeypatch.setattr(public_router.email_service, "send_email", _fake_send_email)
+        monkeypatch.setattr(public_router.email_service, "send_template", _fake_send_template)
         return public_router
     return _patch
 
@@ -376,10 +381,13 @@ def test_talentpool_optin_with_valid_job_id_stores_it_and_names_the_job_in_the_e
 
     sent = []
 
-    async def _fake_send_email(**kwargs):
-        sent.append(kwargs)
+    # WS3: same rename as patch_public_router above -- the job title now
+    # travels as ctx["job_title"] into send_template(), not as a rendered
+    # body_text string.
+    async def _fake_send_template(name, to_email, ctx, lang="nl"):
+        sent.append({"name": name, "to_email": to_email, "ctx": ctx, "lang": lang})
         return True
-    monkeypatch.setattr(public_router.email_service, "send_email", _fake_send_email)
+    monkeypatch.setattr(public_router.email_service, "send_template", _fake_send_template)
 
     data = TalentpoolOptinRequest(
         email="applicant@example.com", consent=True, scope="matching_only",
@@ -393,7 +401,9 @@ def test_talentpool_optin_with_valid_job_id_stores_it_and_names_the_job_in_the_e
     assert job_alerts is True
     assert source == "vacancy_apply"
     assert len(sent) == 1
-    assert "Senior Embedded C++ Engineer" in sent[0]["body_text"]
+    assert sent[0]["name"] == "talentpool_confirm"
+    assert sent[0]["to_email"] == "applicant@example.com"
+    assert sent[0]["ctx"]["job_title"] == "Senior Embedded C++ Engineer"
 
 
 def test_talentpool_optin_with_unknown_job_id_stores_no_job_id(patch_public_router):
@@ -527,10 +537,11 @@ def test_talentpool_optin_second_role_within_ten_minutes_gets_its_own_row(monkey
 
     sent = []
 
-    async def _fake_send_email(**kwargs):
-        sent.append(kwargs)
+    # WS3: send_template(), not send_email() -- see patch_public_router above.
+    async def _fake_send_template(name, to_email, ctx, lang="nl"):
+        sent.append({"name": name, "to_email": to_email, "ctx": ctx})
         return True
-    monkeypatch.setattr(public_router.email_service, "send_email", _fake_send_email)
+    monkeypatch.setattr(public_router.email_service, "send_template", _fake_send_template)
 
     data1 = TalentpoolOptinRequest(
         email="dubbel@example.com", consent=True, scope="matching_only",
@@ -884,17 +895,22 @@ def test_talentpool_reminder_job_sends_one_email_and_stamps_reminder_sent_at(mon
 
     sent_calls = []
 
-    async def _fake_send_email(**kwargs):
-        sent_calls.append(kwargs)
+    # WS3: talentpool_reminder_job() now calls send_template() (the
+    # "talentpool_reminder" template) instead of building its own
+    # body_text and calling send_email() directly.
+    async def _fake_send_template(name, to_email, ctx, lang="nl"):
+        sent_calls.append({"name": name, "to_email": to_email, "ctx": ctx})
         return True
 
     import services.email_service as email_service_module
-    monkeypatch.setattr(email_service_module.email_service, "send_email", _fake_send_email)
+    monkeypatch.setattr(email_service_module.email_service, "send_template", _fake_send_template)
 
     result = asyncio.run(scheduler.talentpool_reminder_job())
     assert result == {"candidates_due": 1, "sent": 1}
     assert len(sent_calls) == 1
+    assert sent_calls[0]["name"] == "talentpool_reminder"
     assert sent_calls[0]["to_email"] == "due@example.com"
+    assert sent_calls[0]["ctx"]["full_name"] == "Jane Doe"
     stamp_calls = [c for c in db.executed if "consent_reminder_sent_at = NOW()" in c[0]]
     assert len(stamp_calls) == 1
     assert stamp_calls[0][1] == (1,)
@@ -907,11 +923,11 @@ def test_talentpool_reminder_job_does_not_stamp_when_send_fails(monkeypatch):
     monkeypatch.setattr(scheduler, "fetch_all", db.fetch_all)
     monkeypatch.setattr(scheduler, "execute", db.execute)
 
-    async def _fake_send_email(**kwargs):
+    async def _fake_send_template(name, to_email, ctx, lang="nl"):
         return False
 
     import services.email_service as email_service_module
-    monkeypatch.setattr(email_service_module.email_service, "send_email", _fake_send_email)
+    monkeypatch.setattr(email_service_module.email_service, "send_template", _fake_send_template)
 
     result = asyncio.run(scheduler.talentpool_reminder_job())
     assert result == {"candidates_due": 1, "sent": 0}
