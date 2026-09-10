@@ -70,7 +70,7 @@ daar gelegenheid voor is, niet als blokkerende stap voor deze release.
 De callback stuurt bij een mislukte flow altijd een redirect naar
 `{FRONTEND_URL}/?google_auth_error=<code>`, nooit een kale JSON-fout (een
 top-level browsernavigatie kan geen JSON-response afvangen). De
-frontend (`website/script.js`) toont voor elk van deze acht codes een
+frontend (`website/script.js`) toont voor elk van deze negen codes een
 eigen NL/EN-tekst:
 
 | Code | Betekenis |
@@ -81,6 +81,7 @@ eigen NL/EN-tekst:
 | `token_exchange_failed` | De uitwisseling van `code` tegen een token bij Google mislukte (verkeerde cliëntgegevens, netwerkfout, of `redirect_uri`-mismatch die Google zelf al blokkeerde vóór onze callback). |
 | `email_not_verified` | Het Google-account zelf heeft een niet-geverifieerd e-mailadres. |
 | `account_disabled` | Er bestaat al een account met dit e-mailadres, maar het is (zacht) verwijderd. |
+| `admin_use_password` | Het Google-account hoort bij een beheerdersaccount. Beheerders loggen in met wachtwoord en TOTP, niet via Google Sign-In, zodat de TOTP-controle nooit wordt overgeslagen. |
 | `server_error` | Onverwachte fout bij het verifiëren van het ID-token. |
 | `access_denied` | Doorgegeven van Google zelf: de gebruiker heeft op het toestemmingsscherm op "Weigeren" geklikt. |
 

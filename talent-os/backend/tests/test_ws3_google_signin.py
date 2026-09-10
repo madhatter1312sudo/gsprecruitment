@@ -315,6 +315,36 @@ def test_callback_account_disabled_for_soft_deleted_user(monkeypatch, fake_notif
     assert _error_code(_location(response)) == "account_disabled"
 
 
+def test_callback_admin_account_is_rejected_password_only(monkeypatch, fake_notify):
+    """Security-auditor HIGH finding: an admin account must never get a
+    token via Google Sign-In. login() checks mfa_required_for_user() and
+    stops at an mfa_required challenge for an admin with TOTP enabled;
+    this callback had no equivalent check at all, so the same account
+    reached through here got a full admin JWT with no second factor.
+    core.deps's admin-MFA enforcement only checks that totp_enabled_at is
+    set, not that this particular sign-in passed one, so that token
+    worked on every admin route. Admins keep using password + TOTP."""
+    state_jwt, nonce = _state_for(monkeypatch)
+    request = _make_request(cookies={"google_oauth_state": nonce})
+    _patch_token_exchange(monkeypatch, 200)
+    _patch_id_token_verify(monkeypatch, idinfo={"email": "boss@example.com", "email_verified": True, "name": "Boss"})
+    db = _FakeAuthDB(existing_user={
+        "id": 1, "email": "boss@example.com", "full_name": "Boss", "role": "admin",
+        "is_verified": True, "deleted_at": None,
+    })
+    _patch_db(monkeypatch, db)
+
+    response = asyncio.run(auth_router.google_callback(request, code="abc", state=state_jwt))
+
+    assert _error_code(_location(response)) == "admin_use_password"
+    assert len(db.inserted_users) == 0
+    # No last_login_at update, no token issuance -- the callback must
+    # return before reaching any of that for an admin account.
+    assert db.executed == []
+    events = [e for e, _ in fake_notify]
+    assert events == []
+
+
 def test_callback_new_user_role_client_creates_client_row(monkeypatch, fake_notify):
     state_jwt, nonce = _state_for(monkeypatch, role="client")
     request = _make_request(cookies={"google_oauth_state": nonce})

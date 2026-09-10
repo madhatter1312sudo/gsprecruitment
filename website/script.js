@@ -1517,8 +1517,8 @@ const GSP_WHATSAPP = '31617913965';
   // error code, nothing secret) after the user completes Google's consent
   // screen. Codes: not_configured, invalid_state, missing_code,
   // token_exchange_failed, email_not_verified, account_disabled,
-  // access_denied, server_error (unknown codes fall back to the
-  // server_error text). Pick up the token, strip it from the URL
+  // admin_use_password, access_denied, server_error (unknown codes fall
+  // back to the server_error text). Pick up the token, strip it from the URL
   // immediately, then fetch the user's profile to finish signing them in
   // the same way a normal email/password login does.
   function handleGoogleAuthCallback() {
@@ -1539,6 +1539,7 @@ const GSP_WHATSAPP = '31617913965';
         token_exchange_failed: { nl: 'Google gaf geen geldig antwoord, probeer opnieuw.', en: 'Google did not return a valid response, please try again.' },
         email_not_verified: { nl: 'Je Google-adres is niet geverifieerd.', en: 'Your Google address is not verified.' },
         account_disabled: { nl: 'Dit account is uitgeschakeld, neem contact op via info@gsprecruitment.nl.', en: 'This account has been disabled, contact info@gsprecruitment.nl.' },
+        admin_use_password: { nl: 'Beheerders loggen in met wachtwoord en TOTP, niet via Google.', en: 'Admins sign in with a password and TOTP, not Google.' },
         access_denied: { nl: 'Je hebt de aanmelding bij Google geannuleerd.', en: 'You cancelled the Google sign-in.' },
         server_error: { nl: 'Er ging iets mis, probeer het later opnieuw.', en: 'Something went wrong, please try again later.' },
       };

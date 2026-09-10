@@ -107,6 +107,29 @@ def test_owner_email_sent_when_configured(fake_telegram, fake_send_template, mon
     assert call["ctx"]["deeplink"] == "https://gsprecruitment.nl/admin/#leads"
 
 
+def test_owner_email_never_carries_the_address_or_company(fake_telegram, fake_send_template, monkeypatch):
+    """Security-auditor MEDIUM (GDPR data minimisation): the owner e-mail
+    may carry a name, interest or vacancy title plus the deeplink, never
+    the e-mail address or a company name -- the deeplink already opens
+    the record in the admin panel, and a copy of the address in the
+    owner's mailbox (at Google or elsewhere) is a second, unmanaged copy
+    that a GDPR erasure request in the admin panel never reaches."""
+    monkeypatch.setattr(settings, "owner_notify_email", "owner@gsprecruitment.nl")
+    asyncio.run(notify_module.notify_owner("lead", {
+        "interest_type": "embedded_vacature",
+        "full_name": "Jane Doe",
+        "email": "jane@example.com",
+        "company": "Acme BV",
+        "anchor": "leads",
+    }))
+    detail = fake_send_template[0]["ctx"]["detail"]
+    assert "Jane Doe" in detail
+    assert "jane@example.com" not in detail
+    assert "Acme BV" not in detail
+    assert "E-mail" not in detail
+    assert "Bedrijf" not in detail
+
+
 def test_owner_email_uses_candidates_anchor_when_given(fake_telegram, fake_send_template, monkeypatch):
     monkeypatch.setattr(settings, "owner_notify_email", "owner@gsprecruitment.nl")
     asyncio.run(notify_module.notify_owner("talentpool_confirmed", {"job_title": "Firmware Engineer", "anchor": "candidates"}))

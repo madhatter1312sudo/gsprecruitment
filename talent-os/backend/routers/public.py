@@ -268,15 +268,14 @@ async def submit_lead(request: Request, data: LeadSubmit):
     # Telegram side is unchanged (no-ops without TELEGRAM_BOT_TOKEN/
     # TELEGRAM_CHAT_ID, never carries the submitter's name or e-mail,
     # services/telegram.py docstring); an OWNER_NOTIFY_EMAIL, if set, may
-    # additionally get name/interest/company (services/notify.py). Must
-    # never fail the submission itself -- notify_owner() is itself
-    # best-effort and never raises.
+    # additionally get name/interest (services/notify.py) -- never the
+    # e-mail address or company, the deeplink already opens the lead in
+    # the admin panel. Must never fail the submission itself --
+    # notify_owner() is itself best-effort and never raises.
     await notify_owner("lead", {
         "interest_type": data.interest_type,
         "submitted_at": lead["created_at"],
         "full_name": data.name,
-        "email": data.email,
-        "company": data.company,
         "anchor": "leads",
     })
 

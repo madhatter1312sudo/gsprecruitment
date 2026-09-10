@@ -143,7 +143,7 @@ async def register(request: Request, data: UserRegister):
     # WS3: best-effort owner notification -- see services/notify.py.
     await notify_owner(
         "candidate_registered" if data.role == "candidate" else "client_registered",
-        {"full_name": data.full_name, "email": email, "anchor": "candidates" if data.role == "candidate" else "leads"},
+        {"full_name": data.full_name, "anchor": "candidates" if data.role == "candidate" else "leads"},
     )
 
     return _build_token_response(user)
@@ -776,6 +776,19 @@ async def google_callback(
     if user and user["deleted_at"] is not None:
         return RedirectResponse(f"{settings.frontend_url}/?google_auth_error=account_disabled")
 
+    # Security-auditor finding: an admin account reached via this branch
+    # skipped login()'s mfa_required_for_user() check entirely -- Google
+    # Sign-In issued a full admin JWT for an account that login() itself
+    # would have stopped at an mfa_required challenge. core.deps's
+    # admin-MFA enforcement only checks that totp_enabled_at is set, not
+    # that this particular sign-in actually passed a second factor, so
+    # that JWT worked on every admin route. Whoever controls the matching
+    # Google account (or the Workspace domain) would get admin with no
+    # TOTP. Admins keep signing in with a password and TOTP; Google
+    # Sign-In is for candidates and clients only.
+    if user and user["role"] == "admin":
+        return RedirectResponse(f"{settings.frontend_url}/?google_auth_error=admin_use_password")
+
     if not user:
         # New account via Google -- role is whatever was requested at
         # /google/login (default candidate), pre-verified since Google
@@ -798,7 +811,7 @@ async def google_callback(
             )
         # WS3: best-effort owner notification -- see services/notify.py.
         await notify_owner("google_signup", {
-            "full_name": full_name, "email": email,
+            "full_name": full_name,
             "anchor": "leads" if new_role == "client" else "candidates",
         })
     # An existing account keeps its own stored role -- the role requested

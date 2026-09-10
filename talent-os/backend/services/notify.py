@@ -12,9 +12,12 @@ notify_owner(event, fields) is de enige plek die beide kanalen aanroept:
 
   (b) een e-mail naar OWNER_NOTIFY_EMAIL (core/config.py), alleen als die
       setting gezet is -- leeg (de default) betekent geen eigenaarsmail,
-      alleen Telegram. Deze mail mag wel naam, interesse of vacaturetitel
-      bevatten (het is een interne melding aan de eigenaar zelf, geen
-      bericht aan de betrokkene) plus een deeplink naar het adminpaneel.
+      alleen Telegram. Deze mail mag naam, interesse of vacaturetitel
+      bevatten plus een deeplink naar het adminpaneel -- niet meer dan
+      dat: geen e-mailadres en geen bedrijfsnaam. De deeplink ontsluit die
+      gegevens al in het adminpaneel zelf, dus een kopie ervan in de
+      eigenaarsmailbox (bij Google of een andere derde) is overbodig en
+      een wissing in het adminpaneel bereikt die kopie niet.
 
 Best-effort: een falende Telegram-call of e-mail mag nooit een exception
 laten ontsnappen naar de aanroeper -- de lead-, register- en
@@ -66,18 +69,19 @@ def _owner_email_detail(fields: dict) -> str:
     """Build the one-or-two-line detail block for the owner_notify
     e-mail -- unlike Telegram, this mail is allowed to carry the name,
     interest or vacancy title (contract: an internal notification to the
-    owner themself, not a message to the person it is about)."""
+    owner themself, not a message to the person it is about). Never the
+    e-mail address or company: the deeplink already opens the record in
+    the admin panel, so a copy of the address in the owner's mailbox
+    (at Google or elsewhere) would only be a second, unmanaged copy of
+    personal data that a GDPR erasure request in the admin panel never
+    reaches. Callers must not pass "email" or "company" in `fields`."""
     parts = []
     if fields.get("full_name"):
         parts.append(f"Naam: {fields['full_name']}")
-    if fields.get("email"):
-        parts.append(f"E-mail: {fields['email']}")
     if fields.get("interest_type"):
         parts.append(f"Interesse: {fields['interest_type']}")
     if fields.get("job_title") or fields.get("applied_job"):
         parts.append(f"Vacature: {fields.get('job_title') or fields.get('applied_job')}")
-    if fields.get("company"):
-        parts.append(f"Bedrijf: {fields['company']}")
     return "\n".join(parts) if parts else "Geen aanvullende gegevens."
 
 

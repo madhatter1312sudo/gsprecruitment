@@ -1171,11 +1171,17 @@ section { padding: 100px 0; }
 .fade-in-right.visible { opacity: 1; transform: translateX(0); }
 
 /* ── Toast Container (from auth.js) ─────────────────────── */
+/* z-index above the cookie-consent banner (script.js initCookieConsent(),
+   inline z-index:10000, same bottom-right corner): a toast is the only UI
+   carrying the Google Sign-In error copy, and for a visitor who has not
+   accepted cookies yet -- exactly the state a first-time Google sign-in
+   attempt produces -- the banner otherwise sits on top of it and hides
+   the message completely (design-reviewer finding). */
 .toast-container {
   position: fixed;
   bottom: 24px;
   right: 24px;
-  z-index: 9998;
+  z-index: 10001;
   display: flex;
   flex-direction: column;
   gap: 8px;
