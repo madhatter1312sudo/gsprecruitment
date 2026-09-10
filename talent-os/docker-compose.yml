@@ -84,9 +84,24 @@ services:
       API_KEY: ${API_KEY}
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY}
       APOLLO_API_KEY: ${APOLLO_API_KEY}
+      # WS3 (docs/EMAIL-SETUP.md, docs/GOOGLE-SIGNIN-SETUP.md): only this
+      # one service block in this file runs the backend image, so there is
+      # no second/third block to keep in sync (CLAUDE.md's "all three or
+      # none" rule refers to talent-os/.env, root docker-compose.yml and
+      # this file all carrying the same var names -- see those two files).
+      EMAIL_PROVIDER: ${EMAIL_PROVIDER}
+      EMAIL_FROM: ${EMAIL_FROM}
+      EMAIL_REPLY_TO: ${EMAIL_REPLY_TO}
+      OWNER_NOTIFY_EMAIL: ${OWNER_NOTIFY_EMAIL}
       SMTP_HOST: ${SMTP_HOST}
+      SMTP_PORT: ${SMTP_PORT}
       SMTP_USER: ${SMTP_USER}
       SMTP_PASS: ${SMTP_PASS}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET}
+      GOOGLE_REFRESH_TOKEN: ${GOOGLE_REFRESH_TOKEN}
+      GOOGLE_REDIRECT_URI: ${GOOGLE_REDIRECT_URI}
+      FRONTEND_URL: ${FRONTEND_URL}
       BACKEND_HOST: "127.0.0.1"
       JWT_SECRET: ${JWT_SECRET}
       CORS_ORIGINS: "http://localhost:3000"
