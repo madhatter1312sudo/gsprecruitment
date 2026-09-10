@@ -463,15 +463,6 @@ const Auth = {
     return user;
   },
 
-  /* ---- OAuth Handlers ---- */
-  handleOAuthLogin(provider) {
-    if (String(provider).toLowerCase().includes('google')) {
-      window.location.href = `${this.API}/auth/google/login`;
-      return;
-    }
-    this.toast(`${provider} login is not available`, 'info');
-  },
-
   /* ---- Show toast notification ---- */
   toast(message, type = 'success') {
     let container = document.querySelector('.toast-container');
