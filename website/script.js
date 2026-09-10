@@ -654,9 +654,12 @@ const GSP_WHATSAPP = '31617913965';
     // Anonymous/tbd-salary vacancies (WS4) have no salary_min/max — show
     // "salary on request" instead of a blank gap next to the CTA.
     const hasSalary = job.salary_min != null && job.salary_max != null;
+    // Shortened fallback copy ("Op aanvraag" / "On request") keeps this
+    // span narrow enough to sit next to the CTA on one row at 390px
+    // without wrapping (design-reviewer, jobCardHTML footer, WS1 review).
     const salary = hasSalary
       ? `€${Math.round(job.salary_min / 1000)}k – €${Math.round(job.salary_max / 1000)}k`
-      : `<span class="lang-nl">Salaris op aanvraag</span><span class="lang-en">Salary on request</span>`;
+      : `<span class="lang-nl">Op aanvraag</span><span class="lang-en">On request</span>`;
     const href = `vacature.html?id=${encodeURIComponent(job.slug || job.id)}`;
     return `
       <div class="card-data" data-id="${GSP.esc(job.id)}" data-slug="${GSP.esc(job.slug || job.id)}" data-href="${href}">
@@ -666,7 +669,7 @@ const GSP_WHATSAPP = '31617913965';
         <h3>${GSP.esc(job.title)}</h3>
         <p class="card-clamp-3">${GSP.esc(job.description || '')}</p>
         <div class="card-data__meta" style="display:flex;align-items:center;justify-content:space-between;gap:var(--space-md)">
-          <span>${salary}</span>
+          <span style="white-space:nowrap">${salary}</span>
           <a href="${href}" class="${ctaClass}"><span class="lang-nl">${GSP.esc(ctaLabel.nl)}</span><span class="lang-en">${GSP.esc(ctaLabel.en)}</span></a>
         </div>
       </div>`;

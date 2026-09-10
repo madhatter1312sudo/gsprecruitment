@@ -239,7 +239,18 @@
 }
 
 /* ── Archetype 2: lichte inhoudskaart met rand ───────────── */
-.card, .service-card, .path-card, .story-card {
+/* Scoped `body:not(.portal) .card` on every bare-.card selector below —
+   .card is also the ingelogde-portalen dashboardkaart (candidate/index.html,
+   client/index.html <body class="portal">, portal.css's own dark .card
+   definition further down the cascade). Without the scope this archetype's
+   flex/align-items/hover-lift leaked through portal.css's narrower
+   background/border/radius/padding override (portal.css only overwrites
+   those four properties, not display/align-items/transform), collapsing
+   every portal dashboard-card header and adding an unwanted gold-ink
+   hover lift to non-clickable cards (code-reviewer, WS1 review). The other
+   archetype-2 aliases (.service-card/.path-card/.story-card) are never
+   used inside a portal, so they stay unscoped. */
+body:not(.portal) .card, .service-card, .path-card, .story-card {
   box-sizing: border-box;
   width: 100%;
   display: flex;
@@ -251,14 +262,14 @@
   border-radius: var(--radius);
   transition: border-color 0.15s ease, transform 0.15s ease;
 }
-.card:hover, .card:focus-visible,
+body:not(.portal) .card:hover, body:not(.portal) .card:focus-visible,
 .service-card:hover, .service-card:focus-visible,
 .path-card:hover, .path-card:focus-visible, .path-card:focus-within,
 .story-card:hover, .story-card:focus-visible {
   border-color: var(--gold-ink);
   transform: translateY(-2px);
 }
-.card:focus-visible, .service-card:focus-visible, .path-card:focus-visible, .story-card:focus-visible {
+body:not(.portal) .card:focus-visible, .service-card:focus-visible, .path-card:focus-visible, .story-card:focus-visible {
   outline: 2px solid var(--gold-500);
   outline-offset: 2px;
 }
@@ -271,29 +282,34 @@
    add :focus-within there too if one is added later. .path-card also
    carries .card in HTML, so .card .go-link below already reaches its CTA
    — the old .path-go alias name is retired (0 usage). */
-.card h3, .service-card h3, .path-card h3, .story-card h3 {
+body:not(.portal) .card h3, .service-card h3, .path-card h3, .story-card h3 {
   font-family: var(--font-display); font-size: var(--font-size-xl); font-weight: 500;
   color: var(--navy-900); margin-bottom: var(--space-sm);
 }
-.card p, .service-card p, .path-card p, .story-card p {
+body:not(.portal) .card p, .service-card p, .path-card p, .story-card p {
   font-family: var(--font); font-size: var(--font-size-sm); color: var(--gray-500);
 }
-.card .go-link, .service-card .go-link {
+body:not(.portal) .card .go-link, .service-card .go-link {
   margin-top: auto; padding-top: var(--space-lg);
   font-weight: 600; font-size: var(--font-size-sm); color: var(--gold-ink);
   display: inline-flex; align-items: center; gap: 7px;
   min-height: 44px; /* §8.x.0 44px touch target, padding-based (see archetype 1) */
 }
-.card:hover .go-link, .card:focus-within .go-link { gap: 11px; }
+body:not(.portal) .card:hover .go-link, body:not(.portal) .card:focus-within .go-link { gap: 11px; }
 /* .mark used as a card kicker (props-grid, path-grid, services-grid on
-   werkgevers.html; .step-card-expanded on werkwijze.html) had no spacing
-   of its own — cluster B's report (cluster-B.md) flagged 19 inline
-   style="margin-bottom:..." stopgaps for this (13 on werkgevers.html's
-   .card kickers at --space-md, 6 on werkwijze.html's smaller-padding
-   .step-card-expanded at --space-sm). Two shared rules, same values,
-   replace all of them (§8.x.8 stap 4 integratie); the inline styles are
-   removed from both pages in the same pass. */
-.card > .mark:first-child { margin-bottom: var(--space-md); }
+   werkgevers.html; index.html's services-grid; .step-card-expanded on
+   werkwijze.html) had no spacing of its own — cluster B's report
+   (cluster-B.md) flagged 19 inline style="margin-bottom:..." stopgaps for
+   this (13 on werkgevers.html's .card kickers at --space-md, 6 on
+   werkwijze.html's smaller-padding .step-card-expanded at --space-sm).
+   index.html's own services-grid uses bare .service-card (no .card), so
+   the alias is listed explicitly here too — not just .card — otherwise
+   its .mark chip sits flush against the h3 with 0px gap (code-reviewer,
+   WS1 review: markMB 0px on all 7 index.html service-cards). Same shared
+   values, replaces the inline stopgaps; removed from both pages in the
+   same pass. */
+body:not(.portal) .card > .mark:first-child, .service-card > .mark:first-child,
+.story-card > .mark:first-child, .path-card > .mark:first-child { margin-bottom: var(--space-md); }
 .step-card-expanded > .mark:first-child { margin-bottom: var(--space-sm); }
 /* Reusable 3-line clamp for a card body under a language toggle (blog
    excerpt, job description) — min-height keeps the shorter (English) copy
@@ -308,7 +324,7 @@
 .card--error { border-left: 3px solid #dc2626; } /* matches existing .form-error color; border only, never text */
 .card--error .go-link { color: var(--gold-ink); }
 @media (max-width: 390px) {
-  .card, .service-card, .path-card, .story-card { padding: var(--space-lg); }
+  body:not(.portal) .card, .service-card, .path-card, .story-card { padding: var(--space-lg); }
 }
 
 /* ── Archetype 3: datakaart (vacature) — #jobsGrid, #homeVacanciesGrid ─
@@ -1190,21 +1206,23 @@ section { padding: 100px 0; }
 
 /* ── Trust badges row ───────────────────────────────────── */
 /* Container/border/radius/color (light + dark page-hero variant) now live
-   in the archetype-5 block near the top of this file. Only row layout and
-   the svg icon stay here. */
+   in the archetype-5 block near the top of this file. Only row layout
+   stays here. All three pages that render trust-badges (index.html,
+   werkgevers.html, over-ons.html) are icon-less mono text now — no
+   .trust-badge svg left anywhere, so those rules are gone with it. */
 .trust-badges { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 28px; position: relative; z-index: 1; }
 .trust-badge { font-weight: 600; background: var(--bg-card); }
-.trust-badge svg { flex-shrink: 0; color: var(--gold-dark); }
 .page-hero .trust-badge { background: transparent; }
-.page-hero .trust-badge svg { color: var(--navy-200, #7FA0C9); }
 
-/* ── Line-icon (kandidaten.html/vacatures.html props, trust-badges) ───
+/* ── Line-icon (kandidaten.html/vacatures.html props) ───────────────
    .step-icon/.service-icon-svg/.steps-list/.step-card/.step-num removed —
    werkwijze.html's steps are .step-card-expanded now (archetype 4,
    uitgeklapt), the expertise grid is icon-less (.mark.code); confirmed 0
    usage. .line-icon stays: still the bare-stroke SVG icon used inside
-   .prop (kandidaten.html/vacatures.html) and inside some trust-badges
-   (werkgevers.html/over-ons.html) — out of this migration's scope. */
+   .prop (kandidaten.html/vacatures.html). Trust-badges no longer use it —
+   werkgevers.html and over-ons.html were migrated to the icon-less
+   archetype-5 rendering (mono text only), matching index.html; the old
+   .trust-badge svg rules were removed above with the last svg. */
 .line-icon { width: 32px; height: 32px; display: block; }
 
 /* ── Homepage vacancy module ────────────────────────────── */
@@ -1222,6 +1240,7 @@ section { padding: 100px 0; }
 .vac-link {
   display: inline-flex; align-items: center; gap: 5px; min-height: 44px;
   font-weight: 600; font-size: 0.88rem; color: var(--gold-ink); transition: var(--transition);
+  white-space: nowrap; flex-shrink: 0; /* datakaart footer: never wrap next to a null-salary fallback, design-reviewer WS1 */
 }
 .vac-link:hover, .vac-link:focus-visible { gap: 8px; color: var(--navy); }
 .footer-brand img {
@@ -1869,6 +1888,7 @@ html[data-lang="en"] .lang-nl { display: none; }
 .job-view-link {
   display: inline-flex; align-items: center; gap: 5px; min-height: 44px;
   font-size: 0.85rem; font-weight: 600; color: var(--gold-ink); transition: var(--transition);
+  white-space: nowrap; flex-shrink: 0; /* datakaart footer: never wrap next to a null-salary fallback, design-reviewer WS1 */
 }
 .job-view-link:hover, .job-view-link:focus-visible { gap: 8px; color: var(--navy); }
 

@@ -82,7 +82,7 @@
     @media (max-width:768px){ .sidebar { width: 100%; position: fixed; left: -100%; transition: left var(--transition-base); } .sidebar.open { left: 0; } .main-content { margin-left: 0; } .stats-grid { grid-template-columns: 1fr 1fr; } .portal-content { padding: var(--space-lg); } .kanban-board { grid-template-columns: 1fr; } }
   </style>
 </head>
-<body>
+<body class="portal">
   <!-- WS-E.2: shown instead of the portal when the account's e-mail is not
        yet confirmed, or (client accounts) confirmed but not yet approved
        by GSP Recruitment -- Auth.requireAuth() only checks the JWT is
