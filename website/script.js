@@ -686,7 +686,7 @@ const GSP_WHATSAPP = '31617913965';
           <span class="lang-nl">Vacatures</span><span class="lang-en">Vacancies</span>
         </p>
         <h3 style="margin-bottom:var(--space-sm)">
-          <span class="lang-nl">Op dit moment werven we nieuwe rollen</span><span class="lang-en">We are not actively hiring for new roles right now</span>
+          <span class="lang-nl">Er staan nu geen vacatures open; nieuwe rollen zijn in voorbereiding</span><span class="lang-en">New roles are being opened right now</span>
         </h3>
         <p style="color:var(--gray-500);margin-bottom:var(--space-lg)">
           <span class="lang-nl">Meld je aan voor de talentpool, dan nemen wij contact op zodra een passende rol binnenkomt.</span><span class="lang-en">Join the talent pool and we will reach out as soon as a suitable role comes in.</span>

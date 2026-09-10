@@ -518,12 +518,17 @@ body:not(.portal) .card > .mark:first-child, .service-card > .mark:first-child,
    zie §8.x.7. Linksonder (niet rechtsonder — botst anders met back-to-top/
    toast-container/cookiebanner). Twee 48x48-items, geen puls, nooit
    #25D366; label klapt alleen desktop-hover/focus-visible uit, glyph is op
-   touch altijd zelfstandig leesbaar (aria-label draagt de betekenis). */
+   touch altijd zelfstandig leesbaar (aria-label draagt de betekenis).
+   Rand + --shadow-md (reparatie, chief-of-staff review): de pil staat op
+   dezelfde navy als de hero/footer eronder; zonder eigen rand versmelt
+   hij op die vlakken met de achtergrond en is niet als knop herkenbaar. */
 .contact-rail {
   position: fixed; left: var(--space-lg); bottom: var(--space-lg); z-index: 9995;
   display: flex; flex-direction: column;
   background: var(--navy-900);
+  border: 1px solid var(--navy-600);
   border-radius: var(--radius);
+  box-shadow: var(--shadow-md);
   overflow: hidden;
 }
 .contact-rail__item {
@@ -552,6 +557,20 @@ body:not(.portal) .card > .mark:first-child, .service-card > .mark:first-child,
   max-width: 120px;
 }
 .contact-rail__item:focus-visible { outline: 2px solid var(--gold-500); outline-offset: -2px; }
+/* ≤600px (reparatie, chief-of-staff review): op smalle schermen staat de
+   gestapelde 48x96 pil over de eerste tekstregels van de kaart eronder
+   (§8.x.0 belooft "het glyph blijft altijd zelfstandig leesbaar"; dat
+   geldt niet voor een tikdoel dat drie regels lichaamstekst afdekt). Beide
+   kanalen blijven zichtbaar op hun volledige 48x48-tikdoel (geen
+   verkleining, zie §8.x.4); ze staan op smalle schermen naast elkaar in
+   plaats van gestapeld, wat het footprint van 96px hoog naar 48px hoog
+   halveert. De footer krijgt los daarvan (zie .footer) extra
+   padding-bottom zodat de pil aan het eind van de pagina nooit over de
+   copyrightregel valt. */
+@media (max-width: 600px) {
+  .contact-rail { flex-direction: row; }
+  .contact-rail__item + .contact-rail__item { border-top: none; border-left: 1px solid var(--navy-600); }
+}
 
 /* ── Reset ──────────────────────────────────────────────── */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -1197,6 +1216,15 @@ section { padding: 100px 0; }
   border-top: 1px solid var(--border);
   color: rgba(255, 255, 255, 0.6);
   padding: 64px 0 32px;
+}
+/* Reparatie (chief-of-staff review, contactrail §8.x.4): op ≤600px staat de
+   pil linksonder fixed over de allerlaatste regel van de pagina (copyright/
+   KvK-regel) omdat die regel anders op precies dezelfde schermpositie
+   eindigt. Extra ruimte onderaan de footer houdt die regel boven de pil
+   vrij, ongeacht scrollpositie; dit lost het "WA" botst met "AVG"-geval
+   structureel op in plaats van per pagina. */
+@media (max-width: 600px) {
+  .footer { padding-bottom: var(--space-5xl); }
 }
 .footer-grid { display: grid; grid-template-columns: 2fr 1fr 1fr 1fr; gap: 48px; margin-bottom: 40px; }
 .footer-grid-5 { grid-template-columns: 1.6fr repeat(5, 1fr); gap: 32px; }
