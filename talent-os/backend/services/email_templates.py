@@ -16,6 +16,11 @@ losse ctx-waarde eerst door `html.escape()` -- geen enkele aanroeper mag
 hierop vertrouwen zonder dat deze module het zelf afdwingt, dus dit
 gebeurt hier centraal in `_esc()`, nooit door de aanroeper.
 
+`lang` is standaard None: dan komt NL gevolgd door EN in één bericht terug
+(zoals de oude f-string-bodies dat ook deden), want geen enkele aanroeper
+kent de taal van de ontvanger. Een aanroeper die de taal wel kent geeft
+'nl' of 'en' expliciet mee voor een eentalig bericht.
+
 Uitvoering: één kolom, systeemlettertypen, navy kop (#0A1628), precies
 één link, geen afbeeldingen, geen tracking-pixel. Gedeelde voettekst op
 elk bericht. Geen STOP-regel: geen van deze templates gaat naar een
@@ -41,16 +46,27 @@ def _esc(value: Optional[object]) -> str:
     return _html.escape(str(value))
 
 
-def _shell(heading: str, body_html: str) -> str:
-    """One-column HTML shell shared by every template: system fonts, a
-    navy heading, the template's own body, then the shared footer. No
-    images, no tracking pixel, no external stylesheet -- every style is
-    inline so the page renders the same in any mail client."""
+def _shell(sections) -> str:
+    """One HTML shell shared by every template: system fonts, one or more
+    heading+body sections, then a single shared footer. No images, no
+    tracking pixel, no external stylesheet -- every style is inline so the
+    page renders the same in any mail client.
+
+    `sections` is a list of (heading, body_html) pairs. A single-language
+    render passes one section. The bilingual default (render() with
+    lang=None) passes two -- NL then EN -- stacked in this same shell with
+    one divider between them and one footer at the end, not two separate
+    e-mails glued together."""
+    parts = []
+    for i, (heading, body_html) in enumerate(sections):
+        if i > 0:
+            parts.append('<hr style="margin:24px 0;border:none;border-top:1px solid #E2E8F0;">')
+        parts.append(f'<h1 style="font-size:20px;color:#0A1628;margin:0 0 16px;">{heading}</h1>')
+        parts.append(body_html)
     return (
         f'<div style="font-family:{_FONT_STACK};max-width:480px;margin:0 auto;'
         'padding:24px;color:#1E293B;font-size:15px;line-height:1.5;">'
-        f'<h1 style="font-size:20px;color:#0A1628;margin:0 0 16px;">{heading}</h1>'
-        f'{body_html}'
+        f'{"".join(parts)}'
         '<p style="margin:24px 0 0;padding-top:16px;border-top:1px solid #E2E8F0;'
         f'font-size:12px;color:#64748B;">{FOOTER_TEXT}</p>'
         '</div>'
@@ -107,15 +123,20 @@ _VERIFY_HTML_BODY = {
 }
 
 
-def _render_verify_email(ctx: dict, lang: str):
+def _verify_email_parts(ctx: dict, lang: str):
+    """(subject, heading, text, body_html) for one language -- the single-
+    language render and the NL+EN bilingual default in render() both build
+    on this, so the two never drift apart."""
     subject = _VERIFY_SUBJECT[lang].substitute()
     text = _VERIFY_TEXT[lang].substitute(full_name=ctx.get("full_name") or "", link=ctx["link"], ttl_hours=ctx["ttl_hours"])
     link_html = _link_html(_esc(ctx["link"]), _esc(ctx["link"]))
-    html = _shell(
-        _VERIFY_HEADING[lang],
-        _VERIFY_HTML_BODY[lang].substitute(full_name=_esc(ctx.get("full_name")), ttl_hours=_esc(ctx["ttl_hours"]), link_html=link_html),
-    )
-    return subject, text, html
+    body_html = _VERIFY_HTML_BODY[lang].substitute(full_name=_esc(ctx.get("full_name")), ttl_hours=_esc(ctx["ttl_hours"]), link_html=link_html)
+    return subject, _VERIFY_HEADING[lang], text, body_html
+
+
+def _render_verify_email(ctx: dict, lang: str):
+    subject, heading, text, body_html = _verify_email_parts(ctx, lang)
+    return subject, text, _shell([(heading, body_html)])
 
 
 # ── reset_password ────────────────────────────────────────────────────────
@@ -162,15 +183,17 @@ _RESET_HTML_BODY = {
 }
 
 
-def _render_reset_password(ctx: dict, lang: str):
+def _reset_password_parts(ctx: dict, lang: str):
     subject = _RESET_SUBJECT[lang].substitute()
     text = _RESET_TEXT[lang].substitute(full_name=ctx.get("full_name") or "", link=ctx["link"], ttl_hours=ctx["ttl_hours"])
     link_html = _link_html(_esc(ctx["link"]), _esc(ctx["link"]))
-    html = _shell(
-        _RESET_HEADING[lang],
-        _RESET_HTML_BODY[lang].substitute(full_name=_esc(ctx.get("full_name")), ttl_hours=_esc(ctx["ttl_hours"]), link_html=link_html),
-    )
-    return subject, text, html
+    body_html = _RESET_HTML_BODY[lang].substitute(full_name=_esc(ctx.get("full_name")), ttl_hours=_esc(ctx["ttl_hours"]), link_html=link_html)
+    return subject, _RESET_HEADING[lang], text, body_html
+
+
+def _render_reset_password(ctx: dict, lang: str):
+    subject, heading, text, body_html = _reset_password_parts(ctx, lang)
+    return subject, text, _shell([(heading, body_html)])
 
 
 # ── talentpool_confirm ────────────────────────────────────────────────────
@@ -225,18 +248,20 @@ _TP_JOB_LINE_HTML = {
 }
 
 
-def _render_talentpool_confirm(ctx: dict, lang: str):
+def _talentpool_confirm_parts(ctx: dict, lang: str):
     job_title = ctx.get("job_title")
     job_line = _TP_JOB_LINE_TEXT[lang].substitute(job_title=job_title) if job_title else ""
     job_line_html = _TP_JOB_LINE_HTML[lang].substitute(job_title=_esc(job_title)) if job_title else ""
     subject = _TP_CONFIRM_SUBJECT[lang].substitute()
     text = _TP_CONFIRM_TEXT[lang].substitute(job_line=job_line, link=ctx["link"], ttl_hours=ctx["ttl_hours"])
     link_html = _link_html(_esc(ctx["link"]), _esc(ctx["link"]))
-    html = _shell(
-        _TP_CONFIRM_HEADING[lang],
-        _TP_CONFIRM_HTML_BODY[lang].substitute(job_line_html=job_line_html, ttl_hours=_esc(ctx["ttl_hours"]), link_html=link_html),
-    )
-    return subject, text, html
+    body_html = _TP_CONFIRM_HTML_BODY[lang].substitute(job_line_html=job_line_html, ttl_hours=_esc(ctx["ttl_hours"]), link_html=link_html)
+    return subject, _TP_CONFIRM_HEADING[lang], text, body_html
+
+
+def _render_talentpool_confirm(ctx: dict, lang: str):
+    subject, heading, text, body_html = _talentpool_confirm_parts(ctx, lang)
+    return subject, text, _shell([(heading, body_html)])
 
 
 # ── talentpool_reminder ───────────────────────────────────────────────────
@@ -281,15 +306,17 @@ _TP_REMINDER_HTML_BODY = {
 }
 
 
-def _render_talentpool_reminder(ctx: dict, lang: str):
+def _talentpool_reminder_parts(ctx: dict, lang: str):
     subject = _TP_REMINDER_SUBJECT[lang].substitute()
     text = _TP_REMINDER_TEXT[lang].substitute(full_name=ctx.get("full_name") or "", link=ctx["link"])
     link_html = _link_html(_esc(ctx["link"]), _esc(ctx["link"]))
-    html = _shell(
-        _TP_REMINDER_HEADING[lang],
-        _TP_REMINDER_HTML_BODY[lang].substitute(full_name=_esc(ctx.get("full_name")), link_html=link_html),
-    )
-    return subject, text, html
+    body_html = _TP_REMINDER_HTML_BODY[lang].substitute(full_name=_esc(ctx.get("full_name")), link_html=link_html)
+    return subject, _TP_REMINDER_HEADING[lang], text, body_html
+
+
+def _render_talentpool_reminder(ctx: dict, lang: str):
+    subject, heading, text, body_html = _talentpool_reminder_parts(ctx, lang)
+    return subject, text, _shell([(heading, body_html)])
 
 
 # ── client_team_invite ────────────────────────────────────────────────────
@@ -337,19 +364,21 @@ _TEAM_INVITE_HTML_BODY = {
 }
 
 
-def _render_client_team_invite(ctx: dict, lang: str):
+def _client_team_invite_parts(ctx: dict, lang: str):
     subject = _TEAM_INVITE_SUBJECT[lang].substitute()
     text = _TEAM_INVITE_TEXT[lang].substitute(
         full_name=ctx.get("full_name") or "", inviter_company=ctx.get("inviter_company") or "GSP Recruitment", link=ctx["link"],
     )
     link_html = _link_html(_esc(ctx["link"]), _esc(ctx["link"]))
-    html = _shell(
-        _TEAM_INVITE_HEADING[lang],
-        _TEAM_INVITE_HTML_BODY[lang].substitute(
-            full_name=_esc(ctx.get("full_name")), inviter_company=_esc(ctx.get("inviter_company") or "GSP Recruitment"), link_html=link_html,
-        ),
+    body_html = _TEAM_INVITE_HTML_BODY[lang].substitute(
+        full_name=_esc(ctx.get("full_name")), inviter_company=_esc(ctx.get("inviter_company") or "GSP Recruitment"), link_html=link_html,
     )
-    return subject, text, html
+    return subject, _TEAM_INVITE_HEADING[lang], text, body_html
+
+
+def _render_client_team_invite(ctx: dict, lang: str):
+    subject, heading, text, body_html = _client_team_invite_parts(ctx, lang)
+    return subject, text, _shell([(heading, body_html)])
 
 
 # ── owner_notify (intern) ─────────────────────────────────────────────────
@@ -373,18 +402,20 @@ _OWNER_NOTIFY_HTML_BODY = {
 }
 
 
-def _render_owner_notify(ctx: dict, lang: str):
+def _owner_notify_parts(ctx: dict, lang: str):
     event_label = ctx.get("event_label") or ""
     detail = ctx.get("detail") or ""
     deeplink = ctx["deeplink"]
     subject = _OWNER_NOTIFY_SUBJECT[lang].substitute(event_label=event_label)
     text = _OWNER_NOTIFY_TEXT[lang].substitute(event_label=event_label, detail=detail, deeplink=deeplink)
     link_html = _link_html(_esc(deeplink), _esc(deeplink))
-    html = _shell(
-        _esc(event_label),
-        _OWNER_NOTIFY_HTML_BODY[lang].substitute(detail=_esc(detail), link_html=link_html),
-    )
-    return subject, text, html
+    body_html = _OWNER_NOTIFY_HTML_BODY[lang].substitute(detail=_esc(detail), link_html=link_html)
+    return subject, _esc(event_label), text, body_html
+
+
+def _render_owner_notify(ctx: dict, lang: str):
+    subject, heading, text, body_html = _owner_notify_parts(ctx, lang)
+    return subject, text, _shell([(heading, body_html)])
 
 
 _RENDERERS = {
@@ -396,18 +427,50 @@ _RENDERERS = {
     "owner_notify": _render_owner_notify,
 }
 
+# (subject, heading, text, body_html) for one language -- render()'s
+# bilingual default (lang=None) uses these directly instead of the
+# _RENDERERS entry above, so it can place NL and EN in one shared _shell()
+# instead of two independent single-language e-mails glued together.
+_PARTS = {
+    "verify_email": _verify_email_parts,
+    "reset_password": _reset_password_parts,
+    "talentpool_confirm": _talentpool_confirm_parts,
+    "talentpool_reminder": _talentpool_reminder_parts,
+    "client_team_invite": _client_team_invite_parts,
+    "owner_notify": _owner_notify_parts,
+}
 
-def render(name: str, ctx: dict, lang: str = "nl"):
-    """Render template `name` for `lang` ('nl' or 'en', default 'nl' --
-    the site is Dutch-first) with context dict `ctx`.
+_BILINGUAL_TEXT_SEPARATOR = "\n" + ("-" * 40) + "\n\n"
+
+
+def render(name: str, ctx: dict, lang: Optional[str] = None):
+    """Render template `name` with context dict `ctx`.
+
+    `lang` is 'nl', 'en', or None (the default). None renders NL followed
+    by EN in a single message -- Dutch-first, English included -- because
+    none of the email service's callers know the recipient's language
+    (UserRegister has no language field) and defaulting to NL-only would
+    silently drop the English half every one of these servicemails used
+    to carry as an f-string body before this module existed. A caller
+    that does know the language may still pass 'nl' or 'en' for a
+    single-language message; an unrecognised value falls back to 'nl'.
 
     Returns (subject, text, html). Raises KeyError for an unknown
     template name or a required ctx field the caller forgot -- both are
     programming errors, not something to swallow silently."""
-    if lang not in ("nl", "en"):
-        lang = "nl"
     try:
         renderer = _RENDERERS[name]
+        parts_fn = _PARTS[name]
     except KeyError:
         raise KeyError(f"Unknown email template: {name!r}") from None
+
+    if lang is None:
+        subject_nl, heading_nl, text_nl, body_nl = parts_fn(ctx, "nl")
+        _subject_en, heading_en, text_en, body_en = parts_fn(ctx, "en")
+        text = text_nl + _BILINGUAL_TEXT_SEPARATOR + text_en
+        html = _shell([(heading_nl, body_nl), (heading_en, body_en)])
+        return subject_nl, text, html
+
+    if lang not in ("nl", "en"):
+        lang = "nl"
     return renderer(ctx, lang)

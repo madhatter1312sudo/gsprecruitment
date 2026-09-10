@@ -231,6 +231,57 @@ def test_html_escapes_the_link_itself():
     assert "&lt;script&gt;" in html
 
 
+# ── Bilingual default (chief-of-staff FIX FIRST 2) ────────────────────────
+# send_template()'s call sites never pass `lang` -- the backend does not
+# know the recipient's language (UserRegister has no language field) --
+# so render()'s default must carry both languages in one message, the way
+# the five original f-string bodies on main did, instead of silently
+# dropping to NL-only.
+
+def test_render_default_lang_is_bilingual_nl_then_en():
+    subject, text, html = email_templates.render(
+        "verify_email", {"full_name": "Jan Jansen", "link": "https://gsprecruitment.nl/verify?token=abc", "ttl_hours": 24},
+    )
+    # Subject stays NL (there is only one Subject: header on a real e-mail).
+    assert subject == "Bevestig je e-mailadres - GSP Recruitment"
+    # Both languages appear in the text body, NL first.
+    assert "Beste Jan Jansen," in text
+    assert "Dear Jan Jansen," in text
+    assert text.index("Beste Jan Jansen,") < text.index("Dear Jan Jansen,")
+    # Both languages appear in the HTML, sharing one shell (one footer).
+    assert "Bevestig je e-mailadres" in html
+    assert "Confirm your e-mail address" in html
+    assert html.count("GSP Recruitment, KvK 75545586, info@gsprecruitment.nl") == 1
+
+
+def test_render_default_lang_is_bilingual_for_every_template():
+    """Every template gets the same treatment, not just verify_email."""
+    cases = [
+        ("reset_password", {"full_name": "X", "link": "https://x/y", "ttl_hours": 1}, "wachtwoord reset aangevraagd", "You requested a password reset"),
+        ("talentpool_confirm", {"link": "https://x/y", "ttl_hours": 48, "job_title": None}, "talentpool van GSP Recruitment", "GSP Recruitment's talent pool"),
+        ("talentpool_reminder", {"full_name": "X", "link": "https://x/y"}, "bewaartermijn 12 maanden", "12-month retention period"),
+        ("client_team_invite", {"full_name": "X", "inviter_company": "Acme B.V.", "link": "https://x/y"}, "team van Acme B.V.", "Acme B.V.'s team"),
+        ("owner_notify", {"event_label": "Nieuwe lead", "detail": "Interesse: embedded", "deeplink": "https://x/y"}, "Interesse: embedded", "View in the admin panel"),
+    ]
+    for name, ctx, nl_snippet, en_snippet in cases:
+        _, text, _ = email_templates.render(name, ctx)
+        assert nl_snippet in text, f"{name}: missing NL text in bilingual default"
+        assert en_snippet in text, f"{name}: missing EN text in bilingual default"
+
+
+def test_render_explicit_lang_still_single_language():
+    """A caller that does know the language (none currently do, but the
+    contract keeps this path) still gets a single-language message."""
+    _, text_nl, _ = email_templates.render(
+        "verify_email", {"full_name": "X", "link": "https://x/y", "ttl_hours": 1}, "nl",
+    )
+    assert "Dear X," not in text_nl
+    _, text_en, _ = email_templates.render(
+        "verify_email", {"full_name": "X", "link": "https://x/y", "ttl_hours": 1}, "en",
+    )
+    assert "Beste X," not in text_en
+
+
 def test_html_never_carries_none_literal_for_missing_full_name():
     """_esc(None) must render as an empty string, never the literal text
     'None' leaking into a real e-mail (e.g. talentpool_reminder's

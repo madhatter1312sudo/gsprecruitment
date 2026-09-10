@@ -121,8 +121,10 @@ geeft per domeinalias doorgaans een eigen selectornaam.
 
 Conclusie voor dit spoor: het rootdomein hoeft niet aangepast te worden
 (het staat al op `p=quarantine`, strenger dan het `p=none`-startpunt uit
-het oorspronkelijke plan); alleen de vier subdomeinrecords in de tabel
-hierboven zijn nieuw.
+het oorspronkelijke plan); alleen de drie subdomeinrecords in de tabel
+hierboven zijn nieuw. Geen aparte Google-verificatie-TXT nodig: de
+aanwezige MX- en DKIM-records op het rootdomein tonen dat Workspace daar
+al geverifieerd draait, en dat dekt het subdomein mee.
 
 Zelf opnieuw controleren nadat je de records hebt gezet:
 

@@ -125,6 +125,77 @@ def check_role(pw, base, role):
     return problems
 
 
+def check_no_consent(pw, base):
+    """Chief-of-staff FIX FIRST 1: a visitor who has not accepted the cookie
+    banner is the ordinary first-time case, not an edge case -- the Google
+    button is right there on the same page as the still-open banner.
+    consumeGoogleAuthRedirect() used to call setAuth() and reload()
+    unconditionally; setAuth() silently refuses to write to localStorage
+    without consent, so the reload landed back on requireAuth()'s "no
+    token" branch and bounced the visitor to '/' with no toast and no
+    error code -- a login that fails with no visible sign it failed. This
+    seeds no consent at all (unlike check_role() above) and asserts the
+    fixed behaviour instead: no token is ever stored, and the visitor ends
+    up on '/' with ?google_auth_error=cookie_consent so script.js can show
+    a toast."""
+    browser = pw.chromium.launch(executable_path=CHROMIUM_PATH or None, headless=True)
+    context = browser.new_context()
+    page = context.new_page()
+
+    def route_handler(route, request):
+        from urllib.parse import urlparse
+        if request.url.startswith("https://api.gsprecruitment.nl/api/auth/me"):
+            route.fulfill(
+                status=200, content_type="application/json",
+                body=json.dumps({
+                    "id": 1, "role": "candidate", "email": "fragment-check-noconsent@example.invalid",
+                    "full_name": "Fragment Check", "is_verified": True,
+                }),
+            )
+            return
+        if urlparse(request.url).netloc.startswith("127.0.0.1"):
+            route.continue_()
+            return
+        route.abort()
+
+    page.route("**/*", route_handler)
+
+    errors = []
+    page.on("pageerror", lambda exc: errors.append(str(exc)))
+
+    page.goto(f"{base}/candidate/#google_auth={FAKE_JWT}", wait_until="domcontentloaded", timeout=10000)
+    try:
+        # requireAuth() -> consumeGoogleAuthRedirect() lands here via
+        # `window.location.href = '/?google_auth_error=cookie_consent'`;
+        # the / page's own script.js (handleGoogleAuthCallback) then
+        # strips that query string with replaceState() as soon as it
+        # reads it (same "don't repeat the toast on refresh" behaviour
+        # documented for every other google_auth_error code) and shows
+        # the toast instead -- so the toast, not the URL, is the durable
+        # evidence the error code actually arrived.
+        page.wait_for_selector(".toast-error", timeout=5000)
+    except Exception:
+        pass  # evaluated below regardless, for a clear failure message
+
+    token = page.evaluate("() => localStorage.getItem('gsp_token')")
+    final_path = page.evaluate("() => window.location.pathname")
+    toast_text = page.evaluate(
+        "() => document.querySelector('.toast-error span:last-child')?.textContent || null"
+    )
+
+    context.close()
+    browser.close()
+
+    problems = []
+    if token is not None:
+        problems.append(f"gsp_token was stored ({token!r}) even though cookie consent was never granted")
+    if final_path != "/":
+        problems.append(f"page did not land on '/': {final_path!r}")
+    if not toast_text:
+        problems.append("no error toast was shown -- the failure is silent, exactly the bug this guards against")
+    return problems
+
+
 def main():
     try:
         from playwright.sync_api import sync_playwright
@@ -147,13 +218,22 @@ def main():
             if problems:
                 failures[role] = problems
 
+        no_consent_problems = check_no_consent(pw, base)
+        status = "OK" if not no_consent_problems else "FAIL"
+        print(f"  [{status}] /candidate/#google_auth=<jwt> without cookie consent")
+        for p in no_consent_problems:
+            print(f"         {p}")
+        if no_consent_problems:
+            failures["no_consent"] = no_consent_problems
+
     httpd.shutdown()
 
     if failures:
         print("\nFAIL: Google Sign-In redirect landing on the portal path did not store a session.")
         sys.exit(1)
 
-    print("\nPASS: both /candidate/ and /client/ consume #google_auth=<jwt> and end up with a stored session.")
+    print("\nPASS: both /candidate/ and /client/ consume #google_auth=<jwt> and end up with a stored session,")
+    print("      and a visit without cookie consent fails visibly instead of silently.")
 
 
 if __name__ == "__main__":

@@ -501,6 +501,16 @@ const GSP_WHATSAPP = '31617913965';
     const socialBtns = qsa('.social-btns button');
     socialBtns.forEach(btn => {
       btn.addEventListener('click', () => {
+        // A visitor who has not yet dealt with the cookie banner clicks this
+        // button as often as one who already accepted -- that is the normal
+        // first-time case, not an edge case. The redirect to the portal path
+        // that follows needs setAuth() to actually store the session there,
+        // and setAuth() refuses to write to localStorage without consent. The
+        // banner's own copy is "functionele cookies, geen tracking"; a signed-
+        // in session is exactly that kind of functional storage, so granting
+        // it here (rather than failing the login silently) matches what the
+        // banner already promises.
+        try { localStorage.setItem('gsp_cookie_consent', 'true'); } catch (e) { /* ignore */ }
         const role = googleLoginRole(btn);
         const next = role === 'client' ? '/client/' : '/candidate/';
         window.location.href = `${Auth.API}/auth/google/login?role=${role}&next=${encodeURIComponent(next)}`;
@@ -1517,8 +1527,10 @@ const GSP_WHATSAPP = '31617913965';
   // error code, nothing secret) after the user completes Google's consent
   // screen. Codes: not_configured, invalid_state, missing_code,
   // token_exchange_failed, email_not_verified, account_disabled,
-  // admin_use_password, access_denied, server_error (unknown codes fall
-  // back to the server_error text). Pick up the token, strip it from the URL
+  // admin_use_password, access_denied, server_error, plus cookie_consent
+  // (set locally by auth.js, not by the backend, when a session landed on
+  // a portal path but consent was missing so it could not be stored;
+  // unknown codes fall back to the server_error text). Pick up the token, strip it from the URL
   // immediately, then fetch the user's profile to finish signing them in
   // the same way a normal email/password login does.
   function handleGoogleAuthCallback() {
@@ -1542,6 +1554,10 @@ const GSP_WHATSAPP = '31617913965';
         admin_use_password: { nl: 'Beheerders loggen in met wachtwoord en TOTP, niet via Google.', en: 'Admins sign in with a password and TOTP, not Google.' },
         access_denied: { nl: 'Je hebt de aanmelding bij Google geannuleerd.', en: 'You cancelled the Google sign-in.' },
         server_error: { nl: 'Er ging iets mis, probeer het later opnieuw.', en: 'Something went wrong, please try again later.' },
+        // Set by auth.js's consumeGoogleAuthRedirect() when a session
+        // arrives on a portal path but setAuth() refused to store it
+        // (cookie consent not granted). Not a code the backend sends.
+        cookie_consent: { nl: 'Je bent aangemeld bij Google, maar we konden je sessie niet opslaan. Accepteer de cookiemelding en probeer opnieuw.', en: 'You signed in with Google, but we could not store your session. Please accept the cookie notice and try again.' },
       };
       const fallback = { nl: 'Er ging iets mis, probeer het later opnieuw.', en: 'Something went wrong, please try again later.' };
       const copy = messages[error] || fallback;

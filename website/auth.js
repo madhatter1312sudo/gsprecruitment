@@ -462,6 +462,14 @@ const Auth = {
      Exchanges the token for the user profile exactly like a normal login,
      stores both via setAuth(), then reloads so requireAuth() runs its
      normal check against a token that is now actually in localStorage.
+     setAuth() returns false without writing anything when cookie consent
+     has not been granted -- the button that starts this flow (script.js)
+     grants it before redirecting to Google, but a visitor can still land
+     here without having gone through that button (a bookmarked link, a
+     stale tab, storage blocked by the browser), so this cannot assume
+     consent is present. Reloading anyway in that case would silently
+     bounce straight back out through requireAuth()'s "no token" branch,
+     which is exactly the stuck-logged-out failure this exists to avoid.
      Returns true when a redirect/reload is in flight, so the caller must
      stop rather than treat this pass as "not logged in". */
   consumeGoogleAuthRedirect() {
@@ -477,8 +485,11 @@ const Auth = {
         return res.json();
       })
       .then((user) => {
-        this.setAuth(token, user);
-        window.location.reload();
+        if (this.setAuth(token, user)) {
+          window.location.reload();
+        } else {
+          window.location.href = '/?google_auth_error=cookie_consent';
+        }
       })
       .catch(() => {
         this.toast('Google sign-in failed. Please try again.', 'error');

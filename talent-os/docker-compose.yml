@@ -89,19 +89,28 @@ services:
       # no second/third block to keep in sync (CLAUDE.md's "all three or
       # none" rule refers to talent-os/.env, root docker-compose.yml and
       # this file all carrying the same var names -- see those two files).
-      EMAIL_PROVIDER: ${EMAIL_PROVIDER}
-      EMAIL_FROM: ${EMAIL_FROM}
-      EMAIL_REPLY_TO: ${EMAIL_REPLY_TO}
+      # Defaulted (chief-of-staff FIX FIRST 4): this reference file's own
+      # .env is optional (postgres.env above is `required: false`), so an
+      # .env missing these keys must fall back to the same values
+      # core/config.py's pydantic Settings already default to in
+      # production, not an empty string -- an empty FRONTEND_URL/
+      # GOOGLE_REDIRECT_URI would turn every Google redirect relative to
+      # the API host, an empty EMAIL_FROM would send with no From header,
+      # and an empty SMTP_PORT does not even parse as the int Settings
+      # expects (the backend refuses to start).
+      EMAIL_PROVIDER: ${EMAIL_PROVIDER:-gmail}
+      EMAIL_FROM: "${EMAIL_FROM:-GSP Recruitment <info@gsprecruitment.nl>}"
+      EMAIL_REPLY_TO: ${EMAIL_REPLY_TO:-info@gsprecruitment.nl}
       OWNER_NOTIFY_EMAIL: ${OWNER_NOTIFY_EMAIL}
       SMTP_HOST: ${SMTP_HOST}
-      SMTP_PORT: ${SMTP_PORT}
+      SMTP_PORT: ${SMTP_PORT:-587}
       SMTP_USER: ${SMTP_USER}
       SMTP_PASS: ${SMTP_PASS}
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
       GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET}
       GOOGLE_REFRESH_TOKEN: ${GOOGLE_REFRESH_TOKEN}
-      GOOGLE_REDIRECT_URI: ${GOOGLE_REDIRECT_URI}
-      FRONTEND_URL: ${FRONTEND_URL}
+      GOOGLE_REDIRECT_URI: ${GOOGLE_REDIRECT_URI:-https://api.gsprecruitment.nl/api/auth/google/callback}
+      FRONTEND_URL: ${FRONTEND_URL:-https://gsprecruitment.nl}
       BACKEND_HOST: "127.0.0.1"
       JWT_SECRET: ${JWT_SECRET}
       CORS_ORIGINS: "http://localhost:3000"

@@ -17,7 +17,7 @@ client-ID's.
   letterlijk gelijk zijn aan `GOOGLE_REDIRECT_URI` in `talent-os/.env`
   (`docker-compose.yml`, `.env.example`) -- een verschil van ook maar één
   teken geeft Google's foutmelding `redirect_uri_mismatch`, niet een van
-  de acht foutcodes uit §4 hieronder (die fout gebeurt bij Google, vóór
+  de negen foutcodes uit §4 hieronder (die fout gebeurt bij Google, vóór
   onze callback ooit wordt aangeroepen).
 - **Geautoriseerde JavaScript-oorsprongen**: `https://gsprecruitment.nl`.
   (`https://www.gsprecruitment.nl` toevoegen als de site daar ook
