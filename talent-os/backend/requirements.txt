@@ -24,7 +24,7 @@ bcrypt>=4.1.0,<5.0.0
 # via crafted JWE) are fixed in 3.4.0+.
 python-jose[cryptography]>=3.4.0,<4.0.0
 slowapi>=0.1.10,<1.0.0
-email-validator>=2.0.0,<3.0.0
+email-validator>=2.3.0,<3.0.0
 
 # MFA (WS-E.12, admin TOTP): pyotp for TOTP generation/verification,
 # qrcode for its QR matrix builder only (core/mfa.py renders the matrix
