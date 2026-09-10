@@ -438,33 +438,7 @@ TALENTPOOL_REMINDER_SQL = """
 """
 
 
-def _talentpool_reminder_email_body(name: str) -> str:
-    link = "https://gsprecruitment.nl/kandidaten#talentpoolOptin"
-    greeting = name or ""
-    return f"""Beste {greeting},
-
-Je staat in de talentpool van GSP Recruitment. Over ongeveer een maand loopt je toestemming af (bewaartermijn 12 maanden). Wil je verlengd blijven staan, meld je dan hier opnieuw aan:
-{link}
-
-Doe je niets, dan verwijderen wij je gegevens uit de talentpool zodra de termijn is verstreken.
-
-Met vriendelijke groet,
-GSP Recruitment
-info@gsprecruitment.nl
-
----
-
-Dear {greeting},
-
-You are in GSP Recruitment's talent pool. Your consent expires in about a month (12-month retention period). To stay in the pool, sign up again here:
-{link}
-
-If you do nothing, we will remove your data from the talent pool once the period has passed.
-
-Kind regards,
-GSP Recruitment
-info@gsprecruitment.nl
-"""
+_TALENTPOOL_REMINDER_LINK = "https://gsprecruitment.nl/kandidaten#talentpoolOptin"
 
 
 async def talentpool_reminder_job() -> dict:
@@ -478,10 +452,9 @@ async def talentpool_reminder_job() -> dict:
     rows = await fetch_all(TALENTPOOL_REMINDER_SQL)
     sent = 0
     for row in rows:
-        ok = await email_service.send_email(
-            to_email=row["email"],
-            subject="Je talentpool-aanmelding loopt bijna af — GSP Recruitment",
-            body_text=_talentpool_reminder_email_body(row.get("full_name") or ""),
+        ok = await email_service.send_template(
+            "talentpool_reminder", row["email"],
+            {"full_name": row.get("full_name") or "", "link": _TALENTPOOL_REMINDER_LINK},
         )
         if ok:
             await execute(

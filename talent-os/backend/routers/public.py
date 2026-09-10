@@ -12,7 +12,7 @@ from models.schemas import (
     SiteContentResponse, LeadSubmit, SalaryBenchmarkResponse, QuizSubmitRequest,
     TalentpoolOptinRequest, TalentpoolConfirmRequest,
 )
-from services.telegram import notify_lead
+from services.notify import notify_owner
 from services.email_service import email_service
 from typing import Optional, List
 from datetime import datetime, timedelta, timezone
@@ -264,11 +264,20 @@ async def submit_lead(request: Request, data: LeadSubmit):
     if not lead:
         raise HTTPException(status_code=500, detail="Failed to submit lead")
 
-    # WS-C.10: best-effort ops notification -- no-ops without
-    # TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID, and never carries the
-    # submitter's name or e-mail (services/telegram.py docstring). Must
-    # never fail the submission itself.
-    await notify_lead(data.interest_type, lead["created_at"])
+    # WS-C.10 + WS3: best-effort ops notification via notify_owner() --
+    # Telegram side is unchanged (no-ops without TELEGRAM_BOT_TOKEN/
+    # TELEGRAM_CHAT_ID, never carries the submitter's name or e-mail,
+    # services/telegram.py docstring); an OWNER_NOTIFY_EMAIL, if set, may
+    # additionally get name/interest (services/notify.py) -- never the
+    # e-mail address or company, the deeplink already opens the lead in
+    # the admin panel. Must never fail the submission itself --
+    # notify_owner() is itself best-effort and never raises.
+    await notify_owner("lead", {
+        "interest_type": data.interest_type,
+        "submitted_at": lead["created_at"],
+        "full_name": data.name,
+        "anchor": "leads",
+    })
 
     return {
         "message": "Thank you! We'll get back to you shortly.",
@@ -294,33 +303,14 @@ async def _send_talentpool_confirm_email(email: str, token: str, job_title: Opti
     # or a Referer header. website/talentpool-confirm.html/.js reads it
     # from window.location.hash to match.
     link = f"https://gsprecruitment.nl/talentpool-confirm#token={token}"
-    # WS-4: job_title is plain text only (the job_orders.title column,
-    # never HTML), and this function never logs it or the recipient's
-    # e-mail address -- see the plain logger.warning() call below.
-    job_line_nl = f"Je reageerde op de vacature: {job_title}.\n\n" if job_title else ""
-    job_line_en = f"You applied to the vacancy: {job_title}.\n\n" if job_title else ""
-    body = f"""Bedankt voor je aanmelding voor de talentpool van GSP Recruitment. {job_line_nl}Bevestig via onderstaande link:
-{link}
-
-Deze link is {TALENTPOOL_OPTIN_TOKEN_TTL_HOURS} uur geldig. Heb je dit niet aangevraagd? Dan kun je dit bericht negeren.
-
-Met vriendelijke groet,
-GSP Recruitment
-info@gsprecruitment.nl
-
----
-
-Thank you for signing up for GSP Recruitment's talent pool. {job_line_en}Please confirm via the link below:
-{link}
-
-This link is valid for {TALENTPOOL_OPTIN_TOKEN_TTL_HOURS} hours. Didn't request this? You can ignore this message.
-
-Kind regards,
-GSP Recruitment
-info@gsprecruitment.nl
-"""
-    sent = await email_service.send_email(
-        to_email=email, subject="Bevestig je talentpool-aanmelding — GSP Recruitment", body_text=body,
+    # WS3: content moved into services/email_templates.py's
+    # "talentpool_confirm" template (same link, same promise, same
+    # optional job_title line as before) -- this function only builds the
+    # link and hands off to send_template(). Never logs job_title or the
+    # recipient's e-mail address -- see the plain logger.warning() below.
+    sent = await email_service.send_template(
+        "talentpool_confirm", email,
+        {"link": link, "ttl_hours": TALENTPOOL_OPTIN_TOKEN_TTL_HOURS, "job_title": job_title},
     )
     if not sent:
         logger.warning("Failed to send talentpool opt-in confirmation email")
@@ -484,6 +474,16 @@ async def talentpool_confirm(request: Request, data: TalentpoolConfirmRequest):
                 row["id"], job["id"],
             )
             applied_job = {"id": job["id"], "title": job["title"]}
+
+    # WS3: best-effort owner notification -- Telegram gets only the event
+    # and a timestamp (services/notify.py), the optional owner e-mail may
+    # also carry the vacancy title (applied_job), never carries this
+    # person's name or e-mail address (this flow never had a name to
+    # begin with -- talentpool opt-in only ever collects an e-mail).
+    await notify_owner("talentpool_confirmed", {
+        "job_title": applied_job["title"] if applied_job else None,
+        "anchor": "candidates",
+    })
 
     return {
         "message": "Talentpool consent confirmed.",

@@ -6155,8 +6155,36 @@
     },
     "/api/auth/google/login": {
       "get": {
-        "description": "Redirect the browser to Google's OAuth consent screen.",
+        "description": "Redirect the browser to Google's OAuth consent screen.\n\n`role` (candidate|client, default candidate) is the role a NEW account\nshould get -- an existing account keeps its own stored role regardless\n(see google_callback). `next` is an optional post-login path, used\nonly when it matches the account's actual role.",
         "operationId": "google_login_api_auth_google_login_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "role",
+            "required": false,
+            "schema": {
+              "default": "candidate",
+              "title": "Role",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "next",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Next"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -6165,6 +6193,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
           }
         },
         "summary": "Google Login",

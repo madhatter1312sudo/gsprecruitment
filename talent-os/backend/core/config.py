@@ -69,6 +69,22 @@ class Settings(BaseSettings):
     # which is safe to always run -- there is nothing left for a flag to
     # gate. Deliberately not kept as a dead/unused setting.
 
+    # ── E-mail (WS3) ─────────────────────────────────────────────────────
+    # EMAIL_PROVIDER kiest de provider in services/email_service.py;
+    # "gmail" is het huidige gedrag (GmailApiProvider, ongewijzigd) en de
+    # default zodat een bestaande deploy zonder .env-wijziging identiek
+    # blijft werken. EMAIL_FROM's default is het huidige afzenderadres
+    # (services/email_service.py regel 68, vóór dit spoor hardcoded) --
+    # het subdomeinadres no-reply@mail.gsprecruitment.nl wordt pas gezet
+    # zodra docs/EMAIL-SETUP.md is doorlopen (devops), niet door deze
+    # default. OWNER_NOTIFY_EMAIL is leeg = geen eigenaarsmail (alleen
+    # Telegram via services/notify.py); een lege waarde mag nooit een
+    # e-mail naar niemand of naar EMAIL_FROM sturen.
+    email_provider: str = "gmail"
+    email_from: str = "GSP Recruitment <info@gsprecruitment.nl>"
+    email_reply_to: str = "info@gsprecruitment.nl"
+    owner_notify_email: str = ""
+
     smtp_host: str = "smtp.zoho.com"
     smtp_port: int = 587
     smtp_user: str = ""
@@ -112,6 +128,15 @@ class Settings(BaseSettings):
     google_client_id: str = ""
     google_client_secret: str = ""
     google_refresh_token: str = ""
+
+    # ── Google Sign-In (WS3) ─────────────────────────────────────────────
+    # Reuses the same OAuth client as above; these two were hardcoded
+    # module constants in routers/auth.py before this spoor -- moved here
+    # so devops/frontend can point a staging deploy elsewhere without a
+    # code change. Defaults are the current production values, so an
+    # unset .env keeps today's behaviour.
+    google_redirect_uri: str = "https://api.gsprecruitment.nl/api/auth/google/callback"
+    frontend_url: str = "https://gsprecruitment.nl"
 
     # ── Cloudflare R2 (CV file storage, S3-compatible) ──────────────────────
     # Empty defaults so the app still boots before these are set; callers

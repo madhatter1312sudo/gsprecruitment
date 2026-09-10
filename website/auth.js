@@ -448,8 +448,60 @@ const Auth = {
     }
   },
 
+  /* ---- Consume a Google Sign-In success redirect (#google_auth=<jwt>) ----
+     routers/auth.py's google_callback() redirects a fresh sign-in straight
+     to the portal path (/candidate/ or /client/), not through a page that
+     loads script.js -- candidate/index.html and client/index.html load
+     only gsp-util.js, auth.js and app.js, so handleGoogleAuthCallback()
+     living solely in script.js never ran there. requireAuth() below found
+     no stored token yet, bounced the browser to '/' and threw the
+     fragment (and the JWT in it) away with it. Error codes
+     (?google_auth_error=...) always redirect to '/' server-side, never to
+     a portal path, so only the success token is handled here; script.js
+     still owns the bilingual error toast on the marketing pages.
+     Exchanges the token for the user profile exactly like a normal login,
+     stores both via setAuth(), then reloads so requireAuth() runs its
+     normal check against a token that is now actually in localStorage.
+     setAuth() returns false without writing anything when cookie consent
+     has not been granted -- the button that starts this flow (script.js)
+     grants it before redirecting to Google, but a visitor can still land
+     here without having gone through that button (a bookmarked link, a
+     stale tab, storage blocked by the browser), so this cannot assume
+     consent is present. Reloading anyway in that case would silently
+     bounce straight back out through requireAuth()'s "no token" branch,
+     which is exactly the stuck-logged-out failure this exists to avoid.
+     Returns true when a redirect/reload is in flight, so the caller must
+     stop rather than treat this pass as "not logged in". */
+  consumeGoogleAuthRedirect() {
+    const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ''));
+    const token = hashParams.get('google_auth');
+    if (!token) return false;
+
+    window.history.replaceState({}, document.title, window.location.pathname + window.location.search);
+
+    fetch(`${this.API}/auth/me`, { headers: { 'Authorization': `Bearer ${token}` } })
+      .then((res) => {
+        if (!res.ok) throw new Error('auth/me failed');
+        return res.json();
+      })
+      .then((user) => {
+        if (this.setAuth(token, user)) {
+          window.location.reload();
+        } else {
+          window.location.href = '/?google_auth_error=cookie_consent';
+        }
+      })
+      .catch(() => {
+        this.toast('Google sign-in failed. Please try again.', 'error');
+        window.location.href = '/';
+      });
+
+    return true;
+  },
+
   /* ---- Require auth (call on portal pages) ---- */
   requireAuth(allowedRoles = null) {
+    if (this.consumeGoogleAuthRedirect()) return null;
     if (!this.isLoggedIn() || this.isTokenExpired()) {
       this.clearAuth();
       window.location.href = '/';
@@ -461,15 +513,6 @@ const Auth = {
       return null;
     }
     return user;
-  },
-
-  /* ---- OAuth Handlers ---- */
-  handleOAuthLogin(provider) {
-    if (String(provider).toLowerCase().includes('google')) {
-      window.location.href = `${this.API}/auth/google/login`;
-      return;
-    }
-    this.toast(`${provider} login is not available`, 'info');
   },
 
   /* ---- Show toast notification ---- */

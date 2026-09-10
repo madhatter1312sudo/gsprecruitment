@@ -158,7 +158,7 @@ The API (`api.gsprecruitment.nl`) is a separate origin, described in `ENTERPRISE
 | `client` | Client Portal | Job CRUD, candidate search, messages |
 | `admin` | Admin Panel | Full backend access, MFA-gated (see `ENTERPRISE-ARCHITECTURE-SPEC.md` §3.2) |
 
-Auth is JWT-based (email/password or Google sign-in). There is no `client_admin` sub-role, no session-length distinction beyond the JWT's own expiry, and no LinkedIn OAuth login today (a LinkedIn button exists in the registration UI with no backend flow behind it, see §4).
+Auth is JWT-based (email/password or Google sign-in). There is no `client_admin` sub-role, no session-length distinction beyond the JWT's own expiry, and no LinkedIn OAuth login: the LinkedIn button that used to sit next to the Google button in the registration UI has been removed, since it never had a backend flow behind it (see §4).
 
 ---
 
@@ -212,7 +212,11 @@ De sollicitatieroute wijkt af voor een niet-ingelogde bezoeker: in plaats van do
 
 ## 4. Registration & Auth
 
-Registration is a single modal launched from `kandidaten.html`'s signup split or the header CTA, backed by `POST /api/auth/register`; login is a matching modal backed by `POST /api/auth/login`. Both offer a Google sign-in button wired to `/api/auth/google/login` (see `ENTERPRISE-ARCHITECTURE-SPEC.md` §3.1) and a LinkedIn button that is not wired to anything yet.
+Registration is a single modal launched from `kandidaten.html`'s signup split or the header CTA, backed by `POST /api/auth/register`; login is a matching modal backed by `POST /api/auth/login`. Both offer a Google sign-in button wired to `GET /api/auth/google/login` (see `ENTERPRISE-ARCHITECTURE-SPEC.md` §3.1); there is no LinkedIn button anymore, it was never wired to anything.
+
+The Google button carries the role the account being created or logged into is for. On the register form the account-type select (`#regRole`, candidate/client) decides it; the login form has no such select, so the role follows the page instead, `werkgevers.html` means client, every other page means candidate. The button sends `role` and a matching `next` portal path (`/candidate/` or `/client/`) as query parameters: `GET /api/auth/google/login?role=candidate|client&next=/candidate/` (or `/client/`). The backend wraps `role`, `next` and a nonce into a 10-minute state JWT, held in a `google_oauth_state` cookie during the round trip to Google.
+
+On return, the callback redirects to `{FRONTEND_URL}{next}#google_auth=<jwt>` on success, but only reuses `next` when it matches the account's actual role, an existing user keeps their stored role regardless of what was requested; otherwise it falls back to `/` for a candidate or `/client/` for a client. On failure it redirects to `{FRONTEND_URL}/?google_auth_error=<code>` with one of: `not_configured`, `invalid_state`, `missing_code`, `token_exchange_failed`, `email_not_verified`, `account_disabled`, `admin_use_password`, `server_error`, or Google's own `access_denied` (nine codes in total). The page reads that code once, shows a short NL/EN toast for it, and strips it from the URL so a refresh does not repeat the message.
 
 Fields collected at registration: email, password, role (candidate/client), and for candidates the profile basics used elsewhere in this doc (name, current role, specialisation, CV upload, salary/preferences). There is no separate multi-step wizard with its own onboarding-confirmation screen; the form posts once and the account lands on its portal dashboard. New accounts require email verification (`ENTERPRISE-ARCHITECTURE-SPEC.md` §3.1) before the dashboard's data-fetching calls run.
 

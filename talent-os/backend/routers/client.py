@@ -15,6 +15,7 @@ from models.schemas import (
     MessageListResponse, MessageResponse, PipelineStageUpdate,
 )
 from services.email_service import email_service
+from services.notify import notify_owner
 from typing import Optional, List
 from pydantic import BaseModel
 import asyncio
@@ -277,6 +278,12 @@ async def create_client_job(
         "client_job_create", current_user["id"], "job", job["id"],
         json.dumps({"client_id": client["id"], "title": data.title}),
     )
+
+    # WS3: best-effort owner notification -- see services/notify.py.
+    # Telegram gets only the event and a timestamp; the optional owner
+    # e-mail may also carry the vacancy title.
+    await notify_owner("client_job_created", {"job_title": data.title, "anchor": "leads"})
+
     return job
 
 
@@ -914,37 +921,13 @@ async def invite_team_member(
 
     set_password_link = f"https://gsprecruitment.nl/verify?token={set_password_token}&mode=set-password"
     inviter_company = client.get("company_name") or "GSP Recruitment"
-    email_sent = await email_service.send_email(
-        to_email=user["email"],
-        subject="Uitnodiging teamlid — GSP Recruitment",
-        body_text=f"""Beste {user['full_name']},
-
-Je bent uitgenodigd om je aan te sluiten bij het team van {inviter_company} op GSP Recruitment. Stel je wachtwoord in via onderstaande link om je account te activeren:
-{set_password_link}
-
-Deze link is 24 uur geldig.
-
-Als je deze uitnodiging niet verwachtte, kun je dit bericht negeren.
-
-Met vriendelijke groet,
-GSP Recruitment
-info@gsprecruitment.nl
-
----
-
-Dear {user['full_name']},
-
-You have been invited to join {inviter_company}'s team on GSP Recruitment. Set your password via the link below to activate your account:
-{set_password_link}
-
-This link is valid for 24 hours.
-
-If you did not expect this invitation, you can ignore this message.
-
-Kind regards,
-GSP Recruitment
-info@gsprecruitment.nl
-""",
+    # WS3: content moved into services/email_templates.py's
+    # "client_team_invite" template (same link, same promise as before
+    # this spoor) -- name matches the "client_team_invite" audit_log
+    # action just below.
+    email_sent = await email_service.send_template(
+        "client_team_invite", user["email"],
+        {"full_name": user["full_name"], "inviter_company": inviter_company, "link": set_password_link},
     )
     if not email_sent:
         logger.warning("Failed to send team-invite set-password e-mail to user_id=%s", user["id"])
