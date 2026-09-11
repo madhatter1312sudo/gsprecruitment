@@ -4,10 +4,13 @@ Endpoints for platform administration: dashboard, users, jobs, candidates,
 analytics, audit log, content management, system settings.
 """
 import json
+import logging
+import secrets
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from core.config import settings
 from core.database import fetch_one, fetch_all, execute, fetch_val
 from core.deps import get_current_user, require_role
-from core.security import create_access_token
+from core.security import create_access_token, hash_token
 from core import privacy
 from core.sources import PORTAL_REGISTRATION
 from models.schemas import (
@@ -15,12 +18,16 @@ from models.schemas import (
     AuditLogEntry, ContentItem, ContentUpdate, SystemSettings, SystemSettingsUpdate,
     HealthResponse, PipelineStageUpdate, LeadReadUpdate, LEAD_INTEREST_TYPES,
     AdminTalentpoolConsentUpdate, AdminSpecPresentationConsentUpdate,
+    AdminReferralCreate,
 )
 from routers.health import get_health_detail
 from routers.client import _record_stage_change
+from services.email_service import email_service
 from typing import Optional, List
 from datetime import timedelta, timezone, datetime
 import asyncio
+
+logger = logging.getLogger("talent_os.admin")
 
 router = APIRouter(prefix="/api/v1/admin", tags=["admin-portal"])
 
@@ -840,6 +847,145 @@ async def admin_update_talentpool_consent(
     )
 
     return row
+
+
+# ── WS3b: referral vastleggen + bevestigingsmail ─────────────────────────
+#
+# SOP §1.3: een referral wordt door een mens aangedragen, met toestemming
+# van de betrokkene, vóór het eerste contact -- `lawful_basis =
+# 'toestemming_referral'`. Die toestemming is op dit moment nog een
+# mededeling van de referrer, niet van de persoon zelf, en art. 14 AVG
+# verplicht ons hem bij het eerste bericht te vertellen waar wij zijn
+# gegevens vandaan hebben. Dit endpoint doet precies die twee dingen in
+# één keer: het legt de referral vast, en het stuurt die ene, verplichte
+# kennisgeving met een bevestigingslink.
+#
+# Wat dit endpoint NIET is, en waarom dat hier expliciet staat: dit is
+# geen nieuw automatisch outreach-pad. Er gaat alleen een mail uit door
+# een handeling van een ingelogde beheerder, precies één per referral, en
+# de inhoud is de wettelijk verplichte kennisgeving plus een vraag om
+# bevestiging -- geen wervende tekst, geen vacature, geen vervolg. Elk
+# wervend bericht aan deze persoon blijft lopen via routers/outreach.py,
+# draft-only, met een mens die verstuurt. Klikt de betrokkene niet op de
+# link, dan gebeurt er niets en valt de rij na 3 maanden in de gewone
+# referral-bewaartermijn (core/retention.py REFERRAL_NO_RESPONSE_SQL).
+#
+# De bevestiging loopt bewust over dezelfde `talentpool_optin_requests`-
+# tabel en hetzelfde POST /api/public/talentpool-confirm als de publieke
+# dubbele-opt-in: één tokenmechanisme, één 24-uursvenster, één plek waar
+# een token wordt verbruikt (migrations/030 + 037, dat laatste verbreedde
+# de consent_source-CHECK al met 'referral' -- zie die migratie).
+
+REFERRAL_CONFIRM_TOKEN_TTL_HOURS = 24
+
+
+@router.post("/candidates/referral", status_code=201)
+async def admin_create_referral(
+    data: AdminReferralCreate,
+    current_user: dict = Depends(require_role("admin")),
+):
+    """Legt een aangedragen referral vast en stuurt de betrokkene één
+    bevestigingsmail (Art. 14-blok, referral-variant) met een
+    one-time-link.
+
+    Weigert in twee gevallen, allebei fail-closed:
+      - het adres staat op de suppressielijst (STOP ontvangen: nooit meer
+        mailen, op geen enkele grondslag -- SOP §3.3);
+      - er bestaat al een `candidates`-rij met dit adres. Dan is er al een
+        grondslag en een geschiedenis voor deze persoon, en die mag een
+        referral-invoer niet overschrijven (dezelfde redenering als
+        privacy.should_set_talentpool_lawful_basis(): een bestaande
+        grondslag wordt nooit stilletjes vervangen).
+
+    Anders dan de publieke opt-in geeft dit endpoint die twee gevallen wél
+    als fout terug: de aanroeper is een ingelogde beheerder die de
+    betreffende persoon zelf voor zich heeft, geen anonieme bezoeker, dus
+    er valt hier niets te enumereren wat hij niet al mag zien -- en een
+    stille 201 zou hem laten denken dat de mail eruit ging."""
+    email = data.email.lower().strip()
+
+    suppressed = await fetch_one(
+        "SELECT 1 FROM suppression_list WHERE email_hash = $1", privacy.email_hash(email),
+    )
+    if suppressed:
+        raise HTTPException(
+            status_code=409,
+            detail="This e-mail address is on the suppression list (STOP received) -- no message may be sent to it.",
+        )
+
+    existing = await fetch_one("SELECT id FROM candidates WHERE LOWER(email) = $1", email)
+    if existing:
+        raise HTTPException(
+            status_code=409,
+            detail=f"A candidate record already exists for this e-mail address (id {existing['id']}).",
+        )
+
+    candidate = await fetch_one(
+        """INSERT INTO candidates
+             (full_name, email, source, lawful_basis, date_found, referred_by,
+              consent_source, status)
+           VALUES ($1, $2, 'referral', 'toestemming_referral', CURRENT_DATE, $3, 'referral', 'sourced')
+           RETURNING id, full_name, email, source, lawful_basis, date_found, referred_by""",
+        data.full_name, email, data.referred_by,
+    )
+
+    token = secrets.token_urlsafe(32)
+    await execute(
+        """INSERT INTO talentpool_optin_requests (email, token_hash, scope, source)
+           VALUES ($1, $2, 'matching_and_contact', 'referral')""",
+        email, hash_token(token),
+    )
+
+    # Same fragment-not-query-string rule as the public talentpool link
+    # (routers/public.py _send_talentpool_confirm_email, security-audit
+    # H1): a #fragment never reaches the server, an access log or a
+    # Referer header. website/talentpool-confirm.js reads it from the
+    # hash and posts it to /api/public/talentpool-confirm.
+    link = f"{settings.frontend_url}/talentpool-confirm#token={token}"
+    sent = await email_service.send_template(
+        "referral_confirm", email,
+        {
+            "full_name": data.full_name,
+            "referred_by": data.referred_by,
+            "date_found": candidate["date_found"].isoformat(),
+            "link": link,
+            "ttl_hours": REFERRAL_CONFIRM_TOKEN_TTL_HOURS,
+        },
+    )
+    if not sent:
+        # Never log the address: services/email_service.py already wrote
+        # an email_log row keyed on privacy.email_hash() with the real
+        # error, redacted.
+        logger.warning("admin_create_referral: confirmation e-mail failed for candidate id=%s", candidate["id"])
+
+    # Audit trail with redacted evidence: `note` is free text an admin
+    # typed and can easily contain the referrer's or the candidate's own
+    # address -- same privacy.redact_emails() treatment as `evidence` on
+    # the two consent endpoints above, and the candidate's own address is
+    # stored only as a hash here, never in plaintext in audit_log.changes
+    # (json.dumps'd, never a raw dict -- commit 72b4bcd).
+    await execute(
+        "INSERT INTO audit_log (action, actor_id, target_type, target_id, changes) VALUES ($1, $2, $3, $4, $5::jsonb)",
+        "admin_referral_create", current_user["id"], "candidate", candidate["id"],
+        json.dumps({
+            "source": "referral",
+            "lawful_basis": "toestemming_referral",
+            "referred_by": privacy.redact_emails(data.referred_by),
+            "note": privacy.redact_emails(data.note),
+            "email_hash": privacy.email_hash(email),
+            "confirmation_email_sent": sent,
+        }),
+    )
+
+    return {
+        "id": candidate["id"],
+        "full_name": candidate["full_name"],
+        "source": candidate["source"],
+        "lawful_basis": candidate["lawful_basis"],
+        "date_found": candidate["date_found"],
+        "referred_by": candidate["referred_by"],
+        "confirmation_email_sent": sent,
+    }
 
 
 # ── Spec-presentatietoestemming, admin-recorded ──────────────────────────

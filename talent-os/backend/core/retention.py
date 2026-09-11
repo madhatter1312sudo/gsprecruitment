@@ -162,13 +162,46 @@ CANDIDATE_NO_REACTION_GUARD_SQL = _CANDIDATE_ENGAGEMENT_SIGNALS_SQL + _CANDIDATE
 # (services/scheduler.py generate_retention_review()) reads this to show
 # "verstreken sinds" per person without recomputing the period in Python
 # and risking it drifting from the WHERE clause that actually enforces it.
-SOURCED_NO_RESPONSE_SQL = """
+_SOURCED_NO_RESPONSE_BASE_SQL = """
     SELECT c.id, c.email, c.date_found + INTERVAL '3 months' AS term_expired_op
       FROM candidates c WHERE c.lawful_basis = $1
       AND c.status = 'sourced' AND c.date_found IS NOT NULL
       AND c.date_found <= (CURRENT_DATE - INTERVAL '3 months')
       AND c.consent_withdrawn_at IS NULL AND c.deleted_at IS NULL AND c.email IS NOT NULL
-""" + CANDIDATE_NO_REACTION_GUARD_SQL
+"""
+
+SOURCED_NO_RESPONSE_SQL = _SOURCED_NO_RESPONSE_BASE_SQL + CANDIDATE_NO_REACTION_GUARD_SQL
+
+# WS3b: referral had, tot dit spoor, letterlijk SOURCED_NO_RESPONSE_SQL als
+# selector -- alleen de `lawful_basis`-parameter ('toestemming_referral' in
+# plaats van 'gerechtvaardigd_belang') verschilde. Dezelfde bewaartermijn
+# (3 maanden na `date_found`, VERWERKINGSREGISTER §1.4 rij 7 / SOP §6 rij 7)
+# is ook precies wat blijft; wat verandert is wie er als "geen reactie"
+# telt.
+#
+# Een referral krijgt sinds WS3b een eigen bevestigingsmail met het Art.
+# 14-blok in de referral-variant (services/email_templates.py
+# `referral_confirm`, aangemaakt door POST /api/v1/admin/candidates/
+# referral). Klikt die persoon zelf op de bevestigingslink, dan stempelt
+# routers/public.py's talentpool_confirm() `referral_confirmed_at`. Dat is
+# per definitie een reactie van de betrokkene zelf: het is de enige
+# handeling die deze flow van hem vraagt, en de meest expliciete die er
+# bestaat. Zonder de regel hieronder zou zo iemand drie maanden na
+# `date_found` gewoon op de maandelijkse beoordelingslijst belanden terwijl
+# hij nota bene toestemming had bevestigd -- exact de fout die
+# CANDIDATE_NO_REACTION_GUARD_SQL's eigen commentaar hierboven beschrijft
+# ("status = 'sourced' alleen is nooit bewijs dat niemand heeft
+# gereageerd"), alleen voor een signaal dat vóór WS3b nog niet bestond.
+#
+# Bewust alleen op de referral-rij en niet in de gedeelde guard: de kolom
+# wordt uitsluitend door de referral-flow geschreven, dus voor elke andere
+# categorie zou hij altijd NULL zijn (geen effect) of, erger, per ongeluk
+# betekenis krijgen als een ander pad hem ooit gaat vullen.
+REFERRAL_NO_RESPONSE_SQL = (
+    _SOURCED_NO_RESPONSE_BASE_SQL
+    + "      AND c.referral_confirmed_at IS NULL\n"
+    + CANDIDATE_NO_REACTION_GUARD_SQL
+)
 
 # Same "the status column isn't kept in sync" problem on the prospect
 # side: routers/outreach.py never writes back to client_prospects.status
@@ -595,8 +628,15 @@ RETENTION_TABLE: Tuple[RetentionRow, ...] = (
         anchor_column="candidates.date_found",
         action="anonymise",
         schema_ready=True,
-        selector_sql=SOURCED_NO_RESPONSE_SQL,  # same guarded query; lawful_basis is the $1 parameter
-        signal_missing_nl=_SIGNAL_MISSING_ENGAGEMENT_PREFIX_NL + "het vinden van de persoon",
+        # WS3b: not SOURCED_NO_RESPONSE_SQL any more -- same period and
+        # the same guards, plus `referral_confirmed_at IS NULL` as this
+        # category's own reaction signal (see REFERRAL_NO_RESPONSE_SQL).
+        # lawful_basis is still the $1 parameter.
+        selector_sql=REFERRAL_NO_RESPONSE_SQL,
+        signal_missing_nl=(
+            _SIGNAL_MISSING_ENGAGEMENT_PREFIX_NL
+            + "het vinden van de persoon, en de referral-bevestigingslink is nooit aangeklikt"
+        ),
         subject_table="candidates", email_field="email", selector_params=("toestemming_referral",),
         public_nl=PublicRetentionText(
             categorie="Referral",

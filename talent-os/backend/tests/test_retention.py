@@ -226,11 +226,46 @@ def test_sourced_no_response_sql_guards_against_every_reaction_signal():
     assert "outreach_drafts" not in sql
 
 
-def test_sourced_and_referral_rows_share_the_same_guarded_selector():
+# WS3b split this in two. Until this spoor both rows literally shared
+# SOURCED_NO_RESPONSE_SQL (only the lawful_basis $1 parameter differed);
+# referral now has its own selector with one extra reaction signal on top
+# of exactly the same period and guards. The two tests below say both
+# halves of that out loud, so a later edit cannot quietly re-merge them or
+# let the referral selector drift away from the shared period/guards.
+
+def test_sourced_row_uses_the_shared_guarded_selector():
+    sourced = retention.get_row("sourced_no_response")
+    assert sourced.selector_sql is retention.SOURCED_NO_RESPONSE_SQL
+    assert sourced.selector_params == ("gerechtvaardigd_belang",)
+
+
+def test_referral_row_adds_the_confirmation_signal_to_the_same_guarded_selector():
+    referral = retention.get_row("referral")
+    assert referral.selector_sql is retention.REFERRAL_NO_RESPONSE_SQL
+    assert referral.selector_params == ("toestemming_referral",)
+
+    # The extra signal: a referral who clicked their own confirmation link
+    # has reacted and must never reach the monthly review list.
+    assert "referral_confirmed_at IS NULL" in retention.REFERRAL_NO_RESPONSE_SQL
+    assert "referral_confirmed_at" not in retention.SOURCED_NO_RESPONSE_SQL
+
+    # Same period and the same protective guards as the sourced row --
+    # WS3b changes who counts as "no reaction", never how long we keep.
+    assert "date_found + INTERVAL '3 months'" in retention.REFERRAL_NO_RESPONSE_SQL
+    assert "date_found <= (CURRENT_DATE - INTERVAL '3 months')" in retention.REFERRAL_NO_RESPONSE_SQL
+    assert retention.CANDIDATE_NO_REACTION_GUARD_SQL in retention.REFERRAL_NO_RESPONSE_SQL
+
+
+def test_referral_and_sourced_keep_the_same_public_retention_period():
+    """The four consumers of core/retention.py (register, privacy.html,
+    the approval list, the tests) must keep showing identical periods --
+    splitting the selector must not have moved the published term."""
     sourced = retention.get_row("sourced_no_response")
     referral = retention.get_row("referral")
-    assert sourced.selector_sql is retention.SOURCED_NO_RESPONSE_SQL
-    assert referral.selector_sql is retention.SOURCED_NO_RESPONSE_SQL
+    assert "3 maanden" in sourced.bewaartermijn
+    assert "3 maanden" in referral.bewaartermijn
+    assert "3 maanden" in referral.public_nl.bewaartermijn
+    assert "3 months" in referral.public_en.bewaartermijn
 
 
 def test_prospect_no_response_sql_guards_against_sent_drafts():

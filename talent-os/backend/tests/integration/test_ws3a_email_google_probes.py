@@ -542,6 +542,19 @@ _GENERIC_CTX = {
     "event_label": "Testmelding",
     "detail": "Detail met <b>opmaak</b> & een teken",
     "deeplink": "https://gsprecruitment.nl/admin/#leads",
+    # WS3b/WS3c: de drie nieuwe templates. Deze dict is bewust de UNIE van
+    # alles wat elke template kan vragen -- render() gooit een KeyError bij
+    # een ontbrekend veld (dat is zijn contract), dus een nieuwe template
+    # die hier niet in staat laat deze test terecht falen in plaats van
+    # stilletjes ongecontroleerd te blijven.
+    "referred_by": "Voorbeeld & Collega",
+    "date_found": "2026-09-11",
+    "deadline": "2026-10-11",
+    "unsubscribe_link": "https://gsprecruitment.nl/unsubscribe#token=abc",
+    "jobs": [
+        {"title": "Embedded Software Engineer <script>alert(1)</script>",
+         "location": "Eindhoven", "url": "https://gsprecruitment.nl/vacature.html?id=1"},
+    ],
 }
 
 
@@ -593,6 +606,34 @@ _ALLOWED_SEND_CALL_SITES = {
     ("services.scheduler", "talentpool_reminder_job"),
     ("services.notify", "_notify_owner_email"),
     ("routers.outreach", "approve_draft"),
+    # WS3b/WS3c -- alle drie beoordeeld tegen de regel hierboven:
+    #
+    # admin_create_referral verstuurt wél naar een candidates.email-rij,
+    # maar precies één keer, op de handeling van een ingelogde beheerder
+    # (require_role("admin")), en de inhoud is de wettelijk verplichte
+    # Art. 14-kennisgeving met een bevestigingsvraag -- geen wervend
+    # bericht. Het endpoint weigert een adres op de suppressielijst en
+    # weigert een adres dat al een candidates-rij heeft. De menselijke
+    # goedkeuringsstap is de beheerder die dit endpoint aanroept; er is
+    # geen job, routine of cron die het kan triggeren.
+    ("routers.admin", "admin_create_referral"),
+    #
+    # dormant_account_warning_job mailt naar users.email (een eigen
+    # portaalaccount), nooit naar een gesourcete candidates-rij, en zegt
+    # alleen dat een ongebruikt account op een beoordelingslijst komt.
+    ("services.scheduler", "dormant_account_warning_job"),
+    #
+    # job_alert_job mailt wél naar candidates.email, maar uitsluitend naar
+    # rijen met job_alert_optin_at gezet. Die kolom kent precies twee
+    # schrijvers, allebei een eigen handeling van de betrokkene zelf: de
+    # portaalschakelaar PUT /api/v1/candidate/job-alerts (ingelogd) en het
+    # per e-mail bevestigde job_alerts-vinkje op talentpool_optin_requests.
+    # Geen sourcing-pad, import, beheerder of routine kan hem vullen; de
+    # selectie eist daarnaast geen consent_withdrawn_at, geen
+    # job_alert_unsubscribed_at en afwezigheid op de suppressielijst, en
+    # elk bericht draagt een een-klik-afmeldlink. Zie de uitgebreide
+    # toelichting boven JOB_ALERT_CANDIDATE_SQL in services/scheduler.py.
+    ("services.scheduler", "job_alert_job"),
 }
 
 

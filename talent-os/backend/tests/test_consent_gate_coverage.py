@@ -76,6 +76,18 @@ _ALLOWLIST = {
         "inbox; the JOIN's WHERE already scopes om.candidate_id to the "
         "authenticated user's own candidate_id, so c.full_name is always "
         "the viewer's own name, never another candidate's.",
+    ("public.py", "SELECT id, email FROM candidates WHERE id = $1::int"):
+        "POST /api/public/unsubscribe (WS3c) -- the one-click unsubscribe "
+        "must keep working for exactly the people these two guards exclude: "
+        "someone who already withdrew consent and clicks a second time, and "
+        "someone whose row was soft-deleted between the send and the click. "
+        "Adding the guards would make an unsubscribe silently do nothing for "
+        "them, which is the wrong direction for an opt-out. The row is "
+        "reached only by presenting a valid, unused, per-send token "
+        "(job_alert_sends.token_hash), never by id or address, and the "
+        "address is used solely to compute privacy.email_hash() for the "
+        "suppression list -- it is never returned to the caller and never "
+        "logged (VERWERKINGSREGISTER.md rij 20).",
     ("gdpr.py", "SELECT * FROM candidates WHERE id = $1 AND deleted_at IS NULL"):
         "GET /api/v1/gdpr/export self-service export -- must reach the "
         "requester's own row (matched via their own candidate_profiles "

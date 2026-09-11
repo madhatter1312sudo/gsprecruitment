@@ -23,11 +23,35 @@ kent de taal van de ontvanger. Een aanroeper die de taal wel kent geeft
 
 Uitvoering: één kolom, systeemlettertypen, navy kop (#0A1628), precies
 één link, geen afbeeldingen, geen tracking-pixel. Gedeelde voettekst op
-elk bericht. Geen STOP-regel: geen van deze templates gaat naar een
-gesourcete persoon (die blijven draft-only via routers/outreach.py) --
-elk bericht hier is een servicemail aan iemand die zelf iets deed
-(registreren, opt-in, wachtwoord vergeten) of een interne melding aan de
-eigenaar (owner_notify).
+elk bericht.
+
+Over de STOP-regel en het Art. 14-blok (SOP §3.2/§3.3), want die lijn
+loopt dwars door deze module:
+
+  - `verify_email`, `reset_password`, `talentpool_confirm`,
+    `talentpool_reminder`, `client_team_invite`, `dormant_warning` en
+    `job_alert` gaan naar iemand die zelf iets deed (registreren, opt-in,
+    wachtwoord vergeten, een portaalaccount openen, zich aanmelden voor
+    alerts). Dat is art. 13, niet art. 14: geen kennisgevingsblok. Wel
+    een afmeldmogelijkheid waar er iets terugkerends wordt gestuurd --
+    `job_alert` draagt daarom een eigen een-klik-afmeldlink.
+  - `owner_notify` is intern, aan de eigenaar zelf.
+  - `referral_confirm` (WS3b) is de enige uitzondering en de enige
+    template die wél het volledige Art. 14-blok plus de STOP-regel
+    draagt: de gegevens van deze persoon zijn niet van hemzelf verkregen
+    maar via een referrer (SOP §1.3, `lawful_basis =
+    'toestemming_referral'`), dus art. 14 geldt en het blok is verplicht
+    in dit eerste bericht. De tekst is de referral-variant uit
+    docs/VERWERKINGSREGISTER.md §4 / docs/SOURCING-SOP.md §3.2, waarbij
+    de bronzin volledig is vervangen zoals die twee documenten
+    voorschrijven.
+
+Dat `referral_confirm` hier staat en niet in routers/outreach.py maakt
+geen nieuw verzendpad naar gesourcete personen: outreach blijft
+draft-only. Deze mail gaat uitsluitend uit op een handeling van een
+beheerder (POST /api/v1/admin/candidates/referral), één keer per
+referral, en vraagt de ontvanger om zelf te bevestigen voordat er iets
+met zijn gegevens gebeurt.
 """
 import html as _html
 from string import Template
@@ -381,6 +405,275 @@ def _render_client_team_invite(ctx: dict, lang: str):
     return subject, text, _shell([(heading, body_html)])
 
 
+# ── referral_confirm (WS3b) ───────────────────────────────────────────────
+# ctx: full_name, referred_by, date_found, link, ttl_hours
+#
+# De enige template hier met het volledige Art. 14-kennisgevingsblok (SOP
+# §3.2 / VERWERKINGSREGISTER §4), in de referral-variant: de tweede zin
+# ("Wij vonden uw [bron-omschrijving] op [datum] ...") is volledig
+# vervangen door de voorgeschreven referral-zin, de rest van het blok
+# (grondslag, bewaartermijn, rechten, art. 21, STOP met blokkeerlijst,
+# klachtrecht) staat er ongewijzigd onder. De markers waar
+# routers/outreach.py's _has_art14_block()/_has_optout_line() op
+# controleren ("art. 21", "autoriteit persoonsgegevens", "blokkeerlijst",
+# "3 maanden na" respectievelijk "art. 21", "data protection authority",
+# "suppression list", "3 months after", plus de STOP-zin) zitten er
+# letterlijk in, zodat dezelfde weigeringslogica deze tekst zou
+# goedkeuren als hij langs die poort was gekomen -- code-getest in
+# tests/test_ws3bc_referral_alerts.py.
+
+_REFERRAL_ART14_NL = (
+    'Dit bericht komt van GSP Recruitment (Brainport/Eindhoven), info@gsprecruitment.nl. '
+    'Wij hebben uw gegevens op $date_found gekregen via een aanbeveling van $referred_by, met uw toestemming. '
+    'Grondslag: toestemming, gegeven vóór dit eerste contact. '
+    'Wij bewaren deze gegevens 3 maanden na $date_found als u niet reageert; bij interesse gelden de '
+    'bewaartermijnen op gsprecruitment.nl/privacy. U kunt op elk moment inzage, correctie of verwijdering vragen. '
+    'U heeft het recht om bezwaar te maken tegen deze verwerking (art. 21 AVG). '
+    'U kunt zich afmelden door te antwoorden met "STOP" -- wij verwerken dat binnen 24 uur: wij verwijderen uw '
+    'gegevens uit onze actieve bestanden en uw e-mailadres blijft alleen op een blokkeerlijst zodat wij u niet '
+    'opnieuw benaderen. Een klacht over deze verwerking kunt u indienen bij de Autoriteit Persoonsgegevens '
+    '(autoriteitpersoonsgegevens.nl).'
+)
+_REFERRAL_ART14_EN = (
+    'This message is from GSP Recruitment (Brainport/Eindhoven, NL), info@gsprecruitment.nl. '
+    'We received your details on $date_found through a recommendation from $referred_by, with your consent. '
+    'Legal basis: consent, given before this first contact. '
+    'We retain this data for 3 months after $date_found if you do not respond; if you show interest, the '
+    'retention periods at gsprecruitment.nl/privacy apply. You can request access, correction or deletion at '
+    'any time. You have the right to object to this processing (Art. 21 GDPR). '
+    'You can opt out by replying "STOP" -- we process that within 24 hours: we remove your data from our active '
+    'files, and your e-mail address is kept only on a suppression list so we do not contact you again. '
+    'You can file a complaint about this processing with the Dutch Data Protection Authority '
+    '(Autoriteit Persoonsgegevens, autoriteitpersoonsgegevens.nl).'
+)
+
+_REFERRAL_TEXT = {
+    "nl": Template(
+        "Beste $full_name,\n\n"
+        "$art14\n\n"
+        "Wij doen niets met uw gegevens tot u dit zelf bevestigt. Bevestig via onderstaande link:\n$link\n\n"
+        "Deze link is $ttl_hours uur geldig. Doet u niets, dan verwijderen wij uw gegevens weer.\n\n"
+        "Met vriendelijke groet,\nGSP Recruitment\ninfo@gsprecruitment.nl\n"
+    ),
+    "en": Template(
+        "Dear $full_name,\n\n"
+        "$art14\n\n"
+        "We do nothing with your details until you confirm this yourself. Please confirm via the link below:\n$link\n\n"
+        "This link is valid for $ttl_hours hours. If you do nothing, we will delete your details again.\n\n"
+        "Kind regards,\nGSP Recruitment\ninfo@gsprecruitment.nl\n"
+    ),
+}
+_REFERRAL_SUBJECT = {
+    "nl": Template("U bent bij ons aangedragen - bevestig graag zelf - GSP Recruitment"),
+    "en": Template("You were introduced to us - please confirm yourself - GSP Recruitment"),
+}
+_REFERRAL_HEADING = {"nl": "U bent bij ons aangedragen", "en": "You were introduced to us"}
+_REFERRAL_HTML_BODY = {
+    "nl": Template(
+        "<p>Beste $full_name,</p>"
+        "<p>$art14</p>"
+        "<p>Wij doen niets met uw gegevens tot u dit zelf bevestigt. Bevestig via onderstaande link:</p>"
+        "$link_html"
+        "<p>Deze link is $ttl_hours uur geldig. Doet u niets, dan verwijderen wij uw gegevens weer.</p>"
+    ),
+    "en": Template(
+        "<p>Dear $full_name,</p>"
+        "<p>$art14</p>"
+        "<p>We do nothing with your details until you confirm this yourself. Please confirm via the link below:</p>"
+        "$link_html"
+        "<p>This link is valid for $ttl_hours hours. If you do nothing, we will delete your details again.</p>"
+    ),
+}
+_REFERRAL_ART14_TEMPLATES = {"nl": Template(_REFERRAL_ART14_NL), "en": Template(_REFERRAL_ART14_EN)}
+
+
+def _referral_confirm_parts(ctx: dict, lang: str):
+    referred_by = ctx.get("referred_by") or ("een bekende van u" if lang == "nl" else "someone you know")
+    date_found = ctx.get("date_found") or ""
+    art14 = _REFERRAL_ART14_TEMPLATES[lang].substitute(referred_by=referred_by, date_found=date_found)
+    art14_html = _REFERRAL_ART14_TEMPLATES[lang].substitute(
+        referred_by=_esc(referred_by), date_found=_esc(date_found),
+    )
+    subject = _REFERRAL_SUBJECT[lang].substitute()
+    text = _REFERRAL_TEXT[lang].substitute(
+        full_name=ctx.get("full_name") or "", art14=art14, link=ctx["link"], ttl_hours=ctx["ttl_hours"],
+    )
+    link_html = _link_html(_esc(ctx["link"]), _esc(ctx["link"]))
+    body_html = _REFERRAL_HTML_BODY[lang].substitute(
+        full_name=_esc(ctx.get("full_name")), art14=art14_html,
+        ttl_hours=_esc(ctx["ttl_hours"]), link_html=link_html,
+    )
+    return subject, _REFERRAL_HEADING[lang], text, body_html
+
+
+def _render_referral_confirm(ctx: dict, lang: str):
+    subject, heading, text, body_html = _referral_confirm_parts(ctx, lang)
+    return subject, text, _shell([(heading, body_html)])
+
+
+# ── dormant_warning (WS3b) ────────────────────────────────────────────────
+# ctx: full_name (mag leeg zijn), link, deadline
+#
+# Deze mail mag niets beloven wat de code niet doet. Wat de code doet:
+# core/retention.py's PORTAL_ACCOUNT_INACTIVE_SQL zet een account pas op
+# de maandelijkse beoordelingslijst als het 18 maanden niet is gebruikt
+# EN deze waarschuwing minstens 30 dagen geleden is verstuurd. Die lijst
+# is een goedkeuringslijst voor een beheerder, geen wisknop: er wordt
+# niets automatisch verwijderd. De tekst zegt daarom "komt je account op
+# de maandelijkse verwijderlijst", niet "wordt je account verwijderd", en
+# noemt de datum die de aanroeper doorgeeft (verzenddatum + 30 dagen).
+# Inloggen alleen is genoeg: elk inlogpad stempelt users.last_login_at
+# (routers/auth.py login/google, routers/mfa.py), waarmee het account uit
+# beide selectors valt.
+
+_DORMANT_TEXT = {
+    "nl": Template(
+        "Beste $full_name,\n\n"
+        "Je hebt je GSP Recruitment-account al 18 maanden niet gebruikt.\n\n"
+        "Log in vóór $deadline om je account actief te houden:\n$link\n\n"
+        "Doe je dat niet, dan komt je account daarna op onze maandelijkse verwijderlijst: een beheerder "
+        "beoordeelt die lijst en verwijdert je account en profiel. Inloggen is genoeg, je hoeft verder niets te doen.\n\n"
+        "Met vriendelijke groet,\nGSP Recruitment\ninfo@gsprecruitment.nl\n"
+    ),
+    "en": Template(
+        "Dear $full_name,\n\n"
+        "You have not used your GSP Recruitment account for 18 months.\n\n"
+        "Log in before $deadline to keep your account active:\n$link\n\n"
+        "If you do not, your account goes onto our monthly deletion list after that date: an administrator "
+        "reviews that list and deletes your account and profile. Logging in is enough, there is nothing else to do.\n\n"
+        "Kind regards,\nGSP Recruitment\ninfo@gsprecruitment.nl\n"
+    ),
+}
+_DORMANT_SUBJECT = {
+    "nl": Template("Je account is al 18 maanden ongebruikt - GSP Recruitment"),
+    "en": Template("Your account has been unused for 18 months - GSP Recruitment"),
+}
+_DORMANT_HEADING = {"nl": "Je account is al 18 maanden ongebruikt", "en": "Your account has been unused for 18 months"}
+_DORMANT_HTML_BODY = {
+    "nl": Template(
+        "<p>Beste $full_name,</p>"
+        "<p>Je hebt je GSP Recruitment-account al 18 maanden niet gebruikt. Log in vóór $deadline om je "
+        "account actief te houden:</p>"
+        "$link_html"
+        "<p>Doe je dat niet, dan komt je account daarna op onze maandelijkse verwijderlijst: een beheerder "
+        "beoordeelt die lijst en verwijdert je account en profiel. Inloggen is genoeg, je hoeft verder niets te doen.</p>"
+    ),
+    "en": Template(
+        "<p>Dear $full_name,</p>"
+        "<p>You have not used your GSP Recruitment account for 18 months. Log in before $deadline to keep "
+        "your account active:</p>"
+        "$link_html"
+        "<p>If you do not, your account goes onto our monthly deletion list after that date: an administrator "
+        "reviews that list and deletes your account and profile. Logging in is enough, there is nothing else to do.</p>"
+    ),
+}
+
+
+def _dormant_warning_parts(ctx: dict, lang: str):
+    subject = _DORMANT_SUBJECT[lang].substitute()
+    text = _DORMANT_TEXT[lang].substitute(
+        full_name=ctx.get("full_name") or "", link=ctx["link"], deadline=ctx["deadline"],
+    )
+    link_html = _link_html(_esc(ctx["link"]), _esc(ctx["link"]))
+    body_html = _DORMANT_HTML_BODY[lang].substitute(
+        full_name=_esc(ctx.get("full_name")), deadline=_esc(ctx["deadline"]), link_html=link_html,
+    )
+    return subject, _DORMANT_HEADING[lang], text, body_html
+
+
+def _render_dormant_warning(ctx: dict, lang: str):
+    subject, heading, text, body_html = _dormant_warning_parts(ctx, lang)
+    return subject, text, _shell([(heading, body_html)])
+
+
+# ── job_alert (WS3c) ──────────────────────────────────────────────────────
+# ctx: full_name (mag leeg zijn), jobs (lijst dicts met title/location/url),
+#      unsubscribe_link
+#
+# Servicemail aan iemand die zich zélf voor alerts heeft aangemeld
+# (job_alert_optin_at): geen Art. 14-blok (art. 13-grondslag), wél op elk
+# bericht een afmeldlink, want dit is het enige terugkerende bericht dat
+# deze codebase verstuurt. Die link is per verzending uniek en werkt met
+# één klik (geen inloggen, geen formulier) -- dezelfde token die in de
+# List-Unsubscribe-headers zit (services/scheduler.py job_alert_job).
+#
+# `jobs` is al begrensd op vijf door de aanroeper; deze module rendert
+# wat zij krijgt en escapet elke titel/locatie los in de HTML-variant.
+
+_JOB_ALERT_TEXT = {
+    "nl": Template(
+        "Beste $full_name,\n\n"
+        "Deze vacatures passen bij je profiel:\n\n"
+        "$job_lines\n"
+        "Wil je geen vacature-alerts meer ontvangen? Meld je hier met één klik af:\n$unsubscribe_link\n\n"
+        "Met vriendelijke groet,\nGSP Recruitment\ninfo@gsprecruitment.nl\n"
+    ),
+    "en": Template(
+        "Dear $full_name,\n\n"
+        "These vacancies match your profile:\n\n"
+        "$job_lines\n"
+        "No longer want job alerts? Unsubscribe here with one click:\n$unsubscribe_link\n\n"
+        "Kind regards,\nGSP Recruitment\ninfo@gsprecruitment.nl\n"
+    ),
+}
+_JOB_ALERT_SUBJECT = {
+    "nl": Template("Nieuwe vacatures die bij je passen - GSP Recruitment"),
+    "en": Template("New vacancies that match your profile - GSP Recruitment"),
+}
+_JOB_ALERT_HEADING = {"nl": "Nieuwe vacatures die bij je passen", "en": "New vacancies that match your profile"}
+_JOB_ALERT_HTML_BODY = {
+    "nl": Template(
+        "<p>Beste $full_name,</p>"
+        "<p>Deze vacatures passen bij je profiel:</p>"
+        "$job_list_html"
+        "<p>Wil je geen vacature-alerts meer ontvangen? Meld je hier met één klik af:</p>"
+        "$unsubscribe_html"
+    ),
+    "en": Template(
+        "<p>Dear $full_name,</p>"
+        "<p>These vacancies match your profile:</p>"
+        "$job_list_html"
+        "<p>No longer want job alerts? Unsubscribe here with one click:</p>"
+        "$unsubscribe_html"
+    ),
+}
+_JOB_ALERT_UNSUB_LABEL = {"nl": "Afmelden voor vacature-alerts", "en": "Unsubscribe from job alerts"}
+
+
+def _job_alert_parts(ctx: dict, lang: str):
+    jobs = ctx.get("jobs") or []
+    text_lines = []
+    html_items = []
+    for job in jobs:
+        title = job.get("title") or ""
+        location = job.get("location") or ""
+        url = job.get("url") or ""
+        suffix = f" ({location})" if location else ""
+        text_lines.append(f"- {title}{suffix}\n  {url}")
+        html_items.append(
+            f'<li><a href="{_esc(url)}" style="color:#0A1628;">{_esc(title)}</a>{_esc(suffix)}</li>'
+        )
+    job_lines = "\n".join(text_lines) + "\n\n" if text_lines else ""
+    job_list_html = f'<ul>{"".join(html_items)}</ul>' if html_items else ""
+
+    subject = _JOB_ALERT_SUBJECT[lang].substitute()
+    text = _JOB_ALERT_TEXT[lang].substitute(
+        full_name=ctx.get("full_name") or "", job_lines=job_lines,
+        unsubscribe_link=ctx["unsubscribe_link"],
+    )
+    unsubscribe_html = _link_html(_esc(ctx["unsubscribe_link"]), _esc(_JOB_ALERT_UNSUB_LABEL[lang]))
+    body_html = _JOB_ALERT_HTML_BODY[lang].substitute(
+        full_name=_esc(ctx.get("full_name")), job_list_html=job_list_html,
+        unsubscribe_html=unsubscribe_html,
+    )
+    return subject, _JOB_ALERT_HEADING[lang], text, body_html
+
+
+def _render_job_alert(ctx: dict, lang: str):
+    subject, heading, text, body_html = _job_alert_parts(ctx, lang)
+    return subject, text, _shell([(heading, body_html)])
+
+
 # ── owner_notify (intern) ─────────────────────────────────────────────────
 # ctx: event_label, detail, deeplink -- services/notify.py is the only caller
 
@@ -424,6 +717,9 @@ _RENDERERS = {
     "talentpool_confirm": _render_talentpool_confirm,
     "talentpool_reminder": _render_talentpool_reminder,
     "client_team_invite": _render_client_team_invite,
+    "referral_confirm": _render_referral_confirm,
+    "dormant_warning": _render_dormant_warning,
+    "job_alert": _render_job_alert,
     "owner_notify": _render_owner_notify,
 }
 
@@ -437,6 +733,9 @@ _PARTS = {
     "talentpool_confirm": _talentpool_confirm_parts,
     "talentpool_reminder": _talentpool_reminder_parts,
     "client_team_invite": _client_team_invite_parts,
+    "referral_confirm": _referral_confirm_parts,
+    "dormant_warning": _dormant_warning_parts,
+    "job_alert": _job_alert_parts,
     "owner_notify": _owner_notify_parts,
 }
 

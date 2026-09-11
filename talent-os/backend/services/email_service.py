@@ -271,16 +271,31 @@ class EmailService:
         msg = EmailMessage(to=to_email, subject=subject, text=body_text, html=html, reply_to=settings.email_reply_to)
         return await self._send_with_retry(msg, template="adhoc")
 
-    async def send_template(self, name: str, to_email: str, ctx: dict, lang: Optional[str] = None) -> bool:
+    async def send_template(
+        self, name: str, to_email: str, ctx: dict, lang: Optional[str] = None,
+        headers: Optional[dict] = None,
+    ) -> bool:
         """Render `name` via services/email_templates.render() and send
         it through the same retry + email_log path as send_email().
 
         `lang` defaults to None: none of the current callers know the
         recipient's language, so render() returns NL followed by EN in
         one message rather than silently sending Dutch-only. Pass 'nl' or
-        'en' explicitly for a caller that does know the language."""
+        'en' explicitly for a caller that does know the language.
+
+        `headers` (WS3c) adds extra MIME headers to this one message --
+        today only services/scheduler.py's job_alert_job uses it, for
+        List-Unsubscribe / List-Unsubscribe-Post (RFC 8058 one-click).
+        Deliberately per-call and not a template property: the token in
+        that header is unique per send, so it can never be baked into a
+        template. It is a plain dict written straight onto the MIME
+        message by _build_mime(), so a caller must never put anything
+        into it that it has not itself constructed."""
         subject, text, html = email_templates.render(name, ctx, lang)
-        msg = EmailMessage(to=to_email, subject=subject, text=text, html=html, reply_to=settings.email_reply_to)
+        msg = EmailMessage(
+            to=to_email, subject=subject, text=text, html=html,
+            reply_to=settings.email_reply_to, headers=headers or {},
+        )
         return await self._send_with_retry(msg, template=name)
 
 

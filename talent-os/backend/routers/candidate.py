@@ -11,7 +11,7 @@ from models.schemas import (
     CandidatePortalProfile, CandidateProfileUpdate, CandidateMatchItem,
     ApplicationCreate, SavedJobCreate, CandidateDashboard,
     SalaryBenchmarkResponse, MessageListResponse, MessageResponse,
-    TalentpoolConsentUpdate,
+    TalentpoolConsentUpdate, CandidateJobAlertsUpdate,
 )
 from typing import Optional, List
 import asyncio
@@ -252,6 +252,74 @@ async def update_talentpool_consent(
     )
 
     return row
+
+
+# ── Job-alerts (WS3c) ───────────────────────────────────────────────────
+#
+# Eén van de twee opt-in-routes voor vacature-alerts; de andere is het
+# `job_alerts`-vinkje op talentpool_optin_requests (migrations/037), dat
+# routers/public.py's talentpool_confirm() bij bevestiging overneemt.
+# Beide schrijven dezelfde kolom, candidates.job_alert_optin_at, die
+# services/scheduler.py's job_alert_job als enige selecteert.
+#
+# `enabled=false` hier is een gewone voorkeurswijziging in het portaal en
+# zet, net als de een-klik-afmeldlink in de mail zelf,
+# job_alert_unsubscribed_at -- zodat er precies één kolom bestaat die
+# "deze persoon wil geen alerts" betekent, ongeacht langs welke weg hij
+# dat zei. `enabled=true` is het omgekeerde: het wist die kolom weer. Dat
+# is de enige plek in de codebase die dat doet, en dat kan alleen de
+# persoon zelf, ingelogd -- een afmelding wordt nooit door een job, een
+# beheerder of een tweede talentpool-bevestiging ongedaan gemaakt.
+#
+# Raakt bewust geen enkele consent-kolom: alerts zijn een bezorgvoorkeur
+# binnen een bestaande relatie, niet de grondslag zelf. Iemand die zijn
+# talentpool-toestemming intrekt (consent_withdrawn_at) valt sowieso al
+# uit de selectie van job_alert_job, ook als deze schakelaar aan staat.
+
+@router.put("/job-alerts")
+async def update_job_alerts(
+    data: CandidateJobAlertsUpdate,
+    current_user: dict = Depends(get_verified_user),
+):
+    """Zet vacature-alerts aan of uit voor de ingelogde kandidaat."""
+    if current_user["role"] != "candidate":
+        raise HTTPException(status_code=403, detail="Only candidates can set job alerts")
+
+    candidate_id = await _get_candidate_id(current_user["id"])
+    if not candidate_id:
+        raise HTTPException(status_code=404, detail="No candidate record found for this account")
+
+    if data.enabled:
+        row = await fetch_one(
+            """UPDATE candidates
+               SET job_alert_optin_at = COALESCE(job_alert_optin_at, NOW()),
+                   job_alert_unsubscribed_at = NULL,
+                   updated_at = NOW()
+               WHERE id = $1
+               RETURNING id, job_alert_optin_at, job_alert_unsubscribed_at""",
+            candidate_id,
+        )
+    else:
+        row = await fetch_one(
+            """UPDATE candidates
+               SET job_alert_unsubscribed_at = COALESCE(job_alert_unsubscribed_at, NOW()),
+                   updated_at = NOW()
+               WHERE id = $1
+               RETURNING id, job_alert_optin_at, job_alert_unsubscribed_at""",
+            candidate_id,
+        )
+
+    await execute(
+        "INSERT INTO audit_log (action, actor_id, target_type, target_id, changes) VALUES ($1, $2, $3, $4, $5::jsonb)",
+        "job_alerts_update", current_user["id"], "candidate", candidate_id,
+        json.dumps({"enabled": data.enabled, "source": "portal"}),
+    )
+
+    return {
+        "enabled": row["job_alert_optin_at"] is not None and row["job_alert_unsubscribed_at"] is None,
+        "job_alert_optin_at": row["job_alert_optin_at"],
+        "job_alert_unsubscribed_at": row["job_alert_unsubscribed_at"],
+    }
 
 
 # ── CV Upload ───────────────────────────────────────────────────────────

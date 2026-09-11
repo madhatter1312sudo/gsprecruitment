@@ -15,6 +15,33 @@ logger = logging.getLogger("talent_os.matches")
 router = APIRouter(prefix="/api/matches", tags=["matches"], dependencies=[Depends(verify_api_key)])
 
 
+# ── De matchscore-schaal, op één plek ───────────────────────────────────
+#
+# `matches.match_score` staat overal op de 0-100-schaal, terwijl
+# services/matcher.py intern met cosinusgelijkenis op 0-1 rekent en bij
+# het opslaan vermenigvuldigt (`round(score * 100, 2)`, zie
+# _run_matching_for_job hieronder). Die twee getallen stonden tot WS3c
+# als losse literals in deze module; iedere andere lezer van
+# `match_score` moest de omrekening zelf raden.
+#
+# MATCH_SUGGESTION_MIN_SCORE is de drempel waaronder de matcher een
+# kandidaat helemaal niet als 'suggested' wegschrijft;
+# MATCH_SUGGESTION_MIN_STORED_SCORE is diezelfde drempel op de schaal
+# zoals hij in de kolom staat. services/scheduler.py's job_alert_job
+# leest die tweede: een kandidaat krijgt alleen een alert over matches
+# die minstens zo goed zijn als wat deze codebase zelf een suggestie
+# durft te noemen -- geen apart, verzonnen getal.
+#
+# Voor een match die de matcher zelf schreef is die eis per definitie al
+# waar. Hij is er voor de rijen die POST /api/matches (een externe
+# routine achter dezelfde X-API-Key) wegschrijft: dat endpoint accepteert
+# elke `match_score` die de aanroeper meestuurt, dus zonder deze
+# ondergrens zou een score van 1.0 een alert kunnen veroorzaken.
+MATCH_SCORE_SCALE = 100
+MATCH_SUGGESTION_MIN_SCORE = 0.3
+MATCH_SUGGESTION_MIN_STORED_SCORE = MATCH_SUGGESTION_MIN_SCORE * MATCH_SCORE_SCALE
+
+
 def _consent_gate_sql(prefix: str = "") -> str:
     """FIX 3 (chief-of-staff, ai-pseudonimisering branch): the matching gate
     used to accept `source_url OR lawful_basis = 'opt_in_talentpool'`
@@ -68,7 +95,7 @@ async def _run_matching_for_job(job_id: int) -> None:
 
         job_text = f"{job['title']} {job['description'] or ''} {job['requirements'] or ''}"
         results = await matcher.match_job_to_candidates(
-            job_text, [dict(c) for c in candidates], min_score=0.3,
+            job_text, [dict(c) for c in candidates], min_score=MATCH_SUGGESTION_MIN_SCORE,
         )
 
         for r in results:

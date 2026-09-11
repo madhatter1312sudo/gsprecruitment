@@ -12,6 +12,7 @@ A human must approve a draft via routers/outreach.py before it is sent.
 """
 import json
 import logging
+import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
@@ -21,6 +22,8 @@ from apscheduler.triggers.cron import CronTrigger
 
 from core.config import settings
 from core.database import fetch_all, fetch_one, fetch_val, execute
+from core.security import hash_token
+from core import privacy
 from core import retention
 from services.apollo_client import ApolloClient
 from services import outreach_ai
@@ -522,6 +525,339 @@ async def talentpool_optin_requests_cleanup_job() -> dict:
     return {"status": "purged", "count": count}
 
 
+# ── Slapend account: waarschuwing vooraf (WS3b) ─────────────────────────
+#
+# core/retention.py's PORTAL_ACCOUNT_INACTIVE_SQL zet een kandidaatccount
+# pas op de maandelijkse beoordelingslijst als het 18 maanden ongebruikt
+# is EN `users.dormant_warning_sent_at` minstens 30 dagen oud is. Die
+# kolom bestaat sinds migrations/039, maar tot dit spoor schreef niets
+# hem: de selector kon dus per definitie nooit iemand opleveren
+# (bewust fail-closed -- "geen verwijderlijst zonder verstuurde
+# waarschuwing"). Deze job is de ontbrekende helft.
+#
+# Vorm exact die van talentpool_reminder_job hierboven: selecteer wie aan
+# de beurt is, verstuur, stempel de kolom pas als de verzending lukte, en
+# nooit twee keer binnen dezelfde cyclus.
+#
+# Het venster is 17 tot 18 maanden sinds `last_login_at`. Dat is precies
+# de 30 dagen voorsprong die VERWERKINGSREGISTER §1.4 en privacy.html
+# publiek beloven: wie op 17 maanden wordt gewaarschuwd, heeft op 18
+# maanden een waarschuwing van 30 dagen oud, wat PORTAL_ACCOUNT_INACTIVE_
+# SQL ook precies eist.
+#
+# Restpunt voor de eigenaar, niet stilzwijgend opgelost: een account dat
+# nu al langer dan 18 maanden ongebruikt is, valt boven dit venster en
+# krijgt dus nooit een waarschuwing -- en komt daardoor ook nooit op de
+# beoordelingslijst. Dat is veilig (niemand wordt ongewaarschuwd gewist)
+# maar betekent dat de 18-maandentermijn voor die bestaande achterstand
+# vandaag niet wordt gehaald. Het venster is zo opgedragen; verruimen tot
+# "minstens 17 maanden" (zonder bovengrens) zou die achterstand in één
+# ronde meenemen, met dezelfde 30 dagen notice, en is een besluit voor de
+# eigenaar, niet voor deze job.
+#
+# De guards zijn letterlijk die van PORTAL_ACCOUNT_INACTIVE_SQL en worden
+# daar geïmporteerd, niet overgeschreven: waarschuwen we iemand die die
+# selector later toch beschermt, dan hebben we een dreigende mail
+# gestuurd over een verwijdering die nooit zou komen.
+
+DORMANT_WARNING_SQL = f"""
+    SELECT u.id, u.email, u.full_name, u.last_login_at
+      FROM users u
+     WHERE u.role = 'candidate' AND u.deleted_at IS NULL AND u.email IS NOT NULL
+       AND u.last_login_at IS NOT NULL
+       AND u.last_login_at <= (NOW() - INTERVAL '17 months')
+       AND u.last_login_at > (NOW() - INTERVAL '18 months')
+       AND (u.dormant_warning_sent_at IS NULL OR u.dormant_warning_sent_at < u.last_login_at)
+       AND NOT EXISTS (
+           SELECT 1 FROM candidate_profiles cpf
+           JOIN candidates c ON c.id = cpf.candidate_id
+           WHERE cpf.user_id = u.id
+             AND NOT (TRUE{retention._CANDIDATE_ENGAGEMENT_SIGNALS_SQL})
+       )
+"""
+
+# Tussen de waarschuwing en de beoordelingslijst zitten 30 dagen
+# (PORTAL_ACCOUNT_INACTIVE_SQL: `dormant_warning_sent_at < NOW() - 30
+# days`). De datum in de mail is verzenddatum + deze 30 dagen, niet een
+# los getal in de templatetekst.
+DORMANT_WARNING_GRACE_DAYS = 30
+DORMANT_WARNING_CAP = 200
+_DORMANT_WARNING_LINK = "https://gsprecruitment.nl/candidate/login.html"
+
+
+async def dormant_account_warning_job() -> dict:
+    """Dagelijks (04:45). Waarschuwt kandidaatccounts die 17 tot 18
+    maanden niet zijn gebruikt dat ze na 18 maanden op de maandelijkse
+    verwijderlijst komen, en stempelt `users.dormant_warning_sent_at`
+    zodat dezelfde persoon per inactiviteitscyclus één keer wordt
+    gewaarschuwd.
+
+    Droogloop is de default: met DORMANT_WARNING_ENABLED uit
+    (core/config.py) selecteert en telt deze job wel, maar verstuurt hij
+    niets en stempelt hij niets. Dat laatste is essentieel en geen
+    detail: zou hij in droogloop wél stempelen, dan zou
+    PORTAL_ACCOUNT_INACTIVE_SQL 30 dagen later accounts op de
+    verwijderlijst zetten waar nooit iemand een waarschuwing over heeft
+    gekregen."""
+    from services.email_service import email_service
+
+    rows = await fetch_all(DORMANT_WARNING_SQL)
+    rows = rows[:DORMANT_WARNING_CAP]
+
+    if not settings.dormant_warning_enabled:
+        logger.info(
+            "dormant_account_warning_job: DORMANT_WARNING_ENABLED=false, dry run -- accounts_due=%s, nothing sent",
+            len(rows),
+        )
+        return {"status": "dry_run", "accounts_due": len(rows), "sent": 0}
+
+    deadline = (datetime.now(timezone.utc) + timedelta(days=DORMANT_WARNING_GRACE_DAYS)).date().isoformat()
+    sent = 0
+    for row in rows:
+        ok = await email_service.send_template(
+            "dormant_warning", row["email"],
+            {
+                "full_name": row.get("full_name") or "",
+                "link": _DORMANT_WARNING_LINK,
+                "deadline": deadline,
+            },
+        )
+        if ok:
+            await execute(
+                "UPDATE users SET dormant_warning_sent_at = NOW() WHERE id = $1", row["id"],
+            )
+            sent += 1
+        else:
+            # Nooit het adres in een logregel -- het id is genoeg, en
+            # services/email_service.py schreef zelf al een email_log-rij
+            # op core.privacy.email_hash().
+            logger.warning("dormant_account_warning_job: failed to send warning to user id=%s", row["id"])
+
+    logger.info("dormant_account_warning_job: accounts_due=%s sent=%s", len(rows), sent)
+    return {"status": "success", "accounts_due": len(rows), "sent": sent}
+
+
+# ── Vacature-alerts (WS3c) ──────────────────────────────────────────────
+#
+# HARDE GRENS, en de reden dat dit blok zo uitgebreid is: outreach blijft
+# draft-only. Deze job is geen uitzondering daarop maar valt buiten die
+# categorie, en het verschil zit in de selectie hieronder, niet in een
+# belofte in een commentaarregel.
+#
+#   - Outreach (draft_outreach hierboven) richt zich op een GESOURCETE
+#     persoon: iemand die niets heeft gedaan, wiens gegevens wij hebben
+#     gevonden. Daar mag nooit automatisch een bericht naartoe; er wordt
+#     een `outreach_drafts`-rij met status='draft' geschreven en een mens
+#     verstuurt hem na goedkeuring (routers/outreach.py).
+#   - Deze job richt zich uitsluitend op iemand die ZELF heeft gezegd dat
+#     hij deze mail wil: `candidates.job_alert_optin_at` is gezet, en er
+#     zijn precies twee paden die dat doen, allebei een eigen handeling
+#     van de betrokkene (PUT /api/v1/candidate/job-alerts in zijn eigen
+#     portaal, of het `job_alerts`-vinkje dat hij bij zijn dubbele
+#     opt-in aanvinkte en daarna per e-mail bevestigde). Geen sourcing-
+#     pad, geen import, geen beheerder en geen routine kan die kolom
+#     vullen.
+#
+# Daarom draagt elke alert ook een een-klik-afmeldlink en de
+# List-Unsubscribe-headers, en outreach-drafts niet: dit is het enige
+# terugkerende bericht dat deze codebase verstuurt.
+#
+# De selectie hieronder maakt dat waar in plaats van te beloven:
+#   job_alert_optin_at IS NOT NULL          -- eigen aanmelding, zie boven
+#   job_alert_unsubscribed_at IS NULL       -- niet afgemeld
+#   consent_withdrawn_at IS NULL            -- toestemming niet ingetrokken
+#   deleted_at IS NULL                      -- niet (zacht) verwijderd
+#   consent_scope='matching_and_contact'    -- toestemming die contact dekt
+#     OF lawful_basis='portal_registratie'  -- eigen portaalaccount (art. 13)
+#   niet op de suppressielijst              -- STOP ontvangen, in Python
+#                                              gehasht via core/privacy.py
+
+JOB_ALERT_CANDIDATE_SQL = """
+    SELECT c.id, c.email, c.full_name, c.job_alert_last_sent_at
+      FROM candidates c
+     WHERE c.job_alert_optin_at IS NOT NULL
+       AND c.job_alert_unsubscribed_at IS NULL
+       AND c.consent_withdrawn_at IS NULL
+       AND c.deleted_at IS NULL
+       AND c.email IS NOT NULL
+       AND (c.consent_scope = 'matching_and_contact' OR c.lawful_basis = 'portal_registratie')
+     ORDER BY c.job_alert_last_sent_at ASC NULLS FIRST, c.id ASC
+     LIMIT $1
+"""
+
+# Matches die nieuw genoeg zijn om te melden: sinds de vorige digest van
+# deze kandidaat, of -- als die er nooit was -- de laatste 7 dagen, zodat
+# een verse aanmelder geen jaar aan oude matches in één mail krijgt.
+# `j.city` is de locatiekolom (migrations/016); job_orders heeft geen
+# slug, de publieke vacaturepagina werkt op id (website/script.js,
+# website/vacature.js). De geschiktheidsfilter is letterlijk
+# routers/jobs.py's PUBLIC_JOB_WHERE -- een alert mag nooit naar een
+# vacature wijzen die het publieke bord zelf niet toont.
+JOB_ALERT_MATCHES_SQL = """
+    SELECT j.id, j.title, j.city, m.match_score
+      FROM matches m
+      JOIN job_orders j ON j.id = m.job_id
+     WHERE m.candidate_id = $1
+       AND m.status = 'suggested'
+       AND m.match_score >= $2
+       AND m.created_at > COALESCE($3, NOW() - INTERVAL '7 days')
+       AND {public_job_where}
+     ORDER BY m.match_score DESC
+     LIMIT $4
+"""
+
+JOB_ALERT_RUN_CAP = 200
+JOB_ALERT_MAX_JOBS = 5
+
+
+def job_alert_matches_sql() -> str:
+    """JOB_ALERT_MATCHES_SQL met routers/jobs.py's eigen PUBLIC_JOB_WHERE
+    ingevuld. Lazy import, net als `from routers.matches import ...` in
+    matching() hierboven: routers/* importeren bij het laden van deze
+    module zou een importcyclus opleveren (routers importeren services)."""
+    from routers.jobs import PUBLIC_JOB_WHERE
+
+    return JOB_ALERT_MATCHES_SQL.format(public_job_where=PUBLIC_JOB_WHERE)
+
+
+def _job_alert_unsubscribe_links(token: str) -> tuple:
+    """(voettekstlink voor een mens, one-click-URL voor de
+    List-Unsubscribe-header).
+
+    Twee verschillende URL's met hetzelfde token, met opzet:
+      - de voettekstlink draagt het token in het URL-FRAGMENT, precies
+        zoals de talentpool-bevestigingslink sinds de WS-C.17
+        security-audit (H1) doet -- een fragment bereikt de server nooit
+        en staat dus niet in een access log of een Referer-header;
+      - de List-Unsubscribe-URL kan dat niet: RFC 8058 schrijft een
+        POST-bare https-URL voor en een fragment zou daar simpelweg
+        verdwijnen. Daar staat het token dus in de querystring, met alle
+        gevolgen van dien voor onze eigen access logs. Dat restrisico is
+        inherent aan one-click-afmelden en staat in
+        docs/VERWERKINGSREGISTER.md §1.2.
+    """
+    footer = f"{settings.frontend_url}/unsubscribe#token={token}"
+    one_click = f"{settings.api_base_url}/api/public/unsubscribe?token={token}&scope=alerts"
+    return footer, one_click
+
+
+async def _job_alert_suppressed_ids(rows: list) -> set:
+    """Welke van deze kandidaten op de suppressielijst staan.
+
+    Bewust in Python en niet in SQL: core/privacy.py is de enige plek die
+    bepaalt hoe een adres tot een suppression_list-hash wordt (trim,
+    lower, sha256). Een tweede, met de hand nagebouwde sha256-expressie
+    in SQL zou stilletjes uit de pas kunnen lopen met die definitie, en
+    de fout zou eruitzien als "deze persoon staat er niet op" -- precies
+    de kant op die een mail stuurt naar iemand die STOP heeft gezegd."""
+    by_hash = {privacy.email_hash(r["email"]): r["id"] for r in rows if r["email"]}
+    if not by_hash:
+        return set()
+    hits = await fetch_all(
+        "SELECT email_hash FROM suppression_list WHERE email_hash = ANY($1::text[])",
+        list(by_hash.keys()),
+    )
+    return {by_hash[h["email_hash"]] for h in hits if h["email_hash"] in by_hash}
+
+
+async def job_alert_job() -> dict:
+    """Dagelijks (08:00, ná de matching van 07:00). Eén digest per
+    kandidaat met maximaal JOB_ALERT_MAX_JOBS vacatures, maximaal
+    JOB_ALERT_RUN_CAP kandidaten per run.
+
+    Twee schakelaars, allebei droog by default: de env-master
+    JOB_ALERTS_ENABLED (core/config.py) en de admin-bewerkbare DB-vlag
+    system_settings.job_alerts_enabled. Staat er één uit, dan selecteert
+    en telt deze job wel maar verstuurt hij niets, schrijft hij geen
+    job_alert_sends-rij en stempelt hij geen job_alert_last_sent_at --
+    een droogloop mag geen enkel spoor achterlaten dat een echte
+    verzending suggereert."""
+    from services.email_service import email_service
+    from routers.matches import MATCH_SUGGESTION_MIN_STORED_SCORE
+
+    env_enabled = settings.job_alerts_enabled
+    db_enabled = await _flag_enabled("job_alerts_enabled")
+    enabled = env_enabled and db_enabled
+
+    candidates = await fetch_all(JOB_ALERT_CANDIDATE_SQL, JOB_ALERT_RUN_CAP)
+    suppressed_ids = await _job_alert_suppressed_ids(candidates)
+    matches_sql = job_alert_matches_sql()
+
+    considered = 0
+    sent = 0
+    for row in candidates:
+        if row["id"] in suppressed_ids:
+            continue
+
+        jobs = await fetch_all(
+            matches_sql,
+            row["id"], MATCH_SUGGESTION_MIN_STORED_SCORE,
+            row["job_alert_last_sent_at"], JOB_ALERT_MAX_JOBS,
+        )
+        if not jobs:
+            continue
+        considered += 1
+
+        if not enabled:
+            continue
+
+        token = secrets.token_urlsafe(32)
+        footer_link, one_click_url = _job_alert_unsubscribe_links(token)
+
+        ok = await email_service.send_template(
+            "job_alert", row["email"],
+            {
+                "full_name": row.get("full_name") or "",
+                "jobs": [
+                    {
+                        "title": j["title"],
+                        "location": j["city"],
+                        "url": f"{settings.frontend_url}/vacature.html?id={j['id']}",
+                    }
+                    for j in jobs
+                ],
+                "unsubscribe_link": footer_link,
+            },
+            headers={
+                # RFC 8058: beide headers moeten aanwezig zijn wil een
+                # mailclient de one-click-knop tonen; alleen
+                # List-Unsubscribe zonder -Post levert een "weet je het
+                # zeker"-omweg op, of niets.
+                "List-Unsubscribe": f"<{one_click_url}>",
+                "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
+            },
+        )
+        if not ok:
+            logger.warning("job_alert_job: failed to send digest to candidate id=%s", row["id"])
+            continue
+
+        # Pas ná een geslaagde verzending: de tokenrij en de stempel. In
+        # de andere volgorde zou een mislukte verzending een geldig
+        # afmeldtoken achterlaten voor een mail die nooit is aangekomen,
+        # en zou job_alert_last_sent_at het venster van de volgende run
+        # dichtschuiven over matches die deze persoon nooit heeft gezien.
+        await execute(
+            "INSERT INTO job_alert_sends (candidate_id, job_ids, token_hash) VALUES ($1, $2::int[], $3)",
+            row["id"], [j["id"] for j in jobs], hash_token(token),
+        )
+        await execute(
+            "UPDATE candidates SET job_alert_last_sent_at = NOW() WHERE id = $1", row["id"],
+        )
+        sent += 1
+
+    status = "success" if enabled else "dry_run"
+    logger.info(
+        "job_alert_job: status=%s candidates_selected=%s with_matches=%s sent=%s (env=%s db=%s)",
+        status, len(candidates), considered, sent, env_enabled, db_enabled,
+    )
+    return {
+        "status": status,
+        "candidates_selected": len(candidates),
+        "with_matches": considered,
+        "sent": sent,
+    }
+
+
 # ── Per-category live rows for the monthly review queue ─────────────────
 
 async def _live_rows_for_category(row: "retention.RetentionRow") -> list:
@@ -774,6 +1110,26 @@ async def start_scheduler() -> None:
         talentpool_reminder_job, CronTrigger(hour=4, minute=30),
         id="talentpool_reminder", replace_existing=True,
     )
+    # WS3b/WS3c. Beide worden ALTIJD geregistreerd, ook met hun
+    # schakelaar uit -- anders dan de Apollo-jobs hierboven, die pas
+    # bestaan als APOLLO_SYNC_ENABLED aan staat. Het verschil is bewust:
+    # met de schakelaar uit verstuurt geen van deze twee jobs iets en
+    # schrijft geen van beide iets weg (zie hun docstrings), ze tellen
+    # alleen wie er aan de beurt zou zijn. Die droogloop in de logs is
+    # precies wat je wilt kunnen zien voordat je de schakelaar omzet, en
+    # is zelf geen verwerking richting een betrokkene.
+    #
+    # 04:45 zit na talentpool_reminder (04:30) en voor de matching;
+    # 08:00 zit na de matching van 07:00, zodat de digest van vandaag de
+    # matches van vanochtend meeneemt in plaats van die van gisteren.
+    scheduler.add_job(
+        dormant_account_warning_job, CronTrigger(hour=4, minute=45),
+        id="dormant_account_warning", replace_existing=True,
+    )
+    scheduler.add_job(
+        job_alert_job, CronTrigger(hour=8, minute=0),
+        id="job_alert", replace_existing=True,
+    )
     # WS-E.10 (owner decision): monthly, not daily -- this job only ever
     # queues people for human review (generate_retention_review()'s own
     # docstring), never purges, so there is no HARD RULE left to re-check
@@ -786,7 +1142,7 @@ async def start_scheduler() -> None:
     scheduler.start()
     logger.info(
         "scheduler: started with %s daily jobs + 1 weekly job + 1 monthly job (Europe/Amsterdam)",
-        4 + apollo_jobs_registered,
+        6 + apollo_jobs_registered,
     )
 
 
@@ -817,6 +1173,14 @@ JOBS_BY_NAME = {
     "blog": draft_blog_post,
     "retention_review": retention_review_job,
     "talentpool_optin_cleanup": talentpool_optin_requests_cleanup_job,
+    # WS3b/WS3c: handmatig te draaien via POST /api/v1/admin/outreach/run/
+    # {job_name}, net als de andere jobs hier. Handmatig draaien omzeilt
+    # géén schakelaar: allebei lezen ze settings (en job_alert ook de
+    # DB-vlag) binnenin, dus een admin die dit aanroept met de
+    # schakelaars uit krijgt dezelfde droogloop als de cron -- dezelfde
+    # les als de security-audit-opmerking bij apollo_search_and_sync.
+    "dormant_warning": dormant_account_warning_job,
+    "job_alerts": job_alert_job,
     # Manual-trigger only — deliberately NOT added to start_scheduler()'s
     # cron jobs below. One-shot Apollo bulk-harvest (services/harvest.py)
     # and its outreach-draft catch-up, both run via routers/outreach.py's

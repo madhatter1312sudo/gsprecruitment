@@ -10,7 +10,8 @@ from core.security import hash_token
 from core import privacy
 from models.schemas import (
     SiteContentResponse, LeadSubmit, SalaryBenchmarkResponse, QuizSubmitRequest,
-    TalentpoolOptinRequest, TalentpoolConfirmRequest,
+    TalentpoolOptinRequest, TalentpoolConfirmRequest, UnsubscribeRequest,
+    UNSUBSCRIBE_SCOPES,
 )
 from services.notify import notify_owner
 from services.email_service import email_service
@@ -417,7 +418,7 @@ async def talentpool_confirm(request: Request, data: TalentpoolConfirmRequest):
     side effects only ever happen once per token."""
     token_hash = hash_token(data.token)
     pending = await fetch_one(
-        """SELECT id, email, scope, source, job_id FROM talentpool_optin_requests
+        """SELECT id, email, scope, source, job_id, job_alerts FROM talentpool_optin_requests
            WHERE token_hash = $1 AND confirmed_at IS NULL
              AND requested_at > NOW() - INTERVAL '24 hours'""",
         token_hash,
@@ -432,6 +433,26 @@ async def talentpool_confirm(request: Request, data: TalentpoolConfirmRequest):
     now = datetime.now(timezone.utc)
     until = now + timedelta(days=365)  # 12 months, renewable
 
+    # WS3b: a request created by POST /api/v1/admin/candidates/referral
+    # carries source='referral'. Clicking that link is the referred
+    # person's own, first and only act in this flow, so it stamps
+    # candidates.referral_confirmed_at -- core/retention.py's
+    # REFERRAL_NO_RESPONSE_SQL reads exactly that column as this
+    # category's reaction signal (see its comment there).
+    is_referral = pending["source"] == "referral"
+
+    # WS3c: the job_alerts tick from migrations/037 lives on
+    # talentpool_optin_requests until here; confirming carries it over to
+    # candidates.job_alert_optin_at, which is what services/scheduler.py's
+    # job_alert_job selects on. Only ever set, never cleared, and only on
+    # a tick: an unticked box must not silently revoke an opt-in this
+    # person made earlier through the portal switch. Someone who
+    # unsubscribed before (job_alert_unsubscribed_at set) does NOT get
+    # re-enrolled by a later talentpool confirm -- an unsubscribe is a
+    # withdrawal and only the person's own, explicit re-opt-in through
+    # PUT /api/v1/candidate/job-alerts clears it.
+    wants_alerts = bool(pending["job_alerts"])
+
     existing = await fetch_one(
         "SELECT id, lawful_basis FROM candidates WHERE LOWER(email) = $1", pending["email"],
     )
@@ -442,19 +463,30 @@ async def talentpool_confirm(request: Request, data: TalentpoolConfirmRequest):
                SET consent_talentpool_at = $1, consent_talentpool_until = $2,
                    consent_scope = $3, consent_source = $4, consent_reminder_sent_at = NULL,
                    lawful_basis = CASE WHEN $5 THEN 'opt_in_talentpool' ELSE lawful_basis END,
+                   referral_confirmed_at = CASE WHEN $6 THEN COALESCE(referral_confirmed_at, NOW())
+                                                ELSE referral_confirmed_at END,
+                   job_alert_optin_at = CASE
+                       WHEN $7 AND job_alert_unsubscribed_at IS NULL
+                       THEN COALESCE(job_alert_optin_at, NOW())
+                       ELSE job_alert_optin_at END,
                    updated_at = NOW()
-               WHERE id = $6
+               WHERE id = $8
                RETURNING id, lawful_basis, consent_talentpool_at, consent_talentpool_until""",
-            now, until, pending["scope"], pending["source"], set_lawful_basis, existing["id"],
+            now, until, pending["scope"], pending["source"], set_lawful_basis,
+            is_referral, wants_alerts, existing["id"],
         )
     else:
         row = await fetch_one(
             """INSERT INTO candidates
                (full_name, email, source, lawful_basis, date_found,
-                consent_talentpool_at, consent_talentpool_until, consent_scope, consent_source)
-               VALUES ($1, $2, 'talentpool_optin', 'opt_in_talentpool', CURRENT_DATE, $3, $4, $5, $6)
+                consent_talentpool_at, consent_talentpool_until, consent_scope, consent_source,
+                referral_confirmed_at, job_alert_optin_at)
+               VALUES ($1, $2, 'talentpool_optin', 'opt_in_talentpool', CURRENT_DATE, $3, $4, $5, $6,
+                       CASE WHEN $7 THEN NOW() ELSE NULL END,
+                       CASE WHEN $8 THEN NOW() ELSE NULL END)
                RETURNING id, lawful_basis, consent_talentpool_at, consent_talentpool_until""",
             pending["email"], pending["email"], now, until, pending["scope"], pending["source"],
+            is_referral, wants_alerts,
         )
 
     applied_job = None
@@ -490,3 +522,202 @@ async def talentpool_confirm(request: Request, data: TalentpoolConfirmRequest):
         "consent_talentpool_until": row["consent_talentpool_until"],
         "applied_job": applied_job,
     }
+
+# ── Een-klik-afmelden voor vacature-alerts (WS3c) ────────────────────────
+#
+# Eén endpoint voor twee soorten aanroepers, met precies hetzelfde
+# antwoord voor allebei:
+#
+#   (a) een mens die in de voettekst van een job-alert op de afmeldlink
+#       klikt (website/unsubscribe.html, token in het URL-fragment) en
+#       daar kiest tussen "geen alerts meer" en "helemaal geen contact
+#       meer";
+#   (b) een mailclient die de List-Unsubscribe-header volgt (RFC 8058
+#       one-click): die POST komt rechtstreeks hierheen met ?token=...&
+#       scope=alerts in de querystring, zonder tussenpagina.
+#
+# Waarom het token voor (b) wél in de querystring staat en voor (a) in
+# het fragment: RFC 8058 schrijft een POST-bare https-URL voor, en een
+# fragment bereikt de server nooit -- een one-click-header met #token=
+# zou dus simpelweg niet werken. Voor de menselijke route geldt de
+# bestaande regel uit WS-C.17 (security-audit H1) onverkort: fragment,
+# geen querystring, zodat het token niet in access logs of een
+# Referer-header belandt. Zie de restrisico-notitie hierover in
+# docs/VERWERKINGSREGISTER.md §1.2.
+#
+# Geen enumeratie-orakel. Het antwoord is altijd hetzelfde bericht met
+# dezelfde statuscode: voor een geldig token, een al verbruikt token, een
+# verzonnen token en een ontbrekend token. Om ook het *werk* niet te
+# laten verschillen (een meetbaar tijdsverschil is net zo goed een
+# orakel) voert elke tak exact dezelfde statements uit; bij een onbekend
+# token is `candidate_id` simpelweg NULL en raken die statements nul
+# rijen. Er wordt dus nooit "eerst gekeken of het token bestaat en dan
+# pas iets gedaan".
+#
+# Het token is eenmalig: de eerste geslaagde aanroep stempelt
+# `used_at`, waarna hergebruik langs dezelfde weg als een onbekend token
+# loopt (en dus ook niets meer doet). Daarom stuurt
+# website/unsubscribe.js niet automatisch bij het laden, maar pas als de
+# bezoeker zelf een van de twee knoppen kiest -- anders zou het token op
+# de "alerts"-keuze verbruikt zijn voordat hij "alles" had kunnen kiezen.
+
+_UNSUBSCRIBE_MESSAGE = (
+    "If this unsubscribe link was valid, your preference has been processed. "
+    "You will not receive further job alerts."
+)
+
+
+async def _unsubscribe_body(request: Request) -> dict:
+    """Leest de body van een afmeldverzoek zonder ooit te struikelen over
+    de vorm ervan.
+
+    Bewust géén gedeclareerd Pydantic-body-model op het endpoint: een RFC
+    8058 one-click-POST van een mailclient stuurt
+    `Content-Type: application/x-www-form-urlencoded` met de body
+    `List-Unsubscribe=One-Click` -- geen JSON. Een JSON-body-model zou
+    daar 422 op geven, precies voor de aanroeper die deze header juist
+    bedoeld is te bedienen, én zou dat antwoord laten verschillen van het
+    generieke antwoord dat elke andere aanroeper krijgt. Een lege body,
+    losse tekst of ongeldige JSON leveren hier dus gewoon {} op en het
+    verzoek valt terug op de querystring."""
+    try:
+        raw = await request.body()
+    except Exception:
+        return {}
+    if not raw:
+        return {}
+    try:
+        parsed = json.loads(raw)
+    except (ValueError, UnicodeDecodeError):
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+@talentpool_public_router.post("/unsubscribe")
+@limiter.limit("10/minute")
+async def unsubscribe(
+    request: Request,
+    token: Optional[str] = Query(None),
+    scope: Optional[str] = Query(None),
+):
+    """Meld af voor vacature-alerts (`scope='alerts'`) of voor elk contact
+    (`scope='all'`). Zie het blok hierboven voor de twee aanroepers en
+    voor waarom het antwoord altijd identiek is.
+
+    Body (optioneel, JSON): `{"token": "...", "scope": "alerts"|"all"}` --
+    zie models.schemas.UnsubscribeRequest voor de vorm. Beide velden
+    mogen ook als queryparameter (`?token=...&scope=...`), voor de
+    one-click-header."""
+    raw_body = await _unsubscribe_body(request)
+    # UnsubscribeRequest is het gedocumenteerde bodycontract en doet de
+    # scope-validatie; een body die er niet aan voldoet (of er niet is)
+    # mag hier nooit een 422 worden -- dat zou het enige antwoord zijn
+    # dat wél iets verklapt -- dus valt hij terug op het lege model en
+    # daarmee op de querystring.
+    try:
+        body = UnsubscribeRequest(**raw_body)
+    except (TypeError, ValueError):
+        body = UnsubscribeRequest()
+
+    raw_token = body.token or token
+
+    # Querystring wint alleen als de body niets zei; een onbekende of
+    # ontbrekende scope valt terug op de smalste betekenis ('alerts'),
+    # nooit op de ingrijpendste. Een afmelding moet nooit méér intrekken
+    # dan de betrokkene bedoelde.
+    raw_scope = body.scope if "scope" in raw_body else (scope or "alerts")
+    if raw_scope not in UNSUBSCRIBE_SCOPES:
+        raw_scope = "alerts"
+
+    token_hash = hash_token(raw_token) if raw_token else None
+
+    # Verbruikt het token en levert de kandidaat op, in één statement:
+    # `used_at IS NULL` maakt hergebruik onmogelijk zonder een aparte
+    # check die zelf weer een tak (en dus een tijdsverschil) zou zijn.
+    # Elke parameter krijgt hier een expliciete cast. asyncpg leidt het
+    # type van een placeholder af uit de kolom waarmee hij wordt
+    # vergeleken, en juist in dit endpoint staan er placeholders op
+    # plekken zonder kolom om van te leren (SELECT $1 ... WHERE $1 IS NOT
+    # NULL) -- zonder cast is dat een AmbiguousParameterError, en dat zou
+    # een 500 zijn: het enige antwoord dat van het generieke antwoord
+    # afwijkt en dus verklapt dat er iets bijzonders aan de hand is.
+    consumed = await fetch_one(
+        """UPDATE job_alert_sends SET used_at = NOW()
+           WHERE token_hash = $1::text AND used_at IS NULL
+           RETURNING candidate_id""",
+        token_hash,
+    )
+    candidate_id = consumed["candidate_id"] if consumed else None
+
+    # Vanaf hier draait elk statement altijd, met candidate_id = NULL bij
+    # een onbekend/verbruikt/ontbrekend token: `WHERE id = NULL` matcht
+    # niets, zonder aparte if-tak.
+    candidate = await fetch_one(
+        "SELECT id, email FROM candidates WHERE id = $1::int", candidate_id,
+    )
+    email = candidate["email"] if candidate else None
+
+    await execute(
+        """UPDATE candidates
+           SET job_alert_unsubscribed_at = COALESCE(job_alert_unsubscribed_at, NOW()),
+               updated_at = NOW()
+           WHERE id = $1::int""",
+        candidate_id,
+    )
+
+    withdraw_all = raw_scope == "all"
+
+    # scope='all' is een intrekking in de zin van SOP §3.3: geen contact
+    # meer, op geen enkele grondslag. Dat is precies wat
+    # routers/gdpr.py's add_suppression() met de hand doet -- zelfde drie
+    # effecten (consent_withdrawn_at, suppressielijst, lopende drafts
+    # ingetrokken), hier zonder beheerder omdat de betrokkene het zelf
+    # vraagt. `created_by` blijft NULL: er is geen actor, de persoon zelf
+    # deed dit.
+    await execute(
+        """UPDATE candidates
+           SET consent_withdrawn_at = CASE WHEN $2::boolean THEN COALESCE(consent_withdrawn_at, NOW())
+                                           ELSE consent_withdrawn_at END,
+               updated_at = NOW()
+           WHERE id = $1::int""",
+        candidate_id, withdraw_all,
+    )
+    await execute(
+        """INSERT INTO suppression_list (email_hash, email_domain, reason, created_by)
+           SELECT $1::text, $2::text, 'unsubscribe_all', NULL
+           WHERE $1::text IS NOT NULL AND $3::boolean
+           ON CONFLICT (email_hash) DO NOTHING""",
+        privacy.email_hash(email) if email else None,
+        privacy.email_domain(email) if email else None,
+        withdraw_all,
+    )
+    await execute(
+        """UPDATE outreach_drafts SET status = 'rejected', updated_at = NOW()
+           WHERE target_type = 'candidate' AND target_id = $1::int AND status = 'draft' AND $2::boolean""",
+        candidate_id, withdraw_all,
+    )
+
+    # Audit-regel, alleen als er echt iets is gebeurd (een onbekend token
+    # is geen gebeurtenis om vast te leggen, en zou de audit-log vullen
+    # met ruis die een aanvaller zelf kan produceren). Nooit het adres:
+    # alleen de sha256-hash, net als elders. json.dumps, nooit een ruwe
+    # dict (commit 72b4bcd).
+    await execute(
+        """INSERT INTO audit_log (action, actor_id, target_type, target_id, changes)
+           SELECT 'job_alert_unsubscribe', NULL::int, 'candidate', $1::int, $2::jsonb
+           WHERE $1::int IS NOT NULL""",
+        candidate_id,
+        json.dumps({
+            "scope": raw_scope,
+            "email_hash": privacy.email_hash(email) if email else None,
+            "via": "one_click_token",
+        }),
+    )
+
+    if candidate_id is not None:
+        # Alleen een id, nooit het adres (core.privacy.email_hash is de
+        # regel voor als er toch iets identificeerbaars in een logregel
+        # moet -- hier is het id al genoeg).
+        logger.info("unsubscribe: processed scope=%s for candidate id=%s", raw_scope, candidate_id)
+
+    return {"message": _UNSUBSCRIBE_MESSAGE}

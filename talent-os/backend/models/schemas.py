@@ -162,6 +162,62 @@ class AdminTalentpoolConsentUpdate(BaseModel):
         return v
 
 
+# ── WS3b referral-bevestiging (migrations/041) ───────────────────────────
+
+class AdminReferralCreate(BaseModel):
+    """Admin: POST /api/v1/admin/candidates/referral.
+
+    Legt een door een mens aangedragen referral vast (SOP §1.3,
+    `lawful_basis = 'toestemming_referral'`) en stuurt de betrokkene één
+    bevestigingsmail met het Art. 14-blok in de referral-variant. Er
+    gebeurt verder niets met de gegevens tot de persoon zelf bevestigt.
+
+    `referred_by` is intern: de naam of relatie van degene die aandroeg,
+    zoals het Art. 14-blok die noemt ("via een aanbeveling van ..."). Het
+    staat daarmee wél in de mail aan de betrokkene -- dat is de bedoeling
+    van art. 14 (de bron noemen) -- maar nergens in Telegram of een
+    logregel.
+
+    `note` is vrije tekst van de beheerder en gaat nooit ongefilterd het
+    audit_log in: routers/admin.py haalt hem eerst door
+    privacy.redact_emails(), net als `evidence` hierboven."""
+    full_name: str = Field(..., min_length=1, max_length=200)
+    email: EmailStr
+    referred_by: str = Field(..., min_length=1, max_length=200)
+    note: Optional[str] = Field(None, max_length=2000)
+
+
+# ── WS3c job-alerts (migrations/041) ─────────────────────────────────────
+
+UNSUBSCRIBE_SCOPES = ("alerts", "all")
+
+
+class CandidateJobAlertsUpdate(BaseModel):
+    """Candidate portal: PUT /api/v1/candidate/job-alerts."""
+    enabled: bool
+
+
+class UnsubscribeRequest(BaseModel):
+    """Public: POST /api/public/unsubscribe.
+
+    `token` is het ruwe, per verzending unieke een-klik-token uit de
+    voettekst en de List-Unsubscribe-header van een job-alert; alleen de
+    sha256 ervan staat in job_alert_sends.token_hash. Optioneel in de
+    body omdat een RFC 8058 one-click POST hem ook als query-parameter
+    mag meesturen -- routers/public.py accepteert beide en behandelt een
+    ontbrekend token exact als een onbekend token (zelfde antwoord,
+    zelfde statuscode)."""
+    token: Optional[str] = None
+    scope: str = "alerts"
+
+    @field_validator("scope")
+    @classmethod
+    def _scope_in_set(cls, v):
+        if v not in UNSUBSCRIBE_SCOPES:
+            raise ValueError(f"scope must be one of {UNSUBSCRIBE_SCOPES}")
+        return v
+
+
 # ── Spec-presentatietoestemming (migrations/018 + 035, §6 punt 10 van
 # docs/VERWERKINGSREGISTER.md) ────────────────────────────────────────────
 
