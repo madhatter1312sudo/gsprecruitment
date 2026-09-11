@@ -514,9 +514,9 @@ body:not(.portal) .card > .mark:first-child, .service-card > .mark:first-child,
   .contact-row__label { flex-basis: 84px; }
 }
 
-/* ── Contactrail (sitebreed, §8.x.4) — vervangt .whatsapp-float/.mail-float,
-   zie §8.x.7. Linksonder (niet rechtsonder — botst anders met back-to-top/
-   toast-container/cookiebanner). Twee 48x48-items, geen puls, nooit
+/* ── Contactrail (sitebreed, §8.x.4), vervangt .whatsapp-float/.mail-float,
+   zie §8.x.7. Linksonder op >600px, rechtsonder op <=600px (zie het
+   media-block onderaan dit onderdeel). Twee 48x48-items, geen puls, nooit
    #25D366; label klapt alleen desktop-hover/focus-visible uit, glyph is op
    touch altijd zelfstandig leesbaar (aria-label draagt de betekenis).
    Rand + --shadow-md (reparatie, chief-of-staff review): de pil staat op
@@ -557,18 +557,23 @@ body:not(.portal) .card > .mark:first-child, .service-card > .mark:first-child,
   max-width: 120px;
 }
 .contact-rail__item:focus-visible { outline: 2px solid var(--gold-500); outline-offset: -2px; }
-/* ≤600px (reparatie, chief-of-staff review): op smalle schermen staat de
-   gestapelde 48x96 pil over de eerste tekstregels van de kaart eronder
-   (§8.x.0 belooft "het glyph blijft altijd zelfstandig leesbaar"; dat
-   geldt niet voor een tikdoel dat drie regels lichaamstekst afdekt). Beide
-   kanalen blijven zichtbaar op hun volledige 48x48-tikdoel (geen
-   verkleining, zie §8.x.4); ze staan op smalle schermen naast elkaar in
-   plaats van gestapeld, wat het footprint van 96px hoog naar 48px hoog
-   halveert. De footer krijgt los daarvan (zie .footer) extra
-   padding-bottom zodat de pil aan het eind van de pagina nooit over de
-   copyrightregel valt. */
+/* <=600px: beide kanalen blijven op hun volledige 48x48-tikdoel (geen
+   verkleining, zie §8.x.4), maar staan hier naast elkaar in plaats van
+   gestapeld (96px hoog naar 48px hoog) en staan rechtsonder in plaats van
+   linksonder. Linksonder begint elke regel lopende tekst, dus daar dekt de
+   pil hele woorden af; rechtsonder valt hij in de rafelige regeleinden.
+   Gemeten in Chromium op 390x844 en 390x664, index/kandidaten/werkgevers/
+   vacatures/contact, NL en EN, scrollpositie 0 en onderaan (40 metingen):
+   linksonder 13148px2 afgedekte lopende tekst, rechtsonder 4113px2. Wat
+   overblijft zijn elementen die de volle contentbreedte beslaan (een CTA-
+   knoplabel, een checkboxlabel); die vallen in elke hoek onder de pil.
+   Botsingsvrij gemeten in dezelfde run (afstanden vanaf de onderrand):
+   rail 24-74px, back-to-top 80-122px (CSS-variant) resp. 80-124px (de
+   variant die script.js injecteert), toastcontainer vanaf 132px. De
+   footer houdt los daarvan extra padding-bottom (zie .footer) zodat de
+   laatste footerregel nooit onder de pil valt. */
 @media (max-width: 600px) {
-  .contact-rail { flex-direction: row; }
+  .contact-rail { flex-direction: row; left: auto; right: var(--space-lg); }
   .contact-rail__item + .contact-rail__item { border-top: none; border-left: 1px solid var(--navy-600); }
 }
 
@@ -1471,6 +1476,17 @@ section { padding: 100px 0; }
 .toast-warning { background: #78350f; color: #fff; }
 .toast-removing { opacity: 0; transform: translateX(40px); transition: 0.3s ease; }
 .toast-icon { font-size: 1.1rem; line-height: 1; }
+/* <=600px: de toast is daar bijna schermbreed (max-width 360px op 390px
+   viewport), dus op bottom:24px legt hij zich met z-index 9998 over de
+   contactrail (9995) en blokkeert hij beide contactkanalen zolang hij
+   staat. Gemeten overlap in de oude opstelling: 2238px2 op elke pagina
+   waar een toast kan verschijnen. De container schuift daarom boven de
+   hele vaste stapel: rail tot 74px, back-to-top tot 124px, toast vanaf
+   132px vanaf de onderrand. Alleen <=600px; op breedere schermen is de
+   toast smaller dan de vrije ruimte en verandert er niets. */
+@media (max-width: 600px) {
+  .toast-container { bottom: 132px; }
+}
 
 /* ── Responsive: Tablet ─────────────────────────────────── */
 @media (max-width: 1024px) {
