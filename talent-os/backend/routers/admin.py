@@ -958,10 +958,10 @@ async def admin_create_referral(
         # error, redacted.
         logger.warning("admin_create_referral: confirmation e-mail failed for candidate id=%s", candidate["id"])
 
-    # Audit trail with redacted evidence: `note` is free text an admin
-    # typed and can easily contain the referrer's or the candidate's own
-    # address -- same privacy.redact_emails() treatment as `evidence` on
-    # the two consent endpoints above, and the candidate's own address is
+    # Audit trail with redacted evidence: `evidence` and `note` are free
+    # text an admin typed and can easily contain the referrer's or the
+    # candidate's own address -- same privacy.redact_emails() treatment as
+    # on the two consent endpoints above, and the candidate's own address is
     # stored only as a hash here, never in plaintext in audit_log.changes
     # (json.dumps'd, never a raw dict -- commit 72b4bcd).
     await execute(
@@ -971,6 +971,7 @@ async def admin_create_referral(
             "source": "referral",
             "lawful_basis": "toestemming_referral",
             "referred_by": privacy.redact_emails(data.referred_by),
+            "evidence": privacy.redact_emails(data.evidence),
             "note": privacy.redact_emails(data.note),
             "email_hash": privacy.email_hash(email),
             "confirmation_email_sent": sent,

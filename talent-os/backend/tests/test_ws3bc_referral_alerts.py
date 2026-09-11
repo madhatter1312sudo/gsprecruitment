@@ -129,7 +129,7 @@ def test_dormant_warning_promises_only_what_the_code_does():
     het account op een lijst die een mens beoordeelt (core/retention.py,
     routers/retention_admin.py). Hij moet wel de datum noemen en zeggen
     dat inloggen genoeg is."""
-    ctx = {"full_name": "Jan", "link": "https://gsprecruitment.nl/candidate/login.html", "deadline": "2026-10-11"}
+    ctx = {"full_name": "Jan", "link": "https://gsprecruitment.nl/candidate/", "deadline": "2026-10-11"}
     _s, nl, _h = email_templates.render("dormant_warning", ctx, "nl")
     _s, en, _h = email_templates.render("dormant_warning", ctx, "en")
 
@@ -139,19 +139,85 @@ def test_dormant_warning_promises_only_what_the_code_does():
     assert "Inloggen is genoeg" in nl and "Logging in is enough" in en
 
 
-def test_dormant_warning_sql_window_is_exactly_17_to_18_months():
-    """De 18-maandengrens moet precies liggen: 17 maanden is de ondergrens
-    om gewaarschuwd te worden (dat geeft de 30 dagen die
-    PORTAL_ACCOUNT_INACTIVE_SQL eist), 18 maanden de bovengrens."""
-    sql = sched.DORMANT_WARNING_SQL
+def test_dormant_warning_does_not_claim_a_term_the_job_does_not_use():
+    """B12. De tekst noemde vier keer "18 maanden" terwijl de job vanaf 17
+    maanden waarschuwt, en sinds B3 zonder bovengrens -- dus voor een deel
+    van de ontvangers was dat getal simpelweg onwaar. De datum is wat voor
+    iedereen klopt en is ook het enige waar de ontvanger iets mee moet."""
+    ctx = {"full_name": "Jan", "link": "https://gsprecruitment.nl/candidate/", "deadline": "2026-10-11"}
+    for lang in ("nl", "en"):
+        subject, text, html = email_templates.render("dormant_warning", ctx, lang)
+        for part in (subject, text, html):
+            assert "18 maanden" not in part and "18 months" not in part
+        assert "2026-10-11" in text and "2026-10-11" in html
+
+
+def test_referral_confirm_promises_only_what_the_code_does():
+    """B11. Hier stond "Doet u niets, dan verwijderen wij uw gegevens
+    weer", en dat gebeurt niet: de rij blijft staan, valt na 3 maanden in
+    REFERRAL_NO_RESPONSE_SQL en komt dan op de maandelijkse lijst die een
+    beheerder afhandelt. Dezelfde eis als aan dormant_warning hierboven,
+    voor de tweede mail die iets over verwijderen zegt."""
+    _s, nl, nl_html = email_templates.render("referral_confirm", _REFERRAL_CTX, "nl")
+    _s, en, en_html = email_templates.render("referral_confirm", _REFERRAL_CTX, "en")
+
+    for part in (nl, nl_html):
+        assert "verwijderen wij uw gegevens weer" not in part
+        assert "3 maanden" in part
+        assert "verwijderlijst" in part and "beheerder" in part
+    for part in (en, en_html):
+        assert "we will delete your details again" not in part
+        assert "3 months" in part
+        assert "deletion list" in part and "administrator" in part
+
+
+def test_dormant_warning_link_points_at_a_page_that_exists():
+    """B6. De link wees naar candidate/login.html, een pagina die niet
+    bestaat: het portaal is website/candidate/index.html met een
+    inlogmodal. Een waarschuwing "log in om je account te houden" die naar
+    een 404 wijst is erger dan geen waarschuwing, dus deze test kijkt naar
+    het bestandssysteem en niet naar een string."""
+    website = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))),
+        "website",
+    )
+    path = sched._DORMANT_WARNING_PATH
+    assert path.startswith("/") and path.endswith("/")
+    assert os.path.isfile(os.path.join(website, path.strip("/"), "index.html"))
+    assert not os.path.exists(os.path.join(website, "candidate", "login.html"))
+
+    link = sched._dormant_warning_link()
+    assert link.startswith(settings.frontend_url) and link.endswith(path)
+
+
+def test_dormant_warning_sql_has_no_upper_bound_on_the_window():
+    """B3, besluit van de eigenaar: de bovengrens van 18 maanden is eraf.
+    Met die grens viel iedereen die bij invoering al langer dan 18 maanden
+    sliep permanent buiten het venster: nooit gewaarschuwd, dus nooit
+    beoordeeld, dus de beloofde termijn werd voor precies die achterstand
+    nooit gehaald."""
+    sql = retention.DORMANT_WARNING_SQL
     assert "u.last_login_at <= (NOW() - INTERVAL '17 months')" in sql
-    assert "u.last_login_at > (NOW() - INTERVAL '18 months')" in sql
+    assert "INTERVAL '18 months'" not in sql
     assert "u.role = 'candidate'" in sql
     assert "u.deleted_at IS NULL" in sql
+    # De idempotentie die de bovengrens verving.
     assert "u.dormant_warning_sent_at IS NULL OR u.dormant_warning_sent_at < u.last_login_at" in sql
     # De beschermende guards komen letterlijk uit core/retention.py, niet
     # uit een tweede handgeschreven kopie.
     assert retention._CANDIDATE_ENGAGEMENT_SIGNALS_SQL in sql
+    # CR L2: plafond in SQL, en een aparte telling zonder plafond.
+    assert "LIMIT $1" in sql
+    assert "COUNT(*) AS due" in retention.DORMANT_WARNING_COUNT_SQL
+    assert "LIMIT" not in retention.DORMANT_WARNING_COUNT_SQL
+
+
+def test_dormant_warning_selector_lives_next_to_the_selector_it_feeds():
+    """R7: één bestand voor beide helften van dezelfde belofte.
+    services/scheduler.py bouwde zijn eigen kopie met een private
+    constante uit core/retention.py."""
+    assert sched.retention.DORMANT_WARNING_SQL is retention.DORMANT_WARNING_SQL
+    assert not hasattr(sched, "DORMANT_WARNING_SQL")
 
 
 def test_dormant_warning_grace_matches_the_retention_selector():
@@ -162,25 +228,60 @@ def test_dormant_warning_grace_matches_the_retention_selector():
 
 
 def _stub_scheduler_db(monkeypatch, rows_by_sql=None, default_rows=None):
-    """fetch_all/execute op services.scheduler vervangen. Geeft
-    (executed_sql_args, ) terug zodat een test kan bewijzen dat er niets
-    is weggeschreven."""
+    """fetch_all/fetch_one/execute op services.scheduler vervangen. Geeft
+    de lijst met uitgevoerde SCHRIJF-statements terug, zodat een test kan
+    bewijzen dat er niets is weggeschreven.
+
+    fetch_one hoort daar sinds B7 bij: de tokenrij wordt met INSERT ...
+    RETURNING geschreven en is dus een schrijfactie die langs fetch_one
+    loopt. Een lezende fetch_one (de COUNT van dormant_account_warning_
+    job) belandt niet in `executed` -- anders zou "droogloop schrijft
+    niets" op een telling stuklopen."""
     executed = []
 
-    async def _fake_fetch_all(sql, *args):
+    def _match(sql):
         if rows_by_sql:
             for needle, rows in rows_by_sql.items():
                 if needle in sql:
                     return list(rows)
-        return list(default_rows or [])
+        return None
+
+    async def _fake_fetch_all(sql, *args):
+        rows = _match(sql)
+        return rows if rows is not None else list(default_rows or [])
+
+    async def _fake_fetch_one(sql, *args):
+        if sql.lstrip().upper().startswith(("INSERT", "UPDATE", "DELETE")):
+            executed.append((sql, args))
+            return {"id": 1}
+        rows = _match(sql)
+        if rows is None and "COUNT(*) AS due" in sql:
+            return {"due": len(default_rows or [])}
+        if rows is None:
+            rows = list(default_rows or [])
+        return rows[0] if rows else None
 
     async def _fake_execute(sql, *args):
         executed.append((sql, args))
         return "UPDATE 1"
 
     monkeypatch.setattr(sched, "fetch_all", _fake_fetch_all)
+    monkeypatch.setattr(sched, "fetch_one", _fake_fetch_one)
     monkeypatch.setattr(sched, "execute", _fake_execute)
     return executed
+
+
+def _dormant_rows(*rows):
+    """rows_by_sql voor dormant_account_warning_job: de users-selectie, de
+    telling en de blokkeerlijst zijn drie verschillende queries en mogen
+    niet op één default terugvallen."""
+    # Volgorde telt: de telling en de selectie delen hun FROM/WHERE, dus
+    # de specifiekere naald staat voorop (dicts behouden invoegvolgorde).
+    return {
+        "COUNT(*) AS due": [{"due": len(rows)}],
+        "FROM suppression_list": [],
+        "FROM users u": list(rows),
+    }
 
 
 class _RecordingEmailService:
@@ -208,21 +309,73 @@ def test_dormant_warning_job_sends_nothing_when_the_switch_is_off(monkeypatch, s
     dan zet PORTAL_ACCOUNT_INACTIVE_SQL 30 dagen later accounts op de
     verwijderlijst waarover nooit iemand is gewaarschuwd."""
     executed = _stub_scheduler_db(
-        monkeypatch, default_rows=[{"id": 1, "email": "a@example.com", "full_name": "A", "last_login_at": None}],
+        monkeypatch,
+        rows_by_sql=_dormant_rows({"id": 1, "email": "a@example.com", "full_name": "A", "last_login_at": None}),
     )
     monkeypatch.setattr(settings, "dormant_warning_enabled", False)
 
     result = _run(sched.dormant_account_warning_job())
 
-    assert result == {"status": "dry_run", "accounts_due": 1, "sent": 0}
+    assert result == {"status": "dry_run", "accounts_due": 1, "selected": 1, "sent": 0}
     assert stub_email.sent == []
     assert executed == [], "droogloop mag niets naar de database schrijven"
+
+
+def test_dormant_warning_dry_run_counts_the_whole_backlog_not_the_capped_page(monkeypatch, stub_email):
+    """CR L2: `accounts_due` komt uit een telling zonder plafond. Telde hij
+    na het knippen, dan meldde een achterstand van duizenden accounts
+    netjes DORMANT_WARNING_CAP en verdween precies het getal waar de
+    eigenaar naar kijkt."""
+    page = [
+        {"id": i, "email": f"a{i}@example.com", "full_name": "A", "last_login_at": None}
+        for i in range(sched.DORMANT_WARNING_CAP)
+    ]
+    executed = _stub_scheduler_db(
+        monkeypatch,
+        rows_by_sql={
+            "COUNT(*) AS due": [{"due": 4321}],
+            "FROM suppression_list": [],
+            "FROM users u": page,
+        },
+    )
+    monkeypatch.setattr(settings, "dormant_warning_enabled", False)
+
+    result = _run(sched.dormant_account_warning_job())
+
+    assert result["accounts_due"] == 4321
+    assert result["selected"] == sched.DORMANT_WARNING_CAP
+    assert executed == []
+
+
+def test_dormant_warning_job_skips_a_suppressed_account(monkeypatch, stub_email):
+    """B10: wie STOP heeft gestuurd, krijgt geen bericht meer, op geen
+    enkele grondslag -- ook geen waarschuwing over zijn eigen account.
+    Dezelfde blokkeerlijstcontrole als job_alert_job."""
+    from core import privacy
+
+    row = {"id": 3, "email": "stop@example.com", "full_name": "S", "last_login_at": None}
+    executed = _stub_scheduler_db(
+        monkeypatch,
+        rows_by_sql={
+            "COUNT(*) AS due": [{"due": 1}],
+            "FROM suppression_list": [{"email_hash": privacy.email_hash(row["email"])}],
+            "FROM users u": [row],
+        },
+    )
+    monkeypatch.setattr(settings, "dormant_warning_enabled", True)
+
+    result = _run(sched.dormant_account_warning_job())
+
+    assert result["sent"] == 0
+    assert result["selected"] == 0
+    assert stub_email.sent == []
+    assert executed == []
 
 
 def test_dormant_warning_job_stamps_only_after_a_successful_send(monkeypatch, stub_email):
     executed = _stub_scheduler_db(
         monkeypatch,
-        default_rows=[{"id": 7, "email": "a@example.com", "full_name": "A", "last_login_at": None}],
+        rows_by_sql=_dormant_rows({"id": 7, "email": "a@example.com", "full_name": "A", "last_login_at": None}),
     )
     monkeypatch.setattr(settings, "dormant_warning_enabled", True)
 
@@ -414,9 +567,11 @@ def test_job_alert_job_sets_the_one_click_unsubscribe_headers(monkeypatch, stub_
     assert "?token=" in headers["List-Unsubscribe"]
     assert "#token=" in stub_email.sent[0]["ctx"]["unsubscribe_link"]
 
-    # Pas na een geslaagde verzending: tokenrij en stempel.
-    assert any("INSERT INTO job_alert_sends" in sql for sql, _ in executed)
-    assert any("job_alert_last_sent_at = NOW()" in sql for sql, _ in executed)
+    # B7: de tokenrij vóór de verzending, de stempel erna.
+    sqls = [sql for sql, _ in executed]
+    assert any("INSERT INTO job_alert_sends" in sql for sql in sqls)
+    assert any("job_alert_last_sent_at = NOW()" in sql for sql in sqls)
+    assert not any("DELETE FROM job_alert_sends" in sql for sql in sqls)
 
 
 def test_job_alert_job_writes_only_the_token_hash_never_the_raw_token(monkeypatch, stub_email):
@@ -442,6 +597,11 @@ def test_job_alert_job_writes_only_the_token_hash_never_the_raw_token(monkeypatc
 
 
 def test_job_alert_job_does_not_stamp_when_the_send_fails(monkeypatch, stub_email):
+    """B7. De tokenrij wordt nu vóór de verzending geschreven -- anders kon
+    een mislukte INSERT ná een geslaagde verzending een dode afmeldlink
+    achterlaten, onzichtbaar omdat het afmeldendpoint met opzet altijd
+    hetzelfde antwoordt. Mislukt de verzending, dan gaat die rij dus weer
+    weg, en de stempel komt er sowieso niet."""
     executed = _stub_scheduler_db(
         monkeypatch,
         rows_by_sql={
@@ -457,7 +617,64 @@ def test_job_alert_job_does_not_stamp_when_the_send_fails(monkeypatch, stub_emai
     result = _run(sched.job_alert_job())
 
     assert result["sent"] == 0
-    assert executed == [], "een mislukte verzending mag geen geldig afmeldtoken achterlaten"
+    sqls = [sql for sql, _ in executed]
+    assert any("INSERT INTO job_alert_sends" in sql for sql in sqls)
+    assert any("DELETE FROM job_alert_sends" in sql for sql in sqls)
+    assert not any("job_alert_last_sent_at" in sql for sql in sqls), (
+        "een mislukte verzending mag het venster van morgen niet dichtschuiven"
+    )
+
+
+def test_job_alert_job_writes_the_token_row_before_it_sends(monkeypatch, stub_email):
+    """B7, de volgorde zelf. Een string-assertie kan hem niet zien, dus
+    deze test legt het moment van verzenden vast tussen de statements."""
+    order = []
+
+    executed = _stub_scheduler_db(
+        monkeypatch,
+        rows_by_sql={
+            "FROM candidates c": [_alert_candidate()],
+            "FROM matches m": _alert_job_rows(),
+            "FROM suppression_list": [],
+        },
+    )
+
+    real_send = stub_email.send_template
+
+    async def _tracking_send(*a, **kw):
+        order.append(("send", len(executed)))
+        return await real_send(*a, **kw)
+
+    stub_email.send_template = _tracking_send
+    monkeypatch.setattr(settings, "job_alerts_enabled", True)
+    monkeypatch.setattr(sched, "_flag_enabled", lambda key: _true())
+
+    _run(sched.job_alert_job())
+
+    statements_before_send = order[0][1]
+    assert statements_before_send == 1
+    assert "INSERT INTO job_alert_sends" in executed[0][0]
+
+
+def test_job_alert_suppression_check_survives_two_rows_with_one_address(monkeypatch):
+    """B8. De map ging van hash naar id, dus twee kandidaatrijen met
+    hetzelfde adres lieten er één door -- en die kreeg zijn mail, terwijl
+    het adres op de blokkeerlijst stond. Precies de fout die dit hulpje
+    moet voorkomen, alleen in Python."""
+    from core import privacy
+
+    shared = "dubbel@example.com"
+    rows = [
+        {"id": 1, "email": shared},
+        {"id": 2, "email": shared},
+        {"id": 3, "email": "anders@example.com"},
+    ]
+    _stub_scheduler_db(
+        monkeypatch,
+        rows_by_sql={"FROM suppression_list": [{"email_hash": privacy.email_hash(shared)}]},
+    )
+
+    assert _run(sched._job_alert_suppressed_ids(rows)) == {1, 2}
 
 
 def test_job_alert_caps_are_what_the_spec_asks(monkeypatch):
@@ -475,3 +692,233 @@ def test_generated_tokens_have_full_entropy():
     token = secrets.token_urlsafe(32)
     assert len(token) >= 43
     assert hash_token(token) != hash_token(secrets.token_urlsafe(32))
+
+
+# ══════════════════════════════════════════════════════════════════════
+# B13 -- de guards die niemand testte
+# ══════════════════════════════════════════════════════════════════════
+#
+# Elk van deze guards was op zichzelf juist, maar door geen enkele test
+# gedekt: wie hem morgen weghaalt, ziet een groene suite. Ze zijn stuk
+# voor stuk met een mutatie gecontroleerd (guard eruit -> test faalt);
+# welke, staat in het eindrapport van deze ronde.
+
+
+def test_job_alerts_switch_refuses_a_non_candidate_role():
+    """routers/candidate.py's rolcheck. get_verified_user bewijst alleen
+    dat het account bestaat en geverifieerd is -- een klant- of
+    beheerdersaccount haalt die dependency net zo goed, en zou zonder deze
+    regel een kandidaatvoorkeur zetten op de kandidaatrij die
+    get_or_create_candidate_id voor hem zou aanmaken."""
+    import asyncio
+
+    from fastapi import HTTPException
+    from models.schemas import CandidateJobAlertsUpdate
+    from routers import candidate as candidate_router
+
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(
+            candidate_router.update_job_alerts(
+                CandidateJobAlertsUpdate(enabled=True),
+                current_user={"id": 1, "role": "client", "email": "c@example.com"},
+            )
+        )
+    assert exc.value.status_code == 403
+
+
+def _stub_candidate_router_db(monkeypatch, row):
+    """fetch_one/execute/_get_candidate_id op routers.candidate."""
+    calls = []
+    from routers import candidate as candidate_router
+
+    async def _fake_get_candidate_id(user_id):
+        return 42
+
+    async def _fake_fetch_one(sql, *args):
+        calls.append((sql, args))
+        return row
+
+    async def _fake_execute(sql, *args):
+        calls.append((sql, args))
+        return "INSERT 1"
+
+    monkeypatch.setattr(candidate_router, "_get_candidate_id", _fake_get_candidate_id)
+    monkeypatch.setattr(candidate_router, "fetch_one", _fake_fetch_one)
+    monkeypatch.setattr(candidate_router, "execute", _fake_execute)
+    return calls
+
+
+def test_job_alerts_switch_writes_json_not_a_raw_dict_to_the_audit_log(monkeypatch):
+    """De jsonb-valkuil uit CLAUDE.md (commit 72b4bcd): audit_log.changes
+    is jsonb en asyncpg kan een ruwe dict niet binden. Zonder json.dumps
+    crasht deze endpoint pas in productie, op de audit-regel, nadat de
+    voorkeur al is weggeschreven."""
+    import asyncio
+    import json as _json
+
+    from models.schemas import CandidateJobAlertsUpdate
+    from routers import candidate as candidate_router
+
+    calls = _stub_candidate_router_db(
+        monkeypatch,
+        {"id": 42, "job_alert_optin_at": "now", "job_alert_unsubscribed_at": None, "eligible": True},
+    )
+    asyncio.run(
+        candidate_router.update_job_alerts(
+            CandidateJobAlertsUpdate(enabled=True),
+            current_user={"id": 1, "role": "candidate", "email": "k@example.com"},
+        )
+    )
+
+    audit = [args for sql, args in calls if "INSERT INTO audit_log" in sql]
+    assert audit, "elke mutatie schrijft een audit-regel"
+    changes = audit[0][-1]
+    assert isinstance(changes, str), "changes moet json.dumps'd zijn, nooit een ruwe dict"
+    assert _json.loads(changes)["source"] == "portal"
+
+
+def test_job_alerts_switch_reports_eligibility_from_the_shared_selector(monkeypatch):
+    """CR R6: het portaal moet kunnen tonen dat de schakelaar aan staat
+    terwijl de selector deze persoon nooit oppikt."""
+    import asyncio
+
+    from models.schemas import CandidateJobAlertsUpdate
+    from routers import candidate as candidate_router
+
+    _stub_candidate_router_db(
+        monkeypatch,
+        {"id": 42, "job_alert_optin_at": "now", "job_alert_unsubscribed_at": None, "eligible": False},
+    )
+    out = asyncio.run(
+        candidate_router.update_job_alerts(
+            CandidateJobAlertsUpdate(enabled=True),
+            current_user={"id": 1, "role": "candidate", "email": "k@example.com"},
+        )
+    )
+
+    assert out["enabled"] is True
+    assert out["eligible"] is False
+    # Niet nagebouwd maar letterlijk gedeeld met job_alert_job.
+    assert sched.JOB_ALERT_ELIGIBILITY_SQL in sched.JOB_ALERT_CANDIDATE_SQL
+
+
+def test_job_alert_selection_skips_a_candidate_without_an_address():
+    """`AND c.email IS NOT NULL`: een geanonimiseerde of nooit ingevulde
+    kandidaatrij heeft geen adres, en send_template zou er een lege
+    ontvanger van maken."""
+    assert "c.email IS NOT NULL" in sched.JOB_ALERT_CANDIDATE_SQL
+
+
+def test_job_alert_selection_requires_a_consent_that_still_runs():
+    """B4: `consent_scope` zegt alleen dat er ooit toestemming is gegeven,
+    niet dat hij nog geldt. Talentpool-toestemming verloopt na 12 maanden
+    zonder dat er een kolom verandert."""
+    sql = sched.JOB_ALERT_CANDIDATE_SQL
+    assert "c.consent_talentpool_until IS NOT NULL AND c.consent_talentpool_until > NOW()" in sql
+    assert "c.lawful_basis = 'portal_registratie'" in sql
+
+
+def test_dormant_warning_job_passes_the_cap_to_the_query(monkeypatch, stub_email):
+    """Het dagplafond zit in SQL (LIMIT $1) en niet meer in een Python-
+    slice, dus de test kijkt naar wat de job meegeeft."""
+    seen = []
+
+    async def _fake_fetch_all(sql, *args):
+        seen.append((sql, args))
+        if "FROM suppression_list" in sql:
+            return []
+        return []
+
+    async def _fake_fetch_one(sql, *args):
+        return {"due": 0}
+
+    monkeypatch.setattr(sched, "fetch_all", _fake_fetch_all)
+    monkeypatch.setattr(sched, "fetch_one", _fake_fetch_one)
+    monkeypatch.setattr(settings, "dormant_warning_enabled", False)
+
+    _run(sched.dormant_account_warning_job())
+
+    selects = [args for sql, args in seen if "FROM users u" in sql]
+    assert selects and selects[0] == (sched.DORMANT_WARNING_CAP,)
+
+
+def test_one_click_url_uses_the_api_host_not_the_website_host():
+    """De List-Unsubscribe-URL moet naar de API wijzen: een mailclient
+    POST'et hem rechtstreeks, zonder browser en zonder de frontend. Wees
+    hij naar settings.frontend_url, dan kwam die POST op een statische
+    host terecht en deed het afmelden niets."""
+    footer, one_click = sched._job_alert_unsubscribe_links(secrets.token_urlsafe(32))
+    assert one_click.startswith(settings.api_base_url)
+    assert "/api/public/unsubscribe?" in one_click
+    assert footer.startswith(settings.frontend_url)
+
+
+def test_unsubscribe_audit_row_is_skipped_for_an_unknown_token():
+    """`WHERE $1::int IS NOT NULL` op de audit-INSERT: een onbekend token
+    is geen gebeurtenis, en zonder deze regel kan iedereen met een
+    verzonnen token de audit-log volschrijven -- ruis die een aanvaller
+    zelf produceert, in de tabel waar een incident juist uit gelezen moet
+    worden."""
+    import inspect
+
+    from routers import public as public_router
+
+    src = inspect.getsource(public_router.unsubscribe)
+    assert "INSERT INTO audit_log" in src
+    assert "WHERE $1::int IS NOT NULL" in src
+
+
+def test_unsubscribe_token_is_single_use_and_expires():
+    """`used_at IS NULL` maakt hergebruik onmogelijk zonder een aparte
+    check (die zelf weer een tijdsverschil zou zijn), en sinds R3 verloopt
+    een token na 90 dagen."""
+    import inspect
+
+    from routers import public as public_router
+
+    src = inspect.getsource(public_router.unsubscribe)
+    assert "UPDATE job_alert_sends SET used_at = NOW()" in src
+    assert "used_at IS NULL" in src
+    assert "sent_at > NOW() - INTERVAL '90 days'" in src
+
+
+def test_unsubscribe_scope_falls_back_to_the_narrowest():
+    """Een onbekende scope betekent 'alerts', nooit 'all': een afmelding
+    mag nooit méér intrekken dan de betrokkene bedoelde. De
+    scope-validatie zelf staat in models/schemas.py."""
+    from models.schemas import UNSUBSCRIBE_SCOPES
+    from routers.public import _unsubscribe_field
+
+    assert UNSUBSCRIBE_SCOPES == ("alerts", "all")
+    assert _unsubscribe_field("scope", "bogus") is None
+    assert _unsubscribe_field("scope", "all") == "all"
+    # R1: een onbruikbare scope sleept het token er niet mee in.
+    token = secrets.token_urlsafe(32)
+    assert _unsubscribe_field("token", token) == token
+
+
+def test_talentpool_confirm_never_reenrolls_an_unsubscriber():
+    """Een afmelding is een intrekking. Alleen de persoon zelf, ingelogd,
+    kan hem opheffen (PUT /api/v1/candidate/job-alerts); een tweede
+    talentpool-bevestiging met het alert-vinkje aan mag dat niet."""
+    import inspect
+
+    from routers import public as public_router
+
+    src = inspect.getsource(public_router.talentpool_confirm)
+    assert "WHEN $7 AND job_alert_unsubscribed_at IS NULL" in src
+
+
+def test_confirmed_referral_becomes_a_talentpool_consent():
+    """B1: zonder deze omzetting hield een bevestigde referral
+    lawful_basis='toestemming_referral' en viel hij buiten elke
+    retentierij, buiten de matching-poort en buiten de
+    outreach-weigering."""
+    import inspect
+
+    from routers import public as public_router
+
+    src = inspect.getsource(public_router.talentpool_confirm)
+    assert 'is_referral and existing["lawful_basis"] == "toestemming_referral"' in src
+    # De rij waar hij daarna wél in valt.
+    assert "lawful_basis = 'opt_in_talentpool'" in retention.TALENTPOOL_EXPIRED_SQL

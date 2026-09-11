@@ -457,7 +457,32 @@ async def talentpool_confirm(request: Request, data: TalentpoolConfirmRequest):
         "SELECT id, lawful_basis FROM candidates WHERE LOWER(email) = $1", pending["email"],
     )
     if existing:
-        set_lawful_basis = privacy.should_set_talentpool_lawful_basis(existing["lawful_basis"])
+        # Security-audit B1. `should_set_talentpool_lawful_basis()` only
+        # says yes for NULL or an existing 'opt_in_talentpool', so a
+        # referral that confirms here kept `lawful_basis =
+        # 'toestemming_referral'` -- and then fell out of EVERY retention
+        # row at once: core/retention.py's REFERRAL_NO_RESPONSE_SQL
+        # excludes him the moment `referral_confirmed_at` is stamped,
+        # while TALENTPOOL_EXPIRED_SQL only ever looks at
+        # 'opt_in_talentpool'. The same mismatch kept him out of
+        # routers/matches.py's `_consent_gate_sql()` and out of
+        # routers/outreach.py's `_draft_refusal()`: consent confirmed, and
+        # unusable and unbounded at the same time.
+        #
+        # Confirming here IS the talentpool opt-in (this is the same
+        # double-opt-in token flow, and the UPDATE below writes all four
+        # consent_talentpool_* columns regardless), so the basis becomes
+        # the one that describes what actually happened. That is not the
+        # thing H3a guards against: H3a forbids overwriting a DIFFERENT,
+        # stronger basis (portal_registratie, gerechtvaardigd_belang)
+        # behind the person's back. 'toestemming_referral' is the same
+        # kind of basis -- consent -- for the same person, upgraded by
+        # that person's own click, and only for the request this referral
+        # created. From here he falls under exactly one retention row:
+        # talentpool_consent, 12 months plus the 30-day grace.
+        set_lawful_basis = privacy.should_set_talentpool_lawful_basis(existing["lawful_basis"]) or (
+            is_referral and existing["lawful_basis"] == "toestemming_referral"
+        )
         row = await fetch_one(
             """UPDATE candidates
                SET consent_talentpool_at = $1, consent_talentpool_until = $2,
@@ -593,8 +618,35 @@ async def _unsubscribe_body(request: Request) -> dict:
     return parsed if isinstance(parsed, dict) else {}
 
 
+def _unsubscribe_field(field: str, value):
+    """Valideert één veld van de afmeldbody tegen models.schemas.
+    UnsubscribeRequest en levert None als het niet door de beugel kan.
+
+    Per veld en niet als heel model, want de velden zijn onafhankelijk:
+    een scope die niet bestaat zegt niets over het token dat ernaast
+    staat, en mag dat token niet meeslepen (R1). UnsubscribeRequest
+    blijft wel de enige plek die definieert wat geldig is -- dit is een
+    andere manier om dat model te bevragen, geen tweede, met de hand
+    nagebouwde validatie ernaast."""
+    if value is None:
+        return None
+    try:
+        return getattr(UnsubscribeRequest(**{field: value}), field)
+    except (TypeError, ValueError):
+        return None
+
+
 @talentpool_public_router.post("/unsubscribe")
-@limiter.limit("10/minute")
+# 60/minuut en niet de 10 van de andere publieke endpoints (R4): een
+# one-click-POST komt van de mailprovider, niet van de ontvanger, en dus
+# vanaf een handvol gedeelde uitgaande IP-adressen -- bij een digest naar
+# veel ontvangers lopen die binnen dezelfde minuut op. Een provider
+# probeert zo'n POST bovendien niet opnieuw: wie hier een 429 krijgt, is
+# simpelweg niet afgemeld terwijl zijn mailclient zegt van wel. De limiet
+# blijft bestaan tegen bruteforce op het token, maar dat is hier de
+# zwakste van de twee beschermingen: het token is 32 random bytes en
+# eenmalig.
+@limiter.limit("60/minute")
 async def unsubscribe(
     request: Request,
     token: Optional[str] = Query(None),
@@ -607,26 +659,47 @@ async def unsubscribe(
     Body (optioneel, JSON): `{"token": "...", "scope": "alerts"|"all"}` --
     zie models.schemas.UnsubscribeRequest voor de vorm. Beide velden
     mogen ook als queryparameter (`?token=...&scope=...`), voor de
-    one-click-header."""
-    raw_body = await _unsubscribe_body(request)
-    # UnsubscribeRequest is het gedocumenteerde bodycontract en doet de
-    # scope-validatie; een body die er niet aan voldoet (of er niet is)
-    # mag hier nooit een 422 worden -- dat zou het enige antwoord zijn
-    # dat wél iets verklapt -- dus valt hij terug op het lege model en
-    # daarmee op de querystring.
-    try:
-        body = UnsubscribeRequest(**raw_body)
-    except (TypeError, ValueError):
-        body = UnsubscribeRequest()
+    one-click-header.
 
-    raw_token = body.token or token
+    Eén asymmetrie tussen die twee wegen, met opzet: staat het token in de
+    querystring, dan is de scope altijd `alerts`, ook als de body `all`
+    zegt. `all` is onomkeerbaar en alleen bereikbaar via de body, met het
+    token uit het URL-fragment -- zie het commentaar bij die regel."""
+    raw_body = await _unsubscribe_body(request)
+    # UnsubscribeRequest is het gedocumenteerde bodycontract, maar het
+    # wordt hier PER VELD toegepast en niet als één model (R1). Als één
+    # model viel een body als {"token": "...", "scope": "bogus"} in zijn
+    # geheel om: de ValueError van de scope-validator wierp ook het
+    # geldige token weg, waarna het verzoek stilletjes een no-op werd --
+    # dezelfde 200, hetzelfde bericht, maar niemand afgemeld. Een body
+    # die niet aan het contract voldoet mag hier nooit een 422 worden
+    # (dat zou het enige antwoord zijn dat wél iets verklapt), en een
+    # onbruikbare scope mag nooit een bruikbaar token meeslepen.
+    body_token = _unsubscribe_field("token", raw_body.get("token"))
+    body_scope = _unsubscribe_field("scope", raw_body.get("scope"))
+
+    raw_token = body_token or token
 
     # Querystring wint alleen als de body niets zei; een onbekende of
     # ontbrekende scope valt terug op de smalste betekenis ('alerts'),
     # nooit op de ingrijpendste. Een afmelding moet nooit méér intrekken
     # dan de betrokkene bedoelde.
-    raw_scope = body.scope if "scope" in raw_body else (scope or "alerts")
+    raw_scope = body_scope or scope or "alerts"
     if raw_scope not in UNSUBSCRIBE_SCOPES:
+        raw_scope = "alerts"
+
+    # Security-audit B2. `scope='all'` is onomkeerbaar: het trekt de
+    # toestemming in en zet het adres op de suppressielijst, en er bestaat
+    # geen API om zo'n rij weer te verwijderen. Komt het token uit de
+    # QUERYSTRING, dan staat het in elke access-, proxy- en edge-logregel
+    # die het verzoek passeerde, en zou één gevonden URL genoeg zijn om
+    # iemand daar permanent op te zetten. Die weg is er voor precies één
+    # aanroeper -- de RFC 8058 one-click-POST van een mailclient, die per
+    # definitie alleen 'alerts' bedoelt -- dus is de scope daar hard
+    # 'alerts', wat de body ook zegt. `scope='all'` blijft alleen
+    # bereikbaar via de body met het token uit het URL-fragment, en dat
+    # fragment bereikt geen enkele log (website/unsubscribe.js).
+    if body_token is None and token is not None:
         raw_scope = "alerts"
 
     token_hash = hash_token(raw_token) if raw_token else None
@@ -641,9 +714,19 @@ async def unsubscribe(
     # NULL) -- zonder cast is dat een AmbiguousParameterError, en dat zou
     # een 500 zijn: het enige antwoord dat van het generieke antwoord
     # afwijkt en dus verklapt dat er iets bijzonders aan de hand is.
+    #
+    # `sent_at > NOW() - INTERVAL '90 days'` (R3): een afmeldtoken hoort
+    # bij één verzonden bericht en had tot nu toe geen houdbaarheid, dus
+    # een token uit een mail van twee jaar geleden (of uit een access log
+    # van toen) werkte vandaag nog. 90 dagen is ruim voor het doel -- een
+    # mens die deze mail terugzoekt -- en gelijk aan de bewaartermijn van
+    # email_log (migrations/040). Verlopen loopt langs precies dezelfde
+    # weg als een onbekend token: candidate_id blijft NULL, zelfde
+    # antwoord, zelfde werk.
     consumed = await fetch_one(
         """UPDATE job_alert_sends SET used_at = NOW()
            WHERE token_hash = $1::text AND used_at IS NULL
+             AND sent_at > NOW() - INTERVAL '90 days'
            RETURNING candidate_id""",
         token_hash,
     )
@@ -674,13 +757,25 @@ async def unsubscribe(
     # ingetrokken), hier zonder beheerder omdat de betrokkene het zelf
     # vraagt. `created_by` blijft NULL: er is geen actor, de persoon zelf
     # deed dit.
+    #
+    # Security-audit B9: op id ÉN op adres, net als add_suppression().
+    # Die twee liepen uit elkaar -- hier alleen `id = $1`, daar
+    # `LOWER(email) = LOWER($1)` -- terwijl het effect hetzelfde hoort te
+    # zijn: dit is dezelfde intrekking, alleen door de betrokkene zelf in
+    # plaats van door een beheerder. Eén adres kan meer dan één
+    # candidates-rij hebben (een gesourcete rij en een portaalrij die
+    # WS-C.16's FK nooit heeft samengevoegd), en het adres komt straks op
+    # de suppressielijst te staan: dan moet elke rij met dat adres de
+    # intrekking dragen, anders blijft er een rij achter die voor elke
+    # selector nog "toestemming intact" zegt.
     await execute(
         """UPDATE candidates
            SET consent_withdrawn_at = CASE WHEN $2::boolean THEN COALESCE(consent_withdrawn_at, NOW())
                                            ELSE consent_withdrawn_at END,
                updated_at = NOW()
-           WHERE id = $1::int""",
-        candidate_id, withdraw_all,
+           WHERE id = $1::int
+              OR ($2::boolean AND $3::text IS NOT NULL AND LOWER(email) = LOWER($3::text))""",
+        candidate_id, withdraw_all, email,
     )
     await execute(
         """INSERT INTO suppression_list (email_hash, email_domain, reason, created_by)
@@ -691,10 +786,20 @@ async def unsubscribe(
         privacy.email_domain(email) if email else None,
         withdraw_all,
     )
+    # Zelfde afwijking, andere tabel (B9, tweede helft). add_suppression()
+    # trekt drafts in op `LOWER(target_email)`, dit endpoint deed het op
+    # `target_id` -- en die twee vinden niet dezelfde rijen. Een
+    # outreach-draft die voor deze persoon is geschreven maar aan een
+    # andere candidates-rij met hetzelfde adres hangt (of waarvan
+    # target_id nooit is gezet) bleef hier op 'draft' staan en had morgen
+    # alsnog door een mens verstuurd kunnen worden, aan iemand die zojuist
+    # "geen contact meer" had gekozen. Beide criteria dus, zoals daar.
     await execute(
         """UPDATE outreach_drafts SET status = 'rejected', updated_at = NOW()
-           WHERE target_type = 'candidate' AND target_id = $1::int AND status = 'draft' AND $2::boolean""",
-        candidate_id, withdraw_all,
+           WHERE target_type = 'candidate' AND status = 'draft' AND $2::boolean
+             AND (target_id = $1::int
+                  OR ($3::text IS NOT NULL AND LOWER(target_email) = LOWER($3::text)))""",
+        candidate_id, withdraw_all, email,
     )
 
     # Audit-regel, alleen als er echt iets is gebeurd (een onbekend token

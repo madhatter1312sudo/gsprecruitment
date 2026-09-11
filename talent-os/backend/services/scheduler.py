@@ -527,7 +527,7 @@ async def talentpool_optin_requests_cleanup_job() -> dict:
 
 # ── Slapend account: waarschuwing vooraf (WS3b) ─────────────────────────
 #
-# core/retention.py's PORTAL_ACCOUNT_INACTIVE_SQL zet een kandidaatccount
+# core/retention.py's PORTAL_ACCOUNT_INACTIVE_SQL zet een kandidaataccount
 # pas op de maandelijkse beoordelingslijst als het 18 maanden ongebruikt
 # is EN `users.dormant_warning_sent_at` minstens 30 dagen oud is. Die
 # kolom bestaat sinds migrations/039, maar tot dit spoor schreef niets
@@ -539,42 +539,12 @@ async def talentpool_optin_requests_cleanup_job() -> dict:
 # de beurt is, verstuur, stempel de kolom pas als de verzending lukte, en
 # nooit twee keer binnen dezelfde cyclus.
 #
-# Het venster is 17 tot 18 maanden sinds `last_login_at`. Dat is precies
-# de 30 dagen voorsprong die VERWERKINGSREGISTER §1.4 en privacy.html
-# publiek beloven: wie op 17 maanden wordt gewaarschuwd, heeft op 18
-# maanden een waarschuwing van 30 dagen oud, wat PORTAL_ACCOUNT_INACTIVE_
-# SQL ook precies eist.
-#
-# Restpunt voor de eigenaar, niet stilzwijgend opgelost: een account dat
-# nu al langer dan 18 maanden ongebruikt is, valt boven dit venster en
-# krijgt dus nooit een waarschuwing -- en komt daardoor ook nooit op de
-# beoordelingslijst. Dat is veilig (niemand wordt ongewaarschuwd gewist)
-# maar betekent dat de 18-maandentermijn voor die bestaande achterstand
-# vandaag niet wordt gehaald. Het venster is zo opgedragen; verruimen tot
-# "minstens 17 maanden" (zonder bovengrens) zou die achterstand in één
-# ronde meenemen, met dezelfde 30 dagen notice, en is een besluit voor de
-# eigenaar, niet voor deze job.
-#
-# De guards zijn letterlijk die van PORTAL_ACCOUNT_INACTIVE_SQL en worden
-# daar geïmporteerd, niet overgeschreven: waarschuwen we iemand die die
-# selector later toch beschermt, dan hebben we een dreigende mail
-# gestuurd over een verwijdering die nooit zou komen.
-
-DORMANT_WARNING_SQL = f"""
-    SELECT u.id, u.email, u.full_name, u.last_login_at
-      FROM users u
-     WHERE u.role = 'candidate' AND u.deleted_at IS NULL AND u.email IS NOT NULL
-       AND u.last_login_at IS NOT NULL
-       AND u.last_login_at <= (NOW() - INTERVAL '17 months')
-       AND u.last_login_at > (NOW() - INTERVAL '18 months')
-       AND (u.dormant_warning_sent_at IS NULL OR u.dormant_warning_sent_at < u.last_login_at)
-       AND NOT EXISTS (
-           SELECT 1 FROM candidate_profiles cpf
-           JOIN candidates c ON c.id = cpf.candidate_id
-           WHERE cpf.user_id = u.id
-             AND NOT (TRUE{retention._CANDIDATE_ENGAGEMENT_SIGNALS_SQL})
-       )
-"""
+# De selector zelf staat sinds de reviewronde in core/retention.py, naast
+# PORTAL_ACCOUNT_INACTIVE_SQL (R7): het zijn twee helften van één belofte
+# en ze hoorden niet in twee bestanden te staan, met deze module die daar
+# een private constante vandaan haalde om zijn eigen kopie te bouwen.
+# Zie daar ook waarom het venster geen bovengrens meer heeft (B3) en
+# waarom twee keer waarschuwen desondanks niet kan.
 
 # Tussen de waarschuwing en de beoordelingslijst zitten 30 dagen
 # (PORTAL_ACCOUNT_INACTIVE_SQL: `dormant_warning_sent_at < NOW() - 30
@@ -582,15 +552,32 @@ DORMANT_WARNING_SQL = f"""
 # los getal in de templatetekst.
 DORMANT_WARNING_GRACE_DAYS = 30
 DORMANT_WARNING_CAP = 200
-_DORMANT_WARNING_LINK = "https://gsprecruitment.nl/candidate/login.html"
+
+# Het kandidaatportaal is één pagina met een inlogmodal
+# (website/candidate/index.html plus website/candidate/script.js); er is
+# geen login.html, en daar wees deze link tot de reviewronde wel naar
+# (B6). Een waarschuwingsmail die zegt "log in om je account te houden"
+# en dan naar een 404 wijst, is erger dan geen mail. Via settings.
+# frontend_url en niet als letterlijke host, zoals elke andere link die
+# deze module verstuurt.
+_DORMANT_WARNING_PATH = "/candidate/"
+
+
+def _dormant_warning_link() -> str:
+    return f"{settings.frontend_url}{_DORMANT_WARNING_PATH}"
 
 
 async def dormant_account_warning_job() -> dict:
-    """Dagelijks (04:45). Waarschuwt kandidaatccounts die 17 tot 18
+    """Dagelijks (04:45). Waarschuwt kandidaataccounts die minstens 17
     maanden niet zijn gebruikt dat ze na 18 maanden op de maandelijkse
     verwijderlijst komen, en stempelt `users.dormant_warning_sent_at`
     zodat dezelfde persoon per inactiviteitscyclus één keer wordt
     gewaarschuwd.
+
+    `accounts_due` is het aantal dat vandaag aan de beurt is, geteld vóór
+    het dagplafond DORMANT_WARNING_CAP (CR L2) -- anders zou een
+    droogloop bij een achterstand van duizenden accounts netjes "200"
+    melden en precies het getal verbergen waar de eigenaar naar kijkt.
 
     Droogloop is de default: met DORMANT_WARNING_ENABLED uit
     (core/config.py) selecteert en telt deze job wel, maar verstuurt hij
@@ -601,24 +588,38 @@ async def dormant_account_warning_job() -> dict:
     gekregen."""
     from services.email_service import email_service
 
-    rows = await fetch_all(DORMANT_WARNING_SQL)
-    rows = rows[:DORMANT_WARNING_CAP]
+    due_row = await fetch_one(retention.DORMANT_WARNING_COUNT_SQL)
+    accounts_due = due_row["due"] if due_row else 0
+    rows = await fetch_all(retention.DORMANT_WARNING_SQL, DORMANT_WARNING_CAP)
+
+    # Security-audit B10: dezelfde blokkeerlijstcontrole als job_alert_job
+    # (_job_alert_suppressed_ids), en om dezelfde reden. Wie STOP heeft
+    # gestuurd, krijgt geen bericht meer, op geen enkele grondslag -- ook
+    # geen waarschuwing over zijn eigen account. De prijs is dat zo'n
+    # account ongewaarschuwd blijft en dus ook nooit op de
+    # beoordelingslijst komt; dat is de veilige kant (niemand wordt
+    # ongewaarschuwd gewist) en het is dezelfde afweging die
+    # PORTAL_ACCOUNT_INACTIVE_SQL zelf al maakt.
+    suppressed_ids = await _job_alert_suppressed_ids(rows)
+    rows = [r for r in rows if r["id"] not in suppressed_ids]
 
     if not settings.dormant_warning_enabled:
         logger.info(
-            "dormant_account_warning_job: DORMANT_WARNING_ENABLED=false, dry run -- accounts_due=%s, nothing sent",
-            len(rows),
+            "dormant_account_warning_job: DORMANT_WARNING_ENABLED=false, dry run -- "
+            "accounts_due=%s, selected=%s, nothing sent",
+            accounts_due, len(rows),
         )
-        return {"status": "dry_run", "accounts_due": len(rows), "sent": 0}
+        return {"status": "dry_run", "accounts_due": accounts_due, "selected": len(rows), "sent": 0}
 
     deadline = (datetime.now(timezone.utc) + timedelta(days=DORMANT_WARNING_GRACE_DAYS)).date().isoformat()
+    link = _dormant_warning_link()
     sent = 0
     for row in rows:
         ok = await email_service.send_template(
             "dormant_warning", row["email"],
             {
                 "full_name": row.get("full_name") or "",
-                "link": _DORMANT_WARNING_LINK,
+                "link": link,
                 "deadline": deadline,
             },
         )
@@ -633,8 +634,10 @@ async def dormant_account_warning_job() -> dict:
             # op core.privacy.email_hash().
             logger.warning("dormant_account_warning_job: failed to send warning to user id=%s", row["id"])
 
-    logger.info("dormant_account_warning_job: accounts_due=%s sent=%s", len(rows), sent)
-    return {"status": "success", "accounts_due": len(rows), "sent": sent}
+    logger.info(
+        "dormant_account_warning_job: accounts_due=%s selected=%s sent=%s", accounts_due, len(rows), sent,
+    )
+    return {"status": "success", "accounts_due": accounts_due, "selected": len(rows), "sent": sent}
 
 
 # ── Vacature-alerts (WS3c) ──────────────────────────────────────────────
@@ -669,18 +672,45 @@ async def dormant_account_warning_job() -> dict:
 #   deleted_at IS NULL                      -- niet (zacht) verwijderd
 #   consent_scope='matching_and_contact'    -- toestemming die contact dekt
 #     OF lawful_basis='portal_registratie'  -- eigen portaalaccount (art. 13)
+#   toestemming nog geldig                  -- consent_talentpool_until in de
+#                                              toekomst, tenzij portaalaccount
 #   niet op de suppressielijst              -- STOP ontvangen, in Python
 #                                              gehasht via core/privacy.py
+#
+# Die voorlaatste regel is security-audit B4. `consent_scope` en
+# `consent_withdrawn_at` zeggen alleen iets over toestemming die ooit is
+# gegeven en niet actief is ingetrokken -- niet of hij nog geldt.
+# Talentpool-toestemming loopt na 12 maanden af (migrations/030,
+# core/retention.py TALENTPOOL_EXPIRED_SQL) en verloopt stil: geen kolom
+# verandert, `consent_scope` blijft staan. Zonder de clausule hieronder
+# bleef deze job dus dagelijks mailen naar iemand wiens toestemming al
+# een jaar verlopen was en die daarna zelfs op de wislijst stond. Wie
+# `lawful_basis = 'portal_registratie'` heeft, valt er buiten om dezelfde
+# reden als hierboven: zijn grondslag is zijn eigen account (art. 13),
+# niet die toestemming, en die kent geen einddatum.
 
-JOB_ALERT_CANDIDATE_SQL = """
+# Alles behalve de twee alert-kolommen zelf: "zou deze kandidaat een
+# alert kunnen krijgen als hij zich aanmeldde". Apart benoemd omdat
+# routers/candidate.py's portaalschakelaar hem ook leest (CR R6): die gaf
+# `enabled: true` terug aan iemand die deze selector nooit oppikt (een
+# gesourcete kandidaat zonder `consent_scope`, bijvoorbeeld), en het
+# portaal kon dat verschil niet zien, dus stond er "aan" bij iemand die
+# nooit iets zou ontvangen. Tabelalias `c`, in beide gebruikers.
+JOB_ALERT_ELIGIBILITY_SQL = """
+       c.consent_withdrawn_at IS NULL
+       AND c.deleted_at IS NULL
+       AND c.email IS NOT NULL
+       AND (c.consent_scope = 'matching_and_contact' OR c.lawful_basis = 'portal_registratie')
+       AND (c.lawful_basis = 'portal_registratie'
+            OR (c.consent_talentpool_until IS NOT NULL AND c.consent_talentpool_until > NOW()))
+"""
+
+JOB_ALERT_CANDIDATE_SQL = f"""
     SELECT c.id, c.email, c.full_name, c.job_alert_last_sent_at
       FROM candidates c
      WHERE c.job_alert_optin_at IS NOT NULL
        AND c.job_alert_unsubscribed_at IS NULL
-       AND c.consent_withdrawn_at IS NULL
-       AND c.deleted_at IS NULL
-       AND c.email IS NOT NULL
-       AND (c.consent_scope = 'matching_and_contact' OR c.lawful_basis = 'portal_registratie')
+       AND {JOB_ALERT_ELIGIBILITY_SQL}
      ORDER BY c.job_alert_last_sent_at ASC NULLS FIRST, c.id ASC
      LIMIT $1
 """
@@ -749,15 +779,25 @@ async def _job_alert_suppressed_ids(rows: list) -> set:
     lower, sha256). Een tweede, met de hand nagebouwde sha256-expressie
     in SQL zou stilletjes uit de pas kunnen lopen met die definitie, en
     de fout zou eruitzien als "deze persoon staat er niet op" -- precies
-    de kant op die een mail stuurt naar iemand die STOP heeft gezegd."""
-    by_hash = {privacy.email_hash(r["email"]): r["id"] for r in rows if r["email"]}
-    if not by_hash:
+    de kant op die een mail stuurt naar iemand die STOP heeft gezegd.
+
+    Security-audit B8: de map gaat van id naar hash en niet andersom.
+    Als `{hash: id}` verloor hij stilletjes rijen zodra twee kandidaten
+    hetzelfde adres droegen (een gesourcete rij en een portaalrij die
+    WS-C.16's FK nooit heeft samengevoegd -- deze codebase heeft daar een
+    hele migratie aan besteed, dus het is geen theoretisch geval): de
+    tweede overschreef de eerste, en de overschreven rij kreeg zijn mail
+    gewoon. Precies dezelfde fout die dit hele hulpje moet voorkomen,
+    alleen in Python in plaats van in SQL."""
+    by_id = {r["id"]: privacy.email_hash(r["email"]) for r in rows if r["email"]}
+    if not by_id:
         return set()
     hits = await fetch_all(
         "SELECT email_hash FROM suppression_list WHERE email_hash = ANY($1::text[])",
-        list(by_hash.keys()),
+        list(set(by_id.values())),
     )
-    return {by_hash[h["email_hash"]] for h in hits if h["email_hash"] in by_hash}
+    suppressed_hashes = {h["email_hash"] for h in hits}
+    return {cid for cid, h in by_id.items() if h in suppressed_hashes}
 
 
 async def job_alert_job() -> dict:
@@ -804,6 +844,34 @@ async def job_alert_job() -> dict:
         token = secrets.token_urlsafe(32)
         footer_link, one_click_url = _job_alert_unsubscribe_links(token)
 
+        # Security-audit B7: eerst de tokenrij, dan pas verzenden. De
+        # omgekeerde volgorde leek voorzichtiger ("geen geldig token voor
+        # een mail die nooit aankwam") maar faalt de verkeerde kant op:
+        # deze twee statements zitten niet in één transactie met de
+        # verzending, dus als de INSERT struikelde nádat de mail de deur
+        # uit was, had de ontvanger een afmeldlink die niets doet -- en
+        # het endpoint antwoordt met opzet altijd hetzelfde, dus hij ziet
+        # precies niets van dat verschil. Bovendien bleef
+        # `job_alert_last_sent_at` dan ongestempeld en kreeg hij morgen
+        # dezelfde digest opnieuw.
+        #
+        # Andersom is elke uitkomst hanteerbaar: mislukt de INSERT, dan
+        # gaat er geen mail uit (we slaan deze kandidaat over); mislukt de
+        # verzending, dan halen we de rij weer weg en is er geen token
+        # zonder bericht. Blijft één restgeval: crasht het proces tussen
+        # de verzending en de DELETE, dan staat er een tokenrij voor een
+        # mail die niet aankwam. Dat token is dan hoogstens ongebruikt --
+        # niemand heeft hem ooit gezien -- en verloopt na 90 dagen
+        # (routers/public.py).
+        send_row = await fetch_one(
+            "INSERT INTO job_alert_sends (candidate_id, job_ids, token_hash) "
+            "VALUES ($1, $2::int[], $3) RETURNING id",
+            row["id"], [j["id"] for j in jobs], hash_token(token),
+        )
+        if not send_row:
+            logger.warning("job_alert_job: could not record the unsubscribe token for candidate id=%s", row["id"])
+            continue
+
         ok = await email_service.send_template(
             "job_alert", row["email"],
             {
@@ -828,18 +896,15 @@ async def job_alert_job() -> dict:
             },
         )
         if not ok:
+            # De rij weer weg: geen afmeldtoken voor een bericht dat niet
+            # is aangekomen.
+            await execute("DELETE FROM job_alert_sends WHERE id = $1", send_row["id"])
             logger.warning("job_alert_job: failed to send digest to candidate id=%s", row["id"])
             continue
 
-        # Pas ná een geslaagde verzending: de tokenrij en de stempel. In
-        # de andere volgorde zou een mislukte verzending een geldig
-        # afmeldtoken achterlaten voor een mail die nooit is aangekomen,
-        # en zou job_alert_last_sent_at het venster van de volgende run
+        # Pas ná een geslaagde verzending de stempel: anders zou
+        # job_alert_last_sent_at het venster van de volgende run
         # dichtschuiven over matches die deze persoon nooit heeft gezien.
-        await execute(
-            "INSERT INTO job_alert_sends (candidate_id, job_ids, token_hash) VALUES ($1, $2::int[], $3)",
-            row["id"], [j["id"] for j in jobs], hash_token(token),
-        )
         await execute(
             "UPDATE candidates SET job_alert_last_sent_at = NOW() WHERE id = $1", row["id"],
         )

@@ -505,11 +505,17 @@
         "type": "object"
       },
       "AdminReferralCreate": {
-        "description": "Admin: POST /api/v1/admin/candidates/referral.\n\nLegt een door een mens aangedragen referral vast (SOP \u00a71.3,\n`lawful_basis = 'toestemming_referral'`) en stuurt de betrokkene \u00e9\u00e9n\nbevestigingsmail met het Art. 14-blok in de referral-variant. Er\ngebeurt verder niets met de gegevens tot de persoon zelf bevestigt.\n\n`referred_by` is intern: de naam of relatie van degene die aandroeg,\nzoals het Art. 14-blok die noemt (\"via een aanbeveling van ...\"). Het\nstaat daarmee w\u00e9l in de mail aan de betrokkene -- dat is de bedoeling\nvan art. 14 (de bron noemen) -- maar nergens in Telegram of een\nlogregel.\n\n`note` is vrije tekst van de beheerder en gaat nooit ongefilterd het\naudit_log in: routers/admin.py haalt hem eerst door\nprivacy.redact_emails(), net als `evidence` hierboven.",
+        "description": "Admin: POST /api/v1/admin/candidates/referral.\n\nLegt een door een mens aangedragen referral vast (SOP \u00a71.3,\n`lawful_basis = 'toestemming_referral'`) en stuurt de betrokkene \u00e9\u00e9n\nbevestigingsmail met het Art. 14-blok in de referral-variant. Er\ngebeurt verder niets met de gegevens tot de persoon zelf bevestigt.\n\n`referred_by` is intern: de naam of relatie van degene die aandroeg,\nzoals het Art. 14-blok die noemt (\"via een aanbeveling van ...\"). Het\nstaat daarmee w\u00e9l in de mail aan de betrokkene -- dat is de bedoeling\nvan art. 14 (de bron noemen) -- maar nergens in Telegram of een\nlogregel.\n\n`evidence` is verplicht, net als bij AdminTalentpoolConsentUpdate en\nAdminSpecPresentationConsentUpdate hierboven, en om een sterkere\nreden dan daar (CR R8). Dit endpoint legt toestemming vast die een\nDERDE namens de betrokkene claimt -- de referrer zegt dat hij die\nheeft, de betrokkene zelf heeft op dit moment nog niets gezegd. Art.\n7 lid 1 legt de bewijslast voor die toestemming bij ons, en het was\nvan de drie toestemmingsendpoints juist het enige waar een beheerder\nniets hoefde op te schrijven. Kort volstaat (\"mondeling bevestigd\ndoor X op 3 september, hij heeft haar gevraagd\"), zolang er \u00edets\nstaat.\n\n`evidence` en `note` zijn allebei vrije tekst van de beheerder en\ngaan nooit ongefilterd het audit_log in: routers/admin.py haalt ze\neerst door privacy.redact_emails().",
         "properties": {
           "email": {
             "format": "email",
             "title": "Email",
+            "type": "string"
+          },
+          "evidence": {
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Evidence",
             "type": "string"
           },
           "full_name": {
@@ -540,7 +546,8 @@
         "required": [
           "full_name",
           "email",
-          "referred_by"
+          "referred_by",
+          "evidence"
         ],
         "title": "AdminReferralCreate",
         "type": "object"
@@ -7851,7 +7858,7 @@
     },
     "/api/public/unsubscribe": {
       "post": {
-        "description": "Meld af voor vacature-alerts (`scope='alerts'`) of voor elk contact\n(`scope='all'`). Zie het blok hierboven voor de twee aanroepers en\nvoor waarom het antwoord altijd identiek is.\n\nBody (optioneel, JSON): `{\"token\": \"...\", \"scope\": \"alerts\"|\"all\"}` --\nzie models.schemas.UnsubscribeRequest voor de vorm. Beide velden\nmogen ook als queryparameter (`?token=...&scope=...`), voor de\none-click-header.",
+        "description": "Meld af voor vacature-alerts (`scope='alerts'`) of voor elk contact\n(`scope='all'`). Zie het blok hierboven voor de twee aanroepers en\nvoor waarom het antwoord altijd identiek is.\n\nBody (optioneel, JSON): `{\"token\": \"...\", \"scope\": \"alerts\"|\"all\"}` --\nzie models.schemas.UnsubscribeRequest voor de vorm. Beide velden\nmogen ook als queryparameter (`?token=...&scope=...`), voor de\none-click-header.\n\nE\u00e9n asymmetrie tussen die twee wegen, met opzet: staat het token in de\nquerystring, dan is de scope altijd `alerts`, ook als de body `all`\nzegt. `all` is onomkeerbaar en alleen bereikbaar via de body, met het\ntoken uit het URL-fragment -- zie het commentaar bij die regel.",
         "operationId": "unsubscribe_api_public_unsubscribe_post",
         "parameters": [
           {

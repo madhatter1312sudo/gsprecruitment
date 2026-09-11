@@ -368,6 +368,69 @@ PORTAL_ACCOUNT_INACTIVE_SQL = f"""
       )
 """
 
+# ── Waarschuwing vooraf bij een slapend account (WS3b) ───────────────────
+#
+# De andere helft van PORTAL_ACCOUNT_INACTIVE_SQL hierboven, en daarom
+# staat hij hier ernaast en niet in services/scheduler.py (CR R7): die
+# module haalde hier een private constante (_CANDIDATE_ENGAGEMENT_
+# SIGNALS_SQL) vandaan om er zijn eigen selector mee te bouwen, waarmee
+# de twee helften van dezelfde belofte in twee bestanden stonden en
+# alleen de een een reden had om mee te veranderen.
+#
+# `dormant_warning_sent_at` gates die selector: een account komt pas op
+# de maandelijkse beoordelingslijst als de waarschuwing hieronder
+# daadwerkelijk is verstuurd en 30 dagen oud is. services/scheduler.py's
+# dormant_account_warning_job is wat die kolom stempelt.
+#
+# Ondergrens 17 maanden, GEEN bovengrens (besluit van de eigenaar, B3).
+# De eerste versie had `AND last_login_at > NOW() - INTERVAL '18 months'`
+# erbij, zodat het venster precies één maand breed was. Dat leek netjes
+# maar liet iedereen die op de dag van invoering al langer dan 18 maanden
+# sliep permanent boven het venster vallen: nooit gewaarschuwd, dus nooit
+# beoordeeld, dus de publiek beloofde 18 maanden werd voor precies die
+# achterstand nooit gehaald. Zonder bovengrens loopt die achterstand in
+# één ronde mee, met dezelfde 30 dagen notice als iedereen.
+#
+# Twee keer waarschuwen kan daardoor niet: `dormant_warning_sent_at IS
+# NULL OR < last_login_at` betekent "nog nooit gewaarschuwd in deze
+# inactiviteitscyclus" -- logt iemand in, dan schuift last_login_at
+# vooruit en begint een nieuwe cyclus; doet hij niets, dan blijft de
+# stempel nieuwer dan zijn laatste login en valt hij hier morgen niet
+# opnieuw uit. De LIMIT is dus een dagplafond op een aflopende
+# achterstand, geen filter dat iemand structureel overslaat.
+_DORMANT_WARNING_WHERE_SQL = f"""
+       u.role = 'candidate' AND u.deleted_at IS NULL AND u.email IS NOT NULL
+       AND u.last_login_at IS NOT NULL
+       AND u.last_login_at <= (NOW() - INTERVAL '17 months')
+       AND (u.dormant_warning_sent_at IS NULL OR u.dormant_warning_sent_at < u.last_login_at)
+       AND NOT EXISTS (
+           SELECT 1 FROM candidate_profiles cpf
+           JOIN candidates c ON c.id = cpf.candidate_id
+           WHERE cpf.user_id = u.id
+             AND NOT (TRUE{_CANDIDATE_ENGAGEMENT_SIGNALS_SQL})
+       )
+"""
+
+# $1 = dagplafond. Oudste eerst: wie het langst slaapt, is het langst
+# over tijd en gaat voor.
+DORMANT_WARNING_SQL = f"""
+    SELECT u.id, u.email, u.full_name, u.last_login_at
+      FROM users u
+     WHERE {_DORMANT_WARNING_WHERE_SQL}
+     ORDER BY u.last_login_at ASC
+     LIMIT $1
+"""
+
+# Hetzelfde WHERE, zonder plafond: het aantal dat vandaag aan de beurt is.
+# Zonder dit telde een droogloop alleen wat na het knippen overbleef en
+# rapporteerde een achterstand van 5000 accounts als "200" -- precies het
+# getal dat niets zegt (CR L2).
+DORMANT_WARNING_COUNT_SQL = f"""
+    SELECT COUNT(*) AS due
+      FROM users u
+     WHERE {_DORMANT_WARNING_WHERE_SQL}
+"""
+
 
 # ── Apollo bulk-pool cleanup (VERWERKINGSREGISTER.md §2.6, §5.7) ─────────
 #

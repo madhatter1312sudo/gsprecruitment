@@ -447,19 +447,35 @@ _REFERRAL_ART14_EN = (
     '(Autoriteit Persoonsgegevens, autoriteitpersoonsgegevens.nl).'
 )
 
+# Security-audit B11. Hier stond "Doet u niets, dan verwijderen wij uw
+# gegevens weer" / "we will delete your details again", en dat is niet wat
+# er gebeurt. Wat er gebeurt: de link verloopt na $ttl_hours uur, de
+# candidates-rij blijft daarna staan, en na 3 maanden vanaf `date_found`
+# komt hij op de maandelijkse beoordelingslijst die een beheerder
+# afhandelt (core/retention.py REFERRAL_NO_RESPONSE_SQL). Dat is geen
+# directe verwijdering en het is geen automatische verwijdering. De tekst
+# zegt nu precies dat, met dezelfde termijn die het Art. 14-blok er twee
+# alinea's boven al noemt -- de vorige formulering sprak dat blok zelfs
+# tegen.
 _REFERRAL_TEXT = {
     "nl": Template(
         "Beste $full_name,\n\n"
         "$art14\n\n"
         "Wij doen niets met uw gegevens tot u dit zelf bevestigt. Bevestig via onderstaande link:\n$link\n\n"
-        "Deze link is $ttl_hours uur geldig. Doet u niets, dan verwijderen wij uw gegevens weer.\n\n"
+        "Deze link is $ttl_hours uur geldig. Doet u niets, dan benaderen wij u niet verder en bewaren wij "
+        "uw gegevens hooguit 3 maanden, waarna zij op onze maandelijkse verwijderlijst komen: een beheerder "
+        "beoordeelt die lijst en verwijdert de gegevens. Wilt u niet zolang wachten, antwoord dan met "
+        '"STOP" of vraag ons om verwijdering; dat handelen wij binnen 24 uur af.\n\n'
         "Met vriendelijke groet,\nGSP Recruitment\ninfo@gsprecruitment.nl\n"
     ),
     "en": Template(
         "Dear $full_name,\n\n"
         "$art14\n\n"
         "We do nothing with your details until you confirm this yourself. Please confirm via the link below:\n$link\n\n"
-        "This link is valid for $ttl_hours hours. If you do nothing, we will delete your details again.\n\n"
+        "This link is valid for $ttl_hours hours. If you do nothing, we will not approach you further and we "
+        "keep your details for at most 3 months, after which they go onto our monthly deletion list: an "
+        'administrator reviews that list and deletes the data. If you would rather not wait, reply "STOP" or '
+        "ask us to delete your details; we handle that within 24 hours.\n\n"
         "Kind regards,\nGSP Recruitment\ninfo@gsprecruitment.nl\n"
     ),
 }
@@ -474,14 +490,20 @@ _REFERRAL_HTML_BODY = {
         "<p>$art14</p>"
         "<p>Wij doen niets met uw gegevens tot u dit zelf bevestigt. Bevestig via onderstaande link:</p>"
         "$link_html"
-        "<p>Deze link is $ttl_hours uur geldig. Doet u niets, dan verwijderen wij uw gegevens weer.</p>"
+        "<p>Deze link is $ttl_hours uur geldig. Doet u niets, dan benaderen wij u niet verder en bewaren wij "
+        "uw gegevens hooguit 3 maanden, waarna zij op onze maandelijkse verwijderlijst komen: een beheerder "
+        "beoordeelt die lijst en verwijdert de gegevens. Wilt u niet zolang wachten, antwoord dan met "
+        "&quot;STOP&quot; of vraag ons om verwijdering; dat handelen wij binnen 24 uur af.</p>"
     ),
     "en": Template(
         "<p>Dear $full_name,</p>"
         "<p>$art14</p>"
         "<p>We do nothing with your details until you confirm this yourself. Please confirm via the link below:</p>"
         "$link_html"
-        "<p>This link is valid for $ttl_hours hours. If you do nothing, we will delete your details again.</p>"
+        "<p>This link is valid for $ttl_hours hours. If you do nothing, we will not approach you further and we "
+        "keep your details for at most 3 months, after which they go onto our monthly deletion list: an "
+        "administrator reviews that list and deletes the data. If you would rather not wait, reply "
+        "&quot;STOP&quot; or ask us to delete your details; we handle that within 24 hours.</p>"
     ),
 }
 _REFERRAL_ART14_TEMPLATES = {"nl": Template(_REFERRAL_ART14_NL), "en": Template(_REFERRAL_ART14_EN)}
@@ -526,10 +548,18 @@ def _render_referral_confirm(ctx: dict, lang: str):
 # (routers/auth.py login/google, routers/mfa.py), waarmee het account uit
 # beide selectors valt.
 
+# Security-audit B12: hier stond vier keer "18 maanden", terwijl
+# services/scheduler.py's dormant_account_warning_job vanaf 17 maanden
+# waarschuwt -- en sinds B3 zonder bovengrens, dus de ontvanger kan er
+# net zo goed 30 maanden over hebben gedaan. Elk getal in deze tekst is
+# daarmee voor iemand onwaar. Wat wél voor iedereen klopt is de datum die
+# de job meegeeft (verzenddatum + 30 dagen), en dat is precies de datum
+# waar de ontvanger iets mee moet. De 18 maanden zelf staan in de
+# bewaartermijntabel op privacy.html, waar ze thuishoren.
 _DORMANT_TEXT = {
     "nl": Template(
         "Beste $full_name,\n\n"
-        "Je hebt je GSP Recruitment-account al 18 maanden niet gebruikt.\n\n"
+        "Je hebt je GSP Recruitment-account lange tijd niet gebruikt.\n\n"
         "Log in vóór $deadline om je account actief te houden:\n$link\n\n"
         "Doe je dat niet, dan komt je account daarna op onze maandelijkse verwijderlijst: een beheerder "
         "beoordeelt die lijst en verwijdert je account en profiel. Inloggen is genoeg, je hoeft verder niets te doen.\n\n"
@@ -537,7 +567,7 @@ _DORMANT_TEXT = {
     ),
     "en": Template(
         "Dear $full_name,\n\n"
-        "You have not used your GSP Recruitment account for 18 months.\n\n"
+        "You have not used your GSP Recruitment account for a long time.\n\n"
         "Log in before $deadline to keep your account active:\n$link\n\n"
         "If you do not, your account goes onto our monthly deletion list after that date: an administrator "
         "reviews that list and deletes your account and profile. Logging in is enough, there is nothing else to do.\n\n"
@@ -545,14 +575,17 @@ _DORMANT_TEXT = {
     ),
 }
 _DORMANT_SUBJECT = {
-    "nl": Template("Je account is al 18 maanden ongebruikt - GSP Recruitment"),
-    "en": Template("Your account has been unused for 18 months - GSP Recruitment"),
+    "nl": Template("Je account is lange tijd ongebruikt - GSP Recruitment"),
+    "en": Template("Your account has been unused for a long time - GSP Recruitment"),
 }
-_DORMANT_HEADING = {"nl": "Je account is al 18 maanden ongebruikt", "en": "Your account has been unused for 18 months"}
+_DORMANT_HEADING = {
+    "nl": "Je account is lange tijd ongebruikt",
+    "en": "Your account has been unused for a long time",
+}
 _DORMANT_HTML_BODY = {
     "nl": Template(
         "<p>Beste $full_name,</p>"
-        "<p>Je hebt je GSP Recruitment-account al 18 maanden niet gebruikt. Log in vóór $deadline om je "
+        "<p>Je hebt je GSP Recruitment-account lange tijd niet gebruikt. Log in vóór $deadline om je "
         "account actief te houden:</p>"
         "$link_html"
         "<p>Doe je dat niet, dan komt je account daarna op onze maandelijkse verwijderlijst: een beheerder "
@@ -560,7 +593,7 @@ _DORMANT_HTML_BODY = {
     ),
     "en": Template(
         "<p>Dear $full_name,</p>"
-        "<p>You have not used your GSP Recruitment account for 18 months. Log in before $deadline to keep "
+        "<p>You have not used your GSP Recruitment account for a long time. Log in before $deadline to keep "
         "your account active:</p>"
         "$link_html"
         "<p>If you do not, your account goes onto our monthly deletion list after that date: an administrator "

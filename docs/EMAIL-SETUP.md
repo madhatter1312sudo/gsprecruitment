@@ -267,3 +267,48 @@ twee stromen leesbaar gescheiden.
 
 Leeg laten (de default) betekent: geen eigenaarsmail, alleen de bestaande
 Telegram-melding.
+
+## 8. Eigenaarsactie: WAF-uitzondering voor het een-klik-afmelden
+
+**Nog te doen, door de eigenaar, in het Cloudflare-dashboard. Deze
+reparatieronde heeft niets aan de WAF veranderd.**
+
+Elke job-alert draagt twee RFC 8058-headers:
+
+```
+List-Unsubscribe: <https://api.gsprecruitment.nl/api/public/unsubscribe?token=...&scope=alerts>
+List-Unsubscribe-Post: List-Unsubscribe=One-Click
+```
+
+Klikt iemand in Gmail of Outlook op "Afmelden", dan POST'et de
+MAILPROVIDER naar die URL -- niet de browser van de ontvanger, en niet
+onze eigen frontend. Die POST draagt de header `User-Agent: gsp-ops`
+dus niet: de provider stuurt zijn eigen user-agent en er is geen plek waar
+wij daar iets aan kunnen toevoegen. De WAF-regel die bare curl 403't
+(zie `CLAUDE.md`, "API facts that bite") blokkeert die POST daarmee ook.
+
+Het gevolg is onzichtbaar en precies de verkeerde kant op: het
+afmeldendpoint antwoordt met opzet altijd hetzelfde generieke bericht, een
+provider probeert zo'n POST niet opnieuw, en de ontvanger ziet in zijn
+mailclient "je bent afgemeld" terwijl er niets is gebeurd. Morgen krijgt
+hij dezelfde digest.
+
+Nodig is dus één uitzondering, zo smal mogelijk:
+
+- alleen `POST`;
+- alleen het pad `/api/public/unsubscribe` op `api.gsprecruitment.nl`;
+- alleen de user-agent-eis eraf, niet de overige WAF-bescherming.
+
+Wat aan onze kant al is geregeld, zodat die uitzondering niets opent wat
+dicht hoorde te blijven: het endpoint heeft geen authenticatie om te
+omzeilen, doet niets zonder een geldig token van 32 random bytes, verbruikt
+dat token bij de eerste aanroep (`job_alert_sends.used_at`), laat het na 90
+dagen verlopen, en accepteert vanuit de querystring uitsluitend
+`scope=alerts` -- `scope=all` (toestemming intrekken plus blokkeerlijst)
+kan alleen via de body, met het token uit het URL-fragment. De
+rate limit op dit pad staat op 60/minuut, ruim genoeg voor de gedeelde
+uitgaande IP-adressen van een mailprovider.
+
+Tot die uitzondering er is, werkt het afmelden via de zichtbare link in de
+voettekst van het bericht wél: die gaat langs de website en de gewone
+browser van de ontvanger.

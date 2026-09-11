@@ -14,8 +14,12 @@ Adversarieel, in deze volgorde:
      met een geldig token (geen enumeratie-orakel);
   3. een kandidaat die zijn toestemming heeft ingetrokken krijgt nooit
      een alert;
-  4. de 18-maandengrens ligt precies;
+  4. de ondergrens van het slapend-accountvenster ligt precies, en er
+     is geen bovengrens meer (B3);
   5. met de schakelaars uit gaat er geen enkele mail de deur uit.
+
+Onderaan staat de reparatieronde na de security-audit en de codereview:
+per punt een test die de fout reproduceert zoals hij was.
 
 Geen letterlijke tokenachtige strings: elk token komt uit
 secrets.token_urlsafe(32), net als in de productiecode.
@@ -35,8 +39,8 @@ def _reset_rate_limiter():
     (core/ratelimit.py) is één proces-breed object en de integratiesuite
     deelt een sessie-scoped TestClient, dus elke aanroep hier telt op bij
     wat andere bestanden in dezelfde minuut al deden. Deze tests gaan over
-    het gedrag van /api/public/unsubscribe (10/minuut), niet over de
-    limiet zelf; die heeft eigen dekking in
+    het gedrag van /api/public/unsubscribe (60/minuut sinds R4), niet
+    over de limiet zelf; die heeft eigen dekking in
     test_ws_e4_ratelimit_lockout.py."""
     from core.ratelimit import limiter
 
@@ -388,26 +392,32 @@ def _dormant_user(db_run, months_ago_expr):
     )
 
 
-def test_dormant_warning_window_boundaries_are_exact(db_run, monkeypatch, no_send):
-    """Adversarieel 4. Vier accounts rond de randen van het venster:
-    16 maanden (te vroeg), 17 maanden en 1 dag (net binnen), 17 maanden
-    en 29 dagen (binnen), 18 maanden en 1 dag (te laat). Alleen de twee
-    middelste horen gewaarschuwd te worden."""
+def test_dormant_warning_starts_at_17_months_and_has_no_upper_bound(db_run, monkeypatch, no_send):
+    """Adversarieel 4, herzien na B3 (besluit van de eigenaar: bovengrens
+    eraf). De ondergrens moet nog steeds precies liggen -- 17 maanden is
+    wat de 30 dagen voorsprong oplevert die PORTAL_ACCOUNT_INACTIVE_SQL
+    eist -- maar er is geen bovengrens meer. Met die grens viel een
+    account dat al twee jaar sliep permanent buiten het venster: nooit
+    gewaarschuwd, dus nooit beoordeeld, dus de beloofde 18 maanden werd
+    voor precies die achterstand nooit gehaald."""
     from core.config import settings
     from services import scheduler
 
     too_early = _dormant_user(db_run, "16 months")
     just_in = _dormant_user(db_run, "17 months 1 day")
     still_in = _dormant_user(db_run, "17 months 29 days")
-    too_late = _dormant_user(db_run, "18 months 1 day")
+    over_the_line = _dormant_user(db_run, "18 months 1 day")
+    long_backlog = _dormant_user(db_run, "40 months")
 
     monkeypatch.setattr(settings, "dormant_warning_enabled", True)
-    db_run(scheduler.dormant_account_warning_job)
+    result = db_run(scheduler.dormant_account_warning_job)
 
     assert too_early["email"] not in no_send.sent, "16 maanden is te vroeg"
     assert just_in["email"] in no_send.sent
     assert still_in["email"] in no_send.sent
-    assert too_late["email"] not in no_send.sent, "boven 18 maanden valt buiten dit venster"
+    assert over_the_line["email"] in no_send.sent, "boven 18 maanden hoort er nu juist wel in te vallen"
+    assert long_backlog["email"] in no_send.sent, "de bestaande achterstand loopt in één ronde mee"
+    assert result["accounts_due"] >= 4
 
 
 def test_dormant_warning_is_sent_once_per_inactivity_cycle(db_run, monkeypatch, no_send):
@@ -459,7 +469,8 @@ def test_referral_create_and_confirm_stamps_the_reaction_signal(client, db_run, 
     res = client.post(
         "/api/v1/admin/candidates/referral",
         json={"full_name": "Referral Kandidaat", "email": email,
-              "referred_by": "Piet de Vries", "note": "aangedragen op de meetup"},
+              "referred_by": "Piet de Vries", "evidence": "mondeling bevestigd op de meetup",
+              "note": "aangedragen op de meetup"},
         headers=admin["headers"],
     )
     assert res.status_code == 201, res.text
@@ -520,9 +531,13 @@ def test_referral_confirm_sets_referral_confirmed_at(client, db_run):
         "SELECT referral_confirmed_at, lawful_basis FROM candidates WHERE id = $1", cand["id"],
     )
     assert row["referral_confirmed_at"] is not None
-    # De referral-grondslag blijft staan: privacy.should_set_talentpool_
-    # lawful_basis() overschrijft een bestaande grondslag nooit.
-    assert row["lawful_basis"] == "toestemming_referral"
+    # B1: de grondslag wordt hier wél omgezet. Bevestigen IS de
+    # talentpool-opt-in (zelfde dubbele-opt-in-token, en de vier
+    # consent_talentpool_*-kolommen worden hoe dan ook geschreven), en
+    # zonder deze omzetting viel deze persoon buiten elke bewaartermijn:
+    # REFERRAL_NO_RESPONSE_SQL sluit hem uit zodra referral_confirmed_at
+    # staat, TALENTPOOL_EXPIRED_SQL kijkt alleen naar opt_in_talentpool.
+    assert row["lawful_basis"] == "opt_in_talentpool"
 
 
 def test_confirmed_referral_drops_out_of_the_retention_selector(db_run):
@@ -572,7 +587,8 @@ def test_referral_endpoint_refuses_a_suppressed_address(client, db_run, make_adm
 
     res = client.post(
         "/api/v1/admin/candidates/referral",
-        json={"full_name": "Geblokkeerd", "email": email, "referred_by": "Piet"},
+        json={"full_name": "Geblokkeerd", "email": email, "referred_by": "Piet",
+              "evidence": "mondeling bevestigd"},
         headers=admin["headers"],
     )
     assert res.status_code == 409
@@ -593,7 +609,8 @@ def test_referral_endpoint_never_overwrites_an_existing_candidate(client, db_run
 
     res = client.post(
         "/api/v1/admin/candidates/referral",
-        json={"full_name": "Referral", "email": email, "referred_by": "Piet"},
+        json={"full_name": "Referral", "email": email, "referred_by": "Piet",
+              "evidence": "mondeling bevestigd"},
         headers=admin["headers"],
     )
     assert res.status_code == 409
@@ -605,7 +622,8 @@ def test_referral_endpoint_never_overwrites_an_existing_candidate(client, db_run
 def test_referral_endpoint_requires_an_admin_jwt(client):
     res = client.post(
         "/api/v1/admin/candidates/referral",
-        json={"full_name": "X", "email": _email("nope"), "referred_by": "Y"},
+        json={"full_name": "X", "email": _email("nope"), "referred_by": "Y",
+              "evidence": "mondeling bevestigd"},
     )
     assert res.status_code in (401, 403)
 
@@ -620,6 +638,7 @@ def test_referral_audit_log_never_stores_the_plaintext_address(client, db_run, m
     res = client.post(
         "/api/v1/admin/candidates/referral",
         json={"full_name": "R", "email": email, "referred_by": "Piet",
+              "evidence": f"toestemming per mail van {referrer_email}",
               "note": f"aangedragen door {referrer_email}"},
         headers=admin["headers"],
     )
@@ -731,3 +750,530 @@ def test_talentpool_confirm_without_the_tick_does_not_opt_in(client, db_run):
 
     row = db_run(fetch_one, "SELECT job_alert_optin_at FROM candidates WHERE LOWER(email) = $1", email.lower())
     assert row["job_alert_optin_at"] is None
+
+
+# ══════════════════════════════════════════════════════════════════════
+# Reparatieronde na de security-audit en de codereview
+# ══════════════════════════════════════════════════════════════════════
+
+def _candidate_retention_categories(db_run, candidate_id):
+    """In welke van de bewaartermijnrijen uit core/retention.py valt deze
+    kandidaat vandaag? Draait elke `candidates`-selector uit
+    RETENTION_TABLE met zijn eigen parameters -- dus niet één handmatig
+    gekozen query, want de vraag is juist of hij door ALLE rijen heen
+    valt of in precies één."""
+    from core import retention
+    from core.database import fetch_all
+
+    hits = []
+    for row in retention.RETENTION_TABLE:
+        if row.subject_table != "candidates" or not row.selector_sql:
+            continue
+        rows = db_run(fetch_all, row.selector_sql, *row.selector_params)
+        if any(r["id"] == candidate_id for r in rows):
+            hits.append(row.key)
+    return hits
+
+
+def test_confirmed_referral_lands_in_exactly_one_retention_row(client, db_run, make_admin, no_send):
+    """B1, het hele pad in één test: een beheerder legt een referral vast,
+    de betrokkene bevestigt zelf, en daarna wordt de rij oud.
+
+    Vóór deze reparatie viel zo iemand door elke maas tegelijk. Zijn
+    lawful_basis bleef 'toestemming_referral', dus REFERRAL_NO_RESPONSE_
+    SQL sloot hem uit op referral_confirmed_at en TALENTPOOL_EXPIRED_SQL
+    zag hem nooit (die kijkt alleen naar 'opt_in_talentpool'). Resultaat:
+    bevestigde toestemming, en een rij die door geen enkele bewaartermijn
+    meer werd opgepikt -- onbeperkt bewaard, terwijl hij tegelijk buiten
+    de matching-poort en buiten de outreach-weigering viel."""
+    from core.database import execute, fetch_one
+    from core.security import hash_token
+
+    admin = make_admin()
+    email = _email("b1-referral")
+
+    res = client.post(
+        "/api/v1/admin/candidates/referral",
+        json={"full_name": "B1 Kandidaat", "email": email, "referred_by": "Piet de Vries",
+              "evidence": "mondeling bevestigd op de meetup"},
+        headers=admin["headers"],
+    )
+    assert res.status_code == 201, res.text
+    candidate_id = res.json()["id"]
+
+    # Het endpoint schreef zijn eigen token weg als hash; die is niet terug
+    # te rekenen, dus bevestig met een tweede rij van dezelfde vorm --
+    # precies wat de betrokkene met de link uit zijn mail doet.
+    token = secrets.token_urlsafe(32)
+    db_run(
+        execute,
+        """INSERT INTO talentpool_optin_requests (email, token_hash, scope, source)
+           VALUES ($1, $2, 'matching_and_contact', 'referral')""",
+        email, hash_token(token),
+    )
+    confirmed = client.post("/api/public/talentpool-confirm", json={"token": token})
+    assert confirmed.status_code == 200, confirmed.text
+
+    row = db_run(
+        fetch_one,
+        "SELECT lawful_basis, referral_confirmed_at, consent_talentpool_until "
+        "FROM candidates WHERE id = $1",
+        candidate_id,
+    )
+    assert row["referral_confirmed_at"] is not None
+    assert row["lawful_basis"] == "opt_in_talentpool"
+    assert row["consent_talentpool_until"] is not None
+
+    # Zolang de toestemming loopt, valt hij nergens in -- dat is juist.
+    assert _candidate_retention_categories(db_run, candidate_id) == []
+
+    # Nu ouder dan de termijn plus de 30 dagen coulance, en ouder dan de
+    # 3 maanden van de referral-rij.
+    db_run(
+        execute,
+        """UPDATE candidates
+              SET consent_talentpool_until = NOW() - INTERVAL '2 months',
+                  consent_talentpool_at = NOW() - INTERVAL '14 months',
+                  date_found = CURRENT_DATE - INTERVAL '14 months'
+            WHERE id = $1""",
+        candidate_id,
+    )
+
+    categories = _candidate_retention_categories(db_run, candidate_id)
+    assert categories == ["talentpool_consent"], (
+        f"een bevestigde referral hoort in precies één bewaartermijn te vallen, niet in {categories}"
+    )
+
+
+def test_query_string_token_can_never_reach_scope_all(client, db_run):
+    """B2. Het token in de querystring staat in elke access-, proxy- en
+    edge-logregel die het verzoek passeerde. Zou een body daar `all` bij
+    mogen zeggen, dan volstond één gevonden URL om iemand onomkeerbaar op
+    de blokkeerlijst te zetten -- er bestaat geen API om zo'n rij weer te
+    verwijderen. Uit de querystring is de scope dus hard 'alerts'."""
+    from core import privacy
+    from core.database import fetch_one
+
+    cand = _insert_alert_candidate(db_run)
+    token = _issue_alert_token(db_run, cand["id"], [1])
+
+    res = client.post(f"/api/public/unsubscribe?token={token}", json={"scope": "all"})
+    assert res.status_code == 200
+
+    row = db_run(
+        fetch_one,
+        "SELECT job_alert_unsubscribed_at, consent_withdrawn_at FROM candidates WHERE id = $1",
+        cand["id"],
+    )
+    assert row["job_alert_unsubscribed_at"] is not None, "afmelden voor alerts hoort gewoon te werken"
+    assert row["consent_withdrawn_at"] is None, "een token uit een log mag nooit de toestemming intrekken"
+
+    supp = db_run(
+        fetch_one, "SELECT 1 FROM suppression_list WHERE email_hash = $1",
+        privacy.email_hash(cand["email"]),
+    )
+    assert supp is None
+
+
+def test_body_token_still_reaches_scope_all(client, db_run):
+    """De andere helft van B2: via de body -- met het token uit het
+    URL-fragment, dat geen enkele log bereikt -- blijft 'all' gewoon
+    bereikbaar. Anders zou de reparatie de keuze onmogelijk maken die
+    website/unsubscribe.js de bezoeker biedt."""
+    from core import privacy
+    from core.database import fetch_one
+
+    cand = _insert_alert_candidate(db_run)
+    token = _issue_alert_token(db_run, cand["id"], [1])
+
+    res = client.post("/api/public/unsubscribe", json={"token": token, "scope": "all"})
+    assert res.status_code == 200
+
+    row = db_run(fetch_one, "SELECT consent_withdrawn_at FROM candidates WHERE id = $1", cand["id"])
+    assert row["consent_withdrawn_at"] is not None
+    supp = db_run(
+        fetch_one, "SELECT 1 FROM suppression_list WHERE email_hash = $1",
+        privacy.email_hash(cand["email"]),
+    )
+    assert supp is not None
+
+
+def test_a_bogus_scope_does_not_throw_away_a_valid_token(client, db_run):
+    """R1. Token en scope worden los gevalideerd. Als één model viel de
+    hele body om zodra de scope niet klopte, inclusief het geldige token
+    ernaast, en werd het verzoek stilletjes een no-op met hetzelfde 200 --
+    niemand afgemeld, niemand die het kon zien."""
+    from core.database import fetch_one
+
+    cand = _insert_alert_candidate(db_run)
+    token = _issue_alert_token(db_run, cand["id"], [1])
+
+    res = client.post("/api/public/unsubscribe", json={"token": token, "scope": "bogus"})
+    assert res.status_code == 200
+
+    row = db_run(
+        fetch_one,
+        "SELECT job_alert_unsubscribed_at, consent_withdrawn_at FROM candidates WHERE id = $1",
+        cand["id"],
+    )
+    assert row["job_alert_unsubscribed_at"] is not None, "het token was geldig en hoorde te werken"
+    assert row["consent_withdrawn_at"] is None, "een onbekende scope valt terug op de smalste"
+
+
+def test_a_lone_surrogate_in_the_body_is_answered_like_everything_else(client, db_run):
+    """R2. Een losse surrogate in de JSON-body liet hash_token() een
+    UnicodeEncodeError gooien: een 500, en daarmee het enige antwoord dat
+    van het generieke antwoord afweek -- precies het orakel dat dit
+    endpoint met zoveel zorg vermijdt."""
+    cand = _insert_alert_candidate(db_run)
+    good = _issue_alert_token(db_run, cand["id"], [1])
+
+    reference = client.post("/api/public/unsubscribe", json={"token": good, "scope": "alerts"})
+    surrogate = client.post(
+        "/api/public/unsubscribe",
+        content=b'{"token": "\\ud800", "scope": "alerts"}',
+        headers={"Content-Type": "application/json"},
+    )
+
+    assert surrogate.status_code == reference.status_code == 200
+    assert surrogate.text == reference.text
+
+
+def test_an_old_unsubscribe_token_no_longer_works(client, db_run):
+    """R3. Afmeldtokens verliepen nooit, dus een token uit een mail (of een
+    access log) van twee jaar geleden werkte vandaag nog."""
+    from core.database import execute, fetch_one
+
+    cand = _insert_alert_candidate(db_run)
+    token = _issue_alert_token(db_run, cand["id"], [1])
+    db_run(
+        execute,
+        "UPDATE job_alert_sends SET sent_at = NOW() - INTERVAL '91 days' WHERE candidate_id = $1",
+        cand["id"],
+    )
+
+    res = client.post("/api/public/unsubscribe", json={"token": token, "scope": "all"})
+    assert res.status_code == 200, "verlopen loopt langs dezelfde weg als onbekend: zelfde antwoord"
+
+    row = db_run(
+        fetch_one,
+        "SELECT job_alert_unsubscribed_at, consent_withdrawn_at FROM candidates WHERE id = $1",
+        cand["id"],
+    )
+    assert row["job_alert_unsubscribed_at"] is None
+    assert row["consent_withdrawn_at"] is None
+
+
+def test_unsubscribe_rate_limit_leaves_room_for_a_provider_proxy(client, db_run):
+    """R4. Een one-click-POST komt van de mailprovider, vanaf een handvol
+    gedeelde IP's, en wordt niet opnieuw geprobeerd: wie hier een 429
+    krijgt is simpelweg niet afgemeld terwijl zijn mailclient zegt van
+    wel. Twaalf verzoeken op rij -- boven de oude limiet van 10 -- moeten
+    er dus allemaal doorkomen."""
+    codes = set()
+    for _ in range(12):
+        cand = _insert_alert_candidate(db_run)
+        token = _issue_alert_token(db_run, cand["id"], [1])
+        codes.add(
+            client.post(f"/api/public/unsubscribe?token={token}&scope=alerts").status_code
+        )
+    assert codes == {200}
+
+
+def test_scope_all_withdraws_every_row_with_that_address(client, db_run):
+    """B9. `scope='all'` trok drafts in op target_id terwijl
+    routers/gdpr.py's add_suppression() dat op LOWER(target_email) doet --
+    twee verschillende verzamelingen rijen voor wat hetzelfde besluit is.
+    Eén adres kan meer dan één candidates-rij hebben (WS-C.16), en het
+    adres gaat op de blokkeerlijst: dan moet elke rij met dat adres de
+    intrekking dragen en moet elke lopende draft eraan vervallen."""
+    from core.database import execute, fetch_all, fetch_one
+
+    cand = _insert_alert_candidate(db_run)
+    # Tweede rij, zelfde adres, andere id -- precies het geval dat op
+    # target_id nooit werd gevonden.
+    twin = db_run(
+        fetch_one,
+        "INSERT INTO candidates (full_name, email, lawful_basis) VALUES ('Tweeling', $1, 'gerechtvaardigd_belang') "
+        "RETURNING id",
+        cand["email"].upper(),
+    )
+    db_run(
+        execute,
+        """INSERT INTO outreach_drafts (target_type, target_id, target_email, target_name, subject, body, status)
+           VALUES ('candidate', $1, $2, 'Tweeling', 's', 'b', 'draft')""",
+        twin["id"], cand["email"].upper(),
+    )
+
+    token = _issue_alert_token(db_run, cand["id"], [1])
+    res = client.post("/api/public/unsubscribe", json={"token": token, "scope": "all"})
+    assert res.status_code == 200
+
+    rows = db_run(
+        fetch_all,
+        "SELECT consent_withdrawn_at FROM candidates WHERE LOWER(email) = $1", cand["email"].lower(),
+    )
+    assert len(rows) == 2
+    assert all(r["consent_withdrawn_at"] is not None for r in rows), (
+        "elke rij met dit adres hoort de intrekking te dragen"
+    )
+
+    drafts = db_run(
+        fetch_all,
+        "SELECT status FROM outreach_drafts WHERE LOWER(target_email) = $1", cand["email"].lower(),
+    )
+    assert drafts and all(d["status"] == "rejected" for d in drafts)
+
+
+def test_expired_talentpool_consent_never_receives_an_alert(db_run, monkeypatch, no_send):
+    """B4. Toestemming verloopt stil: na 12 maanden verandert er geen
+    kolom, `consent_scope` blijft gewoon staan. Zonder de nieuwe clausule
+    bleef deze job dagelijks mailen naar iemand wiens toestemming al een
+    jaar verlopen was en die inmiddels op de wislijst stond."""
+    from core.database import execute
+
+    job = _open_job(db_run)
+    expired = _insert_alert_candidate(db_run)
+    db_run(
+        execute,
+        "UPDATE candidates SET consent_talentpool_until = NOW() - INTERVAL '1 month' WHERE id = $1",
+        expired["id"],
+    )
+    still_valid = _insert_alert_candidate(db_run)
+
+    for cand in (expired, still_valid):
+        _suggest_match(db_run, cand["id"], job["id"])
+
+    _run_job_alert(db_run, monkeypatch, env=True, db_flag=True)
+
+    assert still_valid["email"] in no_send.sent
+    assert expired["email"] not in no_send.sent, "verlopen toestemming krijgt geen alert"
+
+
+def test_a_portal_registration_needs_no_talentpool_consent_window(db_run, monkeypatch, no_send):
+    """De andere kant van B4: wie een eigen portaalaccount heeft, heeft
+    art. 13 als grondslag en geen aflopende toestemming. Die mag de nieuwe
+    clausule niet per ongeluk uitsluiten."""
+    from core.database import execute
+
+    job = _open_job(db_run)
+    portal = _insert_alert_candidate(db_run, lawful_basis="portal_registratie", consent_scope=None)
+    db_run(execute, "UPDATE candidates SET consent_talentpool_until = NULL WHERE id = $1", portal["id"])
+    _suggest_match(db_run, portal["id"], job["id"])
+
+    _run_job_alert(db_run, monkeypatch, env=True, db_flag=True)
+
+    assert portal["email"] in no_send.sent
+
+
+def test_two_candidate_rows_with_one_suppressed_address_are_both_skipped(db_run, monkeypatch, no_send):
+    """B8. De hash/id-map liet bij twee rijen met hetzelfde adres er één
+    door -- en die kreeg zijn mail, terwijl het adres op de blokkeerlijst
+    stond."""
+    from core import privacy
+    from core.database import execute, fetch_one
+
+    job = _open_job(db_run)
+    first = _insert_alert_candidate(db_run)
+    second = db_run(
+        fetch_one,
+        """INSERT INTO candidates
+             (full_name, email, lawful_basis, consent_scope, consent_talentpool_until, job_alert_optin_at)
+           VALUES ('Tweede rij', $1, 'opt_in_talentpool', 'matching_and_contact',
+                   NOW() + INTERVAL '12 months', NOW() - INTERVAL '1 day')
+           RETURNING id, email""",
+        first["email"].upper(),
+    )
+    db_run(
+        execute,
+        "INSERT INTO suppression_list (email_hash, email_domain, reason) VALUES ($1, $2, 'STOP') "
+        "ON CONFLICT (email_hash) DO NOTHING",
+        privacy.email_hash(first["email"]), privacy.email_domain(first["email"]),
+    )
+    for cand in (first, second):
+        _suggest_match(db_run, cand["id"], job["id"])
+
+    _run_job_alert(db_run, monkeypatch, env=True, db_flag=True)
+
+    assert first["email"] not in no_send.sent
+    assert second["email"] not in no_send.sent, "de tweede rij met hetzelfde adres viel door de map"
+
+
+def test_a_failed_send_leaves_no_usable_unsubscribe_token(db_run, monkeypatch):
+    """B7, tegen echte rijen: mislukt de verzending, dan blijft er geen
+    tokenrij achter en wordt er niets gestempeld."""
+    import routers.admin as admin_router
+    import routers.public as public_router
+    import services.email_service as es
+    from core.database import fetch_one
+
+    class _Failing:
+        async def send_template(self, name, to_email, ctx, lang=None, headers=None):
+            return False
+
+    stub = _Failing()
+    monkeypatch.setattr(es, "email_service", stub)
+    monkeypatch.setattr(admin_router, "email_service", stub)
+    monkeypatch.setattr(public_router, "email_service", stub)
+
+    job = _open_job(db_run)
+    cand = _insert_alert_candidate(db_run)
+    _suggest_match(db_run, cand["id"], job["id"])
+
+    result = _run_job_alert(db_run, monkeypatch, env=True, db_flag=True)
+    assert result["sent"] == 0
+
+    assert db_run(fetch_one, "SELECT 1 FROM job_alert_sends WHERE candidate_id = $1", cand["id"]) is None
+    row = db_run(fetch_one, "SELECT job_alert_last_sent_at FROM candidates WHERE id = $1", cand["id"])
+    assert row["job_alert_last_sent_at"] is None
+
+
+def test_dormant_warning_skips_a_suppressed_account(db_run, monkeypatch, no_send):
+    """B10. STOP betekent nooit meer mailen, op geen enkele grondslag --
+    ook geen waarschuwing over je eigen account."""
+    from core import privacy
+    from core.config import settings
+    from core.database import execute, fetch_one
+    from services import scheduler
+
+    user = _dormant_user(db_run, "17 months 10 days")
+    db_run(
+        execute,
+        "INSERT INTO suppression_list (email_hash, email_domain, reason) VALUES ($1, $2, 'STOP') "
+        "ON CONFLICT (email_hash) DO NOTHING",
+        privacy.email_hash(user["email"]), privacy.email_domain(user["email"]),
+    )
+    monkeypatch.setattr(settings, "dormant_warning_enabled", True)
+
+    db_run(scheduler.dormant_account_warning_job)
+
+    assert user["email"] not in no_send.sent
+    row = db_run(fetch_one, "SELECT dormant_warning_sent_at FROM users WHERE id = $1", user["id"])
+    assert row["dormant_warning_sent_at"] is None, "niet gewaarschuwd betekent ook niet gestempeld"
+
+
+def test_erasure_clears_the_alert_and_referral_columns(db_run, make_admin):
+    """B5. Migratie 041 voegde vijf kolommen toe die geen van alle in
+    erase_person() stonden. `referred_by` is de NAAM VAN EEN DERDE, vrije
+    tekst die een beheerder typte, en die overleefde een "verwijder alles
+    wat u over mij heeft" ongeschonden. job_alert_sends overleefde
+    helemaal: de ON DELETE CASCADE vuurt alleen bij een harde delete, en
+    deze functie anonimiseert juist in plaats van te verwijderen."""
+    from core.database import fetch_one
+    from routers.gdpr import erase_person
+
+    admin = make_admin()
+    email = _email("erase-alerts")
+    cand = db_run(
+        fetch_one,
+        """INSERT INTO candidates
+             (full_name, email, lawful_basis, referred_by, referral_confirmed_at,
+              job_alert_optin_at, job_alert_last_sent_at)
+           VALUES ('Te wissen', $1, 'toestemming_referral', 'Piet de Vries', NOW(), NOW(), NOW())
+           RETURNING id""",
+        email,
+    )
+    _issue_alert_token(db_run, cand["id"], [1])
+
+    db_run(erase_person, email, actor_id=admin["id"], reason="admin request")
+
+    row = db_run(
+        fetch_one,
+        """SELECT referred_by, referral_confirmed_at, job_alert_optin_at,
+                  job_alert_last_sent_at, job_alert_unsubscribed_at, deleted_at
+             FROM candidates WHERE id = $1""",
+        cand["id"],
+    )
+    assert row["referred_by"] is None, "de naam van een derde hoort niet een wissing te overleven"
+    assert row["referral_confirmed_at"] is None
+    assert row["job_alert_optin_at"] is None
+    assert row["job_alert_last_sent_at"] is None
+    assert row["deleted_at"] is not None
+    assert db_run(fetch_one, "SELECT 1 FROM job_alert_sends WHERE candidate_id = $1", cand["id"]) is None
+
+
+def test_portal_switch_reports_ineligible_for_someone_the_selector_skips(client, db_run, make_candidate_user):
+    """CR R6. De schakelaar gaf `enabled: true` terug aan iemand die
+    job_alert_job nooit oppikt -- gesourcet, geen consent_scope -- zonder
+    dat het portaal dat verschil kon tonen."""
+    from core.database import fetch_one
+
+    user = make_candidate_user()
+    db_run(
+        fetch_one,
+        "INSERT INTO candidates (full_name, email, lawful_basis, source) "
+        "VALUES ('Gesourcet', $1, 'gerechtvaardigd_belang', 'linkedin') RETURNING id",
+        user["email"],
+    )
+
+    res = client.put("/api/v1/candidate/job-alerts", json={"enabled": True}, headers=user["headers"])
+    assert res.status_code == 200, res.text
+    assert res.json()["enabled"] is True
+    assert res.json()["eligible"] is False
+
+
+def test_portal_switch_reports_eligible_for_a_portal_registration(client, db_run, make_candidate_user):
+    from core.database import fetch_one
+
+    user = make_candidate_user()
+    db_run(
+        fetch_one,
+        "INSERT INTO candidates (full_name, email, lawful_basis) VALUES ('P', $1, 'portal_registratie') RETURNING id",
+        user["email"],
+    )
+
+    res = client.put("/api/v1/candidate/job-alerts", json={"enabled": True}, headers=user["headers"])
+    assert res.status_code == 200
+    assert res.json()["eligible"] is True
+
+
+def test_referral_endpoint_requires_evidence(client, make_admin, no_send):
+    """CR R8. Dit endpoint legt toestemming vast die een DERDE namens de
+    betrokkene claimt -- van de drie toestemmingsendpoints juist het enige
+    waar een beheerder niets hoefde op te schrijven, terwijl art. 7 lid 1
+    de bewijslast bij ons legt."""
+    admin = make_admin()
+    res = client.post(
+        "/api/v1/admin/candidates/referral",
+        json={"full_name": "Zonder bewijs", "email": _email("no-evidence"), "referred_by": "Piet"},
+        headers=admin["headers"],
+    )
+    assert res.status_code == 422
+
+
+def test_an_unknown_scope_in_the_query_falls_back_when_the_token_came_from_the_body(client, db_run):
+    """De terugval op de smalste scope, langs de enige weg waar hij er nog
+    toe doet. `?scope=` is geen gevalideerd veld -- alleen de body loopt
+    langs models/schemas.py -- dus een body-token met een verzonnen
+    queryscope is precies het geval waarin deze regel iets moet doen.
+    (Komt het TOKEN uit de query, dan dwingt B2 de scope sowieso al op
+    'alerts'.)"""
+    from core.database import fetch_one
+
+    cand = _insert_alert_candidate(db_run)
+    token = _issue_alert_token(db_run, cand["id"], [1])
+
+    res = client.post("/api/public/unsubscribe?scope=everything", json={"token": token})
+    assert res.status_code == 200
+
+    row = db_run(
+        fetch_one,
+        "SELECT job_alert_unsubscribed_at, consent_withdrawn_at FROM candidates WHERE id = $1",
+        cand["id"],
+    )
+    assert row["job_alert_unsubscribed_at"] is not None
+    assert row["consent_withdrawn_at"] is None, "een verzonnen scope mag nooit de ingrijpendste betekenis krijgen"
+
+    # En de audit-regel draagt de scope waarop het verzoek is uitgevoerd,
+    # niet de vrije tekst die de aanroeper meestuurde. `?scope=` is de
+    # enige weg waarlangs ongevalideerde invoer deze tabel kan bereiken,
+    # en audit_log is juist de plek waar na een incident uit gelezen moet
+    # worden wat er is gebeurd.
+    audit = db_run(
+        fetch_one,
+        "SELECT changes FROM audit_log WHERE action = 'job_alert_unsubscribe' AND target_id = $1",
+        cand["id"],
+    )
+    assert audit is not None
+    assert '"scope": "alerts"' in str(audit["changes"])
+    assert "everything" not in str(audit["changes"])

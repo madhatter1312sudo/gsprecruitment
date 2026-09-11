@@ -32,11 +32,16 @@ router = APIRouter(prefix="/api/matches", tags=["matches"], dependencies=[Depend
 # die minstens zo goed zijn als wat deze codebase zelf een suggestie
 # durft te noemen -- geen apart, verzonnen getal.
 #
-# Voor een match die de matcher zelf schreef is die eis per definitie al
-# waar. Hij is er voor de rijen die POST /api/matches (een externe
-# routine achter dezelfde X-API-Key) wegschrijft: dat endpoint accepteert
-# elke `match_score` die de aanroeper meestuurt, dus zonder deze
-# ondergrens zou een score van 1.0 een alert kunnen veroorzaken.
+# Wat die ondergrens NIET is, want het commentaar hier suggereerde dat
+# eerder wel (CR R5): hij is geen poort op wat er in de kolom komt. POST
+# /api/matches (een externe routine achter dezelfde X-API-Key) schrijft
+# nog steeds elke `match_score` weg die de aanroeper meestuurt, ook 1.0,
+# en niets in dit bestand weigert dat. De ondergrens zit uitsluitend aan
+# de LEESKANT, in services/scheduler.py's JOB_ALERT_MATCHES_SQL: zo'n rij
+# bestaat, is zichtbaar in het admin-paneel, en telt alleen niet mee voor
+# een alert. Wie wil dat hij ook niet wordt opgeslagen, moet dat in
+# create_match afdwingen -- dat is een aparte keuze en die is hier niet
+# gemaakt.
 MATCH_SCORE_SCALE = 100
 MATCH_SUGGESTION_MIN_SCORE = 0.3
 MATCH_SUGGESTION_MIN_STORED_SCORE = MATCH_SUGGESTION_MIN_SCORE * MATCH_SCORE_SCALE

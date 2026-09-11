@@ -23,6 +23,12 @@ from datetime import datetime, timedelta, timezone
 
 from services import storage
 from services.candidate_link import get_or_create_candidate_id
+# De rest van de alert-selectie van services/scheduler.py's job_alert_job,
+# gedeeld en niet nagebouwd -- zie de portaalschakelaar verderop (CR R6).
+# services/scheduler.py importeert zelf geen routers/* bij het laden (de
+# twee plekken die dat nodig hebben doen het in de functie), dus dit is
+# geen importcyclus.
+from services.scheduler import JOB_ALERT_ELIGIBILITY_SQL
 
 logger = logging.getLogger("talent_os.candidate_portal")
 
@@ -289,25 +295,31 @@ async def update_job_alerts(
     if not candidate_id:
         raise HTTPException(status_code=404, detail="No candidate record found for this account")
 
-    if data.enabled:
-        row = await fetch_one(
-            """UPDATE candidates
-               SET job_alert_optin_at = COALESCE(job_alert_optin_at, NOW()),
-                   job_alert_unsubscribed_at = NULL,
+    # CR R6: `eligible` is de rest van de selectie van
+    # services/scheduler.py's job_alert_job, letterlijk uit dezelfde
+    # constante (JOB_ALERT_ELIGIBILITY_SQL), zodat het portaal kan tonen
+    # wat er werkelijk gebeurt. Zonder dit kon deze endpoint `enabled:
+    # true` teruggeven aan iemand die die job nooit oppikt -- een
+    # gesourcete kandidaat zonder `consent_scope`, of iemand wiens
+    # talentpool-toestemming is verlopen -- en dan staat de schakelaar aan
+    # terwijl er nooit iets komt. Bewust een tweede veld en geen
+    # aanpassing van `enabled`: `enabled` is wat deze persoon heeft
+    # gevraagd (en dat blijft waar), `eligible` is of wij het vandaag ook
+    # kunnen doen. Alias `c` omdat de gedeelde constante die gebruikt.
+    optin_sql = (
+        "job_alert_optin_at = COALESCE(job_alert_optin_at, NOW()), job_alert_unsubscribed_at = NULL"
+        if data.enabled
+        else "job_alert_unsubscribed_at = COALESCE(job_alert_unsubscribed_at, NOW())"
+    )
+    row = await fetch_one(
+        f"""UPDATE candidates AS c
+               SET {optin_sql},
                    updated_at = NOW()
-               WHERE id = $1
-               RETURNING id, job_alert_optin_at, job_alert_unsubscribed_at""",
-            candidate_id,
-        )
-    else:
-        row = await fetch_one(
-            """UPDATE candidates
-               SET job_alert_unsubscribed_at = COALESCE(job_alert_unsubscribed_at, NOW()),
-                   updated_at = NOW()
-               WHERE id = $1
-               RETURNING id, job_alert_optin_at, job_alert_unsubscribed_at""",
-            candidate_id,
-        )
+             WHERE c.id = $1
+         RETURNING c.id, c.job_alert_optin_at, c.job_alert_unsubscribed_at,
+                   ({JOB_ALERT_ELIGIBILITY_SQL}) AS eligible""",
+        candidate_id,
+    )
 
     await execute(
         "INSERT INTO audit_log (action, actor_id, target_type, target_id, changes) VALUES ($1, $2, $3, $4, $5::jsonb)",
@@ -317,6 +329,7 @@ async def update_job_alerts(
 
     return {
         "enabled": row["job_alert_optin_at"] is not None and row["job_alert_unsubscribed_at"] is None,
+        "eligible": bool(row["eligible"]),
         "job_alert_optin_at": row["job_alert_optin_at"],
         "job_alert_unsubscribed_at": row["job_alert_unsubscribed_at"],
     }

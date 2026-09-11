@@ -178,12 +178,24 @@ class AdminReferralCreate(BaseModel):
     van art. 14 (de bron noemen) -- maar nergens in Telegram of een
     logregel.
 
-    `note` is vrije tekst van de beheerder en gaat nooit ongefilterd het
-    audit_log in: routers/admin.py haalt hem eerst door
-    privacy.redact_emails(), net als `evidence` hierboven."""
+    `evidence` is verplicht, net als bij AdminTalentpoolConsentUpdate en
+    AdminSpecPresentationConsentUpdate hierboven, en om een sterkere
+    reden dan daar (CR R8). Dit endpoint legt toestemming vast die een
+    DERDE namens de betrokkene claimt -- de referrer zegt dat hij die
+    heeft, de betrokkene zelf heeft op dit moment nog niets gezegd. Art.
+    7 lid 1 legt de bewijslast voor die toestemming bij ons, en het was
+    van de drie toestemmingsendpoints juist het enige waar een beheerder
+    niets hoefde op te schrijven. Kort volstaat ("mondeling bevestigd
+    door X op 3 september, hij heeft haar gevraagd"), zolang er íets
+    staat.
+
+    `evidence` en `note` zijn allebei vrije tekst van de beheerder en
+    gaan nooit ongefilterd het audit_log in: routers/admin.py haalt ze
+    eerst door privacy.redact_emails()."""
     full_name: str = Field(..., min_length=1, max_length=200)
     email: EmailStr
     referred_by: str = Field(..., min_length=1, max_length=200)
+    evidence: str = Field(..., min_length=1, max_length=2000)
     note: Optional[str] = Field(None, max_length=2000)
 
 
