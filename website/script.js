@@ -1415,12 +1415,16 @@ const GSP_WHATSAPP = '31617913965';
 
     const banner = document.createElement('div');
     banner.id = 'cookieConsentBanner';
-    // Compact single-row corner card (not a full-width bar) so it never
-    // sits over a page's primary content at first paint — e.g. the
-    // vacatures filter bar or the contact form heading, both of which sit
-    // close to the fold on a 1440x900 first view. Kept to one line (text
-    // ellipsizes, full copy in the title attribute) so its footprint stays
-    // small enough not to reach up into that content.
+    // Compact corner card (not a full-width bar) so it never sits over a
+    // page's primary content at first paint, bijvoorbeeld de vacatures
+    // filter bar of de contact form heading, die op een eerste weergave
+    // van 1440x900 allebei dicht bij de vouw staan. The text itself is one ellipsized
+    // line (full copy in the title attribute), but the card is not one
+    // row: at 390px the flex row wraps into three (text, privacy link,
+    // accept button) and the card measures 358x144. That height is what
+    // applyBodyOffset() below publishes as --fixed-stack-offset, so the
+    // contact rail, the back-to-top button and the toast container move
+    // up by exactly that much while the banner stands.
     banner.style.cssText = `
       position:fixed;bottom:16px;right:16px;left:auto;z-index:10000;
       max-width:460px;width:calc(100% - 32px);
@@ -1443,11 +1447,18 @@ const GSP_WHATSAPP = '31617913965';
 
     document.body.appendChild(banner);
 
-    // Reserve space so the fixed corner card never sits on top of a tap
-    // target (e.g. a job card CTA) at the bottom-right of the page. Kept in
-    // sync with the card's real (now much smaller) height via offsetHeight.
+    // Two things, both keyed to the card's real height via offsetHeight:
+    // reserve space at the end of the document so the card never sits on
+    // top of a tap target in the page flow, and publish that height as
+    // --fixed-stack-offset so the other fixed bottom-corner elements (the
+    // contact rail, the back-to-top button, the toast container) sit
+    // above the banner instead of underneath it. Both run again on resize
+    // because the card re-wraps between one and three rows with the
+    // viewport width.
     const applyBodyOffset = () => {
-      document.body.style.paddingBottom = banner.offsetHeight + 'px';
+      const h = banner.offsetHeight;
+      document.body.style.paddingBottom = h + 'px';
+      document.documentElement.style.setProperty('--fixed-stack-offset', h + 'px');
     };
     applyBodyOffset();
     window.addEventListener('resize', applyBodyOffset);
@@ -1456,6 +1467,7 @@ const GSP_WHATSAPP = '31617913965';
       localStorage.setItem(CONSENT_KEY, 'true');
       window.removeEventListener('resize', applyBodyOffset);
       document.body.style.paddingBottom = '';
+      document.documentElement.style.setProperty('--fixed-stack-offset', '0px');
       banner.remove();
     });
   }
@@ -1470,7 +1482,7 @@ const GSP_WHATSAPP = '31617913965';
       btn.setAttribute('aria-label', 'Back to top');
       btn.innerHTML = '<i class="fas fa-arrow-up"></i>';
       btn.style.cssText = `
-        position:fixed;bottom:80px;right:20px;z-index:9999;
+        position:fixed;bottom:calc(80px + var(--fixed-stack-offset, 0px));right:20px;z-index:9999;
         width:44px;height:44px;border-radius:50%;
         background:var(--gold);color:var(--bg);border:none;
         cursor:pointer;box-shadow:var(--shadow-md);
@@ -1573,9 +1585,14 @@ const GSP_WHATSAPP = '31617913965';
   // (formerly initWhatsappFloat(), a JS-injected .whatsapp-float plus the
   // page's own static .mail-float) with one navy pill: two 48×48 items
   // (WhatsApp, e-mail), mono glyphs ("WA" / "@", same convention as
-  // .mark.code), no pulse, never #25D366. Fixed bottom-LEFT — bottom-right
-  // already holds .back-to-top/.toast-container/the cookie banner on
-  // narrow screens. A page's static .mail-float anchor still needs to be
+  // .mark.code), no pulse, never #25D366. Fixed bottom-left above 600px;
+  // at 600px and below the pill moves to the bottom-right and the mail
+  // item is hidden in CSS (.contact-rail__item--mail), leaving one 48x48
+  // tap target. E-mail stays reachable on narrow screens through the
+  // mailto link in the shared footer and through contact.html. The other
+  // fixed bottom-right elements (.back-to-top, .toast-container, the
+  // cookie banner) are kept clear of it by the offsets in styles.css and
+  // by --fixed-stack-offset. A page's static .mail-float anchor still needs to be
   // removed from its HTML (§8.x.8 step 3, see templates.md) — this only
   // adds the new element, it does not touch existing markup.
   function initContactRail() {
@@ -1597,7 +1614,7 @@ const GSP_WHATSAPP = '31617913965';
         aria: { nl: 'Stuur een WhatsApp-bericht', en: 'Send a WhatsApp message' }
       },
       {
-        cls: 'contact-rail__item',
+        cls: 'contact-rail__item contact-rail__item--mail',
         href: 'mailto:info@gsprecruitment.nl',
         external: false,
         glyph: '@',

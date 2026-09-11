@@ -515,13 +515,16 @@ body:not(.portal) .card > .mark:first-child, .service-card > .mark:first-child,
 }
 
 /* ── Contactrail (sitebreed, §8.x.4), vervangt .whatsapp-float/.mail-float,
-   zie §8.x.7. Linksonder op >600px, rechtsonder op <=600px (zie het
-   media-block onderaan dit onderdeel). Twee 48x48-items, geen puls, nooit
-   #25D366; label klapt alleen desktop-hover/focus-visible uit, glyph is op
-   touch altijd zelfstandig leesbaar (aria-label draagt de betekenis).
+   zie §8.x.7. Linksonder op >600px met twee 48x48-items (WhatsApp,
+   e-mail); op <=600px rechtsonder met alleen het WhatsApp-item, zie het
+   media-block onderaan dit onderdeel. Geen puls, nooit #25D366; label
+   klapt alleen op desktop-hover/focus-visible uit, glyph is op touch
+   altijd zelfstandig leesbaar (aria-label draagt de betekenis).
    Rand + --shadow-md (reparatie, chief-of-staff review): de pil staat op
    dezelfde navy als de hero/footer eronder; zonder eigen rand versmelt
-   hij op die vlakken met de achtergrond en is niet als knop herkenbaar. */
+   hij op die vlakken met de achtergrond. De rand zelf haalt op navy geen
+   3:1 (--navy-600 op --navy-900 is 1,35:1); de zichtbare scheiding komt
+   van --shadow-md, de rand tekent alleen de vorm af. */
 .contact-rail {
   position: fixed; left: var(--space-lg); bottom: var(--space-lg); z-index: 9995;
   display: flex; flex-direction: column;
@@ -557,23 +560,31 @@ body:not(.portal) .card > .mark:first-child, .service-card > .mark:first-child,
   max-width: 120px;
 }
 .contact-rail__item:focus-visible { outline: 2px solid var(--gold-500); outline-offset: -2px; }
-/* <=600px: beide kanalen blijven op hun volledige 48x48-tikdoel (geen
-   verkleining, zie §8.x.4), maar staan hier naast elkaar in plaats van
-   gestapeld (96px hoog naar 48px hoog) en staan rechtsonder in plaats van
-   linksonder. Linksonder begint elke regel lopende tekst, dus daar dekt de
-   pil hele woorden af; rechtsonder valt hij in de rafelige regeleinden.
-   Gemeten in Chromium op 390x844 en 390x664, index/kandidaten/werkgevers/
-   vacatures/contact, NL en EN, scrollpositie 0 en onderaan (40 metingen):
-   linksonder 13148px2 afgedekte lopende tekst, rechtsonder 4113px2. Wat
-   overblijft zijn elementen die de volle contentbreedte beslaan (een CTA-
-   knoplabel, een checkboxlabel); die vallen in elke hoek onder de pil.
-   Botsingsvrij gemeten in dezelfde run (afstanden vanaf de onderrand):
-   rail 24-74px, back-to-top 80-122px (CSS-variant) resp. 80-124px (de
-   variant die script.js injecteert), toastcontainer vanaf 132px. De
-   footer houdt los daarvan extra padding-bottom (zie .footer) zodat de
-   laatste footerregel nooit onder de pil valt. */
+/* <=600px: één tikdoel. De rail toont hier alleen het WhatsApp-item
+   (48x48) rechtsonder; het e-mailitem verdwijnt. Een pil van 96px breed
+   dekt op 390px lopende tekst af in vrijwel elke scrollpositie: gemeten
+   over de hele scrollrange (acht pagina's, 390x844 en 390x664, NL en EN,
+   stappen van viewport/3) raakte de tweedelige pil in 29 van de 32
+   combinaties tekst, tot 3786px2 per frame. Dat geldt in beide hoeken:
+   alleen de laatste regel van een alinea eindigt rafelig, binnenregels
+   lopen tot de marge. Eén item van 48x48 halveert de breedte en zet hem
+   in de hoek waar de laatste regels het vaakst kort zijn.
+   E-mail blijft op mobiel bereikbaar via de mailto-link in de footer van
+   elke publieke pagina, en via contact.html. Het verbergen gebeurt op de
+   rail zelf, niet via .lang-nl/.lang-en (die klassen sturen uitsluitend
+   taal).
+   --fixed-stack-offset: gezet door applyBodyOffset() in script.js zodra
+   de cookiebanner staat (gemeten hoogte, 144px op 390px), weer 0px bij
+   accepteren. Zonder die offset legt de banner (bottom:16px, z-index
+   10000, breedte calc(100% - 32px)) zich bij elk eerste mobiel bezoek
+   over de rail en de toast heen. */
 @media (max-width: 600px) {
-  .contact-rail { flex-direction: row; left: auto; right: var(--space-lg); }
+  .contact-rail {
+    flex-direction: row;
+    left: auto; right: var(--space-lg);
+    bottom: calc(var(--space-lg) + var(--fixed-stack-offset, 0px));
+  }
+  .contact-rail__item--mail { display: none; }
   .contact-rail__item + .contact-rail__item { border-top: none; border-left: 1px solid var(--navy-600); }
 }
 
@@ -1308,6 +1319,14 @@ section { padding: 100px 0; }
   font-size: 0.82rem;
   color: rgba(255, 255, 255, 0.55);
 }
+/* Het e-mailadres in de onderste footerregel is een echte mailto-link op
+   elke publieke pagina. Op <=600px is dit het enige e-mailkanaal buiten
+   contact.html: de contactrail toont daar alleen WhatsApp (§8.x.4).
+   Kleur volgt de regel eromheen (geen eigen kleur die op navy onder 4,5:1
+   zakt); de onderstreping maakt hem als link herkenbaar zonder alleen op
+   kleur te leunen, hover/focus gaat naar goud zoals .footer-links a. */
+.footer-bottom a { color: inherit; text-decoration: underline; }
+.footer-bottom a:hover, .footer-bottom a:focus-visible { color: var(--gold); }
 
 /* ── Modal ──────────────────────────────────────────────── */
 .modal-overlay {
@@ -1478,14 +1497,16 @@ section { padding: 100px 0; }
 .toast-icon { font-size: 1.1rem; line-height: 1; }
 /* <=600px: de toast is daar bijna schermbreed (max-width 360px op 390px
    viewport), dus op bottom:24px legt hij zich met z-index 9998 over de
-   contactrail (9995) en blokkeert hij beide contactkanalen zolang hij
-   staat. Gemeten overlap in de oude opstelling: 2238px2 op elke pagina
-   waar een toast kan verschijnen. De container schuift daarom boven de
-   hele vaste stapel: rail tot 74px, back-to-top tot 124px, toast vanaf
-   132px vanaf de onderrand. Alleen <=600px; op breedere schermen is de
-   toast smaller dan de vrije ruimte en verandert er niets. */
+   contactrail (9995) en blokkeert hij het contactkanaal zolang hij staat.
+   Gemeten overlap in de oude opstelling: 2238px2 op elke pagina waar een
+   toast kan verschijnen. De container schuift daarom boven de hele vaste
+   stapel: rail tot 74px, back-to-top tot 124px, toast vanaf 132px vanaf
+   de onderrand. Alleen <=600px; op breedere schermen is de toast smaller
+   dan de vrije ruimte en verandert er niets.
+   --fixed-stack-offset schuift de hele stapel omhoog zolang de
+   cookiebanner staat, zie het contactrail-blok bovenin dit bestand. */
 @media (max-width: 600px) {
-  .toast-container { bottom: 132px; }
+  .toast-container { bottom: calc(132px + var(--fixed-stack-offset, 0px)); }
 }
 
 /* ── Responsive: Tablet ─────────────────────────────────── */
@@ -1639,6 +1660,13 @@ section { padding: 100px 0; }
     height: 42px;
     font-size: 1rem;
   }
+}
+/* Zolang de cookiebanner staat, schuift de hele vaste stapel omhoog over
+   de gemeten bannerhoogte; zie het contactrail-blok bovenin dit bestand.
+   De variant die script.js injecteert (#backToTop, inline bottom) zet
+   dezelfde calc in zijn eigen style.cssText. */
+@media (max-width: 600px) {
+  .back-to-top { bottom: calc(80px + var(--fixed-stack-offset, 0px)); }
 }
 
 /* .animate-float/-pulse/-shimmer/-gradient/-slide-up/-scale-in,
