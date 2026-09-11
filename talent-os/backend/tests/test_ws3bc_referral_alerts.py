@@ -14,6 +14,7 @@ daarop aan. Waar een token nodig is, wordt hij met
 secrets.token_urlsafe(32) gegenereerd, precies zoals de productiecode dat
 doet.
 """
+import json
 import os
 import secrets
 import sys
@@ -316,7 +317,10 @@ def test_dormant_warning_job_sends_nothing_when_the_switch_is_off(monkeypatch, s
 
     result = _run(sched.dormant_account_warning_job())
 
-    assert result == {"status": "dry_run", "accounts_due": 1, "selected": 1, "sent": 0}
+    assert result == {
+        "status": "dry_run", "accounts_due": 1, "selected": 1,
+        "sent": 0, "suppressed": 0, "failed": 0,
+    }
     assert stub_email.sent == []
     assert executed == [], "droogloop mag niets naar de database schrijven"
 
@@ -347,10 +351,14 @@ def test_dormant_warning_dry_run_counts_the_whole_backlog_not_the_capped_page(mo
     assert executed == []
 
 
-def test_dormant_warning_job_skips_a_suppressed_account(monkeypatch, stub_email):
-    """B10: wie STOP heeft gestuurd, krijgt geen bericht meer, op geen
+def test_dormant_warning_job_handles_a_suppressed_account_without_mail(monkeypatch, stub_email):
+    """B3. Wie STOP heeft gestuurd, krijgt geen bericht meer, op geen
     enkele grondslag -- ook geen waarschuwing over zijn eigen account.
-    Dezelfde blokkeerlijstcontrole als job_alert_job."""
+    Maar overslaan is niet hetzelfde als niets doen: de rij wordt
+    mailloos afgehandeld (`dormant_warning_skipped_at` plus een
+    audit-regel), zodat hij de selector verlaat in plaats van morgen weer
+    vooraan te staan, en zodat hij na dezelfde 30 dagen de
+    beoordelingslijst bereikt."""
     from core import privacy
 
     row = {"id": 3, "email": "stop@example.com", "full_name": "S", "last_login_at": None}
@@ -367,9 +375,20 @@ def test_dormant_warning_job_skips_a_suppressed_account(monkeypatch, stub_email)
     result = _run(sched.dormant_account_warning_job())
 
     assert result["sent"] == 0
-    assert result["selected"] == 0
+    assert result["suppressed"] == 1
+    assert result["selected"] == 1
     assert stub_email.sent == []
-    assert executed == []
+
+    stamped = [sql for sql, _ in executed if "dormant_warning_skipped_at = NOW()" in sql]
+    assert len(stamped) == 1, "een geblokkeerd account moet worden gestempeld, niet stil overgeslagen"
+
+    audits = [(sql, args) for sql, args in executed if "INSERT INTO audit_log" in sql]
+    assert len(audits) == 1
+    _sql, args = audits[0]
+    assert args[0] == "dormant_warning_suppressed"
+    changes = json.loads(args[3])
+    assert changes["email_hash"] == privacy.email_hash(row["email"])
+    assert row["email"] not in args[3], "geen adres in de audit-regel, alleen de hash"
 
 
 def test_dormant_warning_job_stamps_only_after_a_successful_send(monkeypatch, stub_email):
@@ -385,13 +404,86 @@ def test_dormant_warning_job_stamps_only_after_a_successful_send(monkeypatch, st
     assert stub_email.sent[0]["name"] == "dormant_warning"
     assert any("dormant_warning_sent_at = NOW()" in sql for sql, _ in executed)
 
-    # Mislukte verzending: geen stempel, anders is de waarschuwing
+    # Mislukte verzending: geen verzendstempel, anders is de waarschuwing
     # "verstuurd" zonder dat iemand hem heeft gekregen.
     stub_email.ok = False
     executed.clear()
     result = _run(sched.dormant_account_warning_job())
     assert result["sent"] == 0
-    assert executed == []
+    assert not any("dormant_warning_sent_at = NOW()" in sql for sql, _ in executed)
+
+
+def test_dormant_warning_job_counts_a_failed_send_as_an_attempt(monkeypatch, stub_email):
+    """B4. Een structureel onbezorgbaar adres mag zijn plek onder het
+    dagplafond niet houden: elke mislukte verzending hoogt
+    `dormant_warning_attempts` op, en _DORMANT_WARNING_WHERE_SQL laat de
+    rij na drie pogingen vallen."""
+    executed = _stub_scheduler_db(
+        monkeypatch,
+        rows_by_sql=_dormant_rows({"id": 9, "email": "dead@example.com", "full_name": "D", "last_login_at": None}),
+    )
+    monkeypatch.setattr(settings, "dormant_warning_enabled", True)
+    stub_email.ok = False
+
+    result = _run(sched.dormant_account_warning_job())
+
+    assert result["sent"] == 0
+    assert result["failed"] == 1
+    bumped = [
+        sql for sql, _ in executed
+        if "dormant_warning_attempts = dormant_warning_attempts + 1" in sql
+    ]
+    assert len(bumped) == 1, "een mislukte verzending moet de teller ophogen"
+
+
+def test_dormant_warning_selector_excludes_skipped_and_exhausted_rows():
+    """De twee clausules die B3 en B4 waarmaken staan in de selector zelf,
+    niet in Python na de LIMIT -- anders verbruikt zo'n rij elke dag
+    opnieuw een plek onder het dagplafond."""
+    from core import retention
+
+    sql = retention.DORMANT_WARNING_SQL
+    assert "dormant_warning_skipped_at IS NULL OR u.dormant_warning_skipped_at < u.last_login_at" in sql
+    assert "u.dormant_warning_attempts < 3" in sql
+    # En de telling deelt datzelfde WHERE, anders meldt de droogloop een
+    # achterstand die de job zelf nooit oppakt.
+    assert "dormant_warning_attempts < 3" in retention.DORMANT_WARNING_COUNT_SQL
+
+
+def test_portal_account_inactive_accepts_a_skipped_warning():
+    """Een STOP is een verbod op berichten, geen toestemming tot
+    onbeperkt bewaren: een geblokkeerd slapend account bereikt de
+    maandelijkse beoordelingslijst na dezelfde 18 maanden plus 30 dagen,
+    langs `dormant_warning_skipped_at` in plaats van
+    `dormant_warning_sent_at`."""
+    from core import retention
+
+    sql = retention.PORTAL_ACCOUNT_INACTIVE_SQL
+    assert "dormant_warning_skipped_at IS NOT NULL" in sql
+    assert "u.dormant_warning_skipped_at < (NOW() - INTERVAL '30 days')" in sql
+    assert "u.dormant_warning_sent_at < (NOW() - INTERVAL '30 days')" in sql
+
+
+def test_every_login_path_resets_the_dormant_attempt_counter():
+    """B4: de teller hoort bij een inactiviteitscyclus en een login begint
+    een nieuwe. Alle vier de inlogpaden gebruiken hetzelfde statement uit
+    core/retention.py; een met de hand uitgetypte vijfde kopie zou een
+    account dat via dat ene pad inlogt permanent boven de drempel laten
+    hangen."""
+    import re
+    from core import retention
+
+    assert "dormant_warning_attempts = 0" in retention.LOGIN_STAMP_SQL
+
+    backend_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    hand_written = []
+    for name in ("routers/auth.py", "routers/mfa.py"):
+        with open(os.path.join(backend_root, name), encoding="utf-8") as fh:
+            body = fh.read()
+        hand_written += [
+            f"{name}: {m}" for m in re.findall(r'"UPDATE users SET last_login_at = NOW\(\)[^"]*"', body)
+        ]
+    assert hand_written == [], hand_written
 
 
 # ══════════════════════════════════════════════════════════════════════
@@ -798,8 +890,11 @@ def test_job_alerts_switch_reports_eligibility_from_the_shared_selector(monkeypa
 
     assert out["enabled"] is True
     assert out["eligible"] is False
-    # Niet nagebouwd maar letterlijk gedeeld met job_alert_job.
-    assert sched.JOB_ALERT_ELIGIBILITY_SQL in sched.JOB_ALERT_CANDIDATE_SQL
+    # Niet nagebouwd maar letterlijk gedeeld met job_alert_job, en de
+    # constante staat in core/retention.py zodat deze router niet de hele
+    # scheduler hoeft te importeren (R3).
+    assert retention.JOB_ALERT_ELIGIBILITY_SQL in sched.JOB_ALERT_CANDIDATE_SQL
+    assert candidate_router.JOB_ALERT_ELIGIBILITY_SQL is retention.JOB_ALERT_ELIGIBILITY_SQL
 
 
 def test_job_alert_selection_skips_a_candidate_without_an_address():
@@ -847,10 +942,27 @@ def test_one_click_url_uses_the_api_host_not_the_website_host():
     POST'et hem rechtstreeks, zonder browser en zonder de frontend. Wees
     hij naar settings.frontend_url, dan kwam die POST op een statische
     host terecht en deed het afmelden niets."""
-    footer, one_click = sched._job_alert_unsubscribe_links(secrets.token_urlsafe(32))
+    footer, one_click = sched._job_alert_unsubscribe_links(
+        secrets.token_urlsafe(32), secrets.token_urlsafe(32),
+    )
     assert one_click.startswith(settings.api_base_url)
     assert "/api/public/unsubscribe?" in one_click
     assert footer.startswith(settings.frontend_url)
+
+
+def test_the_two_unsubscribe_links_never_carry_the_same_token():
+    """B1. Zolang de voettekstlink en de List-Unsubscribe-URL hetzelfde
+    token droegen, kon wie een one-click-URL uit een log haalde datzelfde
+    token in de body plakken en `scope=all` bereiken. Twee losse tokens
+    maken van "welke scope mag dit" een eigenschap van het token."""
+    footer_token = secrets.token_urlsafe(32)
+    oneclick_token = secrets.token_urlsafe(32)
+    footer, one_click = sched._job_alert_unsubscribe_links(footer_token, oneclick_token)
+
+    assert f"#token={footer_token}" in footer
+    assert footer_token not in one_click, "het fragmenttoken mag nooit in een querystring staan"
+    assert f"token={oneclick_token}" in one_click
+    assert oneclick_token not in footer
 
 
 def test_unsubscribe_audit_row_is_skipped_for_an_unknown_token():

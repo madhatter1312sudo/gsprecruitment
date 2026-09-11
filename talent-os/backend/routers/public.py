@@ -451,7 +451,18 @@ async def talentpool_confirm(request: Request, data: TalentpoolConfirmRequest):
     # re-enrolled by a later talentpool confirm -- an unsubscribe is a
     # withdrawal and only the person's own, explicit re-opt-in through
     # PUT /api/v1/candidate/job-alerts clears it.
-    wants_alerts = bool(pending["job_alerts"])
+    #
+    # R5: het vinkje telt alleen bij `scope = 'matching_and_contact'`.
+    # `matching_only` betekent letterlijk "wel matchen, geen contact", en
+    # core/retention.py's JOB_ALERT_ELIGIBILITY_SQL eist dan ook precies
+    # die scope -- een `matching_only`-rij wordt door de alertselector
+    # nooit opgepikt. Toch `job_alert_optin_at` stempelen levert een kolom
+    # op die zegt dat deze persoon alerts wil terwijl hij er nooit een
+    # krijgt: het portaal toont "aan", de export toont een opt-in die er
+    # niet is, en zet hij later zijn scope om, dan begint de mail te lopen
+    # zonder dat hij daar op dat moment iets over heeft gezegd. Het
+    # vinkje wordt dus genegeerd, niet stilzwijgend bewaard.
+    wants_alerts = bool(pending["job_alerts"]) and pending["scope"] == "matching_and_contact"
 
     existing = await fetch_one(
         "SELECT id, lawful_basis FROM candidates WHERE LOWER(email) = $1", pending["email"],
@@ -570,6 +581,29 @@ async def talentpool_confirm(request: Request, data: TalentpoolConfirmRequest):
 # Referer-header belandt. Zie de restrisico-notitie hierover in
 # docs/VERWERKINGSREGISTER.md §1.2.
 #
+# TWEE TOKENS PER VERZENDING, en dat is de kern van dit endpoint.
+# `job_alert_sends` draagt twee losse hashes:
+#
+#   - `token_hash`, het token uit het URL-FRAGMENT van de voettekstlink.
+#     Dit is de enige weg naar `scope=all` (toestemming intrekken plus
+#     blokkeerlijst, onomkeerbaar). Een fragment bereikt geen enkele
+#     server- of edge-log, dus dit token staat nergens dan in de mailbox
+#     van de ontvanger.
+#   - `oneclick_token_hash`, het token uit de querystring van de
+#     List-Unsubscribe-URL. Dat token staat per definitie in elke access-,
+#     proxy- en edge-logregel die het verzoek passeerde, en levert daarom
+#     ALTIJD `alerts` op -- wat de body, de querystring of de opgegeven
+#     scope ook zegt.
+#
+# Waarom dat een tweede kolom nodig had en niet met één token kon: zolang
+# beide URL's hetzelfde token droegen, kon wie een one-click-URL uit een
+# log haalde datzelfde token in de BODY plakken en langs de
+# body-is-toegestaan-regel `scope=all` bereiken. Een regel die kijkt naar
+# de PLEK van het token in dit verzoek beschrijft het verzoek, niet het
+# token; de tweede hash maakt er een eigenschap van het token zelf van.
+# Die plek-regel staat er nog (hieronder, bij `body_token is None`), maar
+# als extra laag, niet als het bewijs.
+#
 # Geen enumeratie-orakel. Het antwoord is altijd hetzelfde bericht met
 # dezelfde statuscode: voor een geldig token, een al verbruikt token, een
 # verzonnen token en een ontbrekend token. Om ook het *werk* niet te
@@ -661,10 +695,12 @@ async def unsubscribe(
     mogen ook als queryparameter (`?token=...&scope=...`), voor de
     one-click-header.
 
-    Eén asymmetrie tussen die twee wegen, met opzet: staat het token in de
-    querystring, dan is de scope altijd `alerts`, ook als de body `all`
-    zegt. `all` is onomkeerbaar en alleen bereikbaar via de body, met het
-    token uit het URL-fragment -- zie het commentaar bij die regel."""
+    Eén asymmetrie tussen die twee wegen, met opzet: `scope='all'` is
+    alleen bereikbaar met het token uit het URL-FRAGMENT van de
+    voettekstlink, in de body. Het token uit de List-Unsubscribe-URL
+    levert altijd `alerts`, ongeacht body, querystring of opgegeven
+    scope -- zie het blok hierboven voor waarom dat aan het token hangt en
+    niet aan de plek in het verzoek."""
     raw_body = await _unsubscribe_body(request)
     # UnsubscribeRequest is het gedocumenteerde bodycontract, maar het
     # wordt hier PER VELD toegepast en niet als één model (R1). Als één
@@ -688,49 +724,71 @@ async def unsubscribe(
     if raw_scope not in UNSUBSCRIBE_SCOPES:
         raw_scope = "alerts"
 
-    # Security-audit B2. `scope='all'` is onomkeerbaar: het trekt de
-    # toestemming in en zet het adres op de suppressielijst, en er bestaat
-    # geen API om zo'n rij weer te verwijderen. Komt het token uit de
-    # QUERYSTRING, dan staat het in elke access-, proxy- en edge-logregel
-    # die het verzoek passeerde, en zou één gevonden URL genoeg zijn om
-    # iemand daar permanent op te zetten. Die weg is er voor precies één
-    # aanroeper -- de RFC 8058 one-click-POST van een mailclient, die per
-    # definitie alleen 'alerts' bedoelt -- dus is de scope daar hard
-    # 'alerts', wat de body ook zegt. `scope='all'` blijft alleen
-    # bereikbaar via de body met het token uit het URL-fragment, en dat
-    # fragment bereikt geen enkele log (website/unsubscribe.js).
+    # Extra laag bovenop de tokenbinding hieronder, niet het bewijs zelf:
+    # komt het token uit de QUERYSTRING, dan staat het in elke access-,
+    # proxy- en edge-logregel die het verzoek passeerde, en `scope='all'`
+    # is onomkeerbaar (toestemming ingetrokken, adres op de
+    # suppressielijst, geen API om zo'n rij weer weg te halen). Deze regel
+    # beschrijft het verzoek; de tweede hash hieronder beschrijft het
+    # token, en die twee vangen elkaars gaten op.
     if body_token is None and token is not None:
         raw_scope = "alerts"
 
     token_hash = hash_token(raw_token) if raw_token else None
 
-    # Verbruikt het token en levert de kandidaat op, in één statement:
-    # `used_at IS NULL` maakt hergebruik onmogelijk zonder een aparte
-    # check die zelf weer een tak (en dus een tijdsverschil) zou zijn.
-    # Elke parameter krijgt hier een expliciete cast. asyncpg leidt het
-    # type van een placeholder af uit de kolom waarmee hij wordt
-    # vergeleken, en juist in dit endpoint staan er placeholders op
-    # plekken zonder kolom om van te leren (SELECT $1 ... WHERE $1 IS NOT
-    # NULL) -- zonder cast is dat een AmbiguousParameterError, en dat zou
-    # een 500 zijn: het enige antwoord dat van het generieke antwoord
-    # afwijkt en dus verklapt dat er iets bijzonders aan de hand is.
+    # Twee lookups, en ALLEBEI draaien ze altijd -- ook als de eerste al
+    # raak was. Het antwoord van dit endpoint is met opzet voor elk token
+    # identiek, en een meetbaar tijdsverschil is net zo goed een orakel
+    # als een ander antwoord: "eerst kijken of het bestaat en dan pas iets
+    # doen" is precies wat hier niet gebeurt. Bij een onbekend token raken
+    # beide statements nul rijen en blijft candidate_id NULL.
     #
-    # `sent_at > NOW() - INTERVAL '90 days'` (R3): een afmeldtoken hoort
-    # bij één verzonden bericht en had tot nu toe geen houdbaarheid, dus
-    # een token uit een mail van twee jaar geleden (of uit een access log
-    # van toen) werkte vandaag nog. 90 dagen is ruim voor het doel -- een
-    # mens die deze mail terugzoekt -- en gelijk aan de bewaartermijn van
-    # email_log (migrations/040). Verlopen loopt langs precies dezelfde
-    # weg als een onbekend token: candidate_id blijft NULL, zelfde
-    # antwoord, zelfde werk.
-    consumed = await fetch_one(
+    # `used_at IS NULL` maakt hergebruik onmogelijk zonder een aparte
+    # check die zelf weer een tak zou zijn. Elke parameter krijgt een
+    # expliciete cast: asyncpg leidt het type van een placeholder af uit
+    # de kolom waarmee hij wordt vergeleken, en juist in dit endpoint
+    # staan er placeholders op plekken zonder kolom om van te leren
+    # (SELECT $1 ... WHERE $1 IS NOT NULL) -- zonder cast is dat een
+    # AmbiguousParameterError, en dat zou een 500 zijn: het enige antwoord
+    # dat van het generieke antwoord afwijkt.
+    #
+    # `sent_at > NOW() - INTERVAL '90 days'` voor allebei: een afmeldtoken
+    # hoort bij één verzonden bericht. Zonder houdbaarheid werkt een token
+    # uit een mail van twee jaar geleden (of uit een access log van toen)
+    # vandaag nog. 90 dagen is ruim voor het doel -- een mens die deze
+    # mail terugzoekt -- en gelijk aan de bewaartermijn van email_log
+    # (migrations/040) en van job_alert_sends zelf
+    # (services/scheduler.py job_alert_sends_cleanup_job). Verlopen loopt
+    # langs precies dezelfde weg als een onbekend token.
+    #
+    # Eerst het one-click-token (B1). Een treffer hier betekent: dit token
+    # kwam uit de List-Unsubscribe-URL, stond dus in onze logs, en kan
+    # daarom nooit meer dan `alerts` -- wat de body, de querystring of de
+    # opgegeven scope ook zegt.
+    consumed_oneclick = await fetch_one(
+        """UPDATE job_alert_sends SET used_at = NOW()
+           WHERE oneclick_token_hash = $1::text AND used_at IS NULL
+             AND sent_at > NOW() - INTERVAL '90 days'
+           RETURNING candidate_id""",
+        token_hash,
+    )
+    # Daarna het fragmenttoken, de gewone weg. Dit is het enige token
+    # waarmee `scope='all'` bereikbaar is.
+    consumed_fragment = await fetch_one(
         """UPDATE job_alert_sends SET used_at = NOW()
            WHERE token_hash = $1::text AND used_at IS NULL
              AND sent_at > NOW() - INTERVAL '90 days'
            RETURNING candidate_id""",
         token_hash,
     )
-    candidate_id = consumed["candidate_id"] if consumed else None
+
+    if consumed_oneclick is not None:
+        candidate_id = consumed_oneclick["candidate_id"]
+        raw_scope = "alerts"
+    elif consumed_fragment is not None:
+        candidate_id = consumed_fragment["candidate_id"]
+    else:
+        candidate_id = None
 
     # Vanaf hier draait elk statement altijd, met candidate_id = NULL bij
     # een onbekend/verbruikt/ontbrekend token: `WHERE id = NULL` matcht
@@ -740,12 +798,22 @@ async def unsubscribe(
     )
     email = candidate["email"] if candidate else None
 
+    # B6: op id ÉN op adres, net als de drie statements hieronder. Dit
+    # stond alleen op `id = $1` terwijl `uq_candidates_email` hoofdletter-
+    # gevoelig is en POST /api/candidates het adres niet normaliseert:
+    # `A@example.com` en `a@example.com` kunnen naast elkaar bestaan, en
+    # de alertselector (core/retention.py JOB_ALERT_ELIGIBILITY_SQL) pikt
+    # ze allebei op. Wie zich op de ene rij afmeldde, kreeg morgen zijn
+    # digest van de andere -- dezelfde persoon, hetzelfde adres, een
+    # afmelding die niets leek te doen. Dat is precies het gat dat voor
+    # `scope='all'` al was gedicht.
     await execute(
         """UPDATE candidates
            SET job_alert_unsubscribed_at = COALESCE(job_alert_unsubscribed_at, NOW()),
                updated_at = NOW()
-           WHERE id = $1::int""",
-        candidate_id,
+           WHERE id = $1::int
+              OR ($2::text IS NOT NULL AND LOWER(email) = LOWER($2::text))""",
+        candidate_id, email,
     )
 
     withdraw_all = raw_scope == "all"
@@ -758,16 +826,14 @@ async def unsubscribe(
     # vraagt. `created_by` blijft NULL: er is geen actor, de persoon zelf
     # deed dit.
     #
-    # Security-audit B9: op id ÉN op adres, net als add_suppression().
-    # Die twee liepen uit elkaar -- hier alleen `id = $1`, daar
-    # `LOWER(email) = LOWER($1)` -- terwijl het effect hetzelfde hoort te
-    # zijn: dit is dezelfde intrekking, alleen door de betrokkene zelf in
-    # plaats van door een beheerder. Eén adres kan meer dan één
-    # candidates-rij hebben (een gesourcete rij en een portaalrij die
-    # WS-C.16's FK nooit heeft samengevoegd), en het adres komt straks op
-    # de suppressielijst te staan: dan moet elke rij met dat adres de
-    # intrekking dragen, anders blijft er een rij achter die voor elke
-    # selector nog "toestemming intact" zegt.
+    # Op id ÉN op adres, net als add_suppression(): dit is dezelfde
+    # intrekking, alleen door de betrokkene zelf in plaats van door een
+    # beheerder, dus het effect hoort hetzelfde te zijn. Eén adres kan
+    # meer dan één candidates-rij hebben (een gesourcete rij en een
+    # portaalrij die WS-C.16's FK nooit heeft samengevoegd), en het adres
+    # komt straks op de suppressielijst te staan: dan moet elke rij met
+    # dat adres de intrekking dragen, anders blijft er een rij achter die
+    # voor elke selector nog "toestemming intact" zegt.
     await execute(
         """UPDATE candidates
            SET consent_withdrawn_at = CASE WHEN $2::boolean THEN COALESCE(consent_withdrawn_at, NOW())
@@ -786,14 +852,13 @@ async def unsubscribe(
         privacy.email_domain(email) if email else None,
         withdraw_all,
     )
-    # Zelfde afwijking, andere tabel (B9, tweede helft). add_suppression()
-    # trekt drafts in op `LOWER(target_email)`, dit endpoint deed het op
-    # `target_id` -- en die twee vinden niet dezelfde rijen. Een
-    # outreach-draft die voor deze persoon is geschreven maar aan een
-    # andere candidates-rij met hetzelfde adres hangt (of waarvan
-    # target_id nooit is gezet) bleef hier op 'draft' staan en had morgen
-    # alsnog door een mens verstuurd kunnen worden, aan iemand die zojuist
-    # "geen contact meer" had gekozen. Beide criteria dus, zoals daar.
+    # Zelfde twee criteria, andere tabel. add_suppression() trekt drafts
+    # in op `LOWER(target_email)`; alleen op `target_id` vindt dat niet
+    # dezelfde rijen. Een outreach-draft die voor deze persoon is
+    # geschreven maar aan een andere candidates-rij met hetzelfde adres
+    # hangt (of waarvan target_id nooit is gezet) blijft dan op 'draft'
+    # staan en kan morgen alsnog door een mens worden verstuurd, aan
+    # iemand die zojuist "geen contact meer" koos.
     await execute(
         """UPDATE outreach_drafts SET status = 'rejected', updated_at = NOW()
            WHERE target_type = 'candidate' AND status = 'draft' AND $2::boolean
@@ -815,7 +880,11 @@ async def unsubscribe(
         json.dumps({
             "scope": raw_scope,
             "email_hash": privacy.email_hash(email) if email else None,
-            "via": "one_click_token",
+            # Welk van de twee tokens is gebruikt. Zonder dat onderscheid
+            # zegt deze regel niet waar de afmelding vandaan kwam, en is
+            # bij een vermoed gelekt token achteraf niet na te gaan of
+            # het een one-click-URL uit een log betrof.
+            "via": "one_click_token" if consumed_oneclick is not None else "footer_token",
         }),
     )
 

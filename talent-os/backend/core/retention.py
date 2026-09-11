@@ -242,6 +242,45 @@ TALENTPOOL_EXPIRED_SQL = """
       AND c.deleted_at IS NULL AND c.email IS NOT NULL
 """ + CANDIDATE_NO_REACTION_GUARD_SQL
 
+# ── Wie een vacature-alert zou kunnen ontvangen (WS3c) ──────────────────
+#
+# Alles behalve de twee alert-kolommen zelf: "zou deze kandidaat een alert
+# kunnen krijgen als hij zich aanmeldde". Hier en niet in
+# services/scheduler.py, hoewel job_alert_job de grootste lezer is: dit is
+# een toestemmings- en bewaartermijnvoorwaarde, hij deelt zijn
+# belangrijkste clausule met TALENTPOOL_EXPIRED_SQL hierboven, en de
+# tweede lezer is routers/candidate.py's portaalschakelaar -- die haalde
+# hem tot nu toe uit services/scheduler.py en sleepte daarmee de hele
+# scheduler (APScheduler incluis) een router-import in.
+#
+# Tabelalias `c`, in beide lezers.
+#
+# De portaalschakelaar leest hem om dezelfde reden als de job: hij gaf
+# `enabled: true` terug aan iemand die de selector nooit oppikt (een
+# gesourcete kandidaat zonder `consent_scope`, bijvoorbeeld), en het
+# portaal kon dat verschil niet zien, dus stond er "aan" bij iemand die
+# nooit iets zou ontvangen.
+#
+# De laatste twee regels zijn de toestemmingsgeldigheid. `consent_scope`
+# en `consent_withdrawn_at` zeggen alleen iets over toestemming die ooit
+# is gegeven en niet actief is ingetrokken -- niet of hij nog geldt.
+# Talentpool-toestemming loopt na 12 maanden af (migrations/030,
+# TALENTPOOL_EXPIRED_SQL hierboven) en verloopt stil: geen kolom
+# verandert, `consent_scope` blijft staan. Zonder die clausule mailt de
+# job dagelijks naar iemand wiens toestemming al een jaar verlopen is en
+# die daarna zelfs op de beoordelingslijst staat. Wie
+# `lawful_basis = 'portal_registratie'` heeft, valt erbuiten omdat zijn
+# grondslag zijn eigen account is (art. 13), niet die toestemming, en die
+# kent geen einddatum.
+JOB_ALERT_ELIGIBILITY_SQL = """
+       c.consent_withdrawn_at IS NULL
+       AND c.deleted_at IS NULL
+       AND c.email IS NOT NULL
+       AND (c.consent_scope = 'matching_and_contact' OR c.lawful_basis = 'portal_registratie')
+       AND (c.lawful_basis = 'portal_registratie'
+            OR (c.consent_talentpool_until IS NOT NULL AND c.consent_talentpool_until > NOW()))
+"""
+
 # migrations/032_retention_anchor_columns.py adds candidates.rejected_at,
 # stamped by the only two write paths onto candidates.status
 # (routers/candidates.py PATCH /api/candidates/{id} and
@@ -354,12 +393,24 @@ PROSPECT_RESPONDING_SQL = f"""
 # satisfy this condition, so no account (dormant however long) reaches
 # the review list without one -- the selector fails closed rather than
 # silently keeping the pre-fix behaviour of ignoring the warning.
+#
+# Tweede reparatieronde (B3): `dormant_warning_skipped_at` telt hier
+# gelijk met `dormant_warning_sent_at`, met dezelfde 30 dagen ertussen.
+# Een account waarvan het adres op de blokkeerlijst staat krijgt géén
+# waarschuwingsmail -- STOP is STOP -- maar een STOP is een verbod op
+# berichten, geen toestemming om de gegevens onbeperkt te bewaren. Zonder
+# deze tweede tak bleef zo'n account voor altijd buiten deze lijst, en
+# daarmee buiten de enige plek waar iemand ooit besluit het te wissen.
+# services/scheduler.py's dormant_account_warning_job stempelt die kolom
+# mailloos, met een audit-regel in plaats van een bericht.
 PORTAL_ACCOUNT_INACTIVE_SQL = f"""
     SELECT id, email, last_login_at + INTERVAL '18 months' AS term_expired_op
       FROM users u WHERE u.role = 'candidate' AND u.deleted_at IS NULL
       AND u.last_login_at IS NOT NULL AND u.last_login_at <= (NOW() - INTERVAL '18 months')
-      AND u.dormant_warning_sent_at IS NOT NULL
-      AND u.dormant_warning_sent_at < (NOW() - INTERVAL '30 days')
+      AND ((u.dormant_warning_sent_at IS NOT NULL
+            AND u.dormant_warning_sent_at < (NOW() - INTERVAL '30 days'))
+           OR (u.dormant_warning_skipped_at IS NOT NULL
+               AND u.dormant_warning_skipped_at < (NOW() - INTERVAL '30 days')))
       AND NOT EXISTS (
           SELECT 1 FROM candidate_profiles cpf
           JOIN candidates c ON c.id = cpf.candidate_id
@@ -382,14 +433,13 @@ PORTAL_ACCOUNT_INACTIVE_SQL = f"""
 # daadwerkelijk is verstuurd en 30 dagen oud is. services/scheduler.py's
 # dormant_account_warning_job is wat die kolom stempelt.
 #
-# Ondergrens 17 maanden, GEEN bovengrens (besluit van de eigenaar, B3).
-# De eerste versie had `AND last_login_at > NOW() - INTERVAL '18 months'`
-# erbij, zodat het venster precies één maand breed was. Dat leek netjes
-# maar liet iedereen die op de dag van invoering al langer dan 18 maanden
-# sliep permanent boven het venster vallen: nooit gewaarschuwd, dus nooit
-# beoordeeld, dus de publiek beloofde 18 maanden werd voor precies die
-# achterstand nooit gehaald. Zonder bovengrens loopt die achterstand in
-# één ronde mee, met dezelfde 30 dagen notice als iedereen.
+# Ondergrens 17 maanden, GEEN bovengrens (besluit van de eigenaar). Een
+# venster van precies één maand breed laat iedereen die op de dag van
+# invoering al langer dan 18 maanden slaapt permanent boven het venster
+# vallen: nooit gewaarschuwd, dus nooit beoordeeld, dus de publiek
+# beloofde 18 maanden wordt voor precies die achterstand nooit gehaald.
+# Zonder bovengrens loopt die achterstand in één ronde mee, met dezelfde
+# 30 dagen notice als iedereen.
 #
 # Twee keer waarschuwen kan daardoor niet: `dormant_warning_sent_at IS
 # NULL OR < last_login_at` betekent "nog nooit gewaarschuwd in deze
@@ -398,11 +448,29 @@ PORTAL_ACCOUNT_INACTIVE_SQL = f"""
 # stempel nieuwer dan zijn laatste login en valt hij hier morgen niet
 # opnieuw uit. De LIMIT is dus een dagplafond op een aflopende
 # achterstand, geen filter dat iemand structureel overslaat.
+#
+# `dormant_warning_skipped_at` doet hetzelfde voor de mailloze afhandeling
+# van een geblokkeerd adres (B3), met exact dezelfde vergelijking en dus
+# dezelfde cyclus. Zonder die regel bleef een geblokkeerd account elke dag
+# opnieuw geselecteerd, vooraan onder `ORDER BY last_login_at ASC`, en
+# hield het permanent een plek onder het dagplafond bezet: bij een paar
+# honderd zulke accounts bereikt de job niemand anders meer.
+#
+# `dormant_warning_attempts < 3` doet hetzelfde voor een adres dat
+# structureel niet te bezorgen is (B4). Een mislukte verzending stempelt
+# `dormant_warning_sent_at` met opzet niet -- anders zou
+# PORTAL_ACCOUNT_INACTIVE_SQL 30 dagen later een account op de
+# beoordelingslijst zetten waar nooit een waarschuwing over aankwam -- en
+# zonder teller betekent dat: elke dag opnieuw proberen, elke dag dezelfde
+# plek onder het plafond. Na drie pogingen valt de rij eruit; elke login
+# zet de teller terug op 0 (LOGIN_STAMP_SQL hieronder).
 _DORMANT_WARNING_WHERE_SQL = f"""
        u.role = 'candidate' AND u.deleted_at IS NULL AND u.email IS NOT NULL
        AND u.last_login_at IS NOT NULL
        AND u.last_login_at <= (NOW() - INTERVAL '17 months')
        AND (u.dormant_warning_sent_at IS NULL OR u.dormant_warning_sent_at < u.last_login_at)
+       AND (u.dormant_warning_skipped_at IS NULL OR u.dormant_warning_skipped_at < u.last_login_at)
+       AND u.dormant_warning_attempts < 3
        AND NOT EXISTS (
            SELECT 1 FROM candidate_profiles cpf
            JOIN candidates c ON c.id = cpf.candidate_id
@@ -430,6 +498,25 @@ DORMANT_WARNING_COUNT_SQL = f"""
       FROM users u
      WHERE {_DORMANT_WARNING_WHERE_SQL}
 """
+
+# $1 = users.id. Elk inlogpad stempelt `last_login_at`: routers/auth.py
+# (wachtwoord en Google) en routers/mfa.py (de twee tweede-factorstappen).
+# Daarom staat het statement hier en niet vier keer met de hand uitgetypt:
+# `dormant_warning_attempts` hoort bij een inactiviteitscyclus, en een
+# login begint een nieuwe -- wie inlogt heeft een werkend adres, wat de
+# drie mislukte pogingen ervoor ze ook waren. Een van de vier plekken
+# vergeten betekent: een account dat wel inlogt maar via dat ene pad,
+# blijft voor altijd boven de drempel van B4 hangen.
+#
+# `dormant_warning_sent_at` en `dormant_warning_skipped_at` worden hier
+# bewust NIET genuld: _DORMANT_WARNING_WHERE_SQL vergelijkt ze met
+# `last_login_at` en een verse login maakt beide stempels vanzelf ouder
+# dan die kolom. Nullen zou hetzelfde doen en een historisch gegeven
+# weggooien -- wanneer deze persoon is gewaarschuwd, is precies wat het
+# audit-spoor van §1.4 rij 6 moet kunnen tonen.
+LOGIN_STAMP_SQL = (
+    "UPDATE users SET last_login_at = NOW(), dormant_warning_attempts = 0 WHERE id = $1"
+)
 
 
 # ── Apollo bulk-pool cleanup (VERWERKINGSREGISTER.md §2.6, §5.7) ─────────

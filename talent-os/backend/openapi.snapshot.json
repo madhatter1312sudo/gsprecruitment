@@ -7858,7 +7858,7 @@
     },
     "/api/public/unsubscribe": {
       "post": {
-        "description": "Meld af voor vacature-alerts (`scope='alerts'`) of voor elk contact\n(`scope='all'`). Zie het blok hierboven voor de twee aanroepers en\nvoor waarom het antwoord altijd identiek is.\n\nBody (optioneel, JSON): `{\"token\": \"...\", \"scope\": \"alerts\"|\"all\"}` --\nzie models.schemas.UnsubscribeRequest voor de vorm. Beide velden\nmogen ook als queryparameter (`?token=...&scope=...`), voor de\none-click-header.\n\nE\u00e9n asymmetrie tussen die twee wegen, met opzet: staat het token in de\nquerystring, dan is de scope altijd `alerts`, ook als de body `all`\nzegt. `all` is onomkeerbaar en alleen bereikbaar via de body, met het\ntoken uit het URL-fragment -- zie het commentaar bij die regel.",
+        "description": "Meld af voor vacature-alerts (`scope='alerts'`) of voor elk contact\n(`scope='all'`). Zie het blok hierboven voor de twee aanroepers en\nvoor waarom het antwoord altijd identiek is.\n\nBody (optioneel, JSON): `{\"token\": \"...\", \"scope\": \"alerts\"|\"all\"}` --\nzie models.schemas.UnsubscribeRequest voor de vorm. Beide velden\nmogen ook als queryparameter (`?token=...&scope=...`), voor de\none-click-header.\n\nE\u00e9n asymmetrie tussen die twee wegen, met opzet: `scope='all'` is\nalleen bereikbaar met het token uit het URL-FRAGMENT van de\nvoettekstlink, in de body. Het token uit de List-Unsubscribe-URL\nlevert altijd `alerts`, ongeacht body, querystring of opgegeven\nscope -- zie het blok hierboven voor waarom dat aan het token hangt en\nniet aan de plek in het verzoek.",
         "operationId": "unsubscribe_api_public_unsubscribe_post",
         "parameters": [
           {
@@ -13986,7 +13986,7 @@
     },
     "/api/v1/gdpr/export": {
       "get": {
-        "description": "Art. 15/20 \u2014 export all personal data we hold on the requesting user.\n\nCovers the same table set erase_person() erases: users,\ncandidate_profiles, candidates, plus everything keyed off the resolved\ncandidate id (matches/saved_jobs) and off the account itself\n(outreach addressed to this email, quiz/contact submissions, prior\ndata_subject_requests).",
+        "description": "Art. 15/20 \u2014 export all personal data we hold on the requesting user.\n\nCovers the same table set erase_person() erases: users,\ncandidate_profiles, candidates, plus everything keyed off the resolved\ncandidate id (matches/saved_jobs) and off the account itself\n(outreach addressed to this email, quiz/contact submissions, job\nalerts received, prior data_subject_requests).",
         "operationId": "export_my_data_api_v1_gdpr_export_get",
         "responses": {
           "200": {

@@ -5,6 +5,7 @@ NO local models on VPS. All embedding calls go through OpenRouter.
 import httpx
 from typing import List, Dict, Any, Optional
 from core.config import settings
+from core.matching import MATCH_SUGGESTION_MIN_SCORE
 
 
 class EmbeddingMatcher:
@@ -62,21 +63,13 @@ class EmbeddingMatcher:
         Match a job description against a list of candidates using cosine similarity
         on OpenRouter embeddings.
 
-        `min_score=None` means routers/matches.py's
+        `min_score=None` means core/matching.py's
         MATCH_SUGGESTION_MIN_SCORE -- the one definition of "good enough
-        to call a suggestion" (CR R5). It used to be a second literal
-        `0.3` here that happened to equal that constant, so the two could
-        drift apart without anything noticing; the only caller passes the
-        constant explicitly anyway, which made the literal a silent
-        second opinion for anyone who did not.
-
-        Imported inside the function, not at module level: routers import
-        services, so the other direction at import time is a cycle (same
-        lazy-import pattern as services/scheduler.py's job_alert_job).
+        to call a suggestion". A second literal `0.3` here would be a
+        silent second opinion that can drift away from that constant
+        without anything noticing.
         """
         if min_score is None:
-            from routers.matches import MATCH_SUGGESTION_MIN_SCORE
-
             min_score = MATCH_SUGGESTION_MIN_SCORE
 
         if not candidates:

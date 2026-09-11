@@ -24,11 +24,11 @@ from datetime import datetime, timedelta, timezone
 from services import storage
 from services.candidate_link import get_or_create_candidate_id
 # De rest van de alert-selectie van services/scheduler.py's job_alert_job,
-# gedeeld en niet nagebouwd -- zie de portaalschakelaar verderop (CR R6).
-# services/scheduler.py importeert zelf geen routers/* bij het laden (de
-# twee plekken die dat nodig hebben doen het in de functie), dus dit is
-# geen importcyclus.
-from services.scheduler import JOB_ALERT_ELIGIBILITY_SQL
+# gedeeld en niet nagebouwd -- zie de portaalschakelaar verderop. De
+# constante staat in core/retention.py en niet in services/scheduler.py,
+# zodat deze router er niet de hele scheduler (APScheduler incluis) voor
+# hoeft te importeren.
+from core.retention import JOB_ALERT_ELIGIBILITY_SQL
 
 logger = logging.getLogger("talent_os.candidate_portal")
 

@@ -15,36 +15,21 @@ logger = logging.getLogger("talent_os.matches")
 router = APIRouter(prefix="/api/matches", tags=["matches"], dependencies=[Depends(verify_api_key)])
 
 
-# ── De matchscore-schaal, op één plek ───────────────────────────────────
+# ── De matchscore-schaal ────────────────────────────────────────────────
 #
-# `matches.match_score` staat overal op de 0-100-schaal, terwijl
-# services/matcher.py intern met cosinusgelijkenis op 0-1 rekent en bij
-# het opslaan vermenigvuldigt (`round(score * 100, 2)`, zie
-# _run_matching_for_job hieronder). Die twee getallen stonden tot WS3c
-# als losse literals in deze module; iedere andere lezer van
-# `match_score` moest de omrekening zelf raden.
+# De schaal en de suggestiedrempel staan in core/matching.py, niet hier:
+# services/matcher.py en services/scheduler.py's job_alert_job lezen ze
+# ook, en een constante in routers/ kunnen zij alleen via een lazy import
+# in de functie bereiken (routers importeren services, dus andersom is
+# een cyclus). Zie die module voor wat de twee getallen betekenen en wat
+# de ondergrens uitdrukkelijk niet doet.
 #
-# MATCH_SUGGESTION_MIN_SCORE is de drempel waaronder de matcher een
-# kandidaat helemaal niet als 'suggested' wegschrijft;
-# MATCH_SUGGESTION_MIN_STORED_SCORE is diezelfde drempel op de schaal
-# zoals hij in de kolom staat. services/scheduler.py's job_alert_job
-# leest die tweede: een kandidaat krijgt alleen een alert over matches
-# die minstens zo goed zijn als wat deze codebase zelf een suggestie
-# durft te noemen -- geen apart, verzonnen getal.
-#
-# Wat die ondergrens NIET is, want het commentaar hier suggereerde dat
-# eerder wel (CR R5): hij is geen poort op wat er in de kolom komt. POST
-# /api/matches (een externe routine achter dezelfde X-API-Key) schrijft
-# nog steeds elke `match_score` weg die de aanroeper meestuurt, ook 1.0,
-# en niets in dit bestand weigert dat. De ondergrens zit uitsluitend aan
-# de LEESKANT, in services/scheduler.py's JOB_ALERT_MATCHES_SQL: zo'n rij
-# bestaat, is zichtbaar in het admin-paneel, en telt alleen niet mee voor
-# een alert. Wie wil dat hij ook niet wordt opgeslagen, moet dat in
-# create_match afdwingen -- dat is een aparte keuze en die is hier niet
-# gemaakt.
-MATCH_SCORE_SCALE = 100
-MATCH_SUGGESTION_MIN_SCORE = 0.3
-MATCH_SUGGESTION_MIN_STORED_SCORE = MATCH_SUGGESTION_MIN_SCORE * MATCH_SCORE_SCALE
+# Hier geherexporteerd omdat dit de module is die `match_score` schrijft
+# (_run_matching_for_job hieronder) en omdat bestaande lezers deze namen
+# op deze plek verwachten.
+from core.matching import (  # noqa: F401
+    MATCH_SCORE_SCALE, MATCH_SUGGESTION_MIN_SCORE, MATCH_SUGGESTION_MIN_STORED_SCORE,
+)
 
 
 def _consent_gate_sql(prefix: str = "") -> str:

@@ -41,8 +41,8 @@ async def export_my_data(current_user: dict = Depends(get_current_user)):
     Covers the same table set erase_person() erases: users,
     candidate_profiles, candidates, plus everything keyed off the resolved
     candidate id (matches/saved_jobs) and off the account itself
-    (outreach addressed to this email, quiz/contact submissions, prior
-    data_subject_requests)."""
+    (outreach addressed to this email, quiz/contact submissions, job
+    alerts received, prior data_subject_requests)."""
     email = current_user["email"]
     user_id = current_user["id"]
 
@@ -66,6 +66,7 @@ async def export_my_data(current_user: dict = Depends(get_current_user)):
         )
     applications = []
     saved = []
+    job_alert_sends = []
     if candidate:
         applications = await fetch_all(
             """SELECT m.status, m.match_score, m.created_at, j.title AS job_title
@@ -77,6 +78,22 @@ async def export_my_data(current_user: dict = Depends(get_current_user)):
             """SELECT sj.created_at, j.title AS job_title
                FROM saved_jobs sj JOIN job_orders j ON j.id = sj.job_id
                WHERE sj.candidate_id = $1""",
+            candidate["id"],
+        )
+        # Art. 15 (R2): welke vacature-alerts deze persoon heeft
+        # ontvangen, wanneer, en of hij zich via zo'n bericht heeft
+        # afgemeld. Dat zijn persoonsgegevens over hem en ze horen dus in
+        # zijn eigen export.
+        #
+        # UITDRUKKELIJK NIET de twee tokenhashes. Die zijn geen gegeven
+        # over deze persoon maar een authenticatiemiddel: wie de export
+        # van iemand anders in handen krijgt, zou er anders een
+        # afmeldtoken uit kunnen aflezen. Ze staan om dezelfde reden niet
+        # in de export als `users.password_hash` en
+        # `verification_token_hash` er niet in staan.
+        job_alert_sends = await fetch_all(
+            "SELECT id, job_ids, sent_at, used_at FROM job_alert_sends "
+            "WHERE candidate_id = $1 ORDER BY sent_at DESC",
             candidate["id"],
         )
 
@@ -127,6 +144,7 @@ async def export_my_data(current_user: dict = Depends(get_current_user)):
         "candidate_record": _clean(candidate),
         "applications": [_clean(r) for r in applications],
         "saved_jobs": [_clean(r) for r in saved],
+        "job_alerts_received": [_clean(r) for r in job_alert_sends],
         "outreach_drafts_received": [_clean(r) for r in outreach_drafts],
         "outreach_messages_received": [_clean(r) for r in outreach_messages],
         "quiz_submissions": [_clean(r) for r in quiz],
@@ -555,13 +573,11 @@ async def erase_person(
     # filter, same per-row placeholder reasoning.
     #
     # Dezelfde UPDATE als hierboven, letterlijk dezelfde constante en niet
-    # een tweede kopie ervan. Die twee stonden tot de reparatieronde
-    # woordelijk naast elkaar, en B5 liet precies zien waar dat op
-    # uitdraait: wie er een kolom aan toevoegt, moet aan twee plekken
-    # denken, en de tweede wordt alleen geraakt door een pad (een
-    # FK-gekoppelde rij met een afwijkend adres) dat zelden in beeld komt.
-    # Alleen de SELECT verschilt, en dat is ook het enige dat hoort te
-    # verschillen.
+    # een tweede kopie ervan. Twee woordelijke kopieën betekenen: wie er
+    # een kolom aan toevoegt, moet aan twee plekken denken, en de tweede
+    # wordt alleen geraakt door een pad (een FK-gekoppelde rij met een
+    # afwijkend adres) dat zelden in beeld komt. Alleen de SELECT
+    # verschilt, en dat is ook het enige dat hoort te verschillen.
     if extra_ids:
         await _anonymize_by_id(
             "SELECT id FROM candidates WHERE id = ANY($1::int[])",

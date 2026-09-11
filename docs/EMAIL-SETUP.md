@@ -302,11 +302,24 @@ Nodig is dus één uitzondering, zo smal mogelijk:
 Wat aan onze kant al is geregeld, zodat die uitzondering niets opent wat
 dicht hoorde te blijven: het endpoint heeft geen authenticatie om te
 omzeilen, doet niets zonder een geldig token van 32 random bytes, verbruikt
-dat token bij de eerste aanroep (`job_alert_sends.used_at`), laat het na 90
-dagen verlopen, en accepteert vanuit de querystring uitsluitend
-`scope=alerts` -- `scope=all` (toestemming intrekken plus blokkeerlijst)
-kan alleen via de body, met het token uit het URL-fragment. De
-rate limit op dit pad staat op 60/minuut, ruim genoeg voor de gedeelde
+dat token bij de eerste aanroep (`job_alert_sends.used_at`) en laat het na
+90 dagen verlopen.
+
+En het token in die URL is niet hetzelfde token als in de zichtbare
+afmeldlink. Elke verzending draagt er twee, met twee aparte hashes op
+dezelfde `job_alert_sends`-rij. Het token in de `List-Unsubscribe`-URL
+hierboven levert ALTIJD `scope=alerts` op: `routers/public.py
+unsubscribe()` zoekt eerst op `oneclick_token_hash`, en een treffer daar
+betekent `alerts`, ongeacht wat de body, de querystring of een opgegeven
+scope zegt. `scope=all` (toestemming intrekken plus blokkeerlijst,
+onomkeerbaar) is uitsluitend bereikbaar met het ANDERE token, dat in het
+fragment van de voettekstlink staat en dus in geen enkele log terechtkomt.
+Wie de URL hierboven uit een logregel plukt en het token in de body plakt,
+komt daarmee niet verder dan een afmelding voor vacature-alerts.
+Daarbovenop geldt onveranderd dat een token in de querystring nooit meer
+dan `alerts` oplevert, ook het fragmenttoken niet.
+
+De rate limit op dit pad staat op 60/minuut, ruim genoeg voor de gedeelde
 uitgaande IP-adressen van een mailprovider.
 
 Tot die uitzondering er is, werkt het afmelden via de zichtbare link in de

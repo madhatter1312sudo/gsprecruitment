@@ -104,19 +104,33 @@ def _suggest_match(db_run, candidate_id, job_id, score=81.0):
     )
 
 
-def _issue_alert_token(db_run, candidate_id, job_ids):
-    """Doet wat job_alert_job na een geslaagde verzending doet, zodat een
-    afmeldtest niet afhankelijk is van een echte e-mailverzending."""
+def _issue_alert_tokens(db_run, candidate_id, job_ids):
+    """(fragmenttoken, one-click-token) voor één verzending -- precies wat
+    job_alert_job na een geslaagde verzending wegschrijft, zodat een
+    afmeldtest niet afhankelijk is van een echte e-mailverzending.
+
+    Twee losse tokens per rij (B1): het eerste zit in het fragment van de
+    voettekstlink en is de enige weg naar `scope=all`, het tweede in de
+    querystring van de List-Unsubscribe-URL en kan nooit meer dan
+    `alerts`."""
     from core.database import execute
     from core.security import hash_token
 
     token = secrets.token_urlsafe(32)
+    oneclick_token = secrets.token_urlsafe(32)
     db_run(
         execute,
-        "INSERT INTO job_alert_sends (candidate_id, job_ids, token_hash) VALUES ($1, $2::int[], $3)",
-        candidate_id, job_ids, hash_token(token),
+        "INSERT INTO job_alert_sends (candidate_id, job_ids, token_hash, oneclick_token_hash) "
+        "VALUES ($1, $2::int[], $3, $4)",
+        candidate_id, job_ids, hash_token(token), hash_token(oneclick_token),
     )
-    return token
+    return token, oneclick_token
+
+
+def _issue_alert_token(db_run, candidate_id, job_ids):
+    """Alleen het fragmenttoken, voor de tests die niets met de
+    one-click-weg te maken hebben."""
+    return _issue_alert_tokens(db_run, candidate_id, job_ids)[0]
 
 
 # ── 1 + 2: het afmeldendpoint ───────────────────────────────────────────
@@ -1128,28 +1142,561 @@ def test_a_failed_send_leaves_no_usable_unsubscribe_token(db_run, monkeypatch):
     assert row["job_alert_last_sent_at"] is None
 
 
-def test_dormant_warning_skips_a_suppressed_account(db_run, monkeypatch, no_send):
-    """B10. STOP betekent nooit meer mailen, op geen enkele grondslag --
-    ook geen waarschuwing over je eigen account."""
+def _suppress(db_run, email):
     from core import privacy
-    from core.config import settings
-    from core.database import execute, fetch_one
-    from services import scheduler
+    from core.database import execute
 
-    user = _dormant_user(db_run, "17 months 10 days")
     db_run(
         execute,
         "INSERT INTO suppression_list (email_hash, email_domain, reason) VALUES ($1, $2, 'STOP') "
         "ON CONFLICT (email_hash) DO NOTHING",
-        privacy.email_hash(user["email"]), privacy.email_domain(user["email"]),
+        privacy.email_hash(email), privacy.email_domain(email),
     )
+
+
+def test_dormant_warning_handles_a_suppressed_account_without_mail(db_run, monkeypatch, no_send):
+    """B3. STOP betekent nooit meer mailen, op geen enkele grondslag --
+    ook geen waarschuwing over je eigen account. Maar de rij wordt wél
+    afgehandeld: `dormant_warning_skipped_at` plus een audit-regel met
+    alleen de hash, zodat hij de selector verlaat en na dezelfde termijn
+    de beoordelingslijst haalt."""
+    from core import privacy
+    from core.config import settings
+    from core.database import fetch_one
+    from services import scheduler
+
+    user = _dormant_user(db_run, "17 months 10 days")
+    _suppress(db_run, user["email"])
     monkeypatch.setattr(settings, "dormant_warning_enabled", True)
 
     db_run(scheduler.dormant_account_warning_job)
 
     assert user["email"] not in no_send.sent
-    row = db_run(fetch_one, "SELECT dormant_warning_sent_at FROM users WHERE id = $1", user["id"])
-    assert row["dormant_warning_sent_at"] is None, "niet gewaarschuwd betekent ook niet gestempeld"
+    row = db_run(
+        fetch_one,
+        "SELECT dormant_warning_sent_at, dormant_warning_skipped_at FROM users WHERE id = $1",
+        user["id"],
+    )
+    assert row["dormant_warning_sent_at"] is None, "niet gewaarschuwd betekent ook niet als verstuurd stempelen"
+    assert row["dormant_warning_skipped_at"] is not None, "wel afgehandeld, anders staat hij morgen weer vooraan"
+
+    audit = db_run(
+        fetch_one,
+        "SELECT changes FROM audit_log WHERE action = 'dormant_warning_suppressed' AND target_id = $1",
+        user["id"],
+    )
+    assert audit is not None
+    assert privacy.email_hash(user["email"]) in str(audit["changes"])
+    assert user["email"] not in str(audit["changes"])
+
+
+def test_a_blocked_account_no_longer_eats_a_slot_under_the_cap(db_run, monkeypatch, no_send):
+    """B3, de eigenlijke storing. Drie geblokkeerde accounts en één gewoon,
+    alle vier ouder dan het gewone account, onder een plafond van 2. Met
+    het oude wegfilteren NA de LIMIT haalde de gewone nooit een plek: de
+    drie geblokkeerde werden nooit gestempeld, bleven onder `ORDER BY
+    last_login_at ASC` vooraan en verbruikten elke dag opnieuw het hele
+    plafond. Bij 200 zulke accounts waarschuwde de job niemand meer."""
+    from core.config import settings
+    from core.database import fetch_one
+    from services import scheduler
+
+    blocked = [_dormant_user(db_run, f"{30 + i} months") for i in range(3)]
+    for user in blocked:
+        _suppress(db_run, user["email"])
+    normal = _dormant_user(db_run, "20 months")
+
+    monkeypatch.setattr(settings, "dormant_warning_enabled", True)
+    monkeypatch.setattr(scheduler, "DORMANT_WARNING_CAP", 2)
+
+    # Dag 1 en dag 2: de drie geblokkeerde raken onder het plafond van 2
+    # op, en daarna is de gewone aan de beurt. Zonder de reparatie loopt
+    # dit oneindig door zonder dat de gewone ooit wordt bereikt.
+    for _ in range(3):
+        db_run(scheduler.dormant_account_warning_job)
+        row = db_run(fetch_one, "SELECT dormant_warning_sent_at FROM users WHERE id = $1", normal["id"])
+        if row["dormant_warning_sent_at"] is not None:
+            break
+
+    row = db_run(fetch_one, "SELECT dormant_warning_sent_at FROM users WHERE id = $1", normal["id"])
+    assert row["dormant_warning_sent_at"] is not None, (
+        "een geblokkeerde achterstand mag het dagplafond niet permanent opeten"
+    )
+    assert normal["email"] in no_send.sent
+
+
+def test_a_blocked_dormant_account_reaches_the_review_list_after_the_same_term(db_run, monkeypatch, no_send):
+    """B3, de andere helft. Een STOP is een verbod op berichten, geen
+    toestemming tot onbeperkt bewaren. Een geblokkeerd slapend account
+    krijgt geen mail, maar bereikt na 18 maanden plus 30 dagen dezelfde
+    beoordelingslijst als iedereen -- langs `dormant_warning_skipped_at`
+    in plaats van `dormant_warning_sent_at`."""
+    from core.config import settings
+    from core.database import execute, fetch_all
+    from core import retention
+    from services import scheduler
+
+    user = _dormant_user(db_run, "19 months")
+    _suppress(db_run, user["email"])
+    monkeypatch.setattr(settings, "dormant_warning_enabled", True)
+
+    db_run(scheduler.dormant_account_warning_job)
+
+    # Vandaag nog niet: de 30 dagen moeten eerst verstrijken.
+    due_now = db_run(fetch_all, retention.PORTAL_ACCOUNT_INACTIVE_SQL)
+    assert user["id"] not in [r["id"] for r in due_now]
+
+    db_run(
+        execute,
+        "UPDATE users SET dormant_warning_skipped_at = NOW() - INTERVAL '31 days' WHERE id = $1",
+        user["id"],
+    )
+    due_later = db_run(fetch_all, retention.PORTAL_ACCOUNT_INACTIVE_SQL)
+    assert user["id"] in [r["id"] for r in due_later], (
+        "zonder deze tak bewaren wij een geblokkeerd slapend account voor altijd"
+    )
+
+
+def test_a_dead_address_stops_after_three_attempts_and_resets_on_login(db_run, monkeypatch, no_send):
+    """B4. Een structureel onbezorgbaar adres werd elke dag opnieuw
+    geprobeerd en hield zijn plek onder het dagplafond. Drie mislukte
+    pogingen en de rij verlaat de selector; een login begint een nieuwe
+    cyclus en zet de teller terug."""
+    from core.config import settings
+    from core.database import execute, fetch_all, fetch_one
+    from core import retention
+    from services import scheduler
+
+    user = _dormant_user(db_run, "21 months")
+    monkeypatch.setattr(settings, "dormant_warning_enabled", True)
+
+    class _AlwaysFails:
+        async def send_template(self, name, to_email, ctx, lang=None, headers=None):
+            return False
+
+    import services.email_service as es
+
+    monkeypatch.setattr(es, "email_service", _AlwaysFails())
+
+    def _selected():
+        return [r["id"] for r in db_run(fetch_all, retention.DORMANT_WARNING_SQL, 500)]
+
+    for expected in (1, 2, 3):
+        assert user["id"] in _selected()
+        db_run(scheduler.dormant_account_warning_job)
+        row = db_run(fetch_one, "SELECT dormant_warning_attempts FROM users WHERE id = $1", user["id"])
+        assert row["dormant_warning_attempts"] == expected
+
+    assert user["id"] not in _selected(), "na drie mislukte pogingen hoort de rij de selector te verlaten"
+
+    # Een login is wat de cyclus opnieuw start. Hetzelfde statement dat
+    # routers/auth.py en routers/mfa.py draaien.
+    db_run(execute, retention.LOGIN_STAMP_SQL, user["id"])
+    row = db_run(fetch_one, "SELECT dormant_warning_attempts FROM users WHERE id = $1", user["id"])
+    assert row["dormant_warning_attempts"] == 0
+
+
+def test_dormant_warning_mail_names_the_last_login_date(db_run, monkeypatch):
+    """R4. De mail noemt geen maandental -- met een ondergrens van 17
+    maanden en geen bovengrens is elk getal voor een deel van de
+    ontvangers onwaar -- maar wel de datum van de laatste login. Die klopt
+    voor iedereen en is het enige waaraan de ontvanger ziet over welk
+    account dit gaat."""
+    from core.config import settings
+    from core.database import fetch_one
+    from services import scheduler
+    import services.email_service as es
+
+    user = _dormant_user(db_run, "18 months")
+    last_login = db_run(fetch_one, "SELECT last_login_at FROM users WHERE id = $1", user["id"])
+
+    captured = []
+
+    class _Capture:
+        async def send_template(self, name, to_email, ctx, lang=None, headers=None):
+            captured.append((to_email, ctx))
+            return True
+
+    monkeypatch.setattr(es, "email_service", _Capture())
+    monkeypatch.setattr(settings, "dormant_warning_enabled", True)
+
+    db_run(scheduler.dormant_account_warning_job)
+
+    mine = [ctx for to, ctx in captured if to == user["email"]]
+    assert mine, "deze gebruiker hoorde een waarschuwing te krijgen"
+    expected = last_login["last_login_at"].date().isoformat()
+    assert mine[0]["last_login"] == expected
+
+    from services import email_templates
+
+    for lang in ("nl", "en"):
+        _s, text, html = email_templates.render("dormant_warning", mine[0], lang)
+        assert expected in text and expected in html
+        for part in (text, html):
+            assert "18 maanden" not in part and "18 months" not in part
+
+
+# ══════════════════════════════════════════════════════════════════════
+# B1 -- het afmeldtoken aan zijn kanaal gebonden
+# ══════════════════════════════════════════════════════════════════════
+
+def _alert_state(db_run, candidate_id):
+    from core.database import fetch_one
+
+    return db_run(
+        fetch_one,
+        "SELECT job_alert_unsubscribed_at, consent_withdrawn_at FROM candidates WHERE id = $1",
+        candidate_id,
+    )
+
+
+def test_a_one_click_token_in_the_body_can_never_reach_scope_all(client, db_run):
+    """B1, de aanval. Het one-click-token staat in de querystring van de
+    List-Unsubscribe-URL en dus in elke access-, proxy- en edge-logregel.
+    Wie zo'n URL uit een log haalt en het token in de BODY plakt, omzeilt
+    de regel die alleen naar de PLEK van het token kijkt. Dat mag niets
+    opleveren dan `alerts`."""
+    from core import privacy
+    from core.database import fetch_one
+
+    cand = _insert_alert_candidate(db_run)
+    _token, oneclick = _issue_alert_tokens(db_run, cand["id"], [1])
+
+    res = client.post("/api/public/unsubscribe", json={"token": oneclick, "scope": "all"})
+    assert res.status_code == 200
+
+    row = _alert_state(db_run, cand["id"])
+    assert row["job_alert_unsubscribed_at"] is not None, "afmelden voor alerts hoort gewoon te werken"
+    assert row["consent_withdrawn_at"] is None, (
+        "een token uit een logregel mag nooit de toestemming intrekken"
+    )
+    supp = db_run(
+        fetch_one, "SELECT 1 FROM suppression_list WHERE email_hash = $1",
+        privacy.email_hash(cand["email"]),
+    )
+    assert supp is None, "en het adres mag er nooit onomkeerbaar door op de blokkeerlijst komen"
+
+
+def test_a_fragment_token_in_the_query_string_still_only_reaches_alerts(client, db_run):
+    """De extra laag uit ronde 1 blijft staan: ook het fragmenttoken
+    levert vanuit de querystring alleen `alerts` op. Wie het daar zet
+    heeft het zelf blootgesteld."""
+    cand = _insert_alert_candidate(db_run)
+    token, _oneclick = _issue_alert_tokens(db_run, cand["id"], [1])
+
+    res = client.post(f"/api/public/unsubscribe?token={token}", json={"scope": "all"})
+    assert res.status_code == 200
+
+    row = _alert_state(db_run, cand["id"])
+    assert row["job_alert_unsubscribed_at"] is not None
+    assert row["consent_withdrawn_at"] is None
+
+
+def test_a_fragment_token_in_the_body_still_reaches_scope_all(client, db_run):
+    """De keuze die website/unsubscribe.js de bezoeker biedt moet
+    bereikbaar blijven: het fragmenttoken in de body haalt wél `all`."""
+    from core import privacy
+    from core.database import fetch_one
+
+    cand = _insert_alert_candidate(db_run)
+    token, _oneclick = _issue_alert_tokens(db_run, cand["id"], [1])
+
+    res = client.post("/api/public/unsubscribe", json={"token": token, "scope": "all"})
+    assert res.status_code == 200
+
+    row = _alert_state(db_run, cand["id"])
+    assert row["consent_withdrawn_at"] is not None
+    supp = db_run(
+        fetch_one, "SELECT 1 FROM suppression_list WHERE email_hash = $1",
+        privacy.email_hash(cand["email"]),
+    )
+    assert supp is not None
+
+
+def test_both_tokens_are_single_use(client, db_run):
+    """Allebei eenmalig, en het verbruiken van het ene verbruikt ook de
+    andere: `used_at` zit op de verzending, niet op het token. Een tweede
+    aanroep doet niets meer, langs welke van de twee wegen dan ook."""
+    from core.database import execute, fetch_one
+
+    for first, second in (("token", "oneclick"), ("oneclick", "token")):
+        cand = _insert_alert_candidate(db_run)
+        pair = dict(zip(("token", "oneclick"), _issue_alert_tokens(db_run, cand["id"], [1])))
+
+        assert client.post(
+            "/api/public/unsubscribe", json={"token": pair[first], "scope": "alerts"},
+        ).status_code == 200
+        db_run(
+            execute,
+            "UPDATE candidates SET job_alert_unsubscribed_at = NULL WHERE id = $1", cand["id"],
+        )
+
+        res = client.post("/api/public/unsubscribe", json={"token": pair[second], "scope": "alerts"})
+        assert res.status_code == 200
+        row = db_run(
+            fetch_one, "SELECT job_alert_unsubscribed_at FROM candidates WHERE id = $1", cand["id"],
+        )
+        assert row["job_alert_unsubscribed_at"] is None, (
+            f"{second} werkte nog nadat {first} de verzending al had verbruikt"
+        )
+
+
+def test_both_tokens_expire_after_ninety_days(client, db_run):
+    """Dezelfde houdbaarheid voor allebei: een token uit een mail (of een
+    access log) van meer dan 90 dagen geleden doet niets meer."""
+    from core.database import execute
+
+    for which in (0, 1):
+        cand = _insert_alert_candidate(db_run)
+        tokens = _issue_alert_tokens(db_run, cand["id"], [1])
+        db_run(
+            execute,
+            "UPDATE job_alert_sends SET sent_at = NOW() - INTERVAL '91 days' WHERE candidate_id = $1",
+            cand["id"],
+        )
+
+        res = client.post("/api/public/unsubscribe", json={"token": tokens[which], "scope": "alerts"})
+        assert res.status_code == 200, "verlopen loopt langs dezelfde weg als onbekend"
+
+        row = _alert_state(db_run, cand["id"])
+        assert row["job_alert_unsubscribed_at"] is None
+        assert row["consent_withdrawn_at"] is None
+
+
+def test_the_job_writes_two_different_hashes_per_send(db_run, monkeypatch):
+    """De twee hashes komen van twee losse tokens. Waren ze gelijk, dan was
+    de hele binding een illusie: dezelfde waarde zou beide lookups
+    treffen."""
+    from core.config import settings
+    from core.database import fetch_one
+    from services import scheduler
+    import services.email_service as es
+
+    cand = _insert_alert_candidate(db_run)
+    job = _open_job(db_run)
+    _suggest_match(db_run, cand["id"], job["id"])
+
+    headers_seen = []
+
+    class _Capture:
+        async def send_template(self, name, to_email, ctx, lang=None, headers=None):
+            if to_email == cand["email"]:
+                headers_seen.append((ctx, headers or {}))
+            return True
+
+    monkeypatch.setattr(es, "email_service", _Capture())
+    monkeypatch.setattr(settings, "job_alerts_enabled", True)
+
+    async def _flag(key):
+        return True
+
+    monkeypatch.setattr(scheduler, "_flag_enabled", _flag)
+    db_run(scheduler.job_alert_job)
+
+    row = db_run(
+        fetch_one,
+        "SELECT token_hash, oneclick_token_hash FROM job_alert_sends WHERE candidate_id = $1",
+        cand["id"],
+    )
+    assert row is not None
+    assert row["oneclick_token_hash"] is not None
+    assert row["token_hash"] != row["oneclick_token_hash"]
+
+    assert headers_seen, "deze kandidaat hoorde een digest te krijgen"
+    ctx, headers = headers_seen[0]
+    footer = ctx["unsubscribe_link"]
+    one_click = headers["List-Unsubscribe"]
+    fragment_token = footer.split("#token=", 1)[1]
+    assert fragment_token not in one_click, (
+        "het fragmenttoken mag nooit in de List-Unsubscribe-URL staan"
+    )
+
+
+# ══════════════════════════════════════════════════════════════════════
+# B5, B6, R1, R2, R5 -- de rest van de tweede reparatieronde
+# ══════════════════════════════════════════════════════════════════════
+
+def test_a_suppressed_candidate_leaves_the_alert_selector(db_run, monkeypatch, no_send):
+    """B5. `ORDER BY job_alert_last_sent_at ASC NULLS FIRST` zet een
+    kandidaat die nog nooit een digest kreeg vooraan, en een geblokkeerde
+    kandidaat krijgt er nooit een: hij stond dus elke dag weer vooraan en
+    hield permanent een plek onder JOB_ALERT_RUN_CAP bezet. Een STOP IS
+    een afmelding, dus de kolom mag dat zeggen."""
+    from core import privacy
+    from core.database import fetch_all, fetch_one
+    from services import scheduler
+
+    cand = _insert_alert_candidate(db_run)
+    job = _open_job(db_run)
+    _suggest_match(db_run, cand["id"], job["id"])
+    _suppress(db_run, cand["email"])
+
+    _run_job_alert(db_run, monkeypatch)
+
+    assert cand["email"] not in no_send.sent
+    row = db_run(
+        fetch_one, "SELECT job_alert_unsubscribed_at FROM candidates WHERE id = $1", cand["id"],
+    )
+    assert row["job_alert_unsubscribed_at"] is not None, (
+        "anders staat deze rij morgen weer vooraan in dezelfde selector"
+    )
+
+    audit = db_run(
+        fetch_one,
+        "SELECT changes FROM audit_log WHERE action = 'job_alert_suppressed' AND target_id = $1",
+        cand["id"],
+    )
+    assert audit is not None
+    assert privacy.email_hash(cand["email"]) in str(audit["changes"])
+    assert cand["email"] not in str(audit["changes"])
+
+    # En hij is weg uit de selector zelf, niet alleen overgeslagen in
+    # Python: dat is het hele verschil tussen "geen mail" en "geen plek
+    # onder het plafond".
+    selected = db_run(fetch_all, scheduler.JOB_ALERT_CANDIDATE_SQL, 1000)
+    assert cand["id"] not in [r["id"] for r in selected]
+
+
+def test_unsubscribing_for_alerts_covers_every_row_with_that_address(client, db_run):
+    """B6. `uq_candidates_email` is hoofdlettergevoelig en POST
+    /api/candidates normaliseert niet, dus `A@example.com` en
+    `a@example.com` kunnen naast elkaar bestaan -- en de alertselector
+    pikt ze allebei op. Op alleen `id = $1` meldde je je af op de ene rij
+    en kreeg je morgen je digest van de andere."""
+    from core.database import fetch_all, fetch_one
+
+    lower = _email("case")
+    upper = lower.upper()
+    first = _insert_alert_candidate(db_run, email=lower)
+    db_run(
+        fetch_one,
+        """INSERT INTO candidates
+             (full_name, email, lawful_basis, consent_scope, consent_talentpool_until, job_alert_optin_at)
+           VALUES ('Hoofdletter', $1, 'opt_in_talentpool', 'matching_and_contact',
+                   NOW() + INTERVAL '12 months', NOW() - INTERVAL '1 day')
+           RETURNING id""",
+        upper,
+    )
+
+    token = _issue_alert_token(db_run, first["id"], [1])
+    res = client.post("/api/public/unsubscribe", json={"token": token, "scope": "alerts"})
+    assert res.status_code == 200
+
+    rows = db_run(
+        fetch_all,
+        "SELECT job_alert_unsubscribed_at, consent_withdrawn_at FROM candidates WHERE LOWER(email) = $1",
+        lower,
+    )
+    assert len(rows) == 2
+    assert all(r["job_alert_unsubscribed_at"] is not None for r in rows), (
+        "elke rij met dit adres hoort de afmelding te dragen"
+    )
+    # En `alerts` blijft de smalle keuze: de grondslag wordt niet geraakt.
+    assert all(r["consent_withdrawn_at"] is None for r in rows)
+
+
+def test_job_alert_sends_older_than_ninety_days_are_purged(db_run):
+    """R1. `job_alert_sends` had geen bewaartermijn. "Volgt de
+    kandidaatrij" was geen antwoord: erase_person() anonimiseert, dus de
+    ON DELETE CASCADE vuurt op het gewone wispad nooit."""
+    from core.database import execute, fetch_one
+    from services import scheduler
+
+    old = _insert_alert_candidate(db_run)
+    fresh = _insert_alert_candidate(db_run)
+    _issue_alert_token(db_run, old["id"], [1])
+    _issue_alert_token(db_run, fresh["id"], [1])
+    db_run(
+        execute,
+        "UPDATE job_alert_sends SET sent_at = NOW() - INTERVAL '91 days' WHERE candidate_id = $1",
+        old["id"],
+    )
+
+    result = db_run(scheduler.job_alert_sends_cleanup_job)
+    assert result["status"] == "purged"
+    assert result["count"] >= 1
+
+    assert db_run(
+        fetch_one, "SELECT 1 FROM job_alert_sends WHERE candidate_id = $1", old["id"],
+    ) is None
+    assert db_run(
+        fetch_one, "SELECT 1 FROM job_alert_sends WHERE candidate_id = $1", fresh["id"],
+    ) is not None
+
+    audit = db_run(
+        fetch_one,
+        "SELECT changes FROM audit_log WHERE action = 'retention_purge' "
+        "AND target_type = 'job_alert_sends' ORDER BY id DESC LIMIT 1",
+    )
+    assert audit is not None
+    assert "job_alert_sends" in str(audit["changes"])
+
+
+def test_the_article_15_export_lists_the_job_alerts_but_not_the_hashes(client, db_run, make_candidate_user):
+    """R2. Welke alerts iemand heeft gekregen zijn persoonsgegevens over
+    hem. De tokenhashes juist niet: dat is een authenticatiemiddel, en wie
+    andermans export in handen krijgt zou er anders een werkend
+    afmeldtoken uit kunnen lezen."""
+    from core.database import execute, fetch_one
+
+    user = make_candidate_user()
+    cand = db_run(
+        fetch_one,
+        "INSERT INTO candidates (full_name, email, lawful_basis) VALUES ('Export', $1, 'portal_registratie') "
+        "RETURNING id",
+        user["email"],
+    )
+    db_run(
+        execute,
+        "INSERT INTO candidate_profiles (user_id, candidate_id) VALUES ($1, $2) "
+        "ON CONFLICT (user_id) DO UPDATE SET candidate_id = EXCLUDED.candidate_id",
+        user["id"], cand["id"],
+    )
+    _issue_alert_tokens(db_run, cand["id"], [1, 2])
+
+    res = client.get("/api/v1/gdpr/export", headers=user["headers"])
+    assert res.status_code == 200, res.text
+    body = res.json()
+
+    assert "job_alerts_received" in body
+    assert len(body["job_alerts_received"]) == 1
+    entry = body["job_alerts_received"][0]
+    assert entry["job_ids"] == [1, 2]
+    assert "sent_at" in entry and "used_at" in entry
+    assert "token_hash" not in entry and "oneclick_token_hash" not in entry
+    assert "token_hash" not in res.text
+
+
+def test_matching_only_consent_ignores_the_job_alerts_tick(client, db_run):
+    """R5. `matching_only` betekent letterlijk "wel matchen, geen
+    contact", en JOB_ALERT_ELIGIBILITY_SQL eist dan ook
+    `matching_and_contact`. Toch stempelen levert een kolom op die zegt
+    dat deze persoon alerts wil terwijl hij er nooit een krijgt -- en die
+    zou beginnen te lopen zodra hij later zijn scope verruimt, zonder dat
+    hij daar op dat moment iets over heeft gezegd."""
+    from core.database import execute, fetch_one
+    from core.security import hash_token
+
+    email = _email("matching-only")
+    token = secrets.token_urlsafe(32)
+    db_run(
+        execute,
+        """INSERT INTO talentpool_optin_requests (email, token_hash, scope, source, job_alerts)
+           VALUES ($1, $2, 'matching_only', 'kandidaten_page', true)""",
+        email, hash_token(token),
+    )
+
+    res = client.post("/api/public/talentpool-confirm", json={"token": token})
+    assert res.status_code == 200, res.text
+
+    row = db_run(
+        fetch_one,
+        "SELECT consent_scope, job_alert_optin_at FROM candidates WHERE LOWER(email) = $1", email,
+    )
+    assert row["consent_scope"] == "matching_only"
+    assert row["job_alert_optin_at"] is None, (
+        "een vinkje dat de selector nooit oppikt mag geen opt-in-stempel opleveren"
+    )
 
 
 def test_erasure_clears_the_alert_and_referral_columns(db_run, make_admin):

@@ -447,16 +447,15 @@ _REFERRAL_ART14_EN = (
     '(Autoriteit Persoonsgegevens, autoriteitpersoonsgegevens.nl).'
 )
 
-# Security-audit B11. Hier stond "Doet u niets, dan verwijderen wij uw
-# gegevens weer" / "we will delete your details again", en dat is niet wat
-# er gebeurt. Wat er gebeurt: de link verloopt na $ttl_hours uur, de
-# candidates-rij blijft daarna staan, en na 3 maanden vanaf `date_found`
-# komt hij op de maandelijkse beoordelingslijst die een beheerder
-# afhandelt (core/retention.py REFERRAL_NO_RESPONSE_SQL). Dat is geen
-# directe verwijdering en het is geen automatische verwijdering. De tekst
-# zegt nu precies dat, met dezelfde termijn die het Art. 14-blok er twee
-# alinea's boven al noemt -- de vorige formulering sprak dat blok zelfs
-# tegen.
+# Deze tekst mag niets beloven wat de code niet doet, en "doet u niets,
+# dan verwijderen wij uw gegevens weer" is niet wat er gebeurt. Wat er wel
+# gebeurt: de link verloopt na $ttl_hours uur, de candidates-rij blijft
+# daarna staan, en na 3 maanden vanaf `date_found` komt hij op de
+# maandelijkse beoordelingslijst die een beheerder afhandelt
+# (core/retention.py REFERRAL_NO_RESPONSE_SQL). Dat is geen directe en
+# geen automatische verwijdering. De tekst zegt precies dat, met dezelfde
+# termijn die het Art. 14-blok er twee alinea's boven noemt -- elke andere
+# formulering spreekt dat blok tegen.
 _REFERRAL_TEXT = {
     "nl": Template(
         "Beste $full_name,\n\n"
@@ -548,18 +547,29 @@ def _render_referral_confirm(ctx: dict, lang: str):
 # (routers/auth.py login/google, routers/mfa.py), waarmee het account uit
 # beide selectors valt.
 
-# Security-audit B12: hier stond vier keer "18 maanden", terwijl
-# services/scheduler.py's dormant_account_warning_job vanaf 17 maanden
-# waarschuwt -- en sinds B3 zonder bovengrens, dus de ontvanger kan er
-# net zo goed 30 maanden over hebben gedaan. Elk getal in deze tekst is
-# daarmee voor iemand onwaar. Wat wél voor iedereen klopt is de datum die
-# de job meegeeft (verzenddatum + 30 dagen), en dat is precies de datum
-# waar de ontvanger iets mee moet. De 18 maanden zelf staan in de
-# bewaartermijntabel op privacy.html, waar ze thuishoren.
+# Geen maandental in deze tekst. services/scheduler.py's
+# dormant_account_warning_job waarschuwt vanaf 17 maanden en kent geen
+# bovengrens, dus de ontvanger kan er net zo goed 30 maanden over hebben
+# gedaan: elk getal hier is voor een deel van de ontvangers onwaar. Twee
+# dingen kloppen voor iedereen, en die staan er dan ook: de datum waarvóór
+# inloggen volstaat (verzenddatum + 30 dagen, meegegeven door de job) en
+# de datum van de laatste login (`users.last_login_at`, ctx `last_login`).
+# Die tweede is ook het enige waaraan de ontvanger kan herkennen over welk
+# account dit gaat. De 18 maanden zelf staan in de bewaartermijntabel op
+# privacy.html, waar ze thuishoren.
+#
+# `last_login` mag leeg zijn: de selector eist `last_login_at IS NOT NULL`,
+# maar deze module rendert wat zij krijgt en een ontbrekende datum mag
+# nooit een KeyError zijn in de enige mail die iemands account moet redden.
+# Dan valt de zin weg in plaats van de mail.
+_DORMANT_LAST_LOGIN_LINE = {
+    "nl": " Je laatste login was op $last_login.",
+    "en": " Your last login was on $last_login.",
+}
 _DORMANT_TEXT = {
     "nl": Template(
         "Beste $full_name,\n\n"
-        "Je hebt je GSP Recruitment-account lange tijd niet gebruikt.\n\n"
+        "Je hebt je GSP Recruitment-account lange tijd niet gebruikt.$last_login_line\n\n"
         "Log in vóór $deadline om je account actief te houden:\n$link\n\n"
         "Doe je dat niet, dan komt je account daarna op onze maandelijkse verwijderlijst: een beheerder "
         "beoordeelt die lijst en verwijdert je account en profiel. Inloggen is genoeg, je hoeft verder niets te doen.\n\n"
@@ -567,7 +577,7 @@ _DORMANT_TEXT = {
     ),
     "en": Template(
         "Dear $full_name,\n\n"
-        "You have not used your GSP Recruitment account for a long time.\n\n"
+        "You have not used your GSP Recruitment account for a long time.$last_login_line\n\n"
         "Log in before $deadline to keep your account active:\n$link\n\n"
         "If you do not, your account goes onto our monthly deletion list after that date: an administrator "
         "reviews that list and deletes your account and profile. Logging in is enough, there is nothing else to do.\n\n"
@@ -585,16 +595,16 @@ _DORMANT_HEADING = {
 _DORMANT_HTML_BODY = {
     "nl": Template(
         "<p>Beste $full_name,</p>"
-        "<p>Je hebt je GSP Recruitment-account lange tijd niet gebruikt. Log in vóór $deadline om je "
-        "account actief te houden:</p>"
+        "<p>Je hebt je GSP Recruitment-account lange tijd niet gebruikt.$last_login_line Log in vóór "
+        "$deadline om je account actief te houden:</p>"
         "$link_html"
         "<p>Doe je dat niet, dan komt je account daarna op onze maandelijkse verwijderlijst: een beheerder "
         "beoordeelt die lijst en verwijdert je account en profiel. Inloggen is genoeg, je hoeft verder niets te doen.</p>"
     ),
     "en": Template(
         "<p>Dear $full_name,</p>"
-        "<p>You have not used your GSP Recruitment account for a long time. Log in before $deadline to keep "
-        "your account active:</p>"
+        "<p>You have not used your GSP Recruitment account for a long time.$last_login_line Log in before "
+        "$deadline to keep your account active:</p>"
         "$link_html"
         "<p>If you do not, your account goes onto our monthly deletion list after that date: an administrator "
         "reviews that list and deletes your account and profile. Logging in is enough, there is nothing else to do.</p>"
@@ -604,12 +614,23 @@ _DORMANT_HTML_BODY = {
 
 def _dormant_warning_parts(ctx: dict, lang: str):
     subject = _DORMANT_SUBJECT[lang].substitute()
+    last_login = ctx.get("last_login") or ""
+    line = (
+        Template(_DORMANT_LAST_LOGIN_LINE[lang]).substitute(last_login=last_login)
+        if last_login else ""
+    )
+    line_html = (
+        Template(_DORMANT_LAST_LOGIN_LINE[lang]).substitute(last_login=_esc(last_login))
+        if last_login else ""
+    )
     text = _DORMANT_TEXT[lang].substitute(
         full_name=ctx.get("full_name") or "", link=ctx["link"], deadline=ctx["deadline"],
+        last_login_line=line,
     )
     link_html = _link_html(_esc(ctx["link"]), _esc(ctx["link"]))
     body_html = _DORMANT_HTML_BODY[lang].substitute(
         full_name=_esc(ctx.get("full_name")), deadline=_esc(ctx["deadline"]), link_html=link_html,
+        last_login_line=line_html,
     )
     return subject, _DORMANT_HEADING[lang], text, body_html
 
