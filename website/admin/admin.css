@@ -42,13 +42,45 @@
      .a-clickable     hele rij of samenvatting is aanklikbaar
      .a-row-unread    ongelezen rij in de leadsinbox
      .a-barchart      fallback-staafdiagram als ApexCharts ontbreekt
+     .a-eyebrow       mono kapitaalregel boven een waarde (KPI-tegel, §7.2g)
+     .a-num           datawaarde in mono; --xl is de KPI-maat (32px)
+     .a-wide-only     alleen op breed scherm; verdwijnt onder 600px (§7.6-1)
+     .a-bulkbar       balk met de acties op de rijselectie (§7.2a)
+     .a-cardlist      tabel die onder 768px een kaartlijst wordt (§7.2a)
+     .a-clamp         tekstblok op twee regels, --open toont alles
+     .a-disclosure    in- en uitklapbare kaart (<details>)
+     .a-col-check     selectievakjeskolom (36px)
+     .a-col-actions   actiekolom rechts, zonder koptekst
+     .a-col-cat       categoriekolom, één regel met ellipsis (volledige naam in title=)
+     .a-col-status    statuskolom; op een telefoon naast de identiteit bovenin de kaart
+     .a-row-selected  geselecteerde rij: eigen vlak plus gouden linkerrand
+     .a-tap           label om een selectievakje, 44px tikdoel op een telefoon
+     .a-confirm-mismatch  "Komt niet overeen" onder het bevestigingsveld
      .text-success-ink .text-danger-ink .text-warning-ink .text-info-ink
                       de vier semantische tekstkleuren uit §7.1.3, op de
                       --ink-*-tokens uit §7.1.2
      .a-accent        het goudaccent (geen semantische familie, §7.2e)
    Panelen (ui.js): .a-modal (+ --wide, __title, __subtitle, __close), .a-drawer,
    .a-backdrop, .a-confirm-hint, .a-sortable (kolomkop met aria-sort), .a-nav-caption (sidebarkopje).
-   Samen 29 .a-klassen; de spec (§7.1.3) noemt dezelfde 29.
+   Samen 43 klassenamen: de 29 uit §7.1.3 plus de veertien die de sectie
+   Bewaartermijnen (§7.3.1) nodig had (.a-eyebrow, .a-num, .a-wide-only,
+   .a-bulkbar, .a-cardlist, .a-clamp, .a-disclosure, .a-col-check,
+   .a-col-actions, .a-col-cat, .a-col-status, .a-row-selected, .a-tap,
+   .a-confirm-mismatch). Modifiers tellen niet als eigen naam: .a-num--xl,
+   --date en --loading, .a-clamp--open, .a-cardlist--compact,
+   .a-scrollbox--rows en .a-modal__title--danger horen bij hun basisklasse.
+   Die veertien horen bij de componenten van §7.2: .a-eyebrow en .a-num
+   zijn de `gsp-eyebrow`/`gsp-num` uit §7.1.3 met de .a-prefix die
+   diezelfde subsectie voorschrijft, .a-cardlist is de `gsp-cardlist` uit
+   §7.2a, en .a-bulkbar is de bulkbalk uit dezelfde subsectie. Die
+   publiceert zijn eigen hoogte als --a-bulkbar-h zodat de toast eronder
+   vandaan schuift (§7.2f; de spec noemt dat token --gsp-bulkbar-h, hier
+   met dezelfde a-prefix als --a-bar-h).
+
+   De destructieve outline-knop staat paneelbreed op --ink-error
+   (.portal-section .btn-outline-danger, naast .a-modal en .a-drawer):
+   Tablers eigen danger-outline haalt 4,17:1 op --navy-900 en zakt daarmee
+   onder de tekstvloer, en dat geldt in elke sectie, niet alleen in deze.
 
    Geometrie zonder merkbetekenis (mb-3, d-flex, gap-2, text-center,
    flex-fill, text-nowrap) komt uit Bootstrap 5 en staat hier niet.
@@ -162,13 +194,48 @@ h1, h2, h3, h4,
 
 /* ==== Toast (auth.js Auth.toast): het paneel laadt styles.css niet ==== */
 .toast-container { position: fixed; bottom: 24px; right: 24px; z-index: 9998; display: flex; flex-direction: column; gap: 8px; }
-.toast { display: flex; align-items: center; gap: 10px; padding: 14px 20px; border-radius: var(--radius-sm); font-size: .88rem; font-weight: 500; box-shadow: var(--shadow-lg); max-width: 360px; opacity: 0; transform: translateY(16px); transition: opacity var(--transition-base), transform var(--transition-base); }
+/* Tabler draagt `.toast:not(.show){display:none}` (0,2,0) en dat won van
+   de losse `.toast`-regel hieronder (0,1,0): elke toast van Auth.toast()
+   stond dus op display:none, in het hele paneel. Die markup gebruikt
+   .toast-visible en niet Bootstraps .show, dus de zichtbaarheid komt van
+   deze regel, met gelijke specificiteit en later in de cascade. */
+.toast-container .toast { display: flex; }
+/* §7.2f: één vlak voor alle vier de varianten (--navy-900), een 1px rand
+   en een 3px linkerrand in de inktkleur van de variant. De volvlakke
+   #065f46/#991b1b/#78350f die hier stonden trokken meer aandacht dan de
+   mededeling waard is en botsten met de navy schil; ze stonden bovendien
+   buiten de tokenlaag. Radius --radius (3px), niet --radius-sm uit de oude
+   shim. */
+.toast {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 20px;
+  border-radius: var(--radius);
+  font-size: .88rem;
+  font-weight: 500;
+  box-shadow: var(--shadow-lg);
+  max-width: 360px;
+  opacity: 0;
+  transform: translateY(16px);
+  transition: opacity var(--transition-base), transform var(--transition-base);
+  background: var(--navy-900);
+  color: var(--white);
+  border: 1px solid var(--navy-500);
+  border-left: 3px solid var(--navy-500);
+}
 .toast-visible { opacity: 1; transform: translateY(0); }
 .toast-removing { opacity: 0; transform: translateX(40px); }
-.toast-success { background: #065f46; color: var(--white); }
-.toast-error { background: #991b1b; color: var(--white); }
-.toast-warning { background: #78350f; color: var(--white); }
-.toast-info { background: var(--navy-600); color: var(--white); }
+.toast-success { border-left-color: var(--ink-success); }
+.toast-error { border-left-color: var(--ink-error); }
+.toast-warning { border-left-color: var(--ink-warning); }
+.toast-info { border-left-color: var(--ink-info); }
+/* Het pictogram draagt de kleur van de variant; de tekst blijft --white,
+   want die moet op elke variant even goed leesbaar zijn. */
+.toast-success .toast-icon { color: var(--ink-success); }
+.toast-error .toast-icon { color: var(--ink-error); }
+.toast-warning .toast-icon { color: var(--ink-warning); }
+.toast-info .toast-icon { color: var(--ink-info); }
 .toast-icon { font-size: 1.1rem; line-height: 1; }
 
 /* ==== Compatibiliteitsklassen voor door JS gegenereerde markup ==== */
@@ -276,7 +343,7 @@ h1, h2, h3, h4,
 .a-stat__value--positive { color: var(--ink-success); }
 .a-stat__label { font-size: var(--font-size-xs); color: var(--admin-muted); }
 
-.a-metric-row { display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid var(--admin-hairline); }
+.a-metric-row { display: flex; justify-content: space-between; gap: var(--space-md); padding: 6px 0; border-bottom: 1px solid var(--admin-hairline); }
 
 .a-listrow { display: flex; align-items: center; gap: var(--space-md); padding: var(--space-md) 0; border-bottom: 1px solid var(--admin-hairline); }
 .a-listrow:last-child { border-bottom: none; }
@@ -310,6 +377,12 @@ h1, h2, h3, h4,
 .a-tabpane { min-height: 120px; }
 
 .a-clickable { cursor: pointer; }
+/* Geselecteerde rij (§7.2a): eigen vlak plus een gouden linkerrand op de
+   eerste cel. Geen aria-selected: dat attribuut geldt alleen binnen
+   role="grid" en dit is een gewone tabel; het checked-vakje draagt de
+   staat al voor een schermlezer. */
+.a-row-selected > td { background: var(--navy-600); --tblr-table-bg: var(--navy-600); }
+.a-row-selected > td:first-child { box-shadow: inset 2px 0 0 0 var(--gold-500); }
 .a-row-unread { font-weight: 600; }
 
 .a-barchart { display: flex; align-items: flex-end; gap: 6px; height: 120px; width: 100%; }
@@ -368,7 +441,8 @@ h1, h2, h3, h4,
 }
 .a-modal__close:hover,
 .a-modal__close:focus-visible { color: var(--gold-400); }
-.a-modal__title { color: var(--white); margin: 0 var(--space-xl) var(--space-sm) 0; }
+.a-modal__title { color: var(--white); font-size: var(--font-size-xl); margin: 0 var(--space-xl) var(--space-sm) 0; }
+.a-modal__title--danger { display: flex; align-items: baseline; gap: var(--space-sm); }
 .a-modal__subtitle { margin-bottom: var(--space-lg); font-size: var(--font-size-sm); }
 .a-drawer.offcanvas {
   width: min(760px, 100vw);
@@ -378,17 +452,29 @@ h1, h2, h3, h4,
 }
 .a-drawer .offcanvas-body { padding: var(--space-xl); }
 
+/* Op een telefoon is de modal fullscreen (§7.2c) en staan de knoppen
+   gestapeld en op volle breedte, met de primaire of destructieve knop
+   bovenaan. De DOM-volgorde is secundair, destructief, primair, dus
+   column-reverse zet de handelende knop boven. */
+@media (max-width: 576px) {
+  .a-modal .a-actions { flex-direction: column-reverse; }
+  .a-modal .a-actions .btn { width: 100%; }
+}
+
 /* Getypte bevestiging voor destructieve acties. */
 .a-confirm-hint { color: var(--admin-muted); font-size: var(--font-size-sm); margin-bottom: var(--space-sm); }
 /* Tablers danger-outline is op navy-900 4,17:1; --ink-error haalt 6,56:1. */
 .a-modal .btn-outline-danger,
-.a-drawer .btn-outline-danger {
+.a-drawer .btn-outline-danger,
+.portal-section .btn-outline-danger {
   --tblr-btn-color: var(--ink-error);
   --tblr-btn-border-color: var(--ink-error);
   --tblr-btn-hover-bg: var(--ink-error);
   --tblr-btn-hover-color: var(--navy-900);
 }
 .a-confirm-hint code { color: var(--gold-400); }
+/* "Komt niet overeen", leeg tot er iets fout getypt is. */
+.a-confirm-mismatch { font-size: var(--font-size-xs); min-height: 1.2em; margin-top: 4px; }
 
 /* Sorteerbare kolomkoppen (ui.table). aria-sort is de bron van waarheid;
    het pijltje is puur decoratief. */
@@ -397,6 +483,280 @@ h1, h2, h3, h4,
 .a-sortable[aria-sort="ascending"]::after { content: "\2191"; opacity: 1; color: var(--gold-400); }
 .a-sortable[aria-sort="descending"]::after { content: "\2193"; opacity: 1; color: var(--gold-400); }
 .a-sortable:focus-visible { outline: 2px solid var(--gold-500); outline-offset: -2px; }
+
+/* Tablers eigen focusring op een selectievakje is goud op 25% dekking en
+   haalt 1,8:1; de vloer voor een niet-tekstuele grens is 3:1 (§7.1.2). */
+.form-check-input:focus-visible {
+  outline: 2px solid var(--gold-500);
+  outline-offset: 2px;
+}
+
+/* ==========================================================================
+   Sectie Bewaartermijnen (§7.3.1) en de componenten die zij als eerste
+   nodig had: KPI-tegel (§7.2g), bulkbalk en kaartlijst (§7.2a).
+   ========================================================================== */
+
+/* Mono kapitaalregel boven een waarde. Zet zelf font-family: mono, en hangt
+   dus niet aan .text-uppercase -- die klasse betekent "hoofdletters", niet
+   "mono" (§7.1.4). */
+.a-eyebrow {
+  font-family: var(--font-mono);
+  text-transform: uppercase;
+  letter-spacing: .1em;
+  font-size: var(--font-size-xs);
+  color: var(--admin-muted);
+}
+/* Datawaarden: cijfers, bedragen, tellingen, ID's (§7.1.4). */
+.a-num { font-family: var(--font-mono); }
+.a-num--xl {
+  font-size: var(--font-size-3xl);
+  font-weight: 700;
+  color: var(--white);
+  line-height: 1.15;
+}
+/* Een datum of "n.v.t." op de waardepositie van een KPI-tegel: wel de
+   tegelpositie, niet de cijfermaat van 32px. */
+.a-num--date { font-size: var(--font-size-lg); font-weight: 500; }
+/* Laadstaat van een KPI-waarde (§7.2g): een vlak blok op de plek van het
+   getal, geen spinner en geen 0 die daarna verspringt. --navy-600 omdat de
+   tegel zelf al op --navy-700 staat. */
+.a-num--loading {
+  display: inline-block;
+  width: 3ch;
+  height: 1em;
+  vertical-align: -0.1em;
+  background: var(--navy-600);
+  border-radius: var(--radius-sm);
+}
+
+/* Besluit 1 uit §7.6: categoriebreed goedkeuren wordt op een telefoon niet
+   aangeboden. display:none haalt de knop ook uit de tabvolgorde, dus hij is
+   daar ook met een toetsenbord niet te bereiken. */
+@media (max-width: 600px) {
+  .a-wide-only { display: none !important; }
+}
+
+.a-bulkbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-md);
+  padding: var(--space-md) var(--space-lg);
+  background: var(--navy-700);
+  border-bottom: 1px solid var(--admin-hairline);
+}
+@media (max-width: 600px) {
+  /* Plakt onderaan het scherm, zonder --fixed-stack-offset: dat token zet
+     website/script.js en het paneel laadt dat bestand niet (§7.2a). */
+  /* fixed, niet sticky: sticky binnen een lange tabelkaart scrollt met de
+     kaart mee het beeld uit, en dan is de balk juist weg op het moment dat
+     je hem nodig hebt. De hoogte gaat als --a-bulkbar-h naar de toast. */
+  .a-bulkbar {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 1040;
+    border-top: 1px solid var(--admin-hairline);
+  }
+  /* Een vaste balk dekt af wat eronder ligt: de sectie houdt onderaan
+     evenveel ruimte vrij als de balk hoog is, zodat de laatste rij en de
+     pagineerfooter bereikbaar blijven. */
+  #section-retention { padding-bottom: var(--a-bulkbar-h, 0px); }
+  /* De toast schuift omhoog zolang de bulkbalk staat; de balk zet
+     --a-bulkbar-h zelf op zijn eigen hoogte en weer op 0px bij verdwijnen. */
+  .toast-container {
+    left: var(--space-md);
+    right: var(--space-md);
+    bottom: calc(var(--space-md) + var(--a-bulkbar-h, 0px));
+  }
+  .toast { max-width: none; }
+}
+
+.a-col-check { width: 36px; }
+.a-col-actions { width: 104px; text-align: right; white-space: nowrap; }
+/* Categoriekolom op één regel: een categorienaam van vier woorden maakte
+   de rij anders drie regels hoog. De volledige naam staat in title= en
+   in de kaartweergave onder 768px staat hij alsnog voluit. */
+.a-col-cat {
+  max-width: 12rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Scrollbox met echte regels in plaats van voorgevormde tekst. */
+.a-scrollbox--rows { max-height: 40vh; white-space: normal; padding: 0 10px; }
+.a-scrollbox--rows .a-listrow { padding: var(--space-sm) 0; font-size: var(--font-size-sm); }
+
+.a-clamp {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.a-clamp--open {
+  display: block;
+  overflow: visible;
+}
+
+/* In- en uitklapbare kaart. <details> in plaats van een Collapse-instantie:
+   het werkt zonder JavaScript, is uit zichzelf toetsenbordbereikbaar en is
+   niet afhankelijk van het moment waarop de Tabler-bundel binnen is. */
+.a-disclosure > summary {
+  cursor: pointer;
+  list-style: none;
+  padding: var(--space-md) var(--space-lg);
+  color: var(--white);
+  font-family: var(--font-display);
+  font-size: var(--font-size-lg);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-md);
+  min-height: 44px;
+}
+.a-disclosure > summary::-webkit-details-marker { display: none; }
+.a-disclosure > summary::after {
+  content: "\25BE";
+  color: var(--admin-muted);
+}
+.a-disclosure[open] > summary::after { content: "\25B4"; }
+.a-disclosure > summary:focus-visible {
+  outline: 2px solid var(--gold-500);
+  outline-offset: -2px;
+}
+
+/* Onder 768px is een datatabel geen tabel meer maar een kaartlijst (§7.2a):
+   per record één kaart met de kolomnaam als label boven elke waarde. Eén
+   renderer, één markup; alleen data-label per cel komt erbij. */
+@media (max-width: 767.98px) {
+  .a-cardlist,
+  .a-cardlist tbody,
+  .a-cardlist td {
+    display: block;
+    width: 100%;
+  }
+  .a-cardlist thead { display: none; }
+  /* Kaart: één <tr> is één kaart, en de cellen erin liggen als flexregels
+     (zie de kaartanatomie verderop in dit blok). */
+  .a-cardlist tr {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    column-gap: var(--space-sm);
+    width: 100%;
+    border: 1px solid var(--admin-hairline);
+    border-radius: var(--radius);
+    background: var(--navy-700);
+    padding: var(--space-md);
+    margin-bottom: var(--space-sm);
+  }
+  .a-cardlist td {
+    border: 0;
+    padding: 4px 0;
+  }
+  .a-cardlist td[data-label]::before {
+    content: attr(data-label);
+    display: block;
+    font-family: var(--font-mono);
+    text-transform: uppercase;
+    letter-spacing: .08em;
+    font-size: var(--font-size-xs);
+    color: var(--admin-muted);
+  }
+  .a-cardlist td.a-col-actions {
+    width: 100%;
+    text-align: left;
+    white-space: normal;
+  }
+  .a-cardlist td.a-col-check { width: auto; text-align: left; }
+  /* Kaartanatomie (§7.3.1 390): bovenin de identiteit plus de statusbadge,
+     daaronder onderwerp, termijn en signaal in leesvolgorde, en onderin de
+     knoppen. Flex met order, zodat het dezelfde markup blijft. */
+  .a-cardlist td { order: 5; }
+  .a-cardlist td.a-col-check { order: 1; flex: 0 0 auto; padding-left: 0; padding-right: 0; }
+  .a-cardlist td.a-col-cat {
+    order: 2;
+    /* basis 0 en mag krimpen: de categorie neemt de ruimte die overblijft
+       naast het selectievakje en de statusbadge, en breekt af op twee
+       regels in plaats van de badge naar de volgende regel te duwen */
+    flex: 1 1 8rem;
+    min-width: 0;
+    width: auto;
+    max-width: none;
+    white-space: normal;
+    font-size: var(--font-size-base, 1rem);
+  }
+  .a-cardlist td.a-col-status { order: 3; flex: 0 0 auto; width: auto; margin-left: auto; text-align: right; }
+  .a-cardlist td.a-col-cat::before,
+  .a-cardlist td.a-col-status::before { display: none; }
+  .a-cardlist td.a-col-actions { order: 9; }
+  /* Regel twee van de kaart: onderwerp, verlopen termijn en handeling op
+     één regel in plaats van drie label-waardeparen onder elkaar. De
+     selector hangt aan data-label, hetzelfde haakje waar de kaartlijst
+     zijn labels al uit haalt; alleen de reviewtabel draagt deze drie. */
+  .a-cardlist td[data-label="Onderwerp"],
+  .a-cardlist td[data-label="Termijn verlopen"],
+  .a-cardlist td[data-label="Actie"] {
+    order: 4;
+    flex: 0 0 auto;
+    width: auto;
+    font-size: var(--font-size-sm);
+  }
+  .a-cardlist td[data-label="Onderwerp"]::before,
+  .a-cardlist td[data-label="Actie"]::before { display: none; }
+  .a-cardlist td[data-label="Termijn verlopen"]::before {
+    content: "·";
+    display: inline;
+    margin-right: 4px;
+    color: var(--admin-muted);
+    letter-spacing: 0;
+  }
+  .a-cardlist td[data-label="Ontbrekend signaal"] {
+    order: 6;
+    flex: 0 0 100%;
+    font-size: var(--font-size-sm);
+  }
+  .a-cardlist td[data-label="Ontbrekend signaal"]::before { display: none; }
+
+  /* Variant voor een tabel die alleen tellingen draagt (de categoriekaart):
+     label en waarde op één regel naast elkaar, anders wordt elke categorie
+     een kaart van vier regels en staat de lijst eronder van het scherm af. */
+  .a-cardlist--compact td {
+    display: inline-block;
+    width: auto;
+    order: 5;
+    margin-right: var(--space-md);
+  }
+  .a-cardlist--compact td[data-label]::before {
+    display: inline;
+    margin-right: 4px;
+  }
+  .a-cardlist--compact td.a-cell-name {
+    display: block;
+    width: 100%;
+    margin-right: 0;
+  }
+  .a-cardlist td.a-col-actions .btn {
+    width: 100%;
+    margin-top: var(--space-sm);
+  }
+}
+
+/* 44px-tikdoel in deze sectie (§8.x.0). Sectiebreed, niet paneelbreed: de
+   knopmaat van de andere secties hoort bij hun eigen pass. Een
+   selectievakje wordt niet zelf 44px groot -- dat levert een enorm vierkant
+   op -- maar krijgt zijn tikdoel van het label eromheen. */
+@media (max-width: 600px) {
+  #section-retention .btn { min-height: 44px; min-width: 44px; }
+  .a-tap {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 44px;
+    min-height: 44px;
+  }
+}
 
 /* ==== Bewegingsvoorkeur ==== */
 @media (prefers-reduced-motion: reduce) {

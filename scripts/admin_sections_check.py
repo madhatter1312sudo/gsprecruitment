@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-admin_sections_check.py — WS-B.5 + WS-B.10 proof: the three new admin
-sections (Opdrachtgevers, Leads, Rapportage) render end to end in a real
-browser against stubbed routes (example.com/example.invalid data — no real
-PII, no real network calls).
+admin_sections_check.py -- WS-B.5 + WS-B.10 proof: de nieuwe adminsecties
+(Opdrachtgevers, Leads, Rapportage en Bewaartermijnen) renderen van begin
+tot eind in een echte browser tegen gestubde routes (example.com/
+example.invalid, geen echte PII, geen echt netwerk).
 
 Covers:
   - Opdrachtgevers: list renders (name, domain, open-jobs count, primary
@@ -21,7 +21,20 @@ Covers:
     tables from stubbed /jobs and /leads data, with no invented numbers
     (every value traces to a stubbed API field).
 
-Exit 0 = all three sections pass with zero console errors, 1 = failure.
+  - Bewaartermijnen (SITE-DESIGN-SPEC.md §7.3.1): de samenvatting, de
+    categorietabel en de lijst met gemengde statussen renderen; de
+    heropende rij toont zijn eigen regel; er staat geen e-mailadres en
+    geen ruwe enumwaarde in de lijst; rijselectie toont de bulkbalk;
+    sorteren gaat server-side (sort/order in de querystring, aria-sort op
+    de kop); "Lijst genereren" roept generate aan; goedkeuren blijft
+    geblokkeerd tot APPROVE letterlijk getypt is en stuurt dan
+    confirm="APPROVE"; afwijzen vraagt geen getypte bevestiging en stuurt
+    de notitie mee; categoriebreed goedkeuren stuurt expected_count,
+    houdt de modal open bij een 409 mismatch en slaagt na verversen; de
+    twee droogloopkaarten vragen geen bevestiging; een 500 geeft de
+    retrylink en herstelt daarna.
+
+Exit 0 = alle secties slagen zonder console errors, 1 = mislukt.
 """
 import json
 import re
@@ -138,6 +151,91 @@ ANALYTICS_STATE = {"mode": "ok"}
 ANALYTICS_DATA = {
     "job_fill_rate": 82, "client_retention_rate": 91, "candidate_satisfaction": 76,
     "user_growth": {"2026-07-01": 4, "2026-08-01": 6, "2026-09-01": 9},
+}
+
+
+# ---- Bewaartermijnen (§7.3.1) ------------------------------------------
+# retention_review_items zoals GET /api/v1/admin/retention/review ze
+# teruggeeft, met gemengde statussen: drie 'pending' (waarvan één heropend
+# na een eerdere afwijzing), één 'rejected' en één 'purged'. De adressen
+# zijn example.invalid -- geen echte PII.
+RETENTION_ITEMS = [
+    {"id": 1, "category": "rejected_applicant", "subject_table": "candidates", "subject_id": 1482,
+     "email": "kandidaat1@example.invalid", "action": "anonymise",
+     "term_expired_at": "2026-08-12T00:00:00Z",
+     "signal_missing_nl": "geen nieuwe match, pipeline-activiteit of plaatsing sinds de afwijzing",
+     "status": "pending", "first_seen_at": "2026-09-01T00:00:00Z", "last_seen_at": "2026-09-03T00:00:00Z",
+     "reappeared_after_rejection_at": None, "purged_at": None},
+    {"id": 2, "category": "referral", "subject_table": "candidates", "subject_id": 903,
+     "email": "kandidaat2@example.invalid", "action": "anonymise",
+     "term_expired_at": "2026-07-01T00:00:00Z",
+     "signal_missing_nl": "geen reactie en geen sollicitatie sinds de introductie",
+     "status": "pending", "first_seen_at": "2026-06-01T00:00:00Z", "last_seen_at": "2026-09-03T00:00:00Z",
+     "reappeared_after_rejection_at": "2026-08-04T00:00:00Z", "purged_at": None},
+    {"id": 3, "category": "rejected_applicant", "subject_table": "candidates", "subject_id": 1490,
+     "email": "kandidaat3@example.invalid", "action": "anonymise",
+     "term_expired_at": "2026-08-20T00:00:00Z",
+     "signal_missing_nl": "geen nieuwe match, pipeline-activiteit of plaatsing sinds de afwijzing",
+     "status": "pending", "first_seen_at": "2026-09-01T00:00:00Z", "last_seen_at": "2026-09-03T00:00:00Z",
+     "reappeared_after_rejection_at": None, "purged_at": None},
+    {"id": 4, "category": "prospect_no_response", "subject_table": "client_prospects", "subject_id": 77,
+     "email": None, "action": "hard_delete", "term_expired_at": "2026-05-05T00:00:00Z",
+     "signal_missing_nl": "geen reactie op de benadering en geen bestaande relatie",
+     "status": "rejected", "first_seen_at": "2026-06-01T00:00:00Z", "last_seen_at": "2026-09-03T00:00:00Z",
+     "reappeared_after_rejection_at": None, "purged_at": None},
+    {"id": 5, "category": "leads_quiz", "subject_table": "quiz_submissions", "subject_id": 12,
+     "email": None, "action": "hard_delete", "term_expired_at": "2026-04-01T00:00:00Z",
+     "signal_missing_nl": "ouder dan de bewaartermijn voor leads en quizinzendingen",
+     "status": "purged", "first_seen_at": "2026-05-01T00:00:00Z", "last_seen_at": "2026-09-03T00:00:00Z",
+     "reappeared_after_rejection_at": None, "purged_at": "2026-09-04T00:00:00Z"},
+]
+
+# Eén categorie met meer openstaande items dan de paginagrootte van de
+# lijst (50). Zonder die categorie zijn "de hele categorie" en "de eerste
+# pagina ervan" hetzelfde getal, en dan bewijst de assertie op
+# expected_count niets: de modal moet juist ZONDER limit ophalen.
+RETENTION_BIG_CATEGORY = "sourced_no_response"
+RETENTION_BIG_COUNT = 60
+RETENTION_ITEMS += [
+    {"id": 100 + i, "category": RETENTION_BIG_CATEGORY, "subject_table": "candidates",
+     "subject_id": 2000 + i, "email": None, "action": "anonymise",
+     "term_expired_at": "2026-08-25T00:00:00Z",
+     "signal_missing_nl": "geen reactie op de benadering en geen sollicitatie",
+     "status": "pending", "first_seen_at": "2026-09-01T00:00:00Z",
+     "last_seen_at": "2026-09-03T00:00:00Z",
+     "reappeared_after_rejection_at": None, "purged_at": None}
+    for i in range(RETENTION_BIG_COUNT)
+]
+
+RETENTION_PAGE_SIZE = 50
+
+RETENTION_TABLE_ROWS = [
+    {"key": "rejected_applicant", "categorie": "Afgewezen sollicitant", "bewaartermijn": "12 maanden",
+     "bron_opmerking": "AVG art. 6 lid 1 sub f", "legal_basis_ref": "art. 6.1.f",
+     "anchor_column": "rejected_at", "action": "anonymise", "schema_ready": True,
+     "signal_missing_nl": "geen nieuwe match, pipeline-activiteit of plaatsing sinds de afwijzing"},
+    {"key": "placed_candidate", "categorie": "Geplaatste kandidaat (contract- en factuurdata)",
+     "bewaartermijn": "7 jaar", "bron_opmerking": "fiscale bewaarplicht", "legal_basis_ref": "art. 6.1.c",
+     "anchor_column": "placed_at", "action": "retain", "schema_ready": False, "signal_missing_nl": ""},
+    {"key": "logs", "categorie": "Logs", "bewaartermijn": "90 dagen", "bron_opmerking": "infrastructuur",
+     "legal_basis_ref": "art. 6.1.f", "anchor_column": None, "action": "infra_only",
+     "schema_ready": False, "signal_missing_nl": ""},
+]
+
+# mode: "ok" | "error" (500 op de lijst). generated/approved/rejected/bulk
+# leggen vast wat de UI daadwerkelijk verstuurde, zodat de asserties op de
+# aanroep kunnen controleren en niet alleen op de tekst op het scherm.
+RETENTION_STATE = {
+    "mode": "ok", "generated": 0, "approved": [], "rejected": [],
+    "bulk_calls": [], "dry_run": 0, "apollo_dry_run": 0,
+    # Per categorie precies één 409 op de categoriebrede goedkeuring, en
+    # daarna 200. Deterministisch, dus de test hangt niet van een volgorde
+    # of een timing af: de eerste aanroep voor een categorie is altijd de
+    # mismatch die de UI moet afvangen, de tweede slaagt altijd.
+    "bulk_mismatch_done": set(),
+    # modal_error laat uitsluitend de ophaling ZONDER limit mislukken: dat
+    # is de fetch van de categoriebrede bevestigingsmodal, niet de lijst.
+    "modal_error": False,
 }
 
 
@@ -312,6 +410,132 @@ def route_admin_api(route, request):
         json_response({"detail": "Not found"}, status=404)
         return
 
+    # ---- Bewaartermijnen (§7.3.1) ----
+    if path == "/api/v1/admin/retention/table" and method == "GET":
+        json_response({"markdown": "| Categorie |\n|---|\n", "rows": RETENTION_TABLE_ROWS})
+        return
+    if path == "/api/v1/admin/retention/run" and method == "POST":
+        body = json.loads(request.post_data or "{}")
+        if not body.get("dry_run"):
+            json_response({"detail": {"code": "retention_run_no_longer_purges",
+                                       "message": "Dit endpoint wist niets meer."}}, status=410)
+            return
+        RETENTION_STATE["dry_run"] += 1
+        json_response({"dry_run": True, "categories": [
+            {"key": "rejected_applicant", "status": "counted", "count": 2},
+            {"key": "placed_candidate", "status": "not_applicable", "count": None},
+            {"key": "logs", "status": "schema_not_ready", "count": None},
+        ]})
+        return
+    if path == "/api/v1/admin/apollo-pool/purge" and method == "POST":
+        body = json.loads(request.post_data or "{}")
+        if not body.get("dry_run"):
+            json_response({"detail": {"code": "apollo_pool_purge_no_longer_deletes",
+                                       "message": "Dit endpoint wist niets meer."}}, status=410)
+            return
+        RETENTION_STATE["apollo_dry_run"] += 1
+        json_response({"dry_run": True, "total": 9, "would_anonymise": 6,
+                        "would_hard_delete": 3, "skipped": 4})
+        return
+    if path == "/api/v1/admin/retention/review/summary" and method == "GET":
+        buckets = {}
+        for it in RETENTION_ITEMS:
+            buckets[(it["category"], it["status"])] = buckets.get((it["category"], it["status"]), 0) + 1
+        rows = [{"category": c, "status": s, "n": n} for (c, s), n in sorted(buckets.items())]
+        pending = sum(r["n"] for r in rows if r["status"] == "pending")
+        json_response({"pending_total": pending, "by_category": rows})
+        return
+    if path == "/api/v1/admin/retention/review/generate" and method == "POST":
+        RETENTION_STATE["generated"] += 1
+        json_response({"rejected_applicant": {"queued": 2}, "referral": {"queued": 1}})
+        return
+    if path == "/api/v1/admin/retention/review/bulk" and method == "POST":
+        body = json.loads(request.post_data or "{}")
+        RETENTION_STATE["bulk_calls"].append(body)
+        if body.get("decision") == "approved" and body.get("confirm") != "APPROVE":
+            json_response({"detail": {"code": "retention_review_approve_requires_confirm",
+                                       "message": 'confirm: "APPROVE" is required.'}}, status=409)
+            return
+        if body.get("category") and body.get("decision") == "approved":
+            pending = [i for i in RETENTION_ITEMS
+                        if i["category"] == body["category"] and i["status"] == "pending"]
+            # Eerst één mismatch per categorie, zodat de 409-afhandeling in
+            # de UI echt geraakt wordt; elke volgende poging voor dezelfde
+            # categorie slaagt.
+            if body["category"] not in RETENTION_STATE["bulk_mismatch_done"]:
+                RETENTION_STATE["bulk_mismatch_done"].add(body["category"])
+                json_response({"detail": {
+                    "code": "retention_review_bulk_expected_count_mismatch",
+                    "message": f"expected_count={body.get('expected_count')} but the category has "
+                               f"{len(pending)} pending item(s).",
+                }}, status=409)
+                return
+            results = []
+            for it in pending:
+                it["status"] = "purged"
+                it["email"] = None
+                results.append({"id": it["id"], "status": "purged"})
+            json_response({"results": results})
+            return
+        results = []
+        for item_id in body.get("ids") or []:
+            for it in RETENTION_ITEMS:
+                if it["id"] == item_id:
+                    it["status"] = "purged" if body.get("decision") == "approved" else "rejected"
+                    it["email"] = None
+                    results.append({"id": item_id, "status": it["status"]})
+        json_response({"results": results})
+        return
+    m = re.match(r"^/api/v1/admin/retention/review/(\d+)/(approve|reject)$", path)
+    if m and method == "POST":
+        item_id, decision = int(m.group(1)), m.group(2)
+        body = json.loads(request.post_data or "{}")
+        item = next((i for i in RETENTION_ITEMS if i["id"] == item_id), None)
+        if item is None:
+            json_response({"detail": "Review item not found"}, status=404)
+            return
+        if decision == "approve":
+            if body.get("confirm") != "APPROVE":
+                json_response({"detail": {"code": "retention_review_approve_requires_confirm",
+                                           "message": 'confirm: "APPROVE" is required.'}}, status=409)
+                return
+            RETENTION_STATE["approved"].append(body)
+            item["status"] = "purged"
+            item["email"] = None
+            json_response({"id": item_id, "status": "purged"})
+            return
+        RETENTION_STATE["rejected"].append(body)
+        item["status"] = "rejected"
+        item["email"] = None
+        json_response({"id": item_id, "status": "rejected"})
+        return
+    if path == "/api/v1/admin/retention/review" and method == "GET":
+        if RETENTION_STATE["mode"] == "error":
+            json_response({"detail": "Server error"}, status=500)
+            return
+        if RETENTION_STATE["modal_error"] and qs.get("limit", [None])[0] is None and qs.get("category"):
+            json_response({"detail": "Server error"}, status=500)
+            return
+        status = qs.get("status", ["pending"])[0]
+        category = qs.get("category", [None])[0]
+        rows = list(RETENTION_ITEMS)
+        if status != "all":
+            rows = [r for r in rows if r["status"] == status]
+        if category:
+            rows = [r for r in rows if r["category"] == category]
+        sort = qs.get("sort", [None])[0]
+        if sort:
+            order = qs.get("order", ["asc"])[0]
+            rows = sorted(rows, key=lambda r: (r.get(sort) is None, r.get(sort)),
+                           reverse=(order == "desc"))
+        total = len(rows)
+        limit = qs.get("limit", [None])[0]
+        offset = qint(qs, "offset", 0)
+        page = rows[offset:offset + int(limit)] if limit else rows[offset:]
+        json_response({"items": page, "total": total,
+                        "limit": int(limit) if limit else None, "offset": offset})
+        return
+
     if path == "/api/v1/admin/analytics":
         if ANALYTICS_STATE["mode"] == "error":
             json_response({"detail": "Server error"}, status=500)
@@ -331,6 +555,97 @@ def route_admin_api(route, request):
     json_response({"items": [], "total": 0})
 
 
+def click_or_fail(page, failures, selector, what):
+    """Klikken zonder dat een ontbrekend element de hele run in een
+    traceback laat eindigen: dan mist niet alleen deze assertie maar ook
+    alles wat erna komt. Een gemiste knop hoort in de failure-lijst, net
+    als de pagineerknop dat al deed."""
+    if page.query_selector(selector) is None:
+        failures.append(f"retention: {what} niet gevonden ({selector})")
+        return False
+    page.click(selector)
+    return True
+
+
+def text_of(page, selector):
+    """Tekst van een element, of een lege string als het er niet is. Een
+    ontbrekend element hoort een falende assertie op te leveren, geen
+    traceback die de rest van de run overslaat."""
+    el = page.query_selector(selector)
+    return (el.text_content() or "") if el else ""
+
+
+def is_disabled(page, selector, default=True):
+    el = page.query_selector(selector)
+    return default if el is None else bool(el.is_disabled())
+
+
+def wait_until(page, predicate, timeout=6000, step=50):
+    """Wacht op een voorwaarde in plaats van op een aantal milliseconden.
+    Een vaste wait is in een suite die tien secties na elkaar draait geen
+    garantie: dezelfde stap die geïsoleerd 26 van de 26 keer klopt, valt
+    onder belasting soms net buiten het venster. Geeft True zodra de
+    voorwaarde geldt, anders False na `timeout`; de aanroeper maakt er dan
+    een regel in de failure-lijst van."""
+    waited = 0
+    while waited < timeout:
+        try:
+            if predicate():
+                return True
+        except Exception:
+            pass
+        page.wait_for_timeout(step)
+        waited += step
+    return False
+
+
+def wait_for_text(page, selector, needle, timeout=6000):
+    return wait_until(page, lambda: needle in text_of(page, selector), timeout)
+
+
+def wait_for_enabled(page, selector, enabled=True, timeout=6000):
+    return wait_until(page, lambda: (page.query_selector(selector) is not None)
+                      and (is_disabled(page, selector) is not enabled), timeout)
+
+
+def wait_for_calls(page, bucket, count, timeout=6000):
+    """Wacht tot de stub `count` aanroepen heeft gezien; dat is het
+    signaal dat het antwoord verwerkt is, niet een gok over hoe lang dat
+    duurt."""
+    return wait_until(page, lambda: len(bucket) >= count, timeout)
+
+
+def fill_or_fail(page, failures, selector, value, what):
+    if page.query_selector(selector) is None:
+        failures.append(f"retention: {what} niet gevonden ({selector})")
+        return False
+    page.fill(selector, value)
+    return True
+
+
+def check_retention_category_labels():
+    """D3: elke categorie uit core/retention.RETENTION_TABLE heeft een
+    Nederlands label in js/labels.js. Zonder dat toont de droogloop of de
+    bewaartabel de ruwe sleutel (placed_candidate, logs). Statisch, geen
+    browser: de map is een tekstbestand en de tabel ook."""
+    problems = []
+    retention_py = (ROOT / "talent-os" / "backend" / "core" / "retention.py").read_text(encoding="utf-8")
+    keys = re.findall(r'key="([a-z_]+)"', retention_py)
+    labels_js = (WEBSITE / "admin" / "js" / "labels.js").read_text(encoding="utf-8")
+    block = re.search(r"retentiecategorie:\s*\{(.*?)\n    \},", labels_js, re.S)
+    if not block:
+        return ["labels.js: de map retentiecategorie is niet gevonden"]
+    mapped = set(re.findall(r"^\s*([a-z_]+):", block.group(1), re.M))
+    for key in keys:
+        if key not in mapped:
+            problems.append(f"labels.js: RETENTION_TABLE-categorie {key!r} heeft geen Nederlands label")
+    # apollo_pool_purge is geen RETENTION_TABLE-rij maar staat wel in de
+    # beoordelingslijst; die moet er dus juist wel in staan.
+    if "apollo_pool_purge" not in mapped:
+        problems.append("labels.js: de UI-eigen categorie 'apollo_pool_purge' ontbreekt")
+    return problems
+
+
 def main():
     try:
         from playwright.sync_api import sync_playwright
@@ -342,7 +657,7 @@ def main():
     start_server(port)
     base = f"http://127.0.0.1:{port}/admin/"
 
-    failures = []
+    failures = check_retention_category_labels()
 
     with sync_playwright() as pw:
         browser = pw.chromium.launch(executable_path=CHROMIUM_PATH or None, headless=True)
@@ -617,6 +932,304 @@ def main():
         if new_errors:
             failures.append(f"reporting: {len(new_errors)} console error(s): {new_errors[:3]}")
 
+        # ---- Bewaartermijnen (§7.3.1) ----
+        errors_before = len(console_errors)
+        click_or_fail(page, failures, '.nav-link[data-section="retention"]', "het sidebar-item Bewaartermijnen")
+        if not wait_until(page, lambda: page.eval_on_selector_all('#retentionBody tr', "els => els.length")
+                          == RETENTION_PAGE_SIZE):
+            failures.append("retention: de lijst vulde zich niet met een volle pagina")
+        if not wait_for_text(page, '#retentionSummary', "Laatst gegenereerd"):
+            failures.append("retention: de samenvatting vulde zich niet")
+
+        summary_text = text_of(page, '#retentionSummary')
+        if "Te beoordelen" not in summary_text or "3" not in summary_text:
+            failures.append(f"retention: samenvatting toont de telling niet -- kreeg {summary_text[:160]!r}")
+        if "Heropend na afwijzing" not in summary_text:
+            failures.append("retention: de tegel voor heropende items ontbreekt terwijl er er één is")
+        if "Laatst gegenereerd" not in summary_text:
+            failures.append("retention: de tegel 'Laatst gegenereerd' ontbreekt")
+
+        cat_text = text_of(page, '#retentionCategoryBody')
+        for expect in ("Afgewezen sollicitant", "Referral"):
+            if expect not in cat_text:
+                failures.append(f"retention: categorietabel mist {expect!r} -- kreeg {cat_text[:160]!r}")
+        if "rejected_applicant" in cat_text:
+            failures.append("retention: de ruwe categoriesleutel lekte in de categorietabel")
+
+        pending_total = len([i for i in RETENTION_ITEMS if i["status"] == "pending"])
+        rows = page.eval_on_selector_all('#retentionBody tr', "els => els.length")
+        if rows != RETENTION_PAGE_SIZE:
+            failures.append(f"retention: lijst toonde {rows} rijen, verwacht {RETENTION_PAGE_SIZE} "
+                            f"(de paginagrootte, niet de volle {pending_total})")
+        footer = text_of(page, '#retentionCount')
+        if f"van {pending_total}" not in footer:
+            failures.append(f"retention: footer telt niet de volle set -- kreeg {footer.strip()!r}")
+        if page.query_selector('#retentionPagination [data-action="page"][data-page="2"]') is None:
+            failures.append("retention: geen pagineerknop terwijl er meer dan één pagina is")
+        list_text = text_of(page, '#retentionBody')
+        if "kandidaat #1482" not in list_text:
+            failures.append(f"retention: onderwerp niet als 'kandidaat #1482' getoond -- kreeg {list_text[:200]!r}")
+        if "Eerder afgewezen, opnieuw verschenen op" not in list_text:
+            failures.append("retention: de heropende rij mist zijn eigen regel in de statuskolom")
+        if "example.invalid" in list_text:
+            failures.append("retention: een e-mailadres uit de respons stond in de lijst")
+        if "anonymise" in list_text or "pending" in list_text:
+            failures.append("retention: een ruwe enumwaarde lekte in de lijst")
+
+        # Rijselectie en bulkbalk (§7.2a).
+        click_or_fail(page, failures, '#retentionBody input[data-action="retention-select"]', "een selectievakje in de lijst")
+        wait_for_text(page, '#retentionBulkbar', "geselecteerd")
+        bulk_text = text_of(page, '#retentionBulkbar')
+        if "1 geselecteerd" not in bulk_text:
+            failures.append(f"retention: bulkbalk verscheen niet bij een selectie -- kreeg {bulk_text[:120]!r}")
+        row_selected = page.eval_on_selector('#retentionBody tr', "el => el.classList.contains('a-row-selected')")
+        if not row_selected:
+            failures.append("retention: een geselecteerde rij kreeg geen zichtbare selectiestaat")
+        click_or_fail(page, failures, '[data-action="retention-clear-selection"]', "de knop Selectie wissen")
+        wait_until(page, lambda: page.eval_on_selector('#retentionBulkbar', "el => el.hidden") is True)
+        if not page.eval_on_selector('#retentionBulkbar', "el => el.hidden"):
+            failures.append("retention: bulkbalk bleef staan na 'Selectie wissen'")
+
+        # Server-side sorteren (BV10): term_expired_at oplopend zet juli vóór augustus.
+        click_or_fail(page, failures, '#retentionHead th[data-sort-key="term_expired_at"]', "de sorteerbare kop Termijn verlopen")
+        if not wait_until(page, lambda: "903" in text_of(page, '#retentionBody tr td:nth-child(3)')):
+            failures.append("retention: de lijst herlaadde niet na het sorteren")
+        if page.get_attribute('#retentionHead th[data-sort-key="term_expired_at"]', "aria-sort") != "ascending":
+            failures.append("retention: aria-sort kwam niet op 'ascending' te staan")
+        first_subject = text_of(page, '#retentionBody tr td:nth-child(3)')
+        if "903" not in first_subject:
+            failures.append(f"retention: server-side sorteren gaf als eerste rij {first_subject.strip()!r}, verwacht kandidaat #903")
+
+        # Lijst genereren.
+        click_or_fail(page, failures, '#section-retention [data-action="retention-generate"]', "de knop Lijst genereren")
+        if not wait_until(page, lambda: RETENTION_STATE["generated"] >= 1):
+            failures.append("retention: 'Lijst genereren' riep generate niet aan")
+        if RETENTION_STATE["generated"] != 1:
+            failures.append(f"retention: 'Lijst genereren' riep generate {RETENTION_STATE['generated']}x aan, verwacht 1")
+
+        # Goedkeuren: getypte bevestiging, fout en goed.
+        click_or_fail(page, failures, '#retentionBody [data-action="retention-approve"][data-id="1"]', "de goedkeurknop van item 1")
+        if not wait_until(page, lambda: page.query_selector('#retentionApproveModal input[type=text]') is not None):
+            failures.append("retention: de goedkeurmodal ging niet open")
+        modal_text = text_of(page, '#retentionApproveModal')
+        if "k••••@example.invalid" not in modal_text:
+            failures.append(f"retention: de goedkeurmodal toont het adres niet gemaskeerd -- kreeg {modal_text[:200]!r}")
+        if "kandidaat1@example.invalid" in modal_text:
+            failures.append("retention: het volledige e-mailadres stond in de goedkeurmodal")
+        danger = "#retentionApproveModal .btn-outline-danger"
+        if not is_disabled(page, danger):
+            failures.append("retention: de goedkeurknop stond meteen aan zonder getypte bevestiging")
+        fill_or_fail(page, failures, "#retentionApproveModal input[type=text]", "approve",
+                     "het bevestigingsveld van de goedkeurmodal")
+        # Niet 150ms afwachten maar de staat vasthouden: de knop moet uit
+        # BLIJVEN, dus een korte stabiliteitscontrole in plaats van één meting.
+        if wait_for_enabled(page, danger, True, timeout=400):
+            failures.append("retention: de goedkeurknop ging aan bij een niet-kloppende bevestiging")
+        fill_or_fail(page, failures, "#retentionApproveModal input[type=text]", "APPROVE",
+                     "het bevestigingsveld van de goedkeurmodal")
+        if not wait_for_enabled(page, danger, True):
+            failures.append("retention: de goedkeurknop bleef uit terwijl APPROVE getypt was")
+        click_or_fail(page, failures, danger, "de goedkeurknop in de modal")
+        if not wait_for_calls(page, RETENTION_STATE["approved"], 1):
+            failures.append("retention: er kwam geen approve-aanroep binnen")
+        if not wait_until(page, lambda: "kandidaat #1482" not in text_of(page, '#retentionBody')):
+            failures.append("retention: de lijst herlaadde niet na het goedkeuren")
+        if not RETENTION_STATE["approved"] or RETENTION_STATE["approved"][0].get("confirm") != "APPROVE":
+            failures.append(f"retention: approve-aanroep droeg niet confirm='APPROVE' -- {RETENTION_STATE['approved']!r}")
+        after_approve = text_of(page, '#retentionBody')
+        if "kandidaat #1482" in after_approve:
+            failures.append("retention: het goedgekeurde item staat nog in de lijst na herladen")
+
+        # Afwijzen: gewone modal met notitie, geen getypte bevestiging.
+        click_or_fail(page, failures, '#retentionBody [data-action="retention-reject"][data-id="3"]', "de afwijsknop van item 3")
+        if not wait_until(page, lambda: page.query_selector('#retentionRejectNote') is not None):
+            failures.append("retention: de afwijsmodal ging niet open")
+        if page.query_selector('#adminConfirmModal input[type=text]') is not None:
+            failures.append("retention: afwijzen vroeg een getypte bevestiging; dat hoort alleen bij goedkeuren")
+        fill_or_fail(page, failures, '#retentionRejectNote', 'Bewaren, loopt nog een gesprek.',
+                     'het notitieveld van de afwijsmodal')
+        click_or_fail(page, failures, '#adminConfirmModal .btn-primary', "de bevestigknop van de afwijsmodal")
+        if not wait_for_calls(page, RETENTION_STATE["rejected"], 1):
+            failures.append("retention: er kwam geen reject-aanroep binnen")
+        if not RETENTION_STATE["rejected"]:
+            failures.append("retention: afwijzen deed geen reject-aanroep")
+        elif not (RETENTION_STATE["rejected"][0].get("note") or "").startswith("Bewaren"):
+            failures.append(f"retention: de notitie ging niet mee in de reject-aanroep -- {RETENTION_STATE['rejected'][0]!r}")
+
+        # Statusfilter 'Afgewezen (bewaard)'.
+        page.select_option('#retentionStatusFilter', 'rejected')
+        if not wait_for_text(page, '#retentionBody', "prospect #77"):
+            failures.append(f"retention: filter 'Afgewezen (bewaard)' toont de bewaarde rijen niet -- "
+                            f"kreeg {text_of(page, '#retentionBody')[:200]!r}")
+        page.select_option('#retentionStatusFilter', 'pending')
+        if not wait_for_text(page, '#retentionBody', "kandidaat #903"):
+            failures.append("retention: de lijst kwam niet terug op het standaardfilter")
+
+        # Categoriebreed goedkeuren op een categorie met MEER openstaande
+        # items dan de paginagrootte: de modal haalt zonder limit op, dus
+        # expected_count is de volle telling en niet de eerste pagina.
+        click_or_fail(page, failures, f'[data-action="retention-category-approve"][data-category="{RETENTION_BIG_CATEGORY}"]', "Alles goedkeuren voor de grote categorie")
+        # Wachten tot de rijen er staan, niet tot de klok afloopt.
+        if not wait_until(page, lambda: page.eval_on_selector_all(
+                '#retentionBulkModal .a-listrow', "els => els.length") == RETENTION_BIG_COUNT):
+            failures.append("retention: de bulkmodal vulde zich niet met de rijen van de categorie")
+        bulk_modal = text_of(page, '#retentionBulkModal')
+        if "kandidaat #2000" not in bulk_modal:
+            failures.append(f"retention: de bulkmodal toont de geraakte rijen niet -- kreeg {bulk_modal[:200]!r}")
+        modal_rows = page.eval_on_selector_all('#retentionBulkModal .a-listrow', "els => els.length")
+        if modal_rows != RETENTION_BIG_COUNT:
+            failures.append(f"retention: de bulkmodal toonde {modal_rows} rijen, verwacht {RETENTION_BIG_COUNT} "
+                            "(de hele categorie, dus zonder limit opgehaald)")
+        fill_or_fail(page, failures, "#retentionBulkModal input[type=text]", "APPROVE",
+                     "het bevestigingsveld van de bulkmodal")
+        bulk_calls_before = len(RETENTION_STATE["bulk_calls"])
+        if not wait_for_enabled(page, "#retentionBulkModal .btn-outline-danger", True):
+            failures.append("retention: de bulkknop bleef uit terwijl APPROVE getypt was en de lijst geladen is")
+        else:
+            click_or_fail(page, failures, "#retentionBulkModal .btn-outline-danger", "de bulkknop")
+        if not wait_for_calls(page, RETENTION_STATE["bulk_calls"], bulk_calls_before + 1):
+            failures.append("retention: de categoriebrede goedkeuring stuurde geen aanroep")
+        if not wait_for_text(page, '#retentionBulkAlert', "De lijst is veranderd"):
+            failures.append("retention: 409 mismatch werd niet als inline-melding getoond -- "
+                            f"kreeg {text_of(page, '#retentionBulkAlert')[:200]!r}")
+        if not page.evaluate("() => document.getElementById('retentionBulkModal').classList.contains('show')"):
+            failures.append("retention: de bulkmodal sloot bij een 409 mismatch; hij hoort open te blijven")
+        last_bulk = RETENTION_STATE["bulk_calls"][-1] if RETENTION_STATE["bulk_calls"] else {}
+        if last_bulk.get("expected_count") != RETENTION_BIG_COUNT or last_bulk.get("confirm") != "APPROVE":
+            failures.append(f"retention: categoriebrede aanroep droeg niet de volle telling plus confirm -- {last_bulk!r}")
+        # Na de 409 vervalt het oude aantal en gaat de knop op slot: een
+        # tweede poging mag niet hetzelfde verouderde getal opnieuw sturen,
+        # ook niet als iemand langs de disabled heen klikt.
+        calls_before_retry = len(RETENTION_STATE["bulk_calls"])
+        locked = page.eval_on_selector("#retentionBulkModal .btn-outline-danger",
+                                        "el => ({disabled: el.disabled, lock: el.dataset.gspLock})")
+        if not locked["disabled"] or locked["lock"] != "1":
+            failures.append(f"retention: de bulkknop stond na de 409 niet uit en op slot -- {locked!r}")
+        if wait_for_enabled(page, "#retentionBulkModal .btn-outline-danger", True, timeout=600):
+            click_or_fail(page, failures, "#retentionBulkModal .btn-outline-danger", "de bulkknop")
+            page.wait_for_timeout(500)
+        # Geforceerde klik: een click() vanuit JS gaat langs de disabled
+        # heen die de browser voor een muisklik afvangt. De handler zelf
+        # hoort de handeling dan nog steeds te weigeren.
+        page.evaluate("() => document.querySelector('#retentionBulkModal .btn-outline-danger').click()")
+        page.wait_for_timeout(600)
+        if len(RETENTION_STATE["bulk_calls"]) != calls_before_retry:
+            failures.append("retention: een tweede klik na de 409 stuurde alsnog een bulkaanroep "
+                            "zonder dat de telling ververst was")
+        if not wait_until(page, lambda: page.query_selector('[data-action="retention-bulk-refresh"]') is not None):
+            failures.append("retention: de knop Verversen verscheen niet na de 409")
+        click_or_fail(page, failures, '[data-action="retention-bulk-refresh"]', "de knop Verversen")
+        if not wait_for_enabled(page, "#retentionBulkModal .btn-outline-danger", True):
+            failures.append("retention: na verversen bleef de bulkknop uit")
+        elif page.eval_on_selector("#retentionBulkModal .btn-outline-danger",
+                                    "el => el.dataset.gspLock") == "1":
+            failures.append("retention: het slot bleef op de bulkknop staan na verversen")
+        else:
+            calls_before_ok = len(RETENTION_STATE["bulk_calls"])
+            click_or_fail(page, failures, "#retentionBulkModal .btn-outline-danger", "de bulkknop")
+            if not wait_for_calls(page, RETENTION_STATE["bulk_calls"], calls_before_ok + 1):
+                failures.append("retention: de tweede categoriebrede goedkeuring stuurde geen aanroep")
+        if not wait_for_text(page, '#retentionBulkModal', "Verwerkt"):
+            failures.append("retention: de bulkuitkomst werd niet in dezelfde modal getoond -- "
+                            f"kreeg {text_of(page, '#retentionBulkModal')[:200]!r}")
+        result_text = text_of(page, '#retentionBulkModal')
+        click_or_fail(page, failures, '#retentionBulkModal [data-action="close-modal"]', "de sluitknop van de bulkmodal")
+        page.wait_for_timeout(300)
+        # De opzettelijke 409 hierboven logt zijn eigen "Failed to load
+        # resource": ruis van deze negatieve test, geen fout van het paneel.
+        console_errors[:] = [e for e in console_errors if "409 (Conflict)" not in e]
+
+        # Droogloop: read-only, zonder bevestiging. De twee kaarten staan
+        # ingeklapt (<details>), dus eerst openen zoals een gebruiker dat doet.
+        click_or_fail(page, failures, '#section-retention details:nth-of-type(1) > summary', "de kaart Droogloop")
+        click_or_fail(page, failures, '#section-retention details:nth-of-type(2) > summary', "de kaart Apollo-bulkpool")
+        page.wait_for_timeout(200)
+        click_or_fail(page, failures, '[data-action="retention-dryrun"]', "de knop Uitvoeren van de droogloop")
+        wait_for_text(page, '#retentionDryRun', "telt niet mee")
+        dry_text = text_of(page, '#retentionDryRun')
+        if "telt niet mee: bewaren" not in dry_text or "kolom bestaat nog niet" not in dry_text:
+            failures.append(f"retention: droogloop toont de toelichting per status niet -- kreeg {dry_text[:200]!r}")
+        click_or_fail(page, failures, '[data-action="retention-apollo-dryrun"]', "de knop Uitvoeren van de Apollo-droogloop")
+        wait_for_text(page, '#retentionApolloDryRun', "Zou anonimiseren")
+        apollo_text = text_of(page, '#retentionApolloDryRun')
+        if "Zou anonimiseren" not in apollo_text or "Overgeslagen" not in apollo_text:
+            failures.append(f"retention: de Apollo-droogloop toont de vier getallen niet -- kreeg {apollo_text[:200]!r}")
+
+        # Bewaartabel: alleen laden als de kaart opengaat.
+        page.evaluate("() => { document.getElementById('retentionTableDetails').open = true; }")
+        wait_for_text(page, '#retentionTableCard', "Komt niet in de beoordelingslijst")
+        table_text = text_of(page, '#retentionTableCard')
+        if "Komt niet in de beoordelingslijst" not in table_text:
+            failures.append(f"retention: de bewaartabel mist de badge bij retain/infra_only -- kreeg {table_text[:200]!r}")
+
+        new_errors = console_errors[errors_before:]
+        if new_errors:
+            failures.append(f"retention: {len(new_errors)} console error(s): {new_errors[:3]}")
+
+        # Een categoriemodal waarvan de verse telling mislukt, mag niets
+        # goedkeuren: zonder de reset van dat aantal bleef het getal van de
+        # vorige categorie staan en was de knop bruikbaar zodra APPROVE
+        # getypt was.
+        calls_before = len(RETENTION_STATE["bulk_calls"])
+        click_or_fail(page, failures, '[data-action="retention-category-approve"][data-category="referral"]', "Alles goedkeuren voor referral")
+        if not wait_until(page, lambda: page.eval_on_selector_all(
+                '#retentionBulkModal .a-listrow', "els => els.length") == 1):
+            failures.append("retention: de bulkmodal voor referral vulde zich niet")
+        fill_or_fail(page, failures, "#retentionBulkModal input[type=text]", "APPROVE",
+                     "het bevestigingsveld van de bulkmodal")
+        wait_for_enabled(page, "#retentionBulkModal .btn-outline-danger", True)
+        if is_disabled(page, "#retentionBulkModal .btn-outline-danger"):
+            failures.append("retention: de bulkknop bleef uit bij een geslaagde categorieophaling")
+        expected_after_ok = page.evaluate("() => Admin._retention.bulkExpected")
+        if expected_after_ok != 1:
+            failures.append(f"retention: expected_count na een geslaagde ophaling was {expected_after_ok!r}, verwacht 1")
+        # Dezelfde modal opnieuw vullen terwijl de ophaling faalt (dat is wat
+        # de knop Verversen doet): het aantal van zojuist mag niet blijven
+        # staan, anders keurt een tweede klik een categorie goed die dit
+        # scherm nooit heeft laten zien.
+        RETENTION_STATE["modal_error"] = True
+        page.evaluate("() => Admin.fillRetentionCategoryModal(Admin._retentionCategoryModal, 'referral')")
+        if not wait_until(page, lambda: "Verversen" in text_of(page, '#retentionBulkModal')):
+            failures.append("retention: de mislukte hervulling toonde geen melding")
+        if page.evaluate("() => Admin._retention.bulkExpected") != 0:
+            failures.append("retention: na een mislukte categorieophaling bleef het oude aantal staan")
+        if not is_disabled(page, "#retentionBulkModal .btn-outline-danger"):
+            failures.append("retention: de bulkknop bleef bruikbaar na een mislukte categorieophaling")
+            click_or_fail(page, failures, "#retentionBulkModal .btn-outline-danger", "de bulkknop")
+            page.wait_for_timeout(600)
+        if len(RETENTION_STATE["bulk_calls"]) != calls_before:
+            failures.append("retention: een categoriemodal met een mislukte telling keurde alsnog iets goed")
+        fail_alert = text_of(page, '#retentionBulkModal')
+        if "Verversen" not in fail_alert:
+            failures.append(f"retention: mislukte modalophaling bood geen Verversen -- kreeg {fail_alert[:160]!r}")
+        click_or_fail(page, failures, '#retentionBulkModal [data-action="close-modal"]', "de sluitknop van de bulkmodal")
+        page.wait_for_timeout(300)
+        RETENTION_STATE["modal_error"] = False
+        console_errors[:] = [e for e in console_errors if "500 (Internal Server Error)" not in e]
+
+        # 500 met retry. De opzettelijke 500 logt zijn eigen console error;
+        # de grens gaat er daarom hierna overheen, zoals bij analytics.
+        RETENTION_STATE["mode"] = "error"
+        page.select_option('#retentionStatusFilter', 'all')
+        wait_for_text(page, '#retentionBody', "probeer opnieuw")
+        err_text = text_of(page, '#retentionBody')
+        if "probeer opnieuw" not in err_text.lower():
+            failures.append(f"retention: foutstaat mist de retrylink -- kreeg {err_text[:200]!r}")
+        RETENTION_STATE["mode"] = "ok"
+        errors_before = len(console_errors)
+        retry = page.query_selector('#retentionBody a')
+        if retry is None:
+            failures.append("retention: geen retrylink gevonden om van de fout te herstellen")
+        else:
+            retry.click()
+            wait_until(page, lambda: "probeer opnieuw" not in text_of(page, '#retentionBody').lower())
+            recovered = text_of(page, '#retentionBody')
+            if "Kon niet laden" in recovered or "probeer opnieuw" in recovered.lower():
+                failures.append(f"retention: herstelde niet na de retry -- kreeg {recovered[:200]!r}")
+        new_errors = console_errors[errors_before:]
+        if new_errors:
+            failures.append(f"retention (na retry): {len(new_errors)} console error(s): {new_errors[:3]}")
+
         browser.close()
 
     if failures:
@@ -625,8 +1238,10 @@ def main():
             print(f"  - {f}")
         sys.exit(1)
 
-    print("PASS: Opdrachtgevers (list + tabbed drawer), Leads (inbox + unread filter + PATCH) "
-          "and Rapportage all rendered correctly with zero console errors.")
+    print("PASS: Opdrachtgevers (list + tabbed drawer), Leads (inbox + unread filter + PATCH), "
+          "Rapportage en Bewaartermijnen (lijst, generate, goedkeuren met getypte bevestiging, "
+          "afwijzen, categoriebrede bulk met 409-mismatch, droogloop en 500 met retry) "
+          "renderden allemaal correct, zonder console errors.")
     sys.exit(0)
 
 

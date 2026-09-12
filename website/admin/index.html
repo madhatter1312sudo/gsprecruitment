@@ -80,6 +80,7 @@
         <div class="text-secondary text-uppercase px-3 pt-3 pb-1 fw-bold a-nav-caption">System</div>
         <ul class="navbar-nav">
           <li class="nav-item"><a class="nav-link" href="#" data-section="cms"><span class="nav-link-icon"><i class="fa-regular fa-newspaper"></i></span><span class="nav-link-title">Content CMS</span></a></li>
+          <li class="nav-item"><a class="nav-link" href="#" data-section="retention"><span class="nav-link-icon"><i class="fa-regular fa-clock"></i></span><span class="nav-link-title">Bewaartermijnen</span></a></li>
           <li class="nav-item"><a class="nav-link" href="#" data-section="settings"><span class="nav-link-icon"><i class="fa-solid fa-gear"></i></span><span class="nav-link-title">Settings</span></a></li>
         </ul>
 
@@ -578,6 +579,10 @@
              admin_pagination_check.py op staan niet verschuiven. -->
         <section class="portal-section" id="section-reporting"></section>
 
+        <!-- Bewaartermijnen (SITE-DESIGN-SPEC.md §7.3.1). De markup komt uit
+             skeletonHtml() in js/sections/retention.js. -->
+        <section class="portal-section" id="section-retention"></section>
+
         <!-- ==================== CONTENT CMS ==================== -->
         <section class="portal-section" id="section-cms">
           <div class="row row-cards">
@@ -763,6 +768,7 @@
 <script src="js/sections/audit.js"></script>
 <script src="js/sections/cms.js"></script>
 <script src="js/sections/settings.js"></script>
+<script src="js/sections/retention.js"></script>
 <script src="js/vendor-fallback-tabler-js.js"></script>
 <script src="js/nav.js"></script>
 </body>

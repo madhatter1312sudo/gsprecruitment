@@ -21,6 +21,18 @@ zonder Bootstrap) wordt hetzelfde gecontroleerd:
 Daarnaast eenmalig:
   - ui.table() sorteert tekst, getallen en een numerieke string in de goede
     volgorde, en zet aria-sort op de juiste kolomkop.
+  - ui.table({serverSort:true}) sorteert juist NIET zelf: een klik op de kop
+    roept load() opnieuw aan met sortKey/sortDir en laat de volgorde van de
+    route staan (§7.2a, BV10). Plus de lege staat en de foutstaat met retry.
+  - ui.confirm() met een eigen body en onConfirm: de aanroeper leest zijn
+    notitieveld uit terwijl het paneel nog staat.
+  - handle.button(rol), handle.setBusy() en handle.syncGate(): spinner plus
+    disabled op de handelende knop, daarna de oorspronkelijke tekst terug,
+    en een bewust vergrendelde knop (data-gsp-lock) die door de getypte
+    bevestiging noch door setBusy(false) weer aangaat.
+  - De getypte bevestiging: focus gaat bij openen naar het veld, "Komt niet
+    overeen" verschijnt met aria-live zodra er iets fout getypt is, en Enter
+    voert de handeling alleen uit als de knop op dat moment aan staat.
   - Een controle op de focustrap-probe zelf: op een paneel zonder trap moet
     diezelfde probe "niet getrapt" melden. Zo faalt een kapotte trap met een
     duidelijke regel in plaats van met een timeout.
@@ -118,6 +130,53 @@ TABLE_FIXTURE = """() => {
     render: (r) => GSP.html`<tr><td>${r.naam}</td><td>${r.score}</td></tr>`,
   });
   return window.__uiTable.reload().then(() => 'ready');
+}"""
+
+# Tweede tabel, met serverSort: de "server" geeft altijd dezelfde twee
+# rijen terug, dus elke verandering in de volgorde zou client-side
+# hersorteren zijn -- precies wat serverSort niet mag doen. __srvCalls legt
+# vast wat load() als sorteerstaat meekreeg.
+SERVER_SORT_FIXTURE = """() => {
+  const host = document.createElement('div');
+  host.id = 'uiSrvHost';
+  host.innerHTML =
+    '<table><thead id="uiSrvHead"><tr><th data-sort-key="naam">Naam</th></tr></thead>' +
+    '<tbody id="uiSrvBody"></tbody></table>';
+  document.querySelector('.page-body').appendChild(host);
+  window.__srvCalls = [];
+  window.__srvMode = 'ok';
+  window.__srvTable = ui.table({
+    tbody: '#uiSrvBody',
+    thead: '#uiSrvHead',
+    serverSort: true,
+    empty: 'Nog geen rijen.',
+    cols: [{ key: 'naam', label: 'Naam', sortable: true }],
+    load: async (state) => {
+      window.__srvCalls.push({ sortKey: state.sortKey, sortDir: state.sortDir });
+      if (window.__srvMode === 'error') throw new Error('stuk');
+      if (window.__srvMode === 'empty') return { items: [], total: 0 };
+      return { items: [{ naam: 'van de server' }, { naam: 'in deze volgorde' }], total: 2 };
+    },
+    render: (r) => GSP.html`<tr><td>${r.naam}</td></tr>`,
+  });
+  return window.__srvTable.reload().then(() => 'ready');
+}"""
+
+# Een destructieve modal met een bewust vergrendelde knop, plus de
+# getypte bevestiging: de combinatie waar S2 over ging.
+LOCK_FIXTURE = """() => {
+  window.__lockRan = false;
+  window.__lock = ui.modal({
+    id: 'uiLockModal',
+    title: 'Wissen',
+    body: GSP.html`<p>Dit kan niet ongedaan gemaakt worden.</p>`,
+    confirmText: 'WIS',
+    danger: { label: 'Wissen', keepOpen: true, onClick: () => { window.__lockRan = true; } },
+  });
+  const b = window.__lock.button('danger');
+  b.disabled = true;
+  b.dataset.gspLock = '1';
+  return 'ready';
 }"""
 
 # Een paneel zonder focustrap, om te bewijzen dat de probe een ontbrekende
@@ -233,6 +292,9 @@ def panel_assertions(page, failures, label, suffix):
     danger = f"#{cid} .btn-outline-danger"
     if not page.eval_on_selector(danger, "el => el.disabled"):
         failures.append(tag + "confirmText: de destructieve knop stond meteen aan")
+    if page.evaluate("(s) => document.activeElement === document.querySelector(s + ' input[type=text]')",
+                     "#" + cid) is not True:
+        failures.append(tag + "confirmText: de focus ging niet naar het bevestigingsveld bij openen")
     box = page.query_selector(f"#{cid} input[type=text]")
     box.fill("verwijder")
     page.wait_for_timeout(150)
@@ -358,6 +420,136 @@ def main():
         if page.get_attribute('#uiTestHead th[data-sort-key="naam"]', "aria-sort") != "none":
             failures.append("table: de vorige kolom hield zijn aria-sort vast")
 
+        # ui.table met serverSort: een klik op de kolomkop sorteert niet
+        # zelf maar vraagt de route opnieuw, met sort/order erin, en zet
+        # aria-sort op de aangeklikte kop.
+        page.evaluate(SERVER_SORT_FIXTURE)
+        page.wait_for_timeout(300)
+        page.click('#uiSrvHead th[data-sort-key="naam"]')
+        page.wait_for_timeout(300)
+        calls = page.evaluate("() => window.__srvCalls")
+        if calls != [{"sortKey": None, "sortDir": None}, {"sortKey": "naam", "sortDir": "asc"}]:
+            failures.append(f"table serverSort: load() kreeg {calls!r}, verwacht een tweede aanroep met naam/asc")
+        srv_order = page.eval_on_selector_all("#uiSrvBody tr td", "els => els.map(e => e.textContent)")
+        if srv_order != ["van de server", "in deze volgorde"]:
+            failures.append(f"table serverSort: de rijen zijn client-side hersorteerd -- {srv_order!r}")
+        if page.get_attribute('#uiSrvHead th[data-sort-key="naam"]', "aria-sort") != "ascending":
+            failures.append("table serverSort: aria-sort werd niet gezet")
+
+        # Lege staat en foutstaat van ui.table.
+        page.evaluate("() => { window.__srvMode = 'empty'; return window.__srvTable.reload(); }")
+        page.wait_for_timeout(300)
+        empty_text = page.eval_on_selector("#uiSrvBody", "el => el.textContent") or ""
+        if "Nog geen rijen" not in empty_text:
+            failures.append(f"table: lege staat toonde {empty_text.strip()[:80]!r}, verwacht de meegegeven tekst")
+        page.evaluate("() => { window.__srvMode = 'error'; return window.__srvTable.reload(); }")
+        page.wait_for_timeout(300)
+        err_text = page.eval_on_selector("#uiSrvBody", "el => el.textContent") or ""
+        if "probeer opnieuw" not in err_text.lower():
+            failures.append(f"table: foutstaat mist de retrylink -- {err_text.strip()[:80]!r}")
+        page.evaluate("() => { window.__srvMode = 'ok'; }")
+        page.click("#uiSrvBody a")
+        page.wait_for_timeout(300)
+        if "probeer opnieuw" in (page.eval_on_selector("#uiSrvBody", "el => el.textContent") or "").lower():
+            failures.append("table: de retrylink herstelde de tabel niet")
+
+        # ui.confirm met een eigen body en onConfirm: de aanroeper leest
+        # zijn veld uit terwijl het paneel nog staat.
+        page.evaluate("""() => {
+          window.__confirmNote = null;
+          window.__confirmAnswer = null;
+          ui.confirm('Weet je het zeker?', {
+            title: 'Afwijzen',
+            danger: false,
+            confirmLabel: 'Afwijzen',
+            body: GSP.html`<textarea id="uiConfirmNote"></textarea>`,
+            onConfirm: () => { window.__confirmNote = document.getElementById('uiConfirmNote').value; },
+          }).then((ok) => { window.__confirmAnswer = ok; });
+        }""")
+        page.wait_for_timeout(250)
+        page.fill("#uiConfirmNote", "een notitie")
+        page.click("#adminConfirmModal .btn-primary")
+        page.wait_for_timeout(300)
+        if page.evaluate("() => window.__confirmNote") != "een notitie":
+            failures.append("ui.confirm: onConfirm kon het eigen veld niet meer uitlezen")
+        if page.evaluate("() => window.__confirmAnswer") is not True:
+            failures.append("ui.confirm: de Promise loste niet op true op na bevestigen")
+
+        # data-gsp-lock: een knop die de aanroeper bewust heeft
+        # uitgeschakeld (cap overschreden, lijst niet geladen, bulk al
+        # verwerkt) mag door de getypte bevestiging niet weer aangaan --
+        # dat is het pad waarlangs een onomkeerbare handeling anders alsnog
+        # bereikbaar wordt.
+        page.evaluate(LOCK_FIXTURE)
+        page.wait_for_timeout(200)
+        page.fill("#uiLockModal input[type=text]", "WIS")
+        page.wait_for_timeout(200)
+        if not page.eval_on_selector("#uiLockModal .btn-outline-danger", "el => el.disabled"):
+            failures.append("gspLock: de getypte bevestiging zette een vergrendelde knop weer aan")
+        page.evaluate("() => window.__lock.setBusy(true)")
+        page.evaluate("() => window.__lock.setBusy(false)")
+        page.wait_for_timeout(200)
+        if not page.eval_on_selector("#uiLockModal .btn-outline-danger", "el => el.disabled"):
+            failures.append("gspLock: setBusy(false) hief het slot op")
+        page.evaluate("() => { const b = window.__lock.button('danger');"
+                      " delete b.dataset.gspLock; window.__lock.syncGate(); }")
+        page.wait_for_timeout(200)
+        if page.eval_on_selector("#uiLockModal .btn-outline-danger", "el => el.disabled"):
+            failures.append("syncGate: de knop bleef uit terwijl het slot eraf was en de tekst klopte")
+
+        # "Komt niet overeen" verschijnt pas bij een foute invoer.
+        page.fill("#uiLockModal input[type=text]", "wis")
+        page.wait_for_timeout(200)
+        mismatch = page.eval_on_selector("#uiLockModal .a-confirm-mismatch", "el => el.textContent") or ""
+        if "Komt niet overeen" not in mismatch:
+            failures.append(f"bevestiging: geen 'Komt niet overeen'-regel bij foute invoer -- {mismatch!r}")
+        if page.eval_on_selector("#uiLockModal .a-confirm-mismatch",
+                                 "el => el.getAttribute('aria-live')") != "polite":
+            failures.append("bevestiging: de mismatchregel heeft geen aria-live")
+
+        # Enter in het veld voert de handeling alleen uit als de knop aan staat.
+        page.focus("#uiLockModal input[type=text]")
+        page.keyboard.press("Enter")
+        page.wait_for_timeout(250)
+        if page.evaluate("() => window.__lockRan"):
+            failures.append("bevestiging: Enter voerde de handeling uit terwijl de knop uit stond")
+        page.fill("#uiLockModal input[type=text]", "WIS")
+        page.wait_for_timeout(150)
+        page.focus("#uiLockModal input[type=text]")
+        page.keyboard.press("Enter")
+        page.wait_for_timeout(300)
+        if not page.evaluate("() => window.__lockRan"):
+            failures.append("bevestiging: Enter voerde de handeling niet uit terwijl de knop aan stond")
+        page.evaluate("() => window.__lock.close()")
+        page.wait_for_timeout(250)
+
+        # setBusy(): spinner en disabled op de handelende knop, en daarna
+        # weer terug naar de oorspronkelijke tekst.
+        page.evaluate("""() => {
+          window.__busy = ui.modal({
+            id: 'uiBusyModal', title: 'Bezig',
+            body: GSP.html`<p>x</p>`,
+            secondary: { label: 'Annuleren' },
+            primary: { label: 'Opslaan', keepOpen: true },
+          });
+          window.__busy.setBusy(true);
+        }""")
+        page.wait_for_timeout(200)
+        if not page.eval_on_selector("#uiBusyModal .btn-primary", "el => el.disabled"):
+            failures.append("setBusy: de primaire knop ging niet op disabled")
+        if page.query_selector("#uiBusyModal .btn-primary .fa-spinner") is None:
+            failures.append("setBusy: er kwam geen spinner op de primaire knop")
+        page.evaluate("() => window.__busy.setBusy(false)")
+        page.wait_for_timeout(200)
+        if page.eval_on_selector("#uiBusyModal .btn-primary", "el => el.disabled"):
+            failures.append("setBusy(false): de knop bleef disabled")
+        if (page.eval_on_selector("#uiBusyModal .btn-primary", "el => el.textContent") or "").strip() != "Opslaan":
+            failures.append("setBusy(false): de oorspronkelijke knoptekst kwam niet terug")
+        if page.evaluate("() => !window.__busy.button('primary')"):
+            failures.append("handle.button('primary') gaf geen element terug")
+        page.evaluate("() => window.__busy.close()")
+        page.wait_for_timeout(200)
+
         # Integratie: de leaddetailmodal van het paneel zelf.
         page.click('.nav-link[data-section="leads"]')
         page.wait_for_timeout(800)
@@ -460,8 +652,10 @@ def main():
 
     print("PASS: modal, drawer en confirmText voldoen op beide paden (Bootstrap en vangnet) "
           "aan focus, focustrap, stapeling, Escape en klik-buiten; ui.table sorteert tekst en "
-          "getallen met aria-sort; de leadmodal en het Opdrachtgeversdetail van het paneel zelf "
-          "gedragen zich hetzelfde.")
+          "getallen met aria-sort, laat serverSort aan de route en heeft een lege en een "
+          "foutstaat; ui.confirm draagt een eigen body met onConfirm; setBusy zet en herstelt "
+          "de knoppen; de leadmodal en het Opdrachtgeversdetail van het paneel zelf gedragen "
+          "zich hetzelfde.")
     sys.exit(0)
 
 
