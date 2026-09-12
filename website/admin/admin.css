@@ -1,0 +1,411 @@
+/* ==========================================================================
+   GSP Recruitment — admin.css
+   De schil van het adminpaneel. Geladen na ../theme.css (die de tokens uit
+   SITE-DESIGN-SPEC.md §1 levert) en na de gevendorde Tabler 1.4-CSS.
+
+   Dit bestand doet drie dingen, en verder niets:
+     1. Tabler op de merktokens zetten (--tblr-* -> navy/goud uit theme.css).
+     2. De compatibiliteitsklassen leveren die de door JS gegenereerde
+        markup gebruikt (.portal-section, .action-menu, .form-group, ...).
+     3. De utilityklassen leveren die de inline style="..."-attributen in
+        js/admin.js en js/sections/*.js vervangen.
+
+   Regels voor dit bestand:
+     - Geen hardcoded navy- of goudwaarde. Alles via var(--navy-*),
+       var(--gold-*) uit theme.css. scripts/css_tokens_check.py bewaakt dat.
+     - Geometrie (marges, flexrichting, kolommen) komt uit de al geladen
+       Bootstrap 5-utilities van Tabler; hier staan alleen klassen waar een
+       merktoken of een paneelspecifiek patroon in zit.
+
+   ──────────────────────────────────────────────────────────────────────────
+   Utilityklassen, semantisch benoemd (geen kloon van een Bootstrap-utility):
+
+     .a-cell-name     identiteitskolom van een tabelrij (naam, titel, bedrijf)
+     .a-cell-strong   waarde met nadruk binnen een rij of paneel
+     .a-soft          secundaire tekst (e-mail, domein, omschrijving, hint)
+     .a-meta          metadata: tijdstempel, herkomst, aantallen, bijschrift
+     .a-field-label   labeltekst boven een waarde in een detailpaneel
+     .a-state-cell    laad-, leeg- of foutregel binnen een tabelcel (colspan)
+     .a-state-block   dezelfde drie toestanden buiten een tabel
+     .a-actions       knoppenrij onderaan een paneel of formulier
+     .a-textarea      meerregelig invoerveld (concepttekst, notities, body)
+     .a-chips         wrapper om een rij chips
+     .a-chip          chip zelf; --skill en --lang zijn de twee varianten
+     .a-panel         omkaderd subpaneel binnen een paneel (CV-blok, formulier)
+     .a-stat          telkaartje (matches, plaatsingen) met __value en __label
+     .a-metric-row    label/waarde-regel met onderlijn (Platform Summary)
+     .a-listrow       rij in een lijst die geen tabel is (CMS-content)
+     .a-scrollbox     scrollbaar tekstblok (CV-preview, JSON in de audit-log)
+     .a-inline-list   compacte ul in een tabelcel (audit-log, domeinscores)
+     .a-truncate-col  flexkolom die mag afkappen naast een vaste knop
+     .a-tabbar        tabstrip bovenin een drawer, .a-tabpane is het paneel
+     .a-clickable     hele rij of samenvatting is aanklikbaar
+     .a-row-unread    ongelezen rij in de leadsinbox
+     .a-barchart      fallback-staafdiagram als ApexCharts ontbreekt
+     .text-success-ink .text-danger-ink .text-warning-ink .text-info-ink
+                      de vier semantische tekstkleuren uit §7.1.3, op de
+                      --ink-*-tokens uit §7.1.2
+     .a-accent        het goudaccent (geen semantische familie, §7.2e)
+   Panelen (ui.js): .a-modal (+ --wide, __title, __subtitle, __close), .a-drawer,
+   .a-backdrop, .a-confirm-hint, .a-sortable (kolomkop met aria-sort), .a-nav-caption (sidebarkopje).
+   Samen 29 .a-klassen; de spec (§7.1.3) noemt dezelfde 29.
+
+   Geometrie zonder merkbetekenis (mb-3, d-flex, gap-2, text-center,
+   flex-fill, text-nowrap) komt uit Bootstrap 5 en staat hier niet.
+   ========================================================================== */
+
+:root,
+[data-bs-theme="dark"] {
+  /* Gedempte tekst in het paneel is --navy-200, niet --navy-300.
+     --navy-300 (#4A6F9F) haalt 3,51:1 op --navy-800 en 3,26:1 op
+     --navy-700, en zakt daarmee onder de AA-ondergrens van 4,5:1 voor
+     kleine tekst; --navy-200 (#7FA0C9) haalt 6,6:1 op --navy-800. Bewuste
+     afwijking van de "muted text"-omschrijving bij --navy-300 in
+     SITE-DESIGN-SPEC.md §1.2, gemeld voor de componentspec §7.
+     --navy-300 blijft in gebruik voor niet-tekst (hairlines, iconen). */
+  --admin-muted: var(--navy-200);
+  --admin-hairline: var(--navy-600);
+
+  /* Semantische inkt, letterlijk de vier tokens uit SITE-DESIGN-SPEC.md
+     §7.1.2, met de contrastwaarden die daar berekend staan. Ze horen in
+     dit bestand en niet in theme.css: §7.1.2 noemt ze "vier eigen
+     inkttokens" van het paneel, en de publieke site heeft er geen. */
+  --ink-success: #4ADE80;   /* 10,41:1 op --navy-800, 9,66:1 op --navy-700 */
+  --ink-error:   #F87171;   /*  6,56:1 op --navy-800, 6,09:1 op --navy-700 */
+  --ink-warning: #FBBF24;   /* 10,86:1 op --navy-800, 10,08:1 op --navy-700 */
+  --ink-info:    #7DD3FC;   /* 10,87:1 op --navy-800, 10,10:1 op --navy-700 */
+
+  /* ==== Tabler 1.4 op de merktokens (SITE-DESIGN-SPEC.md §7.1.2) ==== */
+  --tblr-body-bg: var(--navy-800);
+  --tblr-bg-surface: var(--navy-700);
+  --tblr-bg-surface-secondary: var(--navy-800);
+  --tblr-bg-surface-tertiary: var(--navy-600);
+  --tblr-bg-surface-dark: var(--navy-900);
+  --tblr-body-color: var(--navy-100);
+  --tblr-secondary: var(--navy-200);
+  --tblr-primary: var(--gold-500);
+  --tblr-primary-fg: var(--navy-900);
+  --tblr-border-radius: var(--radius);
+  --tblr-border-radius-sm: var(--radius);
+  --tblr-border-radius-lg: var(--radius);
+  --tblr-font-sans-serif: var(--font-primary);
+  --tblr-font-monospace: var(--font-mono);
+  --tblr-focus-ring-color: var(--gold-500);
+  --tblr-focus-ring-width: 2px;
+  --tblr-focus-ring-opacity: 1;
+
+  /* Afwijking van het codeblok in §7.1.2, dat hier --navy-600 zet: de
+     contrastvloertabel in diezelfde subsectie zegt dat een dragende rand op
+     --navy-700 minstens --navy-500 moet zijn. De kaartrand is dragend (op
+     navy dragen de schaduwen nauwelijks), dus --navy-500. */
+  --tblr-border-color: var(--navy-500);
+  --tblr-border-color-translucent: var(--navy-500);
+  --tblr-card-bg: var(--navy-700);
+  --tblr-card-border-color: var(--navy-500);
+
+  /* De vier kleuren waar Tabler zijn badge-, alert- en tekstvarianten uit
+     afleidt (§7.1.2, §7.2e). Zonder deze regels blijven .bg-blue-lt en
+     .bg-red-lt op hun lichte-thema-waarden en halen ze de tekstvloer niet
+     op navy: 3,96:1 respectievelijk 4,24:1. */
+  --tblr-blue: var(--ink-info);
+  --tblr-red: var(--ink-error);
+  --tblr-green: var(--ink-success);
+  --tblr-yellow: var(--ink-warning);
+
+  /* css-tokens-check: rgb-triple -- Tabler bouwt hier zelf
+     rgba(var(--x-rgb), a) mee voor tinten, randen en de focusring. Een
+     triple kan niet uit een kleur-var komen, dus deze vijf regels moeten
+     letterlijk zijn; ze horen bij de kleur direct erboven. */
+  --tblr-primary-rgb: 250, 200, 0;
+  --tblr-secondary-rgb: 127, 160, 201;
+  --tblr-blue-rgb: 125, 211, 252;
+  --tblr-red-rgb: 248, 113, 113;
+  --tblr-green-rgb: 74, 222, 128;
+  --tblr-yellow-rgb: 251, 191, 36;
+}
+
+/* ==== Focusindicator ====
+   Tabler zet :focus{box-shadow:none} op formuliervelden en ghost-knoppen,
+   waardoor er met het toetsenbord niets zichtbaar is. Eén regel voor alle
+   vier de plekken waar dat opgaat. */
+.btn:focus-visible,
+.btn-ghost-secondary:focus-visible,
+.form-control:focus-visible,
+.form-select:focus-visible {
+  outline: 2px solid var(--gold-500);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 4px var(--gold-glow);
+}
+
+/* ==== Typografie (SITE-DESIGN-SPEC.md §1.3) ==== */
+body,
+.page { font-family: var(--font-primary); }
+.navbar-brand img { height: 28px; width: auto; }
+h1, h2, h3, h4,
+.navbar-brand,
+.page-title,
+.card-title {
+  font-family: var(--font-display);
+  font-weight: 500;
+  letter-spacing: 0;
+}
+/* Eyebrow-achtige kleine kopjes staan in mono, net als op de publieke site. */
+.text-uppercase { font-family: var(--font-mono); }
+/* KPI-tegels: het getal in mono, zoals de salaris-/datachips elders. */
+.card .h1,
+.card .display-6,
+.card [class*="fs-"].fw-bold,
+.subheader + .h1 {
+  font-family: var(--font-mono);
+  font-weight: 500;
+}
+
+/* ==== Toast (auth.js Auth.toast): het paneel laadt styles.css niet ==== */
+.toast-container { position: fixed; bottom: 24px; right: 24px; z-index: 9998; display: flex; flex-direction: column; gap: 8px; }
+.toast { display: flex; align-items: center; gap: 10px; padding: 14px 20px; border-radius: var(--radius-sm); font-size: .88rem; font-weight: 500; box-shadow: var(--shadow-lg); max-width: 360px; opacity: 0; transform: translateY(16px); transition: opacity var(--transition-base), transform var(--transition-base); }
+.toast-visible { opacity: 1; transform: translateY(0); }
+.toast-removing { opacity: 0; transform: translateX(40px); }
+.toast-success { background: #065f46; color: var(--white); }
+.toast-error { background: #991b1b; color: var(--white); }
+.toast-warning { background: #78350f; color: var(--white); }
+.toast-info { background: var(--navy-600); color: var(--white); }
+.toast-icon { font-size: 1.1rem; line-height: 1; }
+
+/* ==== Compatibiliteitsklassen voor door JS gegenereerde markup ==== */
+/* Kopje boven een groep sidebarlinks. Stond zes keer als
+   style="font-size:10px;letter-spacing:.1em" in index.html, buiten de
+   typeschaal van §1.3. */
+.a-nav-caption {
+  font-size: var(--font-size-xs);
+  letter-spacing: .1em;
+}
+.portal-section { display: none; }
+.portal-section.active { display: block; }
+.action-menu-wrap { position: relative; display: inline-block; }
+.action-menu { position: absolute; right: 0; top: 100%; background: var(--tblr-bg-surface); border: 1px solid var(--tblr-border-color); border-radius: var(--radius); box-shadow: var(--shadow-md); z-index: 200; min-width: 160px; overflow: hidden; }
+.action-menu button { display: flex; align-items: center; gap: 8px; padding: .65rem 1rem; font-size: var(--font-size-sm); background: none; border: none; width: 100%; text-align: left; cursor: pointer; font-family: var(--font-primary); color: var(--navy-100); }
+.action-menu button:hover { background: var(--tblr-bg-surface-tertiary); }
+.activity-item { display: flex; align-items: flex-start; gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--admin-hairline); }
+.activity-item:last-child { border-bottom: none; }
+.activity-icon { width: 34px; height: 34px; border-radius: var(--radius-full); display: flex; align-items: center; justify-content: center; flex-shrink: 0; font-size: .8rem; }
+/* De twee varianten die de dashboardwidgets gebruiken, in plaats van een
+   inline background/color per icoon. */
+.activity-icon--gold { background: color-mix(in srgb, var(--gold-500) 10%, transparent); color: var(--gold-400); }
+.activity-icon--positive { background: color-mix(in srgb, var(--ink-success) 12%, transparent); color: var(--ink-success); }
+.activity-text { font-size: var(--font-size-sm); }
+.activity-time { font-size: 11px; color: var(--admin-muted); margin-top: 2px; }
+.form-group { margin-bottom: var(--space-lg); }
+.form-group label { display: block; font-size: var(--font-size-xs); font-weight: 600; color: var(--navy-200); text-transform: uppercase; letter-spacing: .06em; margin-bottom: .4rem; }
+.form-group input, .form-group select, .form-group textarea { width: 100%; background: var(--tblr-body-bg); border: 1px solid var(--tblr-border-color); border-radius: var(--radius); color: var(--white); padding: .65rem 1rem; font-family: var(--font-primary); font-size: var(--font-size-sm); outline: none; box-sizing: border-box; }
+.form-group input:focus, .form-group select:focus, .form-group textarea:focus { border-color: var(--tblr-primary); box-shadow: 0 0 0 3px var(--gold-glow); }
+.pagination-wrap { display: flex; gap: 6px; flex-wrap: wrap; }
+.pagination-wrap button { min-width: 32px; height: 32px; padding: 0 8px; background: var(--tblr-bg-surface-tertiary); border: 1px solid var(--tblr-border-color); border-radius: var(--radius-sm); color: var(--navy-200); font-family: var(--font-primary); font-size: var(--font-size-xs); cursor: pointer; }
+.pagination-wrap button.active { background: var(--tblr-primary); color: var(--navy-900); border-color: var(--tblr-primary); font-weight: 700; }
+.pagination-wrap button:hover:not(.active):not(:disabled) { border-color: var(--tblr-primary); color: var(--tblr-primary); }
+.pagination-wrap button:disabled { opacity: .35; cursor: not-allowed; }
+.pagination-ellipsis { color: var(--admin-muted); padding: 0 4px; }
+/* Veldenraster in een detailpaneel: twee kolommen, één op een telefoon. */
+.detail-grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-md); margin-bottom: var(--space-lg); }
+@media (max-width: 576px) { .detail-grid { grid-template-columns: 1fr; } }
+/* Brede tabellen scrollen in hun eigen container; de scrollbar blijft
+   zichtbaar als affordance in plaats van kolommen stil af te knippen. */
+.table-responsive { overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: thin; }
+.table-responsive::-webkit-scrollbar { height: 6px; }
+.table-responsive::-webkit-scrollbar-thumb { background: var(--navy-400); border-radius: var(--radius-sm); }
+
+/* ==========================================================================
+   Utilityklassen (zie de tabel bovenaan dit bestand)
+   ========================================================================== */
+
+/* Op een <td> wint Tablers `.table > :not(caption) > * > *` (0,1,1) van een
+   losse klasse (0,1,0), en dat zet de cel terug op --tblr-table-color. Naast
+   `color` zetten deze vier daarom ook die custom property op de cel zelf, dan
+   lost Tablers eigen regel de goede kleur op. Zonder dat viel de nadruk in
+   twaalf naamkolommen en de demping in eenendertig metakolommen weg.
+   scripts/admin_ui_check.py meet de computed kleur, zodat dit niet terugkomt. */
+.a-cell-name { font-weight: 600; color: var(--white); --tblr-table-color: var(--white); }
+.a-cell-strong { color: var(--white); --tblr-table-color: var(--white); }
+.a-soft { color: var(--admin-muted); --tblr-table-color: var(--admin-muted); }
+.a-meta { font-size: var(--font-size-xs); color: var(--admin-muted); --tblr-table-color: var(--admin-muted); }
+.a-inline-list { margin: 0; padding-left: 1.1em; }
+.a-truncate-col { flex: 1; min-width: 0; }
+
+.a-field-label { font-size: var(--font-size-xs); color: var(--admin-muted); margin-bottom: 4px; }
+
+.a-state-cell { text-align: center; padding: var(--space-xl) var(--space-md); color: var(--admin-muted); --tblr-table-color: var(--admin-muted); }
+.a-state-block { color: var(--admin-muted); font-size: var(--font-size-sm); padding: var(--space-md) 0; }
+
+.a-actions { display: flex; flex-wrap: wrap; gap: var(--space-md); margin-top: var(--space-lg); }
+
+.a-textarea {
+  width: 100%;
+  background: var(--navy-900);
+  border: 1px solid var(--tblr-border-color);
+  border-radius: var(--radius);
+  color: var(--white);
+  padding: .75rem;
+  font-family: var(--font-primary);
+  font-size: var(--font-size-sm);
+  resize: vertical;
+  box-sizing: border-box;
+}
+.a-textarea:focus { outline: none; border-color: var(--tblr-primary); box-shadow: 0 0 0 3px var(--gold-glow); }
+
+.a-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.a-chip { color: var(--white); font-weight: 500; }
+.a-chip--skill { background: color-mix(in srgb, var(--gold-500) 18%, transparent); }
+.a-chip--lang { background: color-mix(in srgb, var(--navy-300) 25%, transparent); }
+
+.a-panel {
+  border: 1px solid var(--admin-hairline);
+  border-radius: var(--radius);
+  padding: var(--space-md);
+  margin-bottom: var(--space-md);
+  background: color-mix(in srgb, var(--navy-300) 8%, transparent);
+}
+
+.a-stat {
+  flex: 1;
+  text-align: center;
+  padding: var(--space-md) var(--space-lg);
+  border: 1px solid var(--admin-hairline);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--navy-300) 10%, transparent);
+}
+.a-stat__value { font-size: var(--font-size-xl); font-weight: 700; font-family: var(--font-mono); color: var(--gold-500); }
+.a-stat__value--positive { color: var(--ink-success); }
+.a-stat__label { font-size: var(--font-size-xs); color: var(--admin-muted); }
+
+.a-metric-row { display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid var(--admin-hairline); }
+
+.a-listrow { display: flex; align-items: center; gap: var(--space-md); padding: var(--space-md) 0; border-bottom: 1px solid var(--admin-hairline); }
+.a-listrow:last-child { border-bottom: none; }
+
+.a-scrollbox {
+  max-height: 160px;
+  overflow-y: auto;
+  font-size: var(--font-size-sm);
+  color: var(--navy-100);
+  white-space: pre-wrap;
+  word-break: break-word;
+  background: var(--navy-900);
+  border-radius: var(--radius-sm);
+  padding: 10px;
+  margin: 4px 0 0;
+}
+
+.a-tabbar .btn {
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+}
+.a-tabbar {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+  border-bottom: 1px solid var(--admin-hairline);
+  margin-bottom: var(--space-md);
+  padding-bottom: var(--space-sm);
+}
+.a-tabpane { min-height: 120px; }
+
+.a-clickable { cursor: pointer; }
+.a-row-unread { font-weight: 600; }
+
+.a-barchart { display: flex; align-items: flex-end; gap: 6px; height: 120px; width: 100%; }
+.a-barchart__col { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 4px; }
+.a-barchart__cap { font-size: 9px; color: var(--admin-muted); }
+/* De hoogte is data en komt per staaf mee als --a-bar-h; alleen die ene
+   waarde staat nog in een style-attribuut, de rest is deze klasse. */
+/* Vlakke vulling, geen --gold-gradient: decoratieve gradients zijn
+   sitebreed verboden (§8.x.6) en een grafiekbalk is data, geen decoratie
+   (§7.1.1 punt 4). Daarmee gebruikt het paneel --gold-gradient nergens
+   meer. */
+.a-barchart__bar { width: 100%; border-radius: var(--radius-sm) var(--radius-sm) 0 0; background: var(--gold-500); height: var(--a-bar-h, 0); }
+
+/* De vier semantische tekstklassen heten zoals §7.1.3 ze noemt. .a-accent
+   is geen semantische familie maar het goudaccent (§7.2e: goud is geen
+   badgekleur, wel de accentkleur van het paneel). */
+.text-success-ink { color: var(--ink-success); }
+.text-danger-ink { color: var(--ink-error); }
+.text-warning-ink { color: var(--ink-warning); }
+.text-info-ink { color: var(--ink-info); }
+.a-accent { color: var(--gold-400); }
+
+/* ==========================================================================
+   ui.js: modal en drawer bovenop de Bootstrap 5-componenten van Tabler
+   ========================================================================== */
+.a-modal { z-index: 1055; }
+/* Eigen backdrop voor het geval Bootstrap-JS ontbreekt (zie ui.js). Met
+   Bootstrap maakt die zijn eigen backdrop en is deze klasse er niet. */
+.modal-backdrop.a-backdrop,
+.offcanvas-backdrop.a-backdrop { position: fixed; inset: 0; z-index: 1050; background: var(--navy-950); opacity: .72; }
+.a-modal .modal-content,
+.a-drawer.offcanvas {
+  background: var(--navy-900);
+  border: 1px solid var(--admin-hairline);
+  border-radius: var(--radius);
+  color: var(--navy-100);
+}
+.a-modal .modal-body { padding: var(--space-2xl); }
+.a-modal .modal-dialog { max-width: 520px; }
+.a-modal--wide .modal-dialog { max-width: 760px; }
+.a-modal__close {
+  position: absolute;
+  top: var(--space-md);
+  right: var(--space-md);
+  background: none;
+  border: none;
+  color: var(--navy-200);
+  cursor: pointer;
+  font-size: 1.2rem;
+  z-index: 2;
+  /* Aanraakvlak van 44px, met negatieve marge zodat het optisch even
+     groot blijft als voorheen. */
+  min-width: 44px;
+  min-height: 44px;
+  margin: -0.5rem;
+}
+.a-modal__close:hover,
+.a-modal__close:focus-visible { color: var(--gold-400); }
+.a-modal__title { color: var(--white); margin: 0 var(--space-xl) var(--space-sm) 0; }
+.a-modal__subtitle { margin-bottom: var(--space-lg); font-size: var(--font-size-sm); }
+.a-drawer.offcanvas {
+  width: min(760px, 100vw);
+  /* Boven de backdrop (1050). Tablers offcanvas erft 1045 en verdween
+     anders achter zijn eigen verduistering. */
+  z-index: 1055;
+}
+.a-drawer .offcanvas-body { padding: var(--space-xl); }
+
+/* Getypte bevestiging voor destructieve acties. */
+.a-confirm-hint { color: var(--admin-muted); font-size: var(--font-size-sm); margin-bottom: var(--space-sm); }
+/* Tablers danger-outline is op navy-900 4,17:1; --ink-error haalt 6,56:1. */
+.a-modal .btn-outline-danger,
+.a-drawer .btn-outline-danger {
+  --tblr-btn-color: var(--ink-error);
+  --tblr-btn-border-color: var(--ink-error);
+  --tblr-btn-hover-bg: var(--ink-error);
+  --tblr-btn-hover-color: var(--navy-900);
+}
+.a-confirm-hint code { color: var(--gold-400); }
+
+/* Sorteerbare kolomkoppen (ui.table). aria-sort is de bron van waarheid;
+   het pijltje is puur decoratief. */
+.a-sortable { cursor: pointer; user-select: none; white-space: nowrap; }
+.a-sortable::after { content: "\2195"; opacity: .35; margin-left: .4em; font-size: .85em; }
+.a-sortable[aria-sort="ascending"]::after { content: "\2191"; opacity: 1; color: var(--gold-400); }
+.a-sortable[aria-sort="descending"]::after { content: "\2193"; opacity: 1; color: var(--gold-400); }
+.a-sortable:focus-visible { outline: 2px solid var(--gold-500); outline-offset: -2px; }
+
+/* ==== Bewegingsvoorkeur ==== */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}

@@ -16,96 +16,22 @@
        copy if the vendored file is ever missing (WS-A.9b: no inline onerror=
        attributes -- those are blocked by the enforced CSP too). -->
   <script src="js/vendor-fallback-css.js"></script>
+  <!-- theme.css en admin.css staan hier, direct onder het script dat Tabler
+       en Font Awesome injecteert (SITE-DESIGN-SPEC.md §7.1.1). Die twee
+       stylesheets zijn geen statische <link>: ze belanden in de cascade op
+       de plek van dat <script>. Alles wat daarna komt wint dus bij gelijke
+       specificiteit, en dat is precies de bedoeling: theme.css levert de
+       tokens en de basisregels van de portalen, admin.css de Tabler-
+       koppeling en de utilityklassen. De oude inline compat-shim die
+       --navy-*/--radius-* met eigen waarden overschreef is weg. -->
+  <link rel="stylesheet" href="../theme.css">
+  <link rel="stylesheet" href="admin.css">
   <!-- ApexCharts vendored locally (WS-B.2) -- was a bare CDN <script> with no
        fallback; script-src 'self' already covers vendor/ in website/_headers,
        so no CDN entry or SRI is needed for it any more. Pinned at v4.7.0
        (sha384 verified against the CDN copy at vendor time; bump the file
        together with this comment if the pin ever changes). -->
   <script src="vendor/apexcharts.min.js"></script>
-  <style>
-    /* ==== Legacy design-token compatibility ====
-       admin.js still writes inline style="...var(--navy-300)..." etc (~150
-       occurrences) and the fallback bar-chart branch uses --gold-gradient.
-       Re-declared here (recalibrated to the new brand) so admin.js needs
-       no changes beyond the badge()/button class mappings below. */
-    :root, [data-bs-theme=dark] {
-      --navy-900:#142235; --navy-800:#142235; --navy-700:#18293d; --navy-600:#1a2a42;
-      --navy-500:#24354f; --navy-400:#3a4f6e; --navy-300:#8695ac; --navy-200:#b8c4d6; --navy-100:#e2e8f0;
-      --white:#ffffff;
-      --gold-gradient: linear-gradient(135deg,#FBD74A 0%,#FAC800 45%,#D4A800 100%);
-      --gold-400: #FBD74A;
-      --gold-500: #FAC800;
-      --space-xs:4px; --space-sm:8px; --space-md:16px; --space-lg:24px; --space-xl:32px; --space-2xl:48px;
-      --radius-sm:8px; --radius-md:10px; --radius:12px; --radius-lg:16px; --radius-xl:20px;
-      --font-primary:'IBM Plex Sans','Segoe UI',system-ui,-apple-system,sans-serif;
-      --font-display:'Newsreader',Georgia,'Times New Roman',serif;
-      --font-mono:'IBM Plex Mono',ui-monospace,'SF Mono',Menlo,monospace;
-      --font-size-xs:.75rem; --font-size-sm:.875rem; --font-size-md:1rem; --font-size-xl:1.25rem;
-
-      /* ==== Tabler brand overrides — GSP navy/gold ==== */
-      --tblr-primary:#FAC800;
-      --tblr-primary-rgb:250,200,0;
-      --tblr-body-bg:#0E1B2E;
-      --tblr-bg-surface:#142235;
-      --tblr-bg-surface-tertiary:#1a2a42;
-      --tblr-border-color:#24354f;
-    }
-    body, .page { font-family: var(--font-primary); }
-    .navbar-brand img { height: 28px; width: auto; }
-    h1, h2, h3, h4, .navbar-brand, .page-title, .card-title {
-      font-family: var(--font-display);
-      font-weight: 500;
-      letter-spacing: 0;
-    }
-    /* Eyebrow-style small section captions */
-    .text-uppercase { font-family: var(--font-mono); }
-    /* KPI tiles: numeric value in mono, matching the salary/data-chip convention */
-    .card .h1, .card .display-6, .card [class*="fs-"].fw-bold, .subheader + .h1 {
-      font-family: var(--font-mono);
-      font-weight: 500;
-    }
-
-    /* ==== Toast (auth.js Auth.toast) — admin no longer loads the site stylesheet ==== */
-    .toast-container { position:fixed; bottom:24px; right:24px; z-index:9998; display:flex; flex-direction:column; gap:8px; }
-    .toast { display:flex; align-items:center; gap:10px; padding:14px 20px; border-radius:var(--radius-sm); font-size:.88rem; font-weight:500; box-shadow:0 20px 50px rgba(3,8,18,.5); max-width:360px; opacity:0; transform:translateY(16px); transition:opacity .3s ease, transform .3s ease; }
-    .toast-visible { opacity:1; transform:translateY(0); }
-    .toast-removing { opacity:0; transform:translateX(40px); }
-    .toast-success { background:#065f46; color:#fff; }
-    .toast-error { background:#991b1b; color:#fff; }
-    .toast-warning { background:#78350f; color:#fff; }
-    .toast-info { background:var(--navy-600); color:#fff; }
-    .toast-icon { font-size:1.1rem; line-height:1; }
-
-    /* ==== Compatibility classes for admin.js-generated markup ==== */
-    .portal-section { display:none; }
-    .portal-section.active { display:block; }
-    .action-menu-wrap { position:relative; display:inline-block; }
-    .action-menu { position:absolute; right:0; top:100%; background:var(--tblr-bg-surface); border:1px solid var(--tblr-border-color); border-radius:var(--radius-md); box-shadow:0 8px 32px rgba(0,0,0,.4); z-index:200; min-width:160px; overflow:hidden; }
-    .action-menu button { display:flex; align-items:center; gap:8px; padding:.65rem 1rem; font-size:var(--font-size-sm); background:none; border:none; width:100%; text-align:left; cursor:pointer; font-family:var(--font-primary); }
-    .action-menu button:hover { background:var(--tblr-bg-surface-tertiary); }
-    .activity-item { display:flex; align-items:flex-start; gap:12px; padding:12px 0; border-bottom:1px solid var(--tblr-border-color); }
-    .activity-item:last-child { border-bottom:none; }
-    .activity-icon { width:34px; height:34px; border-radius:50%; display:flex; align-items:center; justify-content:center; flex-shrink:0; font-size:.8rem; }
-    .activity-text { font-size:var(--font-size-sm); }
-    .activity-time { font-size:11px; color:var(--navy-300); margin-top:2px; }
-    .form-group { margin-bottom:var(--space-lg); }
-    .form-group label { display:block; font-size:var(--font-size-xs); font-weight:600; color:var(--navy-200); text-transform:uppercase; letter-spacing:.06em; margin-bottom:.4rem; }
-    .form-group input, .form-group select, .form-group textarea { width:100%; background:var(--tblr-body-bg); border:1px solid var(--tblr-border-color); border-radius:var(--radius-md); color:var(--white); padding:.65rem 1rem; font-family:var(--font-primary); font-size:var(--font-size-sm); outline:none; box-sizing:border-box; }
-    .form-group input:focus, .form-group select:focus, .form-group textarea:focus { border-color:var(--tblr-primary); box-shadow:0 0 0 3px rgba(var(--tblr-primary-rgb),.15); }
-    .pagination-wrap { display:flex; gap:6px; flex-wrap:wrap; }
-    .pagination-wrap button { min-width:32px; height:32px; padding:0 8px; background:var(--tblr-bg-surface-tertiary); border:1px solid var(--tblr-border-color); border-radius:var(--radius-sm); color:var(--navy-200); font-family:var(--font-primary); font-size:var(--font-size-xs); cursor:pointer; }
-    .pagination-wrap button.active { background:var(--tblr-primary); color:#1a1a1a; border-color:var(--tblr-primary); font-weight:700; }
-    .pagination-wrap button:hover:not(.active):not(:disabled) { border-color:var(--tblr-primary); color:var(--tblr-primary); }
-    .pagination-wrap button:disabled { opacity:.35; cursor:not-allowed; }
-    /* Detail-modal field grid: 2 columns on desktop, single column on phones */
-    .detail-grid { display:grid; grid-template-columns:1fr 1fr; gap:var(--space-md); margin-bottom:var(--space-lg); }
-    @media (max-width:576px) { .detail-grid { grid-template-columns:1fr; } }
-    /* Wide tables scroll inside their own container on small screens — keep the
-       scrollbar visible as an affordance instead of silently clipping columns. */
-    .table-responsive { overflow-x:auto; -webkit-overflow-scrolling:touch; scrollbar-width:thin; }
-    .table-responsive::-webkit-scrollbar { height:6px; }
-    .table-responsive::-webkit-scrollbar-thumb { background:var(--navy-400); border-radius:3px; }
-  </style>
 </head>
 <body>
 <div class="page">
@@ -120,38 +46,38 @@
         <a href="../"><img src="../logo.png" alt="GSP Recruitment"></a>
       </h1>
       <div class="collapse navbar-collapse" id="sidebar-menu">
-        <div class="text-secondary text-uppercase px-3 pt-3 pb-1 fw-bold" style="font-size:10px;letter-spacing:.1em;">Overview</div>
+        <div class="text-secondary text-uppercase px-3 pt-3 pb-1 fw-bold a-nav-caption">Overview</div>
         <ul class="navbar-nav">
           <li class="nav-item"><a class="nav-link active" href="#" data-section="dashboard"><span class="nav-link-icon"><i class="fa-solid fa-chart-pie"></i></span><span class="nav-link-title">Dashboard</span></a></li>
         </ul>
 
-        <div class="text-secondary text-uppercase px-3 pt-3 pb-1 fw-bold" style="font-size:10px;letter-spacing:.1em;">People</div>
+        <div class="text-secondary text-uppercase px-3 pt-3 pb-1 fw-bold a-nav-caption">People</div>
         <ul class="navbar-nav">
           <li class="nav-item"><a class="nav-link" href="#" data-section="users"><span class="nav-link-icon"><i class="fa-solid fa-users"></i></span><span class="nav-link-title">Users</span></a></li>
           <li class="nav-item"><a class="nav-link" href="#" data-section="candidates"><span class="nav-link-icon"><i class="fa-solid fa-user-tie"></i></span><span class="nav-link-title">Candidates</span></a></li>
         </ul>
 
-        <div class="text-secondary text-uppercase px-3 pt-3 pb-1 fw-bold" style="font-size:10px;letter-spacing:.1em;">Jobs</div>
+        <div class="text-secondary text-uppercase px-3 pt-3 pb-1 fw-bold a-nav-caption">Jobs</div>
         <ul class="navbar-nav">
           <li class="nav-item"><a class="nav-link" href="#" data-section="jobs"><span class="nav-link-icon"><i class="fa-solid fa-briefcase"></i></span><span class="nav-link-title">All Jobs</span></a></li>
           <li class="nav-item"><a class="nav-link" href="#" data-section="clients"><span class="nav-link-icon"><i class="fa-regular fa-building"></i></span><span class="nav-link-title">Opdrachtgevers</span></a></li>
         </ul>
 
-        <div class="text-secondary text-uppercase px-3 pt-3 pb-1 fw-bold" style="font-size:10px;letter-spacing:.1em;">Growth</div>
+        <div class="text-secondary text-uppercase px-3 pt-3 pb-1 fw-bold a-nav-caption">Growth</div>
         <ul class="navbar-nav">
           <li class="nav-item"><a class="nav-link" href="#" data-section="leads"><span class="nav-link-icon"><i class="fa-solid fa-inbox"></i></span><span class="nav-link-title">Leads</span></a></li>
           <li class="nav-item"><a class="nav-link" href="#" data-section="outreach"><span class="nav-link-icon"><i class="fa-regular fa-paper-plane"></i></span><span class="nav-link-title">Outreach</span></a></li>
           <li class="nav-item"><a class="nav-link" href="#" data-section="blog"><span class="nav-link-icon"><i class="fa-regular fa-newspaper"></i></span><span class="nav-link-title">Blog</span></a></li>
         </ul>
 
-        <div class="text-secondary text-uppercase px-3 pt-3 pb-1 fw-bold" style="font-size:10px;letter-spacing:.1em;">Insights</div>
+        <div class="text-secondary text-uppercase px-3 pt-3 pb-1 fw-bold a-nav-caption">Insights</div>
         <ul class="navbar-nav">
           <li class="nav-item"><a class="nav-link" href="#" data-section="analytics"><span class="nav-link-icon"><i class="fa-solid fa-chart-line"></i></span><span class="nav-link-title">Analytics</span></a></li>
           <li class="nav-item"><a class="nav-link" href="#" data-section="reporting"><span class="nav-link-icon"><i class="fa-solid fa-chart-column"></i></span><span class="nav-link-title">Rapportage</span></a></li>
           <li class="nav-item"><a class="nav-link" href="#" data-section="audit"><span class="nav-link-icon"><i class="fa-solid fa-clock-rotate-left"></i></span><span class="nav-link-title">Audit Log</span></a></li>
         </ul>
 
-        <div class="text-secondary text-uppercase px-3 pt-3 pb-1 fw-bold" style="font-size:10px;letter-spacing:.1em;">System</div>
+        <div class="text-secondary text-uppercase px-3 pt-3 pb-1 fw-bold a-nav-caption">System</div>
         <ul class="navbar-nav">
           <li class="nav-item"><a class="nav-link" href="#" data-section="cms"><span class="nav-link-icon"><i class="fa-regular fa-newspaper"></i></span><span class="nav-link-title">Content CMS</span></a></li>
           <li class="nav-item"><a class="nav-link" href="#" data-section="settings"><span class="nav-link-icon"><i class="fa-solid fa-gear"></i></span><span class="nav-link-title">Settings</span></a></li>
@@ -160,7 +86,7 @@
         <div class="mt-auto">
           <hr class="text-secondary opacity-25 my-2 mx-3">
           <div class="d-flex align-items-center px-3 py-2">
-            <span class="avatar avatar-sm me-2" id="sidebarAvatar" style="background:var(--tblr-primary);color:#1a1a1a;font-weight:700;flex-shrink:0;">AD</span>
+            <span class="avatar avatar-sm me-2" id="sidebarAvatar" style="background:var(--tblr-primary);color:var(--navy-900);font-weight:700;flex-shrink:0;">AD</span>
             <div class="flex-fill" style="min-width:0;">
               <div class="text-white fw-medium text-truncate" id="sidebarName" style="font-size:.8125rem;">Admin</div>
               <div class="text-secondary text-truncate" id="sidebarEmail" style="font-size:.6875rem;"></div>
@@ -646,11 +572,11 @@
              Every figure here comes straight from data the API already
              returns (open jobs by employment_type, leads by interest_type
              / created_at) — no invented KPIs. See Admin.loadReporting(). -->
-        <section class="portal-section" id="section-reporting">
-          <div id="reportingContent">
-            <div style="text-align:center;padding:3rem;color:var(--navy-300);"><i class="fa-solid fa-spinner fa-spin"></i> Laden…</div>
-          </div>
-        </section>
+        <!-- Leeg: js/sections/reporting.js zet zijn eigen skeletonHtml via
+             de registry. De elf andere secties houden hun markup hier, zodat
+             de DOM-ankers waar admin_sections_check.py en
+             admin_pagination_check.py op staan niet verschuiven. -->
+        <section class="portal-section" id="section-reporting"></section>
 
         <!-- ==================== CONTENT CMS ==================== -->
         <section class="portal-section" id="section-cms">
@@ -814,10 +740,29 @@
   </div><!-- /page-wrapper -->
 </div><!-- /page -->
 
+<!-- Laadvolgorde: gsp-util.js (GSP.esc/safeUrl), auth.js, render.js
+     (html``/raw/mount), admin.js (kern + sectieregistry), dan elke
+     sectiemodule die zich registreert, en als laatste nav.js dat de
+     registry uitleest voor navigatie en filterbinding. Geen ES-modules en
+     geen inline scripts (CSP zonder 'unsafe-inline'). -->
 <script src="../gsp-util.js"></script>
 <script src="../auth.js"></script>
 <script src="js/render.js"></script>
 <script src="js/admin.js"></script>
+<script src="js/ui.js"></script>
+<script src="js/labels.js"></script>
+<script src="js/sections/users.js"></script>
+<script src="js/sections/jobs.js"></script>
+<script src="js/sections/candidates.js"></script>
+<script src="js/sections/clients.js"></script>
+<script src="js/sections/leads.js"></script>
+<script src="js/sections/outreach.js"></script>
+<script src="js/sections/blog.js"></script>
+<script src="js/sections/analytics.js"></script>
+<script src="js/sections/reporting.js"></script>
+<script src="js/sections/audit.js"></script>
+<script src="js/sections/cms.js"></script>
+<script src="js/sections/settings.js"></script>
 <script src="js/vendor-fallback-tabler-js.js"></script>
 <script src="js/nav.js"></script>
 </body>
