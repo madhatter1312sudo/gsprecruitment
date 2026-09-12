@@ -155,8 +155,34 @@ def make_jobs(n=TOTAL_ROWS):
     } for i in range(1, n + 1)]
 
 
+# Bewaartermijnen (§7.3.1) pagineert op 50, niet op de 20 van de andere
+# secties, en de route heeft bewust geen default-limit. Deze fixture is
+# daarom ruim boven twee pagina's.
+RETENTION_PAGE_SIZE = 50
+RETENTION_ROWS = 120
+
+
+def make_retention(n=RETENTION_ROWS):
+    return [{
+        "id": i,
+        "category": "rejected_applicant",
+        "subject_table": "candidates",
+        "subject_id": 1000 + i,
+        "email": None,
+        "action": "anonymise",
+        "term_expired_at": "2026-08-12T00:00:00Z",
+        "signal_missing_nl": "geen nieuwe match, pipeline-activiteit of plaatsing sinds de afwijzing",
+        "status": "pending",
+        "first_seen_at": "2026-09-01T00:00:00Z",
+        "last_seen_at": "2026-09-03T00:00:00Z",
+        "reappeared_after_rejection_at": None,
+        "purged_at": None,
+    } for i in range(1, n + 1)]
+
+
 LIST_DATA = {
     "users": make_users(),
+    "retention": make_retention(),
     "candidates": make_candidates(),
     "outreach": make_outreach(),
     "blog": make_blog(),
@@ -174,6 +200,18 @@ def paginate(items, qs):
     limit = int(qs.get("limit", [str(PAGE_SIZE)])[0])
     offset = int(qs.get("offset", ["0"])[0])
     return {"items": items[offset:offset + limit], "total": len(items)}
+
+
+def paginate_retention(items, qs):
+    """GET /retention/review heeft geen default-limit (WS5 BV6): zonder
+    limit komt de volledige set terug. Die eigenschap is precies wat de
+    categoriebrede goedkeuring nodig heeft, dus de stub bootst hem na in
+    plaats van er stilzwijgend een paginagrootte op te leggen."""
+    limit = qs.get("limit", [None])[0]
+    offset = int(qs.get("offset", ["0"])[0])
+    page = items[offset:offset + int(limit)] if limit else items[offset:]
+    return {"items": page, "total": len(items),
+            "limit": int(limit) if limit else None, "offset": offset}
 
 
 def route_admin_api(route, request):
@@ -203,6 +241,14 @@ def route_admin_api(route, request):
         return
     if path == "/api/v1/admin/users":
         json_response(paginate(LIST_DATA["users"], qs))
+        return
+    if path == "/api/v1/admin/retention/review":
+        json_response(paginate_retention(LIST_DATA["retention"], qs))
+        return
+    if path == "/api/v1/admin/retention/review/summary":
+        json_response({"pending_total": RETENTION_ROWS,
+                        "by_category": [{"category": "rejected_applicant", "status": "pending",
+                                         "n": RETENTION_ROWS}]})
         return
     if path == "/api/v1/admin/candidates":
         json_response(paginate(LIST_DATA["candidates"], qs))
@@ -401,6 +447,32 @@ def main():
         if not any("deleted" in t.lower() for t in last_200):
             failures.append(f"jobs delete (200): expected a 'Job deleted' success toast — got {last_200!r}")
 
+        # ---- Bewaartermijnen: pagineert op 50 (§7.3.1), niet op 20 ----
+        errors_before = len(console_errors)
+        page.click('.nav-link[data-section="retention"]')
+        page.wait_for_timeout(900)
+        rows_p1 = page.eval_on_selector_all('#retentionBody tr', "els => els.length")
+        texts_p1 = page.eval_on_selector_all('#retentionBody tr td:nth-child(3)',
+                                              "els => els.map(e => e.textContent.trim())")
+        if rows_p1 != RETENTION_PAGE_SIZE:
+            failures.append(f"retention: pagina 1 gaf {rows_p1} rijen, verwacht {RETENTION_PAGE_SIZE}")
+        btn = '#retentionPagination [data-action="page"][data-page="2"]'
+        if page.query_selector(btn) is None:
+            failures.append("retention: geen pagineerknop voor pagina 2 gevonden")
+        else:
+            page.click(btn)
+            page.wait_for_timeout(800)
+            rows_p2 = page.eval_on_selector_all('#retentionBody tr', "els => els.length")
+            texts_p2 = page.eval_on_selector_all('#retentionBody tr td:nth-child(3)',
+                                                  "els => els.map(e => e.textContent.trim())")
+            if rows_p2 != RETENTION_PAGE_SIZE:
+                failures.append(f"retention: pagina 2 gaf {rows_p2} rijen, verwacht {RETENTION_PAGE_SIZE}")
+            if texts_p1 and texts_p1 == texts_p2:
+                failures.append("retention: pagina 2 toonde dezelfde rijen als pagina 1")
+        new_errors = console_errors[errors_before:]
+        if new_errors:
+            failures.append(f"retention: {len(new_errors)} console error(s): {new_errors[:3]}")
+
         browser.close()
 
     if failures:
@@ -410,7 +482,8 @@ def main():
         sys.exit(1)
 
     print(f"PASS: page 2 rendered {PAGE_SIZE} rows with no console errors on all "
-          f"{len(SECTIONS)} sections ({', '.join(s for s, _, _ in SECTIONS)}).")
+          f"{len(SECTIONS)} sections ({', '.join(s for s, _, _ in SECTIONS)}), "
+          f"plus retention at {RETENTION_PAGE_SIZE} rows per page.")
     sys.exit(0)
 
 

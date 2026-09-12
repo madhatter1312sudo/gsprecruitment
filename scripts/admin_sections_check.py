@@ -190,6 +190,25 @@ RETENTION_ITEMS = [
      "reappeared_after_rejection_at": None, "purged_at": "2026-09-04T00:00:00Z"},
 ]
 
+# Eén categorie met meer openstaande items dan de paginagrootte van de
+# lijst (50). Zonder die categorie zijn "de hele categorie" en "de eerste
+# pagina ervan" hetzelfde getal, en dan bewijst de assertie op
+# expected_count niets: de modal moet juist ZONDER limit ophalen.
+RETENTION_BIG_CATEGORY = "sourced_no_response"
+RETENTION_BIG_COUNT = 60
+RETENTION_ITEMS += [
+    {"id": 100 + i, "category": RETENTION_BIG_CATEGORY, "subject_table": "candidates",
+     "subject_id": 2000 + i, "email": None, "action": "anonymise",
+     "term_expired_at": "2026-08-25T00:00:00Z",
+     "signal_missing_nl": "geen reactie op de benadering en geen sollicitatie",
+     "status": "pending", "first_seen_at": "2026-09-01T00:00:00Z",
+     "last_seen_at": "2026-09-03T00:00:00Z",
+     "reappeared_after_rejection_at": None, "purged_at": None}
+    for i in range(RETENTION_BIG_COUNT)
+]
+
+RETENTION_PAGE_SIZE = 50
+
 RETENTION_TABLE_ROWS = [
     {"key": "rejected_applicant", "categorie": "Afgewezen sollicitant", "bewaartermijn": "12 maanden",
      "bron_opmerking": "AVG art. 6 lid 1 sub f", "legal_basis_ref": "art. 6.1.f",
@@ -209,6 +228,9 @@ RETENTION_TABLE_ROWS = [
 RETENTION_STATE = {
     "mode": "ok", "generated": 0, "approved": [], "rejected": [],
     "bulk_calls": [], "bulk_mismatch": True, "dry_run": 0, "apollo_dry_run": 0,
+    # modal_error laat uitsluitend de ophaling ZONDER limit mislukken: dat
+    # is de fetch van de categoriebrede bevestigingsmodal, niet de lijst.
+    "modal_error": False,
 }
 
 
@@ -485,6 +507,9 @@ def route_admin_api(route, request):
         if RETENTION_STATE["mode"] == "error":
             json_response({"detail": "Server error"}, status=500)
             return
+        if RETENTION_STATE["modal_error"] and qs.get("limit", [None])[0] is None and qs.get("category"):
+            json_response({"detail": "Server error"}, status=500)
+            return
         status = qs.get("status", ["pending"])[0]
         category = qs.get("category", [None])[0]
         rows = list(RETENTION_ITEMS)
@@ -524,6 +549,29 @@ def route_admin_api(route, request):
     json_response({"items": [], "total": 0})
 
 
+def check_retention_category_labels():
+    """D3: elke categorie uit core/retention.RETENTION_TABLE heeft een
+    Nederlands label in js/labels.js. Zonder dat toont de droogloop of de
+    bewaartabel de ruwe sleutel (placed_candidate, logs). Statisch, geen
+    browser: de map is een tekstbestand en de tabel ook."""
+    problems = []
+    retention_py = (ROOT / "talent-os" / "backend" / "core" / "retention.py").read_text(encoding="utf-8")
+    keys = re.findall(r'key="([a-z_]+)"', retention_py)
+    labels_js = (WEBSITE / "admin" / "js" / "labels.js").read_text(encoding="utf-8")
+    block = re.search(r"retentiecategorie:\s*\{(.*?)\n    \},", labels_js, re.S)
+    if not block:
+        return ["labels.js: de map retentiecategorie is niet gevonden"]
+    mapped = set(re.findall(r"^\s*([a-z_]+):", block.group(1), re.M))
+    for key in keys:
+        if key not in mapped:
+            problems.append(f"labels.js: RETENTION_TABLE-categorie {key!r} heeft geen Nederlands label")
+    # apollo_pool_purge is geen RETENTION_TABLE-rij maar staat wel in de
+    # beoordelingslijst; die moet er dus juist wel in staan.
+    if "apollo_pool_purge" not in mapped:
+        problems.append("labels.js: de UI-eigen categorie 'apollo_pool_purge' ontbreekt")
+    return problems
+
+
 def main():
     try:
         from playwright.sync_api import sync_playwright
@@ -535,7 +583,7 @@ def main():
     start_server(port)
     base = f"http://127.0.0.1:{port}/admin/"
 
-    failures = []
+    failures = check_retention_category_labels()
 
     with sync_playwright() as pw:
         browser = pw.chromium.launch(executable_path=CHROMIUM_PATH or None, headless=True)
@@ -818,7 +866,7 @@ def main():
         summary_text = page.eval_on_selector('#retentionSummary', "el => el.textContent") or ""
         if "Te beoordelen" not in summary_text or "3" not in summary_text:
             failures.append(f"retention: samenvatting toont de telling niet -- kreeg {summary_text[:160]!r}")
-        if "Eerder afgewezen, opnieuw verschenen" not in summary_text:
+        if "Heropend na afwijzing" not in summary_text:
             failures.append("retention: de tegel voor heropende items ontbreekt terwijl er er één is")
         if "Laatst gegenereerd" not in summary_text:
             failures.append("retention: de tegel 'Laatst gegenereerd' ontbreekt")
@@ -830,9 +878,16 @@ def main():
         if "rejected_applicant" in cat_text:
             failures.append("retention: de ruwe categoriesleutel lekte in de categorietabel")
 
+        pending_total = len([i for i in RETENTION_ITEMS if i["status"] == "pending"])
         rows = page.eval_on_selector_all('#retentionBody tr', "els => els.length")
-        if rows != 3:
-            failures.append(f"retention: lijst toonde {rows} rijen, verwacht 3 (alleen 'pending')")
+        if rows != RETENTION_PAGE_SIZE:
+            failures.append(f"retention: lijst toonde {rows} rijen, verwacht {RETENTION_PAGE_SIZE} "
+                            f"(de paginagrootte, niet de volle {pending_total})")
+        footer = page.eval_on_selector('#retentionCount', "el => el.textContent") or ""
+        if f"van {pending_total}" not in footer:
+            failures.append(f"retention: footer telt niet de volle set -- kreeg {footer.strip()!r}")
+        if page.query_selector('#retentionPagination [data-action="page"][data-page="2"]') is None:
+            failures.append("retention: geen pagineerknop terwijl er meer dan één pagina is")
         list_text = page.eval_on_selector('#retentionBody', "el => el.textContent") or ""
         if "kandidaat #1482" not in list_text:
             failures.append(f"retention: onderwerp niet als 'kandidaat #1482' getoond -- kreeg {list_text[:200]!r}")
@@ -849,6 +904,9 @@ def main():
         bulk_text = page.eval_on_selector('#retentionBulkbar', "el => el.textContent") or ""
         if "1 geselecteerd" not in bulk_text:
             failures.append(f"retention: bulkbalk verscheen niet bij een selectie -- kreeg {bulk_text[:120]!r}")
+        row_selected = page.eval_on_selector('#retentionBody tr', "el => el.classList.contains('a-row-selected')")
+        if not row_selected:
+            failures.append("retention: een geselecteerde rij kreeg geen zichtbare selectiestaat")
         page.click('[data-action="retention-clear-selection"]')
         page.wait_for_timeout(250)
         if not page.eval_on_selector('#retentionBulkbar', "el => el.hidden"):
@@ -918,28 +976,49 @@ def main():
         page.select_option('#retentionStatusFilter', 'pending')
         page.wait_for_timeout(700)
 
-        # Categoriebreed goedkeuren: eerst een 409 mismatch, dan opnieuw.
-        page.click('[data-action="retention-category-approve"][data-category="referral"]')
-        page.wait_for_timeout(800)
+        # Categoriebreed goedkeuren op een categorie met MEER openstaande
+        # items dan de paginagrootte: de modal haalt zonder limit op, dus
+        # expected_count is de volle telling en niet de eerste pagina.
+        page.click(f'[data-action="retention-category-approve"][data-category="{RETENTION_BIG_CATEGORY}"]')
+        page.wait_for_timeout(900)
         bulk_modal = page.eval_on_selector('#retentionBulkModal', "el => el.textContent") or ""
-        if "kandidaat #903" not in bulk_modal:
+        if "kandidaat #2000" not in bulk_modal:
             failures.append(f"retention: de bulkmodal toont de geraakte rijen niet -- kreeg {bulk_modal[:200]!r}")
+        modal_rows = page.eval_on_selector_all('#retentionBulkModal .a-listrow', "els => els.length")
+        if modal_rows != RETENTION_BIG_COUNT:
+            failures.append(f"retention: de bulkmodal toonde {modal_rows} rijen, verwacht {RETENTION_BIG_COUNT} "
+                            "(de hele categorie, dus zonder limit opgehaald)")
         page.fill("#retentionBulkModal input[type=text]", "APPROVE")
         page.wait_for_timeout(150)
-        page.click("#retentionBulkModal .btn-outline-danger")
-        page.wait_for_timeout(800)
+        if page.eval_on_selector("#retentionBulkModal .btn-outline-danger", "el => el.disabled"):
+            failures.append("retention: de bulkknop bleef uit terwijl APPROVE getypt was en de lijst geladen is")
+        else:
+            page.click("#retentionBulkModal .btn-outline-danger")
+        page.wait_for_timeout(900)
         mismatch_text = page.eval_on_selector('#retentionBulkAlert', "el => el.textContent") or ""
         if "De lijst is veranderd" not in mismatch_text:
             failures.append(f"retention: 409 mismatch werd niet als inline-melding getoond -- kreeg {mismatch_text[:200]!r}")
         if not page.evaluate("() => document.getElementById('retentionBulkModal').classList.contains('show')"):
             failures.append("retention: de bulkmodal sloot bij een 409 mismatch; hij hoort open te blijven")
         last_bulk = RETENTION_STATE["bulk_calls"][-1] if RETENTION_STATE["bulk_calls"] else {}
-        if last_bulk.get("expected_count") != 1 or last_bulk.get("confirm") != "APPROVE":
-            failures.append(f"retention: categoriebrede aanroep droeg niet expected_count+confirm -- {last_bulk!r}")
+        if last_bulk.get("expected_count") != RETENTION_BIG_COUNT or last_bulk.get("confirm") != "APPROVE":
+            failures.append(f"retention: categoriebrede aanroep droeg niet de volle telling plus confirm -- {last_bulk!r}")
+        # Na de 409 vervalt het oude aantal: een tweede klik zonder
+        # verversen mag niet hetzelfde verouderde getal opnieuw sturen.
+        calls_before_retry = len(RETENTION_STATE["bulk_calls"])
+        if not page.eval_on_selector("#retentionBulkModal .btn-outline-danger", "el => el.disabled"):
+            page.click("#retentionBulkModal .btn-outline-danger")
+            page.wait_for_timeout(500)
+        if len(RETENTION_STATE["bulk_calls"]) != calls_before_retry:
+            failures.append("retention: een tweede klik na de 409 stuurde alsnog een bulkaanroep "
+                            "zonder dat de telling ververst was")
         page.click('[data-action="retention-bulk-refresh"]')
-        page.wait_for_timeout(800)
-        page.click("#retentionBulkModal .btn-outline-danger")
         page.wait_for_timeout(900)
+        if page.eval_on_selector("#retentionBulkModal .btn-outline-danger", "el => el.disabled"):
+            failures.append("retention: na verversen bleef de bulkknop uit")
+        else:
+            page.click("#retentionBulkModal .btn-outline-danger")
+        page.wait_for_timeout(1000)
         result_text = page.eval_on_selector('#retentionBulkModal', "el => el.textContent") or ""
         if "Verwerkt" not in result_text:
             failures.append(f"retention: de bulkuitkomst werd niet in dezelfde modal getoond -- kreeg {result_text[:200]!r}")
@@ -975,6 +1054,43 @@ def main():
         new_errors = console_errors[errors_before:]
         if new_errors:
             failures.append(f"retention: {len(new_errors)} console error(s): {new_errors[:3]}")
+
+        # Een categoriemodal waarvan de verse telling mislukt, mag niets
+        # goedkeuren: zonder de reset van dat aantal bleef het getal van de
+        # vorige categorie staan en was de knop bruikbaar zodra APPROVE
+        # getypt was.
+        calls_before = len(RETENTION_STATE["bulk_calls"])
+        page.click('[data-action="retention-category-approve"][data-category="referral"]')
+        page.wait_for_timeout(900)
+        page.fill("#retentionBulkModal input[type=text]", "APPROVE")
+        page.wait_for_timeout(200)
+        if page.eval_on_selector("#retentionBulkModal .btn-outline-danger", "el => el.disabled"):
+            failures.append("retention: de bulkknop bleef uit bij een geslaagde categorieophaling")
+        expected_after_ok = page.evaluate("() => Admin._retention.bulkExpected")
+        if expected_after_ok != 1:
+            failures.append(f"retention: expected_count na een geslaagde ophaling was {expected_after_ok!r}, verwacht 1")
+        # Dezelfde modal opnieuw vullen terwijl de ophaling faalt (dat is wat
+        # de knop Verversen doet): het aantal van zojuist mag niet blijven
+        # staan, anders keurt een tweede klik een categorie goed die dit
+        # scherm nooit heeft laten zien.
+        RETENTION_STATE["modal_error"] = True
+        page.evaluate("() => Admin.fillRetentionCategoryModal(Admin._retentionCategoryModal, 'referral')")
+        page.wait_for_timeout(900)
+        if page.evaluate("() => Admin._retention.bulkExpected") != 0:
+            failures.append("retention: na een mislukte categorieophaling bleef het oude aantal staan")
+        if not page.eval_on_selector("#retentionBulkModal .btn-outline-danger", "el => el.disabled"):
+            failures.append("retention: de bulkknop bleef bruikbaar na een mislukte categorieophaling")
+            page.click("#retentionBulkModal .btn-outline-danger")
+            page.wait_for_timeout(600)
+        if len(RETENTION_STATE["bulk_calls"]) != calls_before:
+            failures.append("retention: een categoriemodal met een mislukte telling keurde alsnog iets goed")
+        fail_alert = page.eval_on_selector('#retentionBulkModal', "el => el.textContent") or ""
+        if "Verversen" not in fail_alert:
+            failures.append(f"retention: mislukte modalophaling bood geen Verversen -- kreeg {fail_alert[:160]!r}")
+        page.click('#retentionBulkModal [data-action="close-modal"]')
+        page.wait_for_timeout(300)
+        RETENTION_STATE["modal_error"] = False
+        console_errors[:] = [e for e in console_errors if "500 (Internal Server Error)" not in e]
 
         # 500 met retry. De opzettelijke 500 logt zijn eigen console error;
         # de grens gaat er daarom hierna overheen, zoals bij analytics.

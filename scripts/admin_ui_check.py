@@ -26,8 +26,13 @@ Daarnaast eenmalig:
     route staan (§7.2a, BV10). Plus de lege staat en de foutstaat met retry.
   - ui.confirm() met een eigen body en onConfirm: de aanroeper leest zijn
     notitieveld uit terwijl het paneel nog staat.
-  - handle.button(rol) en handle.setBusy(): spinner plus disabled op de
-    handelende knop, en daarna de oorspronkelijke tekst terug.
+  - handle.button(rol), handle.setBusy() en handle.syncGate(): spinner plus
+    disabled op de handelende knop, daarna de oorspronkelijke tekst terug,
+    en een bewust vergrendelde knop (data-gsp-lock) die door de getypte
+    bevestiging noch door setBusy(false) weer aangaat.
+  - De getypte bevestiging: focus gaat bij openen naar het veld, "Komt niet
+    overeen" verschijnt met aria-live zodra er iets fout getypt is, en Enter
+    voert de handeling alleen uit als de knop op dat moment aan staat.
   - Een controle op de focustrap-probe zelf: op een paneel zonder trap moet
     diezelfde probe "niet getrapt" melden. Zo faalt een kapotte trap met een
     duidelijke regel in plaats van met een timeout.
@@ -157,6 +162,23 @@ SERVER_SORT_FIXTURE = """() => {
   return window.__srvTable.reload().then(() => 'ready');
 }"""
 
+# Een destructieve modal met een bewust vergrendelde knop, plus de
+# getypte bevestiging: de combinatie waar S2 over ging.
+LOCK_FIXTURE = """() => {
+  window.__lockRan = false;
+  window.__lock = ui.modal({
+    id: 'uiLockModal',
+    title: 'Wissen',
+    body: GSP.html`<p>Dit kan niet ongedaan gemaakt worden.</p>`,
+    confirmText: 'WIS',
+    danger: { label: 'Wissen', keepOpen: true, onClick: () => { window.__lockRan = true; } },
+  });
+  const b = window.__lock.button('danger');
+  b.disabled = true;
+  b.dataset.gspLock = '1';
+  return 'ready';
+}"""
+
 # Een paneel zonder focustrap, om te bewijzen dat de probe een ontbrekende
 # trap ook echt ziet.
 CONTROL_PANEL = """() => {
@@ -270,6 +292,9 @@ def panel_assertions(page, failures, label, suffix):
     danger = f"#{cid} .btn-outline-danger"
     if not page.eval_on_selector(danger, "el => el.disabled"):
         failures.append(tag + "confirmText: de destructieve knop stond meteen aan")
+    if page.evaluate("(s) => document.activeElement === document.querySelector(s + ' input[type=text]')",
+                     "#" + cid) is not True:
+        failures.append(tag + "confirmText: de focus ging niet naar het bevestigingsveld bij openen")
     box = page.query_selector(f"#{cid} input[type=text]")
     box.fill("verwijder")
     page.wait_for_timeout(150)
@@ -449,6 +474,54 @@ def main():
             failures.append("ui.confirm: onConfirm kon het eigen veld niet meer uitlezen")
         if page.evaluate("() => window.__confirmAnswer") is not True:
             failures.append("ui.confirm: de Promise loste niet op true op na bevestigen")
+
+        # data-gsp-lock: een knop die de aanroeper bewust heeft
+        # uitgeschakeld (cap overschreden, lijst niet geladen, bulk al
+        # verwerkt) mag door de getypte bevestiging niet weer aangaan --
+        # dat is het pad waarlangs een onomkeerbare handeling anders alsnog
+        # bereikbaar wordt.
+        page.evaluate(LOCK_FIXTURE)
+        page.wait_for_timeout(200)
+        page.fill("#uiLockModal input[type=text]", "WIS")
+        page.wait_for_timeout(200)
+        if not page.eval_on_selector("#uiLockModal .btn-outline-danger", "el => el.disabled"):
+            failures.append("gspLock: de getypte bevestiging zette een vergrendelde knop weer aan")
+        page.evaluate("() => window.__lock.setBusy(true)")
+        page.evaluate("() => window.__lock.setBusy(false)")
+        page.wait_for_timeout(200)
+        if not page.eval_on_selector("#uiLockModal .btn-outline-danger", "el => el.disabled"):
+            failures.append("gspLock: setBusy(false) hief het slot op")
+        page.evaluate("() => { const b = window.__lock.button('danger');"
+                      " delete b.dataset.gspLock; window.__lock.syncGate(); }")
+        page.wait_for_timeout(200)
+        if page.eval_on_selector("#uiLockModal .btn-outline-danger", "el => el.disabled"):
+            failures.append("syncGate: de knop bleef uit terwijl het slot eraf was en de tekst klopte")
+
+        # "Komt niet overeen" verschijnt pas bij een foute invoer.
+        page.fill("#uiLockModal input[type=text]", "wis")
+        page.wait_for_timeout(200)
+        mismatch = page.eval_on_selector("#uiLockModal .a-confirm-mismatch", "el => el.textContent") or ""
+        if "Komt niet overeen" not in mismatch:
+            failures.append(f"bevestiging: geen 'Komt niet overeen'-regel bij foute invoer -- {mismatch!r}")
+        if page.eval_on_selector("#uiLockModal .a-confirm-mismatch",
+                                 "el => el.getAttribute('aria-live')") != "polite":
+            failures.append("bevestiging: de mismatchregel heeft geen aria-live")
+
+        # Enter in het veld voert de handeling alleen uit als de knop aan staat.
+        page.focus("#uiLockModal input[type=text]")
+        page.keyboard.press("Enter")
+        page.wait_for_timeout(250)
+        if page.evaluate("() => window.__lockRan"):
+            failures.append("bevestiging: Enter voerde de handeling uit terwijl de knop uit stond")
+        page.fill("#uiLockModal input[type=text]", "WIS")
+        page.wait_for_timeout(150)
+        page.focus("#uiLockModal input[type=text]")
+        page.keyboard.press("Enter")
+        page.wait_for_timeout(300)
+        if not page.evaluate("() => window.__lockRan"):
+            failures.append("bevestiging: Enter voerde de handeling niet uit terwijl de knop aan stond")
+        page.evaluate("() => window.__lock.close()")
+        page.wait_for_timeout(250)
 
         # setBusy(): spinner en disabled op de handelende knop, en daarna
         # weer terug naar de oorspronkelijke tekst.
