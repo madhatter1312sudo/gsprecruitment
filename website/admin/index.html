@@ -569,11 +569,11 @@
              Every figure here comes straight from data the API already
              returns (open jobs by employment_type, leads by interest_type
              / created_at) — no invented KPIs. See Admin.loadReporting(). -->
-        <section class="portal-section" id="section-reporting">
-          <div id="reportingContent">
-            <div style="text-align:center;padding:3rem;color:var(--navy-300);"><i class="fa-solid fa-spinner fa-spin"></i> Laden…</div>
-          </div>
-        </section>
+        <!-- Leeg: js/sections/reporting.js zet zijn eigen skeletonHtml via
+             de registry. De elf andere secties houden hun markup hier, zodat
+             de DOM-ankers waar admin_sections_check.py en
+             admin_pagination_check.py op staan niet verschuiven. -->
+        <section class="portal-section" id="section-reporting"></section>
 
         <!-- ==================== CONTENT CMS ==================== -->
         <section class="portal-section" id="section-cms">
@@ -737,10 +737,27 @@
   </div><!-- /page-wrapper -->
 </div><!-- /page -->
 
+<!-- Laadvolgorde: gsp-util.js (GSP.esc/safeUrl), auth.js, render.js
+     (html``/raw/mount), admin.js (kern + sectieregistry), dan elke
+     sectiemodule die zich registreert, en als laatste nav.js dat de
+     registry uitleest voor navigatie en filterbinding. Geen ES-modules en
+     geen inline scripts (CSP zonder 'unsafe-inline'). -->
 <script src="../gsp-util.js"></script>
 <script src="../auth.js"></script>
 <script src="js/render.js"></script>
 <script src="js/admin.js"></script>
+<script src="js/sections/users.js"></script>
+<script src="js/sections/jobs.js"></script>
+<script src="js/sections/candidates.js"></script>
+<script src="js/sections/clients.js"></script>
+<script src="js/sections/leads.js"></script>
+<script src="js/sections/outreach.js"></script>
+<script src="js/sections/blog.js"></script>
+<script src="js/sections/analytics.js"></script>
+<script src="js/sections/reporting.js"></script>
+<script src="js/sections/audit.js"></script>
+<script src="js/sections/cms.js"></script>
+<script src="js/sections/settings.js"></script>
 <script src="js/vendor-fallback-tabler-js.js"></script>
 <script src="js/nav.js"></script>
 </body>

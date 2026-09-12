@@ -1,125 +1,79 @@
-  /* ---- Navigation ---- */
-  const sectionTitles = {
-    dashboard: 'Dashboard', users: 'User Management', jobs: 'All Jobs',
-    candidates: 'All Candidates', clients: 'Opdrachtgevers', outreach: 'Outreach',
-    leads: 'Leads', blog: 'Blog', analytics: 'Analytics',
-    audit: 'Audit Log', reporting: 'Rapportage', cms: 'Content CMS', settings: 'Settings',
-  };
+/* ============================================================
+   GSP Recruitment — admin/js/nav.js
+   Navigatie en filterbinding, allebei gevoed door de sectieregistry
+   (Admin.registerSection, zie js/admin.js). Dit bestand kent zelf geen
+   enkele sectie bij naam meer: titels, loaders en filters komen uit de
+   registry, zodat er één plek is waar een sectie zichzelf beschrijft.
+   Laadt als laatste script, na alle sectiemodules.
+   ============================================================ */
 
-  const sectionLoaders = {
-    users:      () => Admin.loadUsers(),
-    jobs:       () => Admin.loadJobs(),
-    candidates: () => Admin.loadCandidates(),
-    clients:    () => Admin.loadClients(),
-    outreach:   () => Admin.loadOutreach(),
-    leads:      () => Admin.loadLeads(),
-    blog:       () => Admin.loadBlog(),
-    analytics:  () => Admin.loadAnalytics(),
-    audit:      () => Admin.loadAuditLog(),
-    reporting:  () => Admin.loadReporting(),
-    cms:        () => Admin.loadContent(),
-    settings:   () => Admin.loadSettings(),
-  };
-
-  const loaded = new Set(['dashboard']);
-
-  function navigateTo(section) {
-    document.querySelectorAll('.nav-link[data-section]').forEach(item => {
-      item.classList.toggle('active', item.dataset.section === section);
-    });
-    document.querySelectorAll('.portal-section').forEach(s => {
-      s.classList.toggle('active', s.id === `section-${section}`);
-    });
-    document.getElementById('pageTitle').textContent = sectionTitles[section] || section;
-    window.location.hash = section;
-    const menu = document.getElementById('sidebar-menu');
-    if (menu && menu.classList.contains('show') && window.bootstrap) {
-      window.bootstrap.Collapse.getOrCreateInstance(menu).hide();
-    }
-
-    if (!loaded.has(section) && sectionLoaders[section]) {
-      loaded.add(section);
-      // Every loadXxx() is async (returns a promise) -- a section whose
-      // load rejects (e.g. loadAnalytics() on a failed fetch, WS2) is
-      // un-cached again here so revisiting the tab retries the load,
-      // instead of being stuck "loaded" against an empty/error panel
-      // forever after one bad request.
-      Promise.resolve(sectionLoaders[section]()).catch(() => { loaded.delete(section); });
-    }
+/* ---- Navigatie ---- */
+const sectionTitles = {};
+const sectionLoaders = {};
+Admin.sections().forEach(sec => {
+  sectionTitles[sec.id] = sec.title || sec.id;
+  // Het dashboard laadt Admin.init() zelf al; het staat daarom wel in de
+  // titelmap maar niet in de loadermap (anders zou het eerste bezoek aan
+  // #dashboard een tweede keer laden).
+  if (sec.id !== 'dashboard' && typeof sec.loader === 'function') {
+    sectionLoaders[sec.id] = sec.loader;
   }
+});
 
+const loaded = new Set(['dashboard']);
+
+function navigateTo(section) {
   document.querySelectorAll('.nav-link[data-section]').forEach(item => {
-    item.addEventListener('click', (e) => { e.preventDefault(); navigateTo(item.dataset.section); });
+    item.classList.toggle('active', item.dataset.section === section);
   });
-
-  const hash = window.location.hash.replace('#', '');
-  if (hash && sectionTitles[hash]) navigateTo(hash);
-
-  /* ---- Logout ---- */
-  document.getElementById('sidebarLogoutBtn').addEventListener('click', () => Auth.logout());
-
-  /* ---- Audit filter input ---- */
-  const auditInput = document.getElementById('auditActionFilter');
-  if (auditInput) {
-    let t;
-    auditInput.addEventListener('input', e => {
-      clearTimeout(t);
-      t = setTimeout(() => {
-        Admin._currentPage.audit = 1;
-        Admin.loadAuditLog({ action: e.target.value.trim() || undefined });
-      }, 500);
-    });
+  document.querySelectorAll('.portal-section').forEach(s => {
+    s.classList.toggle('active', s.id === `section-${section}`);
+  });
+  document.getElementById('pageTitle').textContent = sectionTitles[section] || section;
+  window.location.hash = section;
+  const menu = document.getElementById('sidebar-menu');
+  if (menu && menu.classList.contains('show') && window.bootstrap) {
+    window.bootstrap.Collapse.getOrCreateInstance(menu).hide();
   }
 
-  /* ---- User search live ---- */
-  const userSearch = document.getElementById('userSearch');
-  if (userSearch) {
-    let t;
-    userSearch.addEventListener('input', e => {
-      clearTimeout(t);
-      t = setTimeout(() => {
-        Admin._currentPage.users = 1;
-        Admin.loadUsers({ search: e.target.value.trim() });
-      }, 400);
-    });
+  if (!loaded.has(section) && sectionLoaders[section]) {
+    loaded.add(section);
+    // Elke loader is async. Een sectie waarvan het laden afwijst (bijv.
+    // loadAnalytics() bij een mislukte fetch, WS2) wordt hier weer
+    // ontcachet, zodat een volgend bezoek het opnieuw probeert in plaats
+    // van voorgoed op een leeg of foutpaneel te blijven staan.
+    Promise.resolve(sectionLoaders[section]()).catch(() => { loaded.delete(section); });
   }
+}
 
-  /* ---- Outreach status filter ---- */
-  const outreachStatusFilter = document.getElementById('outreachStatusFilter');
-  if (outreachStatusFilter) {
-    outreachStatusFilter.addEventListener('change', e => {
-      Admin._currentPage.outreach = 1;
-      Admin.loadOutreach({ status: e.target.value || undefined });
+document.querySelectorAll('.nav-link[data-section]').forEach(item => {
+  item.addEventListener('click', (e) => { e.preventDefault(); navigateTo(item.dataset.section); });
+});
+
+const hash = window.location.hash.replace('#', '');
+if (hash && sectionTitles[hash]) navigateTo(hash);
+
+/* ---- Filters uit de registry ----
+   Precies één binding per element. Hiervoor stond de helft van deze
+   handlers in nav.js en de andere helft in Admin.bindFilters(); die
+   tweedeling is de reden dat een dubbele binding ooit twee API-calls per
+   toetsaanslag opleverde (commit d0917af). Nu is er één lus. */
+Admin.sections().forEach(sec => {
+  (sec.filters || []).forEach(filter => {
+    document.querySelectorAll(filter.selector).forEach(el => {
+      if (el.dataset.gspFilterBound === '1') return;
+      el.dataset.gspFilterBound = '1';
+      const run = filter.debounce
+        ? Admin.debounce(() => filter.handler(el), filter.debounce)
+        : (e) => filter.handler(el, e);
+      el.addEventListener(filter.event || 'change', run);
     });
-  }
+  });
+});
 
-  /* ---- Blog status filter ---- */
-  const blogStatusFilter = document.getElementById('blogStatusFilter');
-  if (blogStatusFilter) {
-    blogStatusFilter.addEventListener('change', e => {
-      Admin._currentPage.blog = 1;
-      Admin.loadBlog({ status: e.target.value || undefined });
-    });
-  }
+/* ---- Logout ---- */
+document.getElementById('sidebarLogoutBtn').addEventListener('click', () => Auth.logout());
 
-  /* ---- Candidate status filter ---- */
-  const candStatusFilter = document.getElementById('candidateStatusFilter');
-  if (candStatusFilter) {
-    candStatusFilter.addEventListener('change', e => {
-      Admin._currentPage.candidates = 1;
-      Admin.loadCandidates({ status: e.target.value || undefined, kind: document.getElementById('candidateKindFilter')?.value || undefined });
-    });
-  }
-
-  /* ---- Candidate kind filter (Alle / Zelf geregistreerd / Gesourced) ---- */
-  const candKindFilter = document.getElementById('candidateKindFilter');
-  if (candKindFilter) {
-    candKindFilter.addEventListener('change', e => {
-      Admin._currentPage.candidates = 1;
-      Admin.loadCandidates({ kind: e.target.value || undefined, status: document.getElementById('candidateStatusFilter')?.value || undefined });
-    });
-  }
-
-  /* ---- Language preference ---- */
-  const savedLang = localStorage.getItem('gsp_lang');
-  if (savedLang === 'nl' || savedLang === 'en') document.documentElement.setAttribute('data-lang', savedLang);
+/* ---- Taalvoorkeur ---- */
+const savedLang = localStorage.getItem('gsp_lang');
+if (savedLang === 'nl' || savedLang === 'en') document.documentElement.setAttribute('data-lang', savedLang);
