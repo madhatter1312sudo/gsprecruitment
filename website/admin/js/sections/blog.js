@@ -59,11 +59,11 @@
             <i class="fa-solid fa-pen"></i>
           </button>
           ${p.status === 'draft' ? html`
-            <button class="btn btn-sm btn-ghost-secondary a-positive" data-action="publish-blog-post" data-id="${p.id}" title="Publish">
+            <button class="btn btn-sm btn-ghost-secondary text-success-ink" data-action="publish-blog-post" data-id="${p.id}" title="Publish">
               <i class="fa-regular fa-circle-check"></i>
             </button>` : ''}
           ${p.status === 'published' ? html`
-            <button class="btn btn-sm btn-ghost-secondary a-danger" data-action="archive-blog-post" data-id="${p.id}" title="Archive">
+            <button class="btn btn-sm btn-ghost-secondary text-danger-ink" data-action="archive-blog-post" data-id="${p.id}" title="Archive">
               <i class="fa-solid fa-box-archive"></i>
             </button>` : ''}
         </td>

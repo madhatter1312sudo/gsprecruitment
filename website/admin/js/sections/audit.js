@@ -59,7 +59,7 @@
     if (!tbody) return;
     const items = data.items || [];
     if (!items.length) { this.setEmpty('#section-audit table tbody', 5, 'Nog geen audit-log entries voor dit filter.'); return; }
-    const colors = { user_delete: 'a-danger', impersonate: 'a-warn', settings_update: 'a-alt' };
+    const colors = { user_delete: 'text-danger-ink', impersonate: 'text-warning-ink', settings_update: 'text-info-ink' };
     mount(tbody, html`${items.map(e => html`
       <tr>
         <td class="a-meta text-nowrap">${this.formatDate(e.created_at)}</td>

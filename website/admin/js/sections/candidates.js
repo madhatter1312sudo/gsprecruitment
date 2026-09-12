@@ -66,14 +66,14 @@
       <tr>
         <td class="a-cell-name">
           ${c.full_name || '—'}
-          ${c.is_verified ? raw('<i class="fa-regular fa-circle-check ms-1 a-positive" title="Geverifieerd"></i>') : raw('<i class="fa-regular fa-circle ms-1 a-soft" title="Niet geverifieerd"></i>')}
+          ${c.is_verified ? raw('<i class="fa-regular fa-circle-check ms-1 text-success-ink" title="Geverifieerd"></i>') : raw('<i class="fa-regular fa-circle ms-1 a-soft" title="Niet geverifieerd"></i>')}
         </td>
         <td class="a-meta">${c.email}</td>
         <td>${c.current_title || '—'}</td>
         <td class="text-center">${c.years_experience ? c.years_experience + ' yrs' : '—'}</td>
         <td class="text-center">
           <span title="Matches">${c.match_count ?? 0}</span>
-          ${c.placement_count ? html` / <span class="a-positive" title="Placed">${c.placement_count} placed</span>` : ''}
+          ${c.placement_count ? html` / <span class="text-success-ink" title="Placed">${c.placement_count} placed</span>` : ''}
         </td>
         <td><span class="${kb.cls}" title="${c.source ? 'Bron: ' + c.source : ''}">${kb.label}</span></td>
         <td>
@@ -228,7 +228,7 @@
       <div class="a-panel mb-4">
         <div class="a-field-label"><i class="fa-regular fa-file-lines me-1"></i>CV</div>
         ${cvFilePath
-          ? html`<div class="a-positive"><i class="fa-regular fa-circle-check me-1"></i>CV geüpload</div>
+          ? html`<div class="text-success-ink"><i class="fa-regular fa-circle-check me-1"></i>CV geüpload</div>
              <div class="a-meta mt-1">
                Het bestand zelf is nog niet downloadbaar vanuit dit paneel — alleen via de geauthenticeerde kandidaatroute.
              </div>`

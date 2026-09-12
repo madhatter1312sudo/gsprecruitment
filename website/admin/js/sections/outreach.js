@@ -59,10 +59,10 @@
             <i class="fa-regular fa-eye"></i>
           </button>
           ${d.status === 'draft' ? html`
-            <button class="btn btn-sm btn-ghost-secondary a-positive" data-action="approve-draft" data-id="${d.id}" title="Approve &amp; send">
+            <button class="btn btn-sm btn-ghost-secondary text-success-ink" data-action="approve-draft" data-id="${d.id}" title="Approve &amp; send">
               <i class="fa-regular fa-paper-plane"></i>
             </button>
-            <button class="btn btn-sm btn-ghost-secondary a-danger" data-action="reject-draft" data-id="${d.id}" title="Reject">
+            <button class="btn btn-sm btn-ghost-secondary text-danger-ink" data-action="reject-draft" data-id="${d.id}" title="Reject">
               <i class="fa-solid fa-xmark"></i>
             </button>` : ''}
         </td>
@@ -96,7 +96,7 @@
         ${editable ? html`
           <button class="btn btn-ghost-secondary" data-action="save-draft" data-id="${d.id}"><i class="fa-regular fa-floppy-disk"></i> Save</button>
           <button class="btn btn-primary" data-action="approve-draft" data-id="${d.id}"><i class="fa-regular fa-paper-plane"></i> Approve &amp; Send</button>
-          <button class="btn btn-ghost-secondary a-danger" data-action="reject-draft" data-id="${d.id}"><i class="fa-solid fa-xmark"></i> Reject</button>` : ''}
+          <button class="btn btn-ghost-secondary text-danger-ink" data-action="reject-draft" data-id="${d.id}"><i class="fa-solid fa-xmark"></i> Reject</button>` : ''}
         <button class="btn btn-ghost-secondary" data-action="close-modal">Close</button>
       </div>
     `, { title: 'Outreach Draft' });

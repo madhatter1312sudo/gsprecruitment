@@ -213,7 +213,7 @@
                   <button class="btn btn-sm btn-ghost-secondary" data-action="client-contact-make-primary" data-client-id="${clientId}" data-id="${c.id}">Maak primair</button>`}</td>
                 <td>
                   <button class="btn btn-sm btn-ghost-secondary" data-action="client-contact-edit" data-client-id="${clientId}" data-id="${c.id}" title="Bewerken"><i class="fa-solid fa-pen"></i></button>
-                  <button class="btn btn-sm btn-ghost-secondary a-danger" data-action="client-contact-delete" data-client-id="${clientId}" data-id="${c.id}" title="Verwijderen"><i class="fa-solid fa-trash"></i></button>
+                  <button class="btn btn-sm btn-ghost-secondary text-danger-ink" data-action="client-contact-delete" data-client-id="${clientId}" data-id="${c.id}" title="Verwijderen"><i class="fa-solid fa-trash"></i></button>
                 </td>
               </tr>`)}</tbody>
           </table>

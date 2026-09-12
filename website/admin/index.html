@@ -15,13 +15,16 @@
        cdnjs/jsdelivr staying up. vendor-fallback-css.js falls back to the CDN
        copy if the vendored file is ever missing (WS-A.9b: no inline onerror=
        attributes -- those are blocked by the enforced CSP too). -->
-  <!-- theme.css levert de designtokens uit SITE-DESIGN-SPEC.md §1 en is de
-       eerste stylesheet: alles daarna (Tabler, admin.css) bouwt erop voort.
-       De oude inline compat-shim die --navy-*/--radius-* met eigen waarden
-       overschreef is weg; canoniek zijn nu de tokens uit theme.css. -->
-  <link rel="stylesheet" href="../theme.css">
   <script src="js/vendor-fallback-css.js"></script>
-  <!-- Na de gevendorde Tabler-CSS, zodat de merkoverrides in admin.css winnen. -->
+  <!-- theme.css en admin.css staan hier, direct onder het script dat Tabler
+       en Font Awesome injecteert (SITE-DESIGN-SPEC.md §7.1.1). Die twee
+       stylesheets zijn geen statische <link>: ze belanden in de cascade op
+       de plek van dat <script>. Alles wat daarna komt wint dus bij gelijke
+       specificiteit, en dat is precies de bedoeling: theme.css levert de
+       tokens en de basisregels van de portalen, admin.css de Tabler-
+       koppeling en de utilityklassen. De oude inline compat-shim die
+       --navy-*/--radius-* met eigen waarden overschreef is weg. -->
+  <link rel="stylesheet" href="../theme.css">
   <link rel="stylesheet" href="admin.css">
   <!-- ApexCharts vendored locally (WS-B.2) -- was a bare CDN <script> with no
        fallback; script-src 'self' already covers vendor/ in website/_headers,

@@ -42,8 +42,10 @@
      .a-clickable     hele rij of samenvatting is aanklikbaar
      .a-row-unread    ongelezen rij in de leadsinbox
      .a-barchart      fallback-staafdiagram als ApexCharts ontbreekt
-     .a-positive .a-danger .a-warn .a-alt .a-accent
-                      de vijf semantische tekstkleuren van het paneel
+     .text-success-ink .text-danger-ink .text-warning-ink .text-info-ink
+                      de vier semantische tekstkleuren uit §7.1.3, op de
+                      --ink-*-tokens uit §7.1.2
+     .a-accent        het goudaccent (geen semantische familie, §7.2e)
 
    Geometrie zonder merkbetekenis (mb-3, d-flex, gap-2, text-center,
    flex-fill, text-nowrap) komt uit Bootstrap 5 en staat hier niet.
@@ -61,60 +63,62 @@
   --admin-muted: var(--navy-200);
   --admin-hairline: var(--navy-600);
 
-  /* Semantisch groen/rood. Geen navy- of goudwaarden, en gelijk aan de
-     waarden die het paneel voor deze refactor al gebruikte. */
-  --admin-positive: #4ade80;
-  --admin-danger: #f87171;
-  --admin-warn: #fb923c;
-  --admin-alt: #a78bfa;
-  /* Informatieblauw voor badges. Tablers eigen --tblr-blue (#066FD1) haalt
-     op zijn eigen 10%-tint maar 3,96:1; deze haalt 9,9:1 op --navy-700. */
-  --admin-info: #7dd3fc;
+  /* Semantische inkt, letterlijk de vier tokens uit SITE-DESIGN-SPEC.md
+     §7.1.2, met de contrastwaarden die daar berekend staan. Ze horen in
+     dit bestand en niet in theme.css: §7.1.2 noemt ze "vier eigen
+     inkttokens" van het paneel, en de publieke site heeft er geen. */
+  --ink-success: #4ADE80;   /* 10,41:1 op --navy-800, 9,66:1 op --navy-700 */
+  --ink-error:   #F87171;   /*  6,56:1 op --navy-800, 6,09:1 op --navy-700 */
+  --ink-warning: #FBBF24;   /* 10,86:1 op --navy-800, 10,08:1 op --navy-700 */
+  --ink-info:    #7DD3FC;   /* 10,87:1 op --navy-800, 10,10:1 op --navy-700 */
 
-  /* ==== Tabler 1.4 op de merktokens ==== */
-  --tblr-primary: var(--gold-500);
-  /* css-tokens-check: rgb-triple -- Tabler bouwt hier rgba(var(--x-rgb), a)
-     mee voor tinten, randen en de focusring; een triple kan niet uit een
-     kleur-var komen, dus deze regel moet letterlijk zijn. */
-  --tblr-primary-rgb: 250, 200, 0;
+  /* ==== Tabler 1.4 op de merktokens (SITE-DESIGN-SPEC.md §7.1.2) ==== */
   --tblr-body-bg: var(--navy-800);
-  --tblr-body-color: var(--navy-100);
   --tblr-bg-surface: var(--navy-700);
-  --tblr-bg-surface-secondary: var(--navy-700);
+  --tblr-bg-surface-secondary: var(--navy-800);
   --tblr-bg-surface-tertiary: var(--navy-600);
+  --tblr-bg-surface-dark: var(--navy-900);
+  --tblr-body-color: var(--navy-100);
+  --tblr-secondary: var(--navy-200);
+  --tblr-primary: var(--gold-500);
+  --tblr-primary-fg: var(--navy-900);
+  --tblr-border-radius: var(--radius);
+  --tblr-border-radius-sm: var(--radius);
+  --tblr-border-radius-lg: var(--radius);
+  --tblr-font-sans-serif: var(--font-primary);
+  --tblr-font-monospace: var(--font-mono);
+  --tblr-focus-ring-color: var(--gold-500);
+  --tblr-focus-ring-width: 2px;
+  --tblr-focus-ring-opacity: 1;
+
+  /* Afwijking van het codeblok in §7.1.2, dat hier --navy-600 zet: de
+     contrastvloertabel in diezelfde subsectie zegt dat een dragende rand op
+     --navy-700 minstens --navy-500 moet zijn. De kaartrand is dragend (op
+     navy dragen de schaduwen nauwelijks), dus --navy-500. */
   --tblr-border-color: var(--navy-500);
   --tblr-border-color-translucent: var(--navy-500);
   --tblr-card-bg: var(--navy-700);
   --tblr-card-border-color: var(--navy-500);
-  --tblr-border-radius: var(--radius);
-  --tblr-border-radius-sm: var(--radius-sm);
-  --tblr-border-radius-lg: var(--radius-lg);
-  --tblr-secondary: var(--navy-200);
-  /* css-tokens-check: rgb-triple -- Tabler bouwt hier rgba(var(--x-rgb), a)
-     mee voor tinten en randen; een triple kan niet uit een kleur-var komen,
-     dus deze regels moeten letterlijk zijn. */
+
+  /* De vier kleuren waar Tabler zijn badge-, alert- en tekstvarianten uit
+     afleidt (§7.1.2, §7.2e). Zonder deze regels blijven .bg-blue-lt en
+     .bg-red-lt op hun lichte-thema-waarden en halen ze de tekstvloer niet
+     op navy: 3,96:1 respectievelijk 4,24:1. */
+  --tblr-blue: var(--ink-info);
+  --tblr-red: var(--ink-error);
+  --tblr-green: var(--ink-success);
+  --tblr-yellow: var(--ink-warning);
+
+  /* css-tokens-check: rgb-triple -- Tabler bouwt hier zelf
+     rgba(var(--x-rgb), a) mee voor tinten, randen en de focusring. Een
+     triple kan niet uit een kleur-var komen, dus deze vijf regels moeten
+     letterlijk zijn; ze horen bij de kleur direct erboven. */
+  --tblr-primary-rgb: 250, 200, 0;
   --tblr-secondary-rgb: 127, 160, 201;
-
-  /* Knoptekst op goud: Tabler pakt --tblr-primary-fg (default #FFFFFF,
-     1,51:1 op --gold-500). Navy-900 haalt 12,3:1. */
-  --tblr-primary-fg: var(--navy-900);
-
-  /* Focusring op volle dekking in plaats van 25% (1,78:1). */
-  --tblr-focus-ring-color: var(--gold-500);
-  --tblr-focus-ring-opacity: 1;
-
-  /* Badgekleuren: .bg-*-lt neemt de tekstkleur uit --tblr-<kleur> en de
-     achtergrond uit een 10%-tint daarvan. Tablers defaults zijn op navy
-     te donker (blauw 3,96:1, rood 4,24:1); deze vier halen 6:1 of meer. */
-  --tblr-blue: var(--admin-info);
-  --tblr-red: var(--admin-danger);
-  --tblr-green: var(--admin-positive);
-  --tblr-yellow: var(--gold-400);
-  /* css-tokens-check: rgb-triple -- zie hierboven, zelfde reden. */
   --tblr-blue-rgb: 125, 211, 252;
   --tblr-red-rgb: 248, 113, 113;
   --tblr-green-rgb: 74, 222, 128;
-  --tblr-yellow-rgb: 251, 215, 74;
+  --tblr-yellow-rgb: 251, 191, 36;
 }
 
 /* ==== Focusindicator ====
@@ -184,7 +188,7 @@ h1, h2, h3, h4,
 /* De twee varianten die de dashboardwidgets gebruiken, in plaats van een
    inline background/color per icoon. */
 .activity-icon--gold { background: color-mix(in srgb, var(--gold-500) 10%, transparent); color: var(--gold-400); }
-.activity-icon--positive { background: color-mix(in srgb, var(--admin-positive) 12%, transparent); color: var(--admin-positive); }
+.activity-icon--positive { background: color-mix(in srgb, var(--ink-success) 12%, transparent); color: var(--ink-success); }
 .activity-text { font-size: var(--font-size-sm); }
 .activity-time { font-size: 11px; color: var(--admin-muted); margin-top: 2px; }
 .form-group { margin-bottom: var(--space-lg); }
@@ -260,7 +264,7 @@ h1, h2, h3, h4,
   background: color-mix(in srgb, var(--navy-300) 10%, transparent);
 }
 .a-stat__value { font-size: var(--font-size-xl); font-weight: 700; font-family: var(--font-mono); color: var(--gold-500); }
-.a-stat__value--positive { color: var(--admin-positive); }
+.a-stat__value--positive { color: var(--ink-success); }
 .a-stat__label { font-size: var(--font-size-xs); color: var(--admin-muted); }
 
 .a-metric-row { display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid var(--admin-hairline); }
@@ -304,12 +308,19 @@ h1, h2, h3, h4,
 .a-barchart__cap { font-size: 9px; color: var(--admin-muted); }
 /* De hoogte is data en komt per staaf mee als --a-bar-h; alleen die ene
    waarde staat nog in een style-attribuut, de rest is deze klasse. */
-.a-barchart__bar { width: 100%; border-radius: var(--radius-sm) var(--radius-sm) 0 0; background: var(--gold-gradient); height: var(--a-bar-h, 0); }
+/* Vlakke vulling, geen --gold-gradient: decoratieve gradients zijn
+   sitebreed verboden (§8.x.6) en een grafiekbalk is data, geen decoratie
+   (§7.1.1 punt 4). Daarmee gebruikt het paneel --gold-gradient nergens
+   meer. */
+.a-barchart__bar { width: 100%; border-radius: var(--radius-sm) var(--radius-sm) 0 0; background: var(--gold-500); height: var(--a-bar-h, 0); }
 
-.a-positive { color: var(--admin-positive); }
-.a-danger { color: var(--admin-danger); }
-.a-warn { color: var(--admin-warn); }
-.a-alt { color: var(--admin-alt); }
+/* De vier semantische tekstklassen heten zoals §7.1.3 ze noemt. .a-accent
+   is geen semantische familie maar het goudaccent (§7.2e: goud is geen
+   badgekleur, wel de accentkleur van het paneel). */
+.text-success-ink { color: var(--ink-success); }
+.text-danger-ink { color: var(--ink-error); }
+.text-warning-ink { color: var(--ink-warning); }
+.text-info-ink { color: var(--ink-info); }
 .a-accent { color: var(--gold-400); }
 
 /* ==========================================================================
@@ -360,12 +371,12 @@ h1, h2, h3, h4,
 
 /* Getypte bevestiging voor destructieve acties. */
 .a-confirm-hint { color: var(--admin-muted); font-size: var(--font-size-sm); margin-bottom: var(--space-sm); }
-/* Tablers danger-outline is op navy-900 4,17:1; --admin-danger haalt 6,5:1. */
+/* Tablers danger-outline is op navy-900 4,17:1; --ink-error haalt 6,56:1. */
 .a-modal .btn-outline-danger,
 .a-drawer .btn-outline-danger {
-  --tblr-btn-color: var(--admin-danger);
-  --tblr-btn-border-color: var(--admin-danger);
-  --tblr-btn-hover-bg: var(--admin-danger);
+  --tblr-btn-color: var(--ink-error);
+  --tblr-btn-border-color: var(--ink-error);
+  --tblr-btn-hover-bg: var(--ink-error);
   --tblr-btn-hover-color: var(--navy-900);
 }
 .a-confirm-hint code { color: var(--gold-400); }

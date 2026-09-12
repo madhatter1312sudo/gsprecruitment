@@ -181,7 +181,7 @@ const Admin = {
         <div class="activity-content a-truncate-col">
           <div class="activity-text a-cell-strong fw-medium">
             ${c.full_name || c.email || 'Onbekend'}
-            ${c.is_verified ? raw('<i class="fa-regular fa-circle-check ms-1 a-positive" title="Geverifieerd"></i>') : ''}
+            ${c.is_verified ? raw('<i class="fa-regular fa-circle-check ms-1 text-success-ink" title="Geverifieerd"></i>') : ''}
           </div>
           <div class="activity-text a-soft">${c.current_title || '—'}${c.location ? ' · ' + c.location : ''}</div>
           <div class="activity-time">${this.timeAgo(c.created_at)}</div>

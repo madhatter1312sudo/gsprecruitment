@@ -292,20 +292,22 @@ Deze vijf zijn getest of in gebruik en worden niet vervangen, alleen uitgebreid:
 
 ### 7.1 Tokens en schil
 
+> **Status, september 2026.** §7.1.1 en §7.1.2 zijn gebouwd (WS5 stap 1 t/m 3), met twee afwijkingen die hieronder ter plekke staan: het tokenblok woont in `website/admin/admin.css` in plaats van in een `<style>`-blok in `index.html`, en `--tblr-border-color` staat op `--navy-500`. §7.1.3 is deels gebouwd: de inline-styles zijn weg, maar met een andere, kleinere klassenset (`.a-*`) dan de `gsp-`-set hieronder; de vier `.text-*-ink`-klassen bestaan wel al met precies deze namen. De census-getallen in §7.1.3 zijn de meting op main van vóór die opruiming en blijven staan als vertrekpunt. §7.1.4 is nog niet gebouwd. Wat er nu daadwerkelijk staat, met bestandsnamen, is §7.9.
+
 #### 7.1.1 Laadvolgorde, en de compat-shim verdwijnt
 
 `website/admin/index.html:27-45` draagt vandaag een compat-shim met eigen navywaarden (`--navy-900:#142235`, `--navy-800:#142235`, `--tblr-body-bg:#0E1B2E`, `--tblr-bg-surface:#142235`) en een eigen radiusschaal van 8 tot 20px. Geen van die waarden staat in §1.2, de radiusschaal spreekt de vlakke 3px van §1.3 tegen, en `--navy-900` en `--navy-800` zijn er aan elkaar gelijk gemaakt, waardoor het paneel het diepteverschil kwijt is dat de rest van de site wel heeft.
 
 Vast:
 
-1. **Laadvolgorde, precies.** De Tabler- en Font-Awesome-stylesheets zijn geen statische `<link>`-elementen: `js/vendor-fallback-css.js` (`index.html:18`) injecteert ze met `document.head.appendChild()` op het moment dat dat script draait, dus ze landen in de cascade direct ná dat `<script>`-element. `<link rel="stylesheet" href="../theme.css">` komt daarom **direct onder regel 18**, dus ná de injectie, zodat de basisregels van `theme.css` (`body`-achtergrond en -kleur, scrollbar, `::selection`) van Tabler winnen bij gelijke specificiteit. Het eigen `<style>`-blok met de `--tblr-*`-koppeling (§7.1.2) en de utilityklassen (§7.1.3) blijft daarna staan en wint van allebei.
+1. **Laadvolgorde, precies.** De Tabler- en Font-Awesome-stylesheets zijn geen statische `<link>`-elementen: `js/vendor-fallback-css.js` (`index.html:18`) injecteert ze met `document.head.appendChild()` op het moment dat dat script draait, dus ze landen in de cascade direct ná dat `<script>`-element. `<link rel="stylesheet" href="../theme.css">` komt daarom **direct onder regel 18**, dus ná de injectie, zodat de basisregels van `theme.css` (`body`-achtergrond en -kleur, scrollbar, `::selection`) van Tabler winnen bij gelijke specificiteit. De `--tblr-*`-koppeling (§7.1.2) en de utilityklassen (§7.1.3) komen daarna en winnen van allebei. *Gebouwd als:* die twee staan niet in een `<style>`-blok maar in `website/admin/admin.css`, als tweede `<link>` direct onder `theme.css`. Zelfde cascadepositie, één bestand minder inline, en de tokencheck kan het bestand lezen.
 2. **`theme.css` is de tokenbron, maar niet compleet.** Het draagt de navy- en goudschaal uit §1.2 en de 3px-radiustokens, maar mist `--space-4xl`, `--space-5xl`, `--font-size-base`, `--font-size-6xl` en `--gold-ink`. Die vijf worden in `theme.css` toegevoegd met exact de waarden uit §1.3 en §8.x.2, in dezelfde PR, zodat er precies één tokenbron voor de drie surfaces is en het paneel geen eigen aanvulling nodig heeft.
-3. Het hele `:root, [data-bs-theme=dark]`-blok met navy-, radius-, spacing- en font-size-herdefinities in `index.html` gaat weg. Wat overblijft in dat blok is uitsluitend de Tabler-koppeling uit §7.1.2 en de componentregels uit §7.1.3.
-4. `--gold-gradient` blijft alleen bestaan zolang de fallback-staafgrafiek in `admin.js` hem gebruikt; die fallback krijgt in dezelfde PR een vlakke `--gold-500`-vulling en daarna verdwijnt het token uit het paneel. Decoratieve gradients zijn sitebreed verboden (§8.x.6) en een grafiekbalk is decoratie, geen data.
+3. Het hele `:root, [data-bs-theme=dark]`-blok met navy-, radius-, spacing- en font-size-herdefinities in `index.html` gaat weg. Wat overblijft is uitsluitend de Tabler-koppeling uit §7.1.2 en de componentregels uit §7.1.3. *Gebouwd:* het blok is weg, de rest staat in `admin.css`.
+4. `--gold-gradient` blijft alleen bestaan zolang de fallback-staafgrafiek in `admin.js` hem gebruikt; die fallback krijgt in dezelfde PR een vlakke `--gold-500`-vulling en daarna verdwijnt het token uit het paneel. Decoratieve gradients zijn sitebreed verboden (§8.x.6) en een grafiekbalk is decoratie, geen data. *Gebouwd:* `.a-barchart__bar` vult vlak met `--gold-500`; het paneel noemt `--gold-gradient` nergens meer.
 
 #### 7.1.2 Tabler-variabelen op de navy-tokens
 
-Eén blok, in `index.html`, na het laden van `theme.css` en Tabler:
+Eén blok, na het laden van `theme.css` en Tabler. *Gebouwd in* `website/admin/admin.css`, niet in een `<style>`-blok in `index.html`:
 
 ```css
 :root, [data-bs-theme="dark"] {
@@ -314,7 +316,7 @@ Eén blok, in `index.html`, na het laden van `theme.css` en Tabler:
   --tblr-bg-surface-secondary: var(--navy-800);
   --tblr-bg-surface-tertiary:  var(--navy-600);   /* #152B4A, hover-rij, inputvulling */
   --tblr-bg-surface-dark:      var(--navy-900);   /* #060D1A, sidebar, drawer-achtergrond */
-  --tblr-border-color:         var(--navy-600);
+  --tblr-border-color:         var(--navy-600);   /* gebouwd als --navy-500, zie noot */
   --tblr-body-color:           var(--navy-100);   /* 12,25:1 op navy-800 */
   --tblr-secondary:            var(--navy-200);   /*  6,71:1, de gedempte tekstvloer */
   --tblr-primary:              var(--gold-500);
@@ -339,6 +341,8 @@ Eén blok, in `index.html`, na het laden van `theme.css` en Tabler:
 ```
 
 `--tblr-border-color-active` bestaat niet in Tabler 1.4 (nul treffers in `vendor/tabler/css/tabler.min.css`) en staat daarom niet in dit blok; een actieve rand wordt per component gezet.
+
+**Noot bij `--tblr-border-color`.** Gebouwd op `--navy-500`, niet op `--navy-600`. Het codeblok hierboven en de contrastvloertabel hieronder spraken elkaar tegen: die tabel zegt dat een dragende rand op `--navy-700` minstens `--navy-500` moet zijn, en de kaartrand is dragend, want op navy dragen de schaduwen nauwelijks. `--navy-600` op `--navy-700` haalt circa 1,3:1 en leest niet als rand. Ook `--tblr-card-border-color` en `--tblr-border-color-translucent` staan daarom op `--navy-500`.
 
 **Contrastvloeren op donker, harde eis.** Berekend volgens WCAG 2.1 (sRGB-linearisatie, `(L1+0,05)/(L2+0,05)`) tegen de twee vlakken waar tekst in dit paneel op staat: `--navy-800` (#0A1628, paginafond) en `--navy-700` (#0F1D35, kaart- en tabelvlak). Deze tabel is de reden dat er hierboven geen `--navy-300` als tekstkleur staat:
 
@@ -366,6 +370,8 @@ Eén blok, in `index.html`, na het laden van `theme.css` en Tabler:
 Alle vier zijn op beide vlakken boven de 4,5:1-vloer gerekend; de neutrale familie gebruikt `--navy-200` (6,71 respectievelijk 6,23:1). Dat is wat "getest" hier betekent: berekend contrast op de twee achtergronden die daadwerkelijk voorkomen, niet een steekproef op één.
 
 #### 7.1.3 Vijftien utilityklassen die de 202 inline `style=`-attributen vervangen
+
+> **Status.** De opruiming is gedaan: van de 202 inline `style=`-attributen staan er nog drie (een staafhoogte als custom property, één kolombreedte, en de `display:none` die JS op een actiemenu zet). Ze zijn vervangen door een kleinere, anders benoemde set van 21 klassen met prefix `.a-`, plus Bootstrap-utilities voor pure geometrie; die set staat gedocumenteerd bovenaan `website/admin/admin.css` en samengevat in §7.9. De vier `.text-*-ink`-klassen hieronder bestaan wél met precies deze namen, aangevuld met `.text-warning-ink` en `.text-info-ink` voor de andere twee inkttokens. De `gsp-`-set hieronder en de zes stukken eigen CSS eronder zijn nog niet gebouwd en horen bij de componentpassen van §7.2. De census-getallen hieronder zijn de meting op main van vóór de opruiming.
 
 `admin.js` draagt 202 inline `style="…"`-attributen. Die mogen blijven staan (de CSP blokkeert alleen inline *scripts*, niet inline stijl), maar ze worden uitgefaseerd omdat ze de tokenlaag omzeilen en elke kleurcorrectie in 63 losse strings moeten laten landen. De vervanging is grotendeels **Bootstrap 5, dat al in de Tabler-bundel geladen is**; alleen waar Tabler niets passends heeft komt een nieuwe klasse. Alle nieuwe klassen krijgen het prefix `gsp-` of zijn een expliciete tekstkleur en staan in één blok in `index.html`.
 
@@ -1170,28 +1176,32 @@ Lege en foutstaten in het hele paneel volgen de Nederlandse conventie: "Kon niet
 
 ### 7.9 Bouwlagen zoals gebouwd (WS5 stap 1 t/m 3)
 
-Tabler 1.4 blijft, geen herbouw. De schil is wel op de canonieke tokens gezet en de front-endcode is opgesplitst:
+Tabler 1.4 blijft, geen herbouw. De schil staat op de canonieke tokens en de front-endcode is opgesplitst:
 
 | Laag | Bestand | Verantwoordelijkheid |
 |---|---|---|
-| Tokens | `website/theme.css` | §1.2/§1.3/§1.4, eerste stylesheet van het paneel |
-| Schil | `website/admin/admin.css` | `--tblr-*` op de merktokens, compatklassen, ~21 semantische utilityklassen (`.a-*`), gedocumenteerd bovenaan het bestand |
+| Tokens | `website/theme.css` | §1.2/§1.3/§1.4, gedeeld met de andere portalen |
+| Schil | `website/admin/admin.css` | het `--tblr-*`-blok uit §7.1.2, de vier `--ink-*`-tokens, compatklassen, 21 utilityklassen (`.a-*` plus de vier `.text-*-ink`), gedocumenteerd bovenaan het bestand |
 | Kern | `website/admin/js/admin.js` | state, laad-/foutstaten, `badge()`, paginering, dashboard, sectieregistry, één gedelegeerde click-listener |
-| ui-laag | `website/admin/js/ui.js` | `ui.modal`, `ui.drawer`, `ui.tabs`, `ui.table`, `ui.confirm` op de Bootstrap 5-componenten van Tabler |
-| Labels | `website/admin/js/labels.js` | alle enum→labelvertalingen, Nederlands, sleutels uit de backend |
+| ui-laag | `website/admin/js/ui.js` | `ui.modal`, `ui.drawer`, `ui.tabs`, `ui.table`, `ui.confirm` op de Bootstrap 5-componenten uit de Tabler-bundel |
+| Labels | `website/admin/js/labels.js` | zes enum→labelmaps, Nederlands, sleutels uit de backend. Wordt in de §7.2e-pass vervangen door `js/status-map.js` met `{label, tone}` per waarde |
 | Secties | `website/admin/js/sections/<naam>.js` | één module per sectie, registreert zich via `Admin.registerSection({id, title, loader, skeletonHtml, filters, actions})` |
 | Navigatie | `website/admin/js/nav.js` | leest de registry voor titels, loaders en filterbinding |
 
-Vier bewuste tokencorrecties in dit paneel:
+**Semantische inkt.** De vier tokens uit §7.1.2 staan in `admin.css` met exact die namen en waarden: `--ink-success #4ADE80`, `--ink-error #F87171`, `--ink-warning #FBBF24`, `--ink-info #7DD3FC`. `--tblr-blue/red/green/yellow` wijzen ernaar, dus de `-lt`-badgefamilies uit §7.2e halen hun contrastvloer op navy. De vier bijbehorende tekstklassen zijn `.text-success-ink`, `.text-danger-ink`, `.text-warning-ink` en `.text-info-ink`; §7.1.3 noemt de eerste twee, de andere twee zijn er in dezelfde vorm bij gekomen voor de audit-logkolom. Goud is geen semantische familie: `.a-accent` is het accent, en de gele badgefamilie staat op `--ink-warning`, niet op goud (§7.2e).
 
-- De inline compat-shim die `--navy-*` op eigen waarden zette (`#142235`, `#0E1B2E`) en radius 8–20px gaf, is verwijderd. Het paneel draait nu op `--navy-800 #0A1628`, `--navy-700 #0F1D35` en radius 3px.
-- Gedempte tekst is `--navy-200`, niet `--navy-300`. `--navy-300` haalt 3,51:1 op `--navy-800` en 3,26:1 op `--navy-700`, en zakt daarmee onder de AA-ondergrens van 4,5:1; `--navy-200` haalt 6,6:1. `--navy-300` blijft in gebruik voor hairlines en iconen.
-- De kaartrand is van Tablers doorschijnende default naar een opake `--navy-500` gegaan (`--tblr-border-color`/`--tblr-card-border-color`). Een doorschijnende rand op navy leest niet als rand; op deze schaal is de rand het enige wat een kaart van de achtergrond scheidt, nu de schaduwen op een donker vlak nauwelijks dragen.
-- Knoptekst op goud is `--navy-900` in plaats van Tablers `#FFFFFF` (1,51:1 naar 12,3:1), de focusring staat op volle dekking `--gold-500` in plaats van 25%, en de vier badgekleuren (`--tblr-blue/red/green/yellow`) zijn vervangen door varianten die op navy 6:1 of meer halen. Tablers defaults haalden 3,96:1 (blauw) en 4,24:1 (rood) op hun eigen tint.
+**Vier bewuste tokencorrecties.**
 
-`scripts/css_tokens_check.py` bewaakt de tokenpariteit van `admin.css` en faalt op elke hardcoded navy- of goudwaarde daarin, in elke schrijfwijze (hex, `rgb()`, moderne `rgb(r g b / a)` en kale triples). De twee `--tblr-*-rgb`-regels zijn met een `css-tokens-check: rgb-triple`-commentaar vrijgesteld: Tabler bouwt daar zelf `rgba(var(--x-rgb), a)` mee en een triple kan niet uit een kleur-var komen.
+- De inline compat-shim die `--navy-*` op eigen waarden zette (`#142235`, `#0E1B2E`) en radius 8–20px gaf, is weg. Het paneel draait op `--navy-800 #0A1628`, `--navy-700 #0F1D35` en radius 3px.
+- Gedempte tekst is `--navy-200`, niet `--navy-300` (3,51:1 op `--navy-800`, 3,26:1 op `--navy-700`), conform de contrastvloertabel in §7.1.2.
+- De kaartrand is `--navy-500` in plaats van Tablers doorschijnende default en in plaats van de `--navy-600` uit het codeblok van §7.1.2. Zie de noot daar.
+- Knoptekst op goud is `--navy-900` (1,51:1 naar 12,3:1) en de focusring staat op volle `--gold-500` in plaats van 25% dekking.
 
-Bootstrap komt uit de gevendorde `admin/vendor/tabler/js/tabler.min.js`: die UMD exporteert `window.tabler` met daarin de volledige `bootstrap`-namespace (Modal, Offcanvas, Collapse, Tab, Toast), maar zet `window.bootstrap` zelf niet. `js/vendor-fallback-tabler-js.js` zet die na het laden door, voor zowel de lokale kopie als de CDN-fallback. Zonder die doorzet draait `ui.js` permanent op zijn vangnet en sluit het mobiele sidebarmenu niet na een navigatie. `ui.js` houdt het vangnet (dezelfde markup en klassen, eigen backdrop, focustrap en Escape) als vangnet voor een ontbrekende bundel; `scripts/admin_ui_check.py` draait beide paden.
+**Bewaakt door.** `scripts/css_tokens_check.py` doet `admin.css` mee in de tokenpariteit en faalt op elke hardcoded navy- of goudwaarde daarin, in elke schrijfwijze (hex, `rgb()`, `rgb(r g b / a)` en kale triples). De zes `--tblr-*-rgb`-regels zijn vrijgesteld met een `css-tokens-check: rgb-triple`-commentaar: Tabler bouwt daar zelf `rgba(var(--x-rgb), a)` mee en een triple kan niet uit een kleur-var komen. `scripts/admin_ui_check.py` test de paneelcomponenten (focus, focustrap, stapeling, Escape, klik-buiten, getypte bevestiging, sorteren met `aria-sort`) op twee paden: met en zonder Bootstrap.
+
+**Bootstrap.** De gevendorde `admin/vendor/tabler/js/tabler.min.js` is een UMD die `window.tabler` exporteert met daarin de volledige `bootstrap`-namespace (Modal, Offcanvas, Collapse, Tab, Toast), maar zet `window.bootstrap` zelf niet. `js/vendor-fallback-tabler-js.js` zet die na het laden door, voor de lokale kopie en voor de CDN-fallback. Zonder die doorzet draait `ui.js` permanent op zijn vangnet en sluit het mobiele sidebarmenu niet na een navigatie. Het vangnet (dezelfde markup en klassen, eigen backdrop, focustrap en Escape) blijft staan voor een ontbrekende bundel.
+
+**Nog niet gebouwd uit §7.1.** De vijf ontbrekende tokens in `theme.css` (§7.1.1 punt 2: `--space-4xl`, `--space-5xl`, `--font-size-base`, `--font-size-6xl`, `--gold-ink`), de `gsp-`-utilityset en de zes stukken eigen CSS uit §7.1.3, en de lettertypeverscherpingen uit §7.1.4, waaronder het loskoppelen van `.text-uppercase` van mono. Die horen bij de componentpassen van §7.2.
 
 ---
 

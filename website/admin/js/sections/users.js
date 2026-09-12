@@ -61,7 +61,7 @@
               ${!u.is_verified ? html`<button data-action="verify-user" data-id="${u.id}"><i class="fa-regular fa-circle-check"></i> Verify</button>` : ''}
               <button data-action="edit-user" data-id="${u.id}"><i class="fa-solid fa-pen"></i> Edit Role</button>
               <button data-action="impersonate-user" data-id="${u.id}" data-email="${u.email}"><i class="fa-solid fa-mask"></i> Impersonate</button>
-              <button data-action="delete-user" data-id="${u.id}" data-email="${u.email}" class="a-danger"><i class="fa-solid fa-trash"></i> Delete</button>
+              <button data-action="delete-user" data-id="${u.id}" data-email="${u.email}" class="text-danger-ink"><i class="fa-solid fa-trash"></i> Delete</button>
             </div>
           </div>
         </td>

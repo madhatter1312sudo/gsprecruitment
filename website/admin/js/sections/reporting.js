@@ -35,7 +35,7 @@
       const unreadData = unreadRes?.ok ? await unreadRes.json() : null;
       this.renderReporting(jobsData, leadsData, unreadData);
     } catch {
-      if (el) mount(el, html`<div class="a-state-cell a-danger">Rapportage kon niet geladen worden.</div>`);
+      if (el) mount(el, html`<div class="a-state-cell text-danger-ink">Rapportage kon niet geladen worden.</div>`);
     }
   },
 

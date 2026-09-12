@@ -51,8 +51,9 @@ failing the build:
          Een regel met het commentaar "css-tokens-check: rgb-triple" is
          daarvan uitgezonderd: Tabler bouwt daar zelf rgba(var(--x-rgb), a)
          mee, en een triple kan niet uit een kleur-var komen.
-     Semantisch groen/rood/oranje/paars zijn geen merkkleuren en mogen wel
-     als hex in admin.css staan (--admin-positive en broertjes).
+     De vier semantische inkttokens uit SITE-DESIGN-SPEC.md §7.1.2
+     (--ink-success, --ink-error, --ink-warning, --ink-info) zijn geen
+     navy- of goudwaarden en mogen wel als hex in admin.css staan.
 
 Usage:
     python3 scripts/css_tokens_check.py

@@ -55,10 +55,10 @@
               <i class="fa-regular fa-circle-check"></i> Approve
             </button>` : ''}
           ${j.status === 'open' ? html`
-            <button class="btn btn-sm btn-ghost-secondary a-danger" data-action="set-job-status" data-id="${j.id}" data-status="closed" title="Close">
+            <button class="btn btn-sm btn-ghost-secondary text-danger-ink" data-action="set-job-status" data-id="${j.id}" data-status="closed" title="Close">
               <i class="fa-solid fa-xmark"></i> Close
             </button>` : ''}
-          <button class="btn btn-sm btn-ghost-secondary a-danger" data-action="confirm-delete-job" data-id="${j.id}" title="Delete">
+          <button class="btn btn-sm btn-ghost-secondary text-danger-ink" data-action="confirm-delete-job" data-id="${j.id}" title="Delete">
             <i class="fa-solid fa-trash"></i>
           </button>
         </td>
