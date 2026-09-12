@@ -274,7 +274,7 @@ The job posting form collects title, specialisation, location, work/contract typ
 
 Deze sectie is het bindende ontwerpdocument voor `website/admin/` (Tabler 1.4, dark navy/gold), `website/candidate/` en `website/client/`. Wie hierna bouwt, bouwt hiernaar; waar dit document en een oudere notitie elkaar tegenspreken, wint dit document. Wat er niet in staat, wordt niet gebouwd zonder een nieuwe ontwerpronde.
 
-**Besluit dat vaststaat: Tabler 1.4 blijft, en wordt goed gebruikt.** Geen herbouw, geen tweede UI-framework, geen componentbibliotheek erbij. De Bootstrap 5-componenten (modal, offcanvas, tabs, dropdown, collapse) zitten in de gevendorde Tabler-bundel en zijn daar bereikbaar als `window.tabler.Modal`, `window.tabler.Offcanvas` enzovoort (zie §7.2b: er is geen `window.bootstrap`). Ze worden vandaag nauwelijks gebruikt; het paneel rolt in plaats daarvan een eigen overlay uit zonder focustrap en zonder ESC (`admin.js` `openModal()`/`closeModal()`). Het werk in deze sectie bestaat grotendeels uit het vervangen van dat eigen werk door het framework dat er al ligt.
+**Besluit dat vaststaat: Tabler 1.4 blijft, en wordt goed gebruikt.** Geen herbouw, geen tweede UI-framework, geen componentbibliotheek erbij. De Bootstrap 5-componenten (modal, offcanvas, tabs, dropdown, collapse) zitten in de gevendorde Tabler-bundel en zijn daar bereikbaar als `window.bootstrap.Modal`, `window.bootstrap.Offcanvas` enzovoort (zie §7.2b: de bundel exporteert `window.tabler.bootstrap`, en `js/vendor-fallback-tabler-js.js` zet die na het laden door naar `window.bootstrap`). Ze worden vandaag nauwelijks gebruikt; het paneel rolt in plaats daarvan een eigen overlay uit zonder focustrap en zonder ESC (`admin.js` `openModal()`/`closeModal()`). Het werk in deze sectie bestaat grotendeels uit het vervangen van dat eigen werk door het framework dat er al ligt.
 
 ### 7.0 Bestaande bouwstenen die blijven
 
@@ -404,10 +404,10 @@ Bestaande utilityklassen uit de bundel die de meerderheid opruimen, één op é�
 | `font-family:var(--font-primary)` (9), `box-sizing:border-box` (8), `border-radius:var(--radius-md)` (13) | **vervallen zonder vervanging**: font erft van `body`, `box-sizing` staat in de reset, radius komt uit `--tblr-border-radius` |
 | `padding:0.75rem` (9) | `.p-3` (16px, bewuste normalisatie naar het 4px-raster) |
 
-**Gebouwd (WS5 stap 1).** Eenentwintig klassen met prefix `.a-`, plus de vier `.text-*-ink`. Dit is wat er in `website/admin/admin.css` staat en wat een sectiepass overneemt; de klassenamen hieronder zijn de namen die de code gebruikt. Waar deze subsectie eerder een `gsp-`-naam voorstelde, staat die tussen haakjes erachter.
+**Gebouwd (WS5 stap 1).** Negenentwintig klassen met prefix `.a-` (waarvan vijf de panelen van `ui.js` dragen: `.a-modal`, `.a-drawer`, `.a-sortable`, `.a-confirm-hint`, `.a-nav-caption`), plus de vier `.text-*-ink`. Dit is wat er in `website/admin/admin.css` staat en wat een sectiepass overneemt; de klassenamen hieronder zijn de namen die de code gebruikt. Waar deze subsectie eerder een `gsp-`-naam voorstelde, staat die tussen haakjes erachter. **De prefix is `.a-`.** Elke `gsp-`-naam die verderop in §7.1 of §7.2 nog voorkomt is een nog niet gebouwde klasse; wie hem bouwt, geeft hem de `.a-`-prefix en voegt hem toe aan de kop van `admin.css`. Er bestaat geen tweede klassenstelsel.
 
 ```css
-/* Tekst. .a-soft is de gedempte-tekstvloer (was: .a-soft) en
+/* Tekst. .a-soft is de gedempte-tekstvloer (was: de losse text-muted-navy-klasse) en
    vervangt elke color:var(--navy-300) op tekst. Op een <td> zetten deze
    vier ook --tblr-table-color, want Tablers celregel is specifieker dan
    een losse klasse. */
@@ -415,7 +415,7 @@ Bestaande utilityklassen uit de bundel die de meerderheid opruimen, één op é�
 .a-cell-strong { color: var(--white); --tblr-table-color: var(--white); }
 .a-soft        { color: var(--admin-muted); --tblr-table-color: var(--admin-muted); }
 .a-meta        { font-size: var(--font-size-xs); color: var(--admin-muted);
-                 --tblr-table-color: var(--admin-muted); }   /* was: .fs-xs + .a-soft */
+                 --tblr-table-color: var(--admin-muted); }   /* was: .fs-xs + de gedempte-tekstklasse */
 .a-field-label { font-size: var(--font-size-xs); color: var(--admin-muted); margin-bottom: 4px; }
 
 /* Semantische inkt (§7.1.2). De eerste twee heetten hier al zo; de andere
@@ -498,7 +498,7 @@ Bestaande utilityklassen uit de bundel die de meerderheid opruimen, één op é�
 
 **Wat Tabler wél levert en dus niet nagebouwd wordt.** Gecontroleerd in `vendor/tabler/css/tabler.min.css`: `.offcanvas-end`, `.offcanvas-bottom`, `.modal-fullscreen-sm-down`, `.table-responsive`, `.nav-tabs`, `.form-switch`, `.is-invalid`, `.invalid-feedback`, `.alert-*`, `.badge` en de `-lt`-varianten bestaan allemaal. Voor geen daarvan komt eigen CSS.
 
-**Wat Tabler niet levert, en dus wél eigen CSS is.** Deze zes staan naast de vijftien utilityklassen hierboven en horen in dezelfde begroting:
+**Wat Tabler niet levert, en dus wél eigen CSS is.** Deze zes staan naast de negenentwintig utilityklassen hierboven en horen in dezelfde begroting:
 
 | Nodig voor | Eigen CSS |
 |---|---|
@@ -570,11 +570,11 @@ Elke component geldt gelijk voor het adminpaneel en beide portalen. Waar een por
 
 **Waarom offcanvas en niet modal.** Detail van een kandidaat of klant is lezen en navigeren, geen beslissing met één uitkomst. Een offcanvas houdt de lijst zichtbaar, verdraagt veel inhoud met tabs, en de Tabler-bundel levert focustrap, ESC en scroll-lock kant-en-klaar. De modal (§7.2c) blijft gereserveerd voor beslissingen.
 
-**De namespace is `window.tabler`, niet `window.bootstrap`.** `vendor/tabler/js/tabler.min.js` (v1.4.0) is een UMD-bundel die zichzelf als `tabler` op `globalThis` zet en daaronder `tabler.Modal`, `tabler.Offcanvas`, `tabler.Tab`, `tabler.Dropdown`, `tabler.Collapse`, `tabler.Toast`, `tabler.Alert`, `tabler.Tooltip` en `tabler.Popover` exporteert. `window.bootstrap` bestaat niet in dit paneel. De data-api zit in dezelfde bundel: `data-bs-toggle`, `data-bs-target` en `data-bs-dismiss` werken zonder JavaScript van onze kant, en de pijltoetsbediening van `.nav-tabs` zit er ook in.
+**De namespace is `window.bootstrap`, doorgezet vanuit `window.tabler.bootstrap`.** `vendor/tabler/js/tabler.min.js` (v1.4.0) is een UMD-bundel die zichzelf als `tabler` op `globalThis` zet, met daarin de volledige Bootstrap-namespace (`tabler.bootstrap.Modal`, `Offcanvas`, `Tab`, `Dropdown`, `Collapse`, `Toast`, `Alert`, `Tooltip`, `Popover`). De bundel zet `window.bootstrap` zelf niet; `js/vendor-fallback-tabler-js.js` doet dat na het laden, voor de lokale kopie en voor de CDN-fallback. Alle code in het paneel leest `window.bootstrap`, nooit `window.tabler` rechtstreeks. De data-api zit in dezelfde bundel: `data-bs-toggle`, `data-bs-target` en `data-bs-dismiss` werken zonder JavaScript van onze kant, en de pijltoetsbediening van `.nav-tabs` zit er ook in.
 
-**De bundel bestaat pas op aanroeptijd.** `js/vendor-fallback-tabler-js.js` staat in `index.html` ná `js/admin.js` en hangt het `<script>` met `document.body.appendChild()` aan de body, dus de bundel wordt asynchroon geladen en `window.tabler` bestaat niet wanneer `admin.js` wordt geparseerd. Elke aanroep leest de namespace daarom pas op het moment van gebruik (`const T = window.tabler; if (!T) { … }`), nooit in een module-scope constante bovenaan het bestand. Ontbreekt de bundel alsnog, dan valt de aanroep terug op een inline-melding "Kon dit venster niet openen, ververs de pagina" in plaats van een stille `undefined`-fout.
+**De bundel bestaat pas op aanroeptijd.** `js/vendor-fallback-tabler-js.js` staat in `index.html` ná `js/admin.js` en hangt het `<script>` met `document.body.appendChild()` aan de body, dus de bundel wordt asynchroon geladen en `window.bootstrap` bestaat niet wanneer `admin.js` wordt geparseerd. Elke aanroep leest de namespace daarom pas op het moment van gebruik (`const B = window.bootstrap; if (!B) { … }`, zoals `ui.js` doet), nooit in een module-scope constante bovenaan het bestand. Ontbreekt de bundel alsnog, dan valt de aanroep terug op een inline-melding "Kon dit venster niet openen, ververs de pagina" in plaats van een stille `undefined`-fout.
 
-**Anatomie.** `<div class="offcanvas offcanvas-end" tabindex="-1" id="gspDrawer" aria-labelledby="gspDrawerTitle">`, breedte 560px op 1440. Kop (`.offcanvas-header`, `background: var(--navy-900)`, sticky): links `h2#gspDrawerTitle` in Newsreader `--font-size-2xl` met daaronder een `.gsp-eyebrow`-regel (type plus ID, bijvoorbeeld "KANDIDAAT · #1482"), rechts de statusbadge en de sluitknop. Direct onder de kop een tabsrij (`.nav.nav-tabs`, aangestuurd door `window.tabler.Tab`, `role="tablist"`). Daaronder `.offcanvas-body.gsp-scroll-y` met de actieve tabpaneel-inhoud. Onderaan een sticky voetbalk (`background: var(--navy-900)`, `border-top: 1px solid var(--navy-600)`) met maximaal twee acties: rechts de primaire, links de secundaire. Destructieve acties staan niet in de voetbalk maar in de tab waar ze thuishoren, achter de modal van §7.2c.
+**Anatomie.** `<div class="offcanvas offcanvas-end" tabindex="-1" id="gspDrawer" aria-labelledby="gspDrawerTitle">`, breedte 560px op 1440. Kop (`.offcanvas-header`, `background: var(--navy-900)`, sticky): links `h2#gspDrawerTitle` in Newsreader `--font-size-2xl` met daaronder een `.gsp-eyebrow`-regel (type plus ID, bijvoorbeeld "KANDIDAAT · #1482"), rechts de statusbadge en de sluitknop. Direct onder de kop een tabsrij (`.nav.nav-tabs`, aangestuurd door `window.bootstrap.Tab`, `role="tablist"`). Daaronder `.offcanvas-body.gsp-scroll-y` met de actieve tabpaneel-inhoud. Onderaan een sticky voetbalk (`background: var(--navy-900)`, `border-top: 1px solid var(--navy-600)`) met maximaal twee acties: rechts de primaire, links de secundaire. Destructieve acties staan niet in de voetbalk maar in de tab waar ze thuishoren, achter de modal van §7.2c.
 
 **Tabs.** Elke tab is een `<button role="tab" aria-selected aria-controls>`; het paneel is `role="tabpanel"` met `tabindex="0"`. Pijl-links/rechts wisselt van tab, `Home`/`End` springt naar de eerste of laatste. De actieve tab draagt een 2px `--gold-500`-onderrand; inactieve tabs zijn `.a-soft`. Elke tab laadt zijn eigen data pas bij eerste opening (lui) en houdt daarna zijn eigen laad-, lege- en foutstaat via `setContainerLoadError`.
 
@@ -588,7 +588,7 @@ Elke component geldt gelijk voor het adminpaneel en beide portalen. Waar een por
 
 #### 7.2c Modal
 
-*Vervangt*: `Admin.openModal()`/`closeModal()` volledig. Die eigen overlay heeft geen focustrap, geen ESC, geen `role="dialog"`, geen `aria-modal`, en zet de focus na sluiten niet terug. Dat is niet te repareren met een pleister; hij gaat weg en `<div class="modal" tabindex="-1">` plus `window.tabler.Modal` neemt het over (zie §7.2b over de namespace en het feit dat die pas op aanroeptijd bestaat). De aanroeperkant blijft gelijk van vorm (`Admin.openModal(id, bodyHtml, opts)` blijft bestaan als dunne wrapper rond `tabler.Modal`), zodat de circa twaalf bestaande aanroepen niet herschreven hoeven te worden.
+*Vervangt*: `Admin.openModal()`/`closeModal()` volledig. Die eigen overlay heeft geen focustrap, geen ESC, geen `role="dialog"`, geen `aria-modal`, en zet de focus na sluiten niet terug. Dat is niet te repareren met een pleister; hij gaat weg en `<div class="modal" tabindex="-1">` plus `window.bootstrap.Modal` neemt het over (zie §7.2b over de namespace en het feit dat die pas op aanroeptijd bestaat). De aanroeperkant blijft gelijk van vorm (`Admin.openModal(id, bodyHtml, opts)` blijft bestaan als dunne wrapper rond `ui.modal`, dat `bootstrap.Modal` gebruikt), zodat de circa twaalf bestaande aanroepen niet herschreven hoeven te worden.
 
 **Anatomie.** `.modal-dialog.modal-dialog-centered` (`.modal-lg` bij `opts.wide`), `.modal-content` op `--navy-900` met 1px `--navy-600`-rand en `--radius`. Kop: `h2.modal-title` in Newsreader `--font-size-xl`, plus sluitknop. Body: `--space-lg` padding. Voet: rechts de primaire actie, links daarvan de secundaire (`.btn-ghost-secondary`, tekst "Annuleren"). Precies één primaire actie per modal.
 
@@ -1134,7 +1134,7 @@ Dat is de conventie die §8.x.0 al voorschrijft (beide spans altijd in de DOM, `
 
 Deze zes zijn geen streven. Een PR die er een breekt, gaat terug.
 
-1. **Focustrap in modal en drawer.** `window.tabler.Modal` en `window.tabler.Offcanvas` uit de gevendorde Tabler 1.4-bundel leveren die; de eigen overlay in `admin.js` niet, en die verdwijnt daarom (§7.2c). Tab loopt rond binnen het geopende element en bereikt niets erachter.
+1. **Focustrap in modal en drawer.** `window.bootstrap.Modal` en `window.bootstrap.Offcanvas` (doorgezet vanuit de gevendorde Tabler 1.4-bundel) leveren die; de eigen overlay in `admin.js` niet, en die verdwijnt daarom (§7.2c). Tab loopt rond binnen het geopende element en bereikt niets erachter.
 2. **ESC sluit** elke modal, elke drawer en elk actiemenu (`.action-menu`, dat vandaag alleen op een klik buiten zichzelf reageert). Bij een openstaand formulier met wijzigingen komt eerst de bevestiging "Wijzigingen weggooien?"; ESC op die bevestiging annuleert het sluiten, niet het formulier.
 3. **Focus keert terug.** Bij het sluiten van een modal, drawer of menu gaat de focus terug naar het element dat het opende. Een lijst die na een actie herlaadt, herstelt de focus op de rijactie van dezelfde record; is die record weg (verwijderd, verwerkt), dan gaat de focus naar de tabelkop en kondigt een `aria-live="polite"`-regio aan wat er gebeurd is.
 4. **Tabvolgorde volgt de leesvolgorde.** Nergens een `tabindex` groter dan 0. Geen element dat er klikbaar uitziet zonder tab-bereikbaar te zijn, en geen tab-stop zonder zichtbare focusstaat. Elke `:hover`-staat in dit document heeft een identieke `:focus-visible`-staat (§8.x.0); dat wordt met tab-navigatie geverifieerd, niet visueel geschat.
@@ -1220,7 +1220,7 @@ Tabler 1.4 blijft, geen herbouw. De schil staat op de canonieke tokens en de fro
 | Laag | Bestand | Verantwoordelijkheid |
 |---|---|---|
 | Tokens | `website/theme.css` | §1.2/§1.3/§1.4, gedeeld met de andere portalen |
-| Schil | `website/admin/admin.css` | het `--tblr-*`-blok uit §7.1.2, de vier `--ink-*`-tokens, compatklassen, 21 utilityklassen (`.a-*` plus de vier `.text-*-ink`), gedocumenteerd bovenaan het bestand |
+| Schil | `website/admin/admin.css` | het `--tblr-*`-blok uit §7.1.2, de vier `--ink-*`-tokens, compatklassen, 29 `.a-*`-utilityklassen plus de vier `.text-*-ink`, gedocumenteerd bovenaan het bestand |
 | Kern | `website/admin/js/admin.js` | state, laad-/foutstaten, `badge()`, paginering, dashboard, sectieregistry, één gedelegeerde click-listener |
 | ui-laag | `website/admin/js/ui.js` | `ui.modal`, `ui.drawer`, `ui.tabs`, `ui.table`, `ui.confirm` op de Bootstrap 5-componenten uit de Tabler-bundel |
 | Labels | `website/admin/js/labels.js` | zes enum→labelmaps, Nederlands, sleutels uit de backend. Wordt in de §7.2e-pass vervangen door `js/status-map.js` met `{label, tone}` per waarde |
@@ -1241,9 +1241,9 @@ Tabler 1.4 blijft, geen herbouw. De schil staat op de canonieke tokens en de fro
 
 **Bootstrap.** De gevendorde `admin/vendor/tabler/js/tabler.min.js` is een UMD die `window.tabler` exporteert met daarin de volledige `bootstrap`-namespace (Modal, Offcanvas, Collapse, Tab, Toast), maar zet `window.bootstrap` zelf niet. `js/vendor-fallback-tabler-js.js` zet die na het laden door, voor de lokale kopie en voor de CDN-fallback. Zonder die doorzet draait `ui.js` permanent op zijn vangnet en sluit het mobiele sidebarmenu niet na een navigatie. Het vangnet (dezelfde markup en klassen, eigen backdrop, focustrap en Escape) blijft staan voor een ontbrekende bundel.
 
-**Engelse resten.** De chrome van het paneel wordt Nederlands, maar dat is een kopijpass per sectie en geen onderdeel van deze refactor. Wat er in stap 1 t/m 3 nog Engels staat: de sectietitels in de registry en de sidebar (User Management, All Jobs, All Candidates, Outreach, Blog, Analytics, Audit Log, Content CMS, Settings), de kolomkoppen van de tabellen in `index.html`, en de toasts en knoplabels in `users.js`, `jobs.js`, `blog.js`, `outreach.js` en `cms.js`.
+**Engelse resten.** De chrome van het paneel wordt Nederlands, maar dat is een kopijpass per sectie en geen onderdeel van deze refactor. Wat er in stap 1 t/m 3 nog Engels staat: de sectietitels in de registry en de sidebar (User Management, All Jobs, All Candidates, Outreach, Blog, Analytics, Audit Log, Content CMS, Settings), de kolomkoppen van de tabellen in `index.html`, en de toasts en knoplabels in `users.js`, `jobs.js`, `blog.js`, `outreach.js`, `cms.js` en `settings.js` ("Settings saved", "Failed to save settings", "Network error").
 
-**Nog niet gebouwd uit §7.1.** De vijf ontbrekende tokens in `theme.css` (§7.1.1 punt 2: `--space-4xl`, `--space-5xl`, `--font-size-base`, `--font-size-6xl`, `--gold-ink`), de `gsp-`-utilityset en de zes stukken eigen CSS uit §7.1.3, en de lettertypeverscherpingen uit §7.1.4, waaronder het loskoppelen van `.text-uppercase` van mono. Die horen bij de componentpassen van §7.2.
+**Nog niet gebouwd uit §7.1.** De vijf ontbrekende tokens in `theme.css` (§7.1.1 punt 2: `--space-4xl`, `--space-5xl`, `--font-size-base`, `--font-size-6xl`, `--gold-ink`), de nog niet gebouwde utilityklassen uit §7.1.3 (krijgen bij de bouw de `.a-`-prefix) en de zes stukken eigen CSS uit §7.1.3, en de lettertypeverscherpingen uit §7.1.4, waaronder het loskoppelen van `.text-uppercase` van mono. Die horen bij de componentpassen van §7.2.
 
 ---
 

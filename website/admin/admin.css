@@ -406,3 +406,6 @@ h1, h2, h3, h4,
     scroll-behavior: auto !important;
   }
 }
+   Panelen (ui.js): .a-modal (+ --wide, __title, __subtitle, __close), .a-drawer,
+   .a-backdrop, .a-confirm-hint, .a-sortable (kolomkop met aria-sort), .a-nav-caption (sidebarkopje).
+   Samen 29 .a-klassen; de spec (§7.1.3) noemt dezelfde 29.
