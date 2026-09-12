@@ -131,6 +131,14 @@ _ALLOWLIST = {
         "consent_withdrawn_at columns this SELECT fetches for exactly "
         "that purpose (see the comment immediately below this query in "
         "routers/client.py).",
+    ("admin.py", "SELECT pe.*, c.full_name, c.current_title, c.current_company,"):
+        "GET /api/v1/admin/pipeline (WS5 BV1) -- the admin-side twin of "
+        "GET /api/v1/client/pipeline above, deliberately identical: same "
+        "reason for not gating in SQL (an ongoing engagement must not "
+        "vanish from the list when consent is withdrawn), and the same "
+        "consent_spec_presentation_at/consent_withdrawn_at gate on "
+        "full_name applied in Python right after the query, using the two "
+        "columns this SELECT fetches for exactly that purpose.",
 }
 
 

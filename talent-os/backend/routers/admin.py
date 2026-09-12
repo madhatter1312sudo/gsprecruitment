@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from core.config import settings
 from core.database import fetch_one, fetch_all, execute, fetch_val
 from core.deps import get_current_user, require_role
+from core.listing import resolve_order_by, sort_key_for
 from core.security import create_access_token, hash_token
 from core import privacy
 from core.sources import PORTAL_REGISTRATION
@@ -71,6 +72,31 @@ async def get_admin_dashboard(current_user: dict = Depends(require_role("admin")
 
 # ── User Management ─────────────────────────────────────────────────────
 
+# WS5 BV10: sortable columns per list route. The key is what a client may
+# pass as `sort`; the value is the literal SQL fragment interpolated into
+# ORDER BY. Request input is only ever a key lookup here (core/listing.py).
+_USER_SORT_COLUMNS = {
+    "id": "id",
+    "email": "email",
+    "full_name": "full_name",
+    "role": "role",
+    "is_verified": "is_verified",
+    "created_at": "created_at",
+    "updated_at": "updated_at",
+    "locked_until": "locked_until",
+    "failed_login_count": "failed_login_count",
+}
+
+# WS5 BV2: failed_login_count and locked_until are what the user list's
+# "Vergrendeld" badge and the "Deblokkeren" row action read (§7.3.6a).
+# Both are plain lockout counters from migrations/020_login_lockout.py --
+# no personal data beyond what this admin-only route already returns.
+_USER_COLUMNS = (
+    "id, email, full_name, role, is_verified, created_at, updated_at, "
+    "failed_login_count, locked_until"
+)
+
+
 @router.get("/users")
 async def list_users(
     role: Optional[str] = Query(None),
@@ -78,9 +104,14 @@ async def list_users(
     search: Optional[str] = Query(None),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
+    sort: Optional[str] = Query(None, description="Sortable column (WS5 BV10); default created_at."),
+    order: Optional[str] = Query(None, description="'asc' or 'desc'; default 'desc'."),
     current_user: dict = Depends(require_role("admin")),
 ):
     """List all users with filters (role, status, search)."""
+    order_by = resolve_order_by(
+        sort, order, allowed=_USER_SORT_COLUMNS, default="created_at DESC", tiebreaker="id DESC",
+    )
     conditions = ["deleted_at IS NULL"]
     params = []
     idx = 1
@@ -103,7 +134,7 @@ async def list_users(
     total = await fetch_val(f"SELECT COUNT(*) FROM users WHERE {where}", *params) or 0
     params_ext = params + [limit, offset]
     rows = await fetch_all(
-        f"SELECT id, email, full_name, role, is_verified, created_at, updated_at FROM users WHERE {where} ORDER BY created_at DESC LIMIT ${idx} OFFSET ${idx + 1}",
+        f"SELECT {_USER_COLUMNS} FROM users WHERE {where} ORDER BY {order_by} LIMIT ${idx} OFFSET ${idx + 1}",
         *params_ext,
     )
 
@@ -117,7 +148,7 @@ async def get_user_detail(
 ):
     """Get detailed user info including profile data."""
     user = await fetch_one(
-        "SELECT id, email, full_name, role, is_verified, created_at, updated_at FROM users WHERE id = $1 AND deleted_at IS NULL",
+        f"SELECT {_USER_COLUMNS} FROM users WHERE id = $1 AND deleted_at IS NULL",
         user_id,
     )
     if not user:
@@ -308,6 +339,19 @@ def _escape_like(term: str) -> str:
     return term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 
+# WS5 BV10 (see _USER_SORT_COLUMNS): only these keys reach ORDER BY.
+_JOB_SORT_COLUMNS = {
+    "id": "j.id",
+    "title": "j.title",
+    "status": "j.status",
+    "created_at": "j.created_at",
+    "updated_at": "j.updated_at",
+    "salary_min": "j.salary_min",
+    "salary_max": "j.salary_max",
+    "company_name": "c.company_name",
+}
+
+
 @router.get("/jobs")
 async def list_all_jobs(
     status: Optional[str] = Query(None),
@@ -317,10 +361,15 @@ async def list_all_jobs(
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
     page: Optional[int] = Query(None, ge=1, description="1-based page number; overrides offset when given (offset = (page-1)*limit)."),
+    sort: Optional[str] = Query(None, description="Sortable column (WS5 BV10); default created_at."),
+    order: Optional[str] = Query(None, description="'asc' or 'desc'; default 'desc'."),
     current_user: dict = Depends(require_role("admin")),
 ):
     """List all jobs cross-client. Excludes is_demo jobs (migrations/012's
     6 seed vacancies) unless include_demo=true is explicitly passed."""
+    order_by = resolve_order_by(
+        sort, order, allowed=_JOB_SORT_COLUMNS, default="j.created_at DESC", tiebreaker="j.id DESC",
+    )
     if page is not None:
         offset = (page - 1) * limit
 
@@ -354,7 +403,7 @@ async def list_all_jobs(
             FROM job_orders j
             JOIN clients c ON c.id = j.client_id
             WHERE {where}
-            ORDER BY j.created_at DESC
+            ORDER BY {order_by}
             LIMIT ${idx} OFFSET ${idx + 1}""",
         *params_ext,
     )
@@ -515,6 +564,36 @@ def _unlinked_self_registered_applicable(status: Optional[str], source: Optional
     return True
 
 
+# WS5 BV10. This route merges two SQL branches in Python, so a sortable
+# column has to exist under the same alias in BOTH branch SELECTs below
+# (branch A reads `candidates`, branch B reads `candidate_profiles` +
+# `users`) -- otherwise the merge sort would compare a present value in
+# one branch against a missing key in the other. Every key here is
+# checked against both SELECT lists; `kind`, `match_count` and
+# `placement_count` are deliberately absent because branch B hardcodes
+# them and sorting on a constant would silently reorder nothing.
+_CANDIDATE_SORT_COLUMNS = {
+    "full_name": "full_name",
+    "email": "email",
+    "current_title": "current_title",
+    "current_company": "current_company",
+    "location": "location",
+    "years_experience": "years_experience",
+    "created_at": "created_at",
+    "updated_at": "updated_at",
+}
+
+
+def _merge_sort_key(row: dict, key: str):
+    """Sort key for the Python-side merge of branch A and branch B, with
+    NULLs pushed to the end in both directions (asyncpg gives None for a
+    NULL column and None is not orderable against a str/date in Python).
+    Returns (is_null, value) so a NULL always compares last on asc; the
+    caller flips only the value half for desc by reversing the list."""
+    value = row.get(key)
+    return (value is None, value if value is not None else "")
+
+
 @router.get("/candidates")
 async def list_all_candidates(
     status: Optional[str] = Query(None),
@@ -523,6 +602,8 @@ async def list_all_candidates(
     search: Optional[str] = Query(None),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
+    sort: Optional[str] = Query(None, description="Sortable column (WS5 BV10); default created_at."),
+    order: Optional[str] = Query(None, description="'asc' or 'desc'; default 'desc'."),
     current_user: dict = Depends(require_role("admin")),
 ):
     """List all candidates across the platform -- sourced (candidates table)
@@ -533,6 +614,18 @@ async def list_all_candidates(
     `id` = candidate_id if present else user_id, for addressing the detail
     endpoint at GET /candidates/{kind}/{id}.
     """
+    # WS5 BV10: validate once, then apply the same column and direction to
+    # both branch queries and to the Python merge below, so a sorted page
+    # is the same page whichever branch a row came from.
+    # The allowlist values are bare output-column aliases, which both
+    # branch SELECTs below produce (c.full_name AS full_name, u.full_name
+    # AS full_name, ...), so one fragment orders both branches.
+    branch_order_by = resolve_order_by(
+        sort, order, allowed=_CANDIDATE_SORT_COLUMNS, default="created_at DESC",
+    )
+    sort_key = sort_key_for(sort, allowed=_CANDIDATE_SORT_COLUMNS, default_key="created_at")
+    descending = branch_order_by.endswith("DESC")
+
     # ── Branch A: candidates table (sourced, plus already-linked self-registered) ──
     a_conditions = ["c.deleted_at IS NULL"]
     a_params = []
@@ -608,7 +701,7 @@ async def list_all_candidates(
             )
             {_MATCH_COUNTS_JOIN}
             WHERE {a_where}
-            ORDER BY c.created_at DESC
+            ORDER BY {branch_order_by}
             LIMIT ${idx}""",
         *a_params, fetch_cap,
     )
@@ -653,12 +746,17 @@ async def list_all_candidates(
                 FROM candidate_profiles cp
                 JOIN users u ON u.id = cp.user_id
                 WHERE {b_where}
-                ORDER BY cp.created_at DESC
+                ORDER BY {branch_order_by}
                 LIMIT ${bidx}""",
             *b_params, fetch_cap,
         )
 
-    combined = sorted(list(a_rows) + list(b_rows), key=lambda r: r["created_at"], reverse=True)
+    # Ascending first, then reversed for desc: that reproduces Postgres's
+    # own NULLS LAST on ASC / NULLS FIRST on DESC defaults, so the merged
+    # page orders NULLs the same way each branch query already did.
+    combined = sorted(list(a_rows) + list(b_rows), key=lambda r: _merge_sort_key(r, sort_key))
+    if descending:
+        combined.reverse()
     page = combined[offset:offset + limit]
     items = [
         {**dict(row), "id": row["candidate_id"] if row["candidate_id"] is not None else row["user_id"]}
@@ -907,17 +1005,33 @@ async def admin_create_referral(
     suppressed = await fetch_one(
         "SELECT 1 FROM suppression_list WHERE email_hash = $1", privacy.email_hash(email),
     )
+    # WS5 BV3: structured detail, same {"code", "message"} shape as
+    # routers/retention_admin.py and routers/gdpr.py already use, so the
+    # panel can tell the two 409s apart and offer "Kandidaat openen" on
+    # the second one instead of printing one English sentence for both.
     if suppressed:
         raise HTTPException(
             status_code=409,
-            detail="This e-mail address is on the suppression list (STOP received) -- no message may be sent to it.",
+            detail={
+                "code": "referral_email_suppressed",
+                "message": (
+                    "This e-mail address is on the suppression list (STOP received) -- "
+                    "no message may be sent to it."
+                ),
+            },
         )
 
     existing = await fetch_one("SELECT id FROM candidates WHERE LOWER(email) = $1", email)
     if existing:
         raise HTTPException(
             status_code=409,
-            detail=f"A candidate record already exists for this e-mail address (id {existing['id']}).",
+            detail={
+                "code": "referral_candidate_exists",
+                "candidate_id": existing["id"],
+                "message": (
+                    f"A candidate record already exists for this e-mail address (id {existing['id']})."
+                ),
+            },
         )
 
     candidate = await fetch_one(
@@ -1305,6 +1419,71 @@ async def approve_client(
 # Admin equivalent of routers/client.py's stage-update/history endpoints,
 # unscoped by client (an admin may act on any client's pipeline).
 
+@router.get("/pipeline")
+async def admin_list_pipeline(
+    candidate_id: Optional[int] = Query(None),
+    client_id: Optional[int] = Query(None),
+    job_id: Optional[int] = Query(None),
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    current_user: dict = Depends(require_role("admin")),
+):
+    """WS5 BV1 (§7.3.4): the admin panel's pipeline tab needs an entry_id
+    before it can call PATCH .../{entry_id}/stage or GET .../history, and
+    until now no admin route listed pipeline entries at all -- the only
+    list route was GET /api/v1/client/pipeline, scoped to the client
+    behind the JWT and therefore unusable with an admin token.
+
+    Same row shape as that client route plus `client_id`, and the same
+    presentation-consent gate on `full_name`: a pipeline entry existing
+    is not consent to be named, and this route deliberately does not hand
+    an admin panel more personal data than the client portal already
+    shows for the same row. An admin who needs the name has
+    GET /candidates and GET /candidates/{kind}/{id} for that, both of
+    which are the routes where naming a candidate is the point.
+    """
+    conditions = []
+    params: list = []
+    for column, value in (("pe.candidate_id", candidate_id), ("pe.client_id", client_id),
+                          ("pe.job_id", job_id)):
+        if value is not None:
+            params.append(value)
+            conditions.append(f"{column} = ${len(params)}")
+    where = " AND ".join(conditions) if conditions else "TRUE"
+
+    total = await fetch_val(f"SELECT COUNT(*) FROM pipeline_entries pe WHERE {where}", *params) or 0
+    params_ext = params + [limit, offset]
+    rows = await fetch_all(
+        f"""SELECT pe.*, c.full_name, c.current_title, c.current_company,
+                   c.location, c.skills, j.title AS job_title,
+                   c.consent_spec_presentation_at, c.consent_withdrawn_at
+            FROM pipeline_entries pe
+            JOIN candidates c ON c.id = pe.candidate_id
+            JOIN job_orders j ON j.id = pe.job_id
+            WHERE {where}
+            ORDER BY pe.created_at DESC, pe.id DESC
+            LIMIT ${len(params) + 1} OFFSET ${len(params) + 2}""",
+        *params_ext,
+    )
+
+    items = []
+    for r in rows:
+        item = dict(r)
+        eligible = (
+            item.get("consent_spec_presentation_at")
+            and not item.get("consent_withdrawn_at")
+        )
+        item.pop("consent_spec_presentation_at", None)
+        item.pop("consent_withdrawn_at", None)
+        if not eligible:
+            item.pop("full_name", None)
+        # NULL array column coerced to [] on read, as everywhere else.
+        item["skills"] = item.get("skills") or []
+        items.append(item)
+
+    return {"items": items, "total": total, "limit": limit, "offset": offset}
+
+
 @router.patch("/pipeline/{entry_id}/stage")
 async def admin_update_pipeline_stage(
     entry_id: int,
@@ -1342,8 +1521,18 @@ async def admin_get_pipeline_stage_history(
     if not entry:
         raise HTTPException(status_code=404, detail="Pipeline entry not found")
 
+    # WS5 BV7: LEFT JOIN users so the timeline can name the actor instead
+    # of rendering "Gebruiker #12". LEFT, not inner: a history row is
+    # append-only and outlives the account that wrote it (an erased or
+    # deleted admin), and losing the row because the actor is gone would
+    # be worse than showing changed_by_name = null. Only full_name is
+    # joined in -- no e-mail, no role.
     rows = await fetch_all(
-        "SELECT * FROM pipeline_stage_history WHERE pipeline_entry_id = $1 ORDER BY changed_at",
+        """SELECT h.*, u.full_name AS changed_by_name
+           FROM pipeline_stage_history h
+           LEFT JOIN users u ON u.id = h.changed_by
+           WHERE h.pipeline_entry_id = $1
+           ORDER BY h.changed_at""",
         entry_id,
     )
     return {"items": rows, "total": len(rows)}
