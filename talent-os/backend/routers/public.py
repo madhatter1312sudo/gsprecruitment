@@ -512,6 +512,17 @@ async def talentpool_confirm(request: Request, data: TalentpoolConfirmRequest):
             is_referral, wants_alerts, existing["id"],
         )
     else:
+        # `full_name` krijgt hier het e-mailadres omdat
+        # `candidates.full_name` NOT NULL is (migratie 000_baseline) en
+        # deze route nooit een naam te zien krijgt: een talentpool-opt-in
+        # vraagt er niet om. NULL zou hier dus een schemawijziging zijn en
+        # bovendien elke lezer van die kolom raken (admin-lijsten,
+        # matching, export), niet alleen de mail.
+        #
+        # Wat het WEL moest raken is opgelost waar het zichtbaar was: de
+        # job-alert groette deze mensen met hun eigen adres ("Beste
+        # jan@example.com,"). services/email_templates.py's `_greeting()`
+        # laat een naam die een "@" bevat weg, voor élke template tegelijk.
         row = await fetch_one(
             """INSERT INTO candidates
                (full_name, email, source, lawful_basis, date_found,

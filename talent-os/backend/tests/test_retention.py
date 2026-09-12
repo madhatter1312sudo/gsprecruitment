@@ -956,3 +956,33 @@ def test_migration_030_is_idempotent_and_matches_the_documented_columns():
     assert "DO $$" not in sql  # _runner.py splits SQL on literal ";"
     assert "DELETE" not in sql.upper()
     assert "DROP" not in sql.upper()
+
+
+# ── privacy.html: de notice van 30 dagen (reparatieronde) ────────────────
+#
+# De pagina zei "na dezelfde 18 maanden plus 30 dagen" voor de twee
+# mailloze gevallen (blokkeerlijst en onbezorgbaar adres). Dat is te
+# precies en daarmee onjuist: core/retention.py's
+# _DORMANT_WARNING_WHERE_SQL kan de skip-stempel al vanaf 17 maanden
+# zetten, en PORTAL_ACCOUNT_INACTIVE_SQL eist vervolgens 18 maanden
+# inactiviteit EN een stempel van minstens 30 dagen oud. Wie op 17
+# maanden wordt gestempeld, komt dus op 18 maanden op de lijst -- niet op
+# 19. Wat wél voor iedereen klopt, en wat de pagina nu zegt: nooit eerder
+# dan 18 maanden, en nooit eerder dan 30 dagen na die notitie.
+
+def test_privacy_html_does_not_add_up_the_18_months_and_the_30_days():
+    with open(PRIVACY_HTML_PATH, encoding="utf-8") as f:
+        text = f.read()
+    assert "plus 30 dagen" not in text
+    assert "plus 30 days" not in text
+    assert text.count("na dezelfde 18 maanden, en nooit eerder dan 30 dagen na die notitie") == 2
+    assert text.count("after the same 18 months, and never sooner than 30 days after that note") == 2
+
+
+def test_the_skip_stamp_can_be_set_before_18_months_which_is_why_the_wording_changed():
+    """De reden dat de zin hierboven niet mag optellen, in code: de
+    waarschuwing (en dus de skip-stempel) begint bij 17 maanden, terwijl
+    de beoordelingslijst zelf 18 maanden eist."""
+    assert "INTERVAL '17 months'" in retention.DORMANT_WARNING_SQL
+    assert "INTERVAL '18 months'" in retention.PORTAL_ACCOUNT_INACTIVE_SQL
+    assert "INTERVAL '30 days'" in retention.PORTAL_ACCOUNT_INACTIVE_SQL

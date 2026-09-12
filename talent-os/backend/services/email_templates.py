@@ -46,6 +46,20 @@ loopt dwars door deze module:
     de bronzin volledig is vervangen zoals die twee documenten
     voorschrijven.
 
+Aanspreekvorm: `referral_confirm` gebruikt "u", de rest "je". Dat is een
+keuze, geen slordigheid, en staat hier zodat niemand het later "gelijk
+trekt". `referral_confirm` is een KOUD EERSTE contact met iemand die ons
+niet kent en die zelf nog niets heeft gedaan -- zijn gegevens kwamen van
+een derde. Dat bericht draagt ook als enige het Art. 14-blok, waarvan de
+tekst in docs/SOURCING-SOP.md §3.2 zelf in de u-vorm staat; "je" ernaast
+zou binnen één bericht twee registers mengen. `dormant_warning` en
+`job_alert` gaan naar iemand met een bestaande relatie (een eigen account,
+een eigen aanmelding voor alerts), net als verify_email, reset_password en
+de talentpool-berichten; die spreken hem aan zoals het portaal dat doet.
+
+De aanhef zelf staat in `_greeting()`, niet in de templates: zie de
+uitleg daar over lege namen en namen die een e-mailadres zijn.
+
 Dat `referral_confirm` hier staat en niet in routers/outreach.py maakt
 geen nieuw verzendpad naar gesourcete personen: outreach blijft
 draft-only. Deze mail gaat uitsluitend uit op een handeling van een
@@ -97,6 +111,79 @@ def _shell(sections) -> str:
     )
 
 
+_GREETING_WORD = {"nl": "Beste", "en": "Dear"}
+
+
+def _greeting(full_name: Optional[object], lang: str, *, escape: bool = False) -> str:
+    """De enige plek waar een bericht iemand aanspreekt.
+
+    Tot de reparatieronde schreef elke template letterlijk "Beste
+    $full_name," / "Dear $full_name,". Twee aanroepers leveren daar geen
+    bruikbare naam bij aan:
+
+      - `routers/public.py talentpool_confirm()` zet bij een verse
+        talentpool-rij `full_name` op het e-mailadres (de kolom
+        `candidates.full_name` is NOT NULL en deze route heeft nooit een
+        naam gezien -- een talentpool-opt-in vraagt er niet om). De
+        job-alert las die kolom en groette de ontvanger dus met zijn
+        eigen adres.
+      - de waarschuwing voor een slapend account krijgt `full_name` uit
+        `users`, waar hij leeg mag zijn; dat leverde "Beste ,".
+
+    Vandaar één helper in plaats van een reparatie per aanroeper: een
+    lege naam, of een naam die een "@" bevat en dus een adres is, laat de
+    naam gewoon weg. "Beste," is een nette aanhef; "Beste ," en "Beste
+    jan@example.com," zijn dat geen van beide.
+
+    `escape=True` geeft de HTML-variant terug (de naam door html.escape()),
+    zodat de aanroeper nooit zelf hoeft te kiezen."""
+    name = str(full_name).strip() if full_name is not None else ""
+    if not name or "@" in name:
+        return f"{_GREETING_WORD[lang]},"
+    return f"{_GREETING_WORD[lang]} {_esc(name) if escape else name},"
+
+
+# Nederlandse en Engelse maandnamen, met de hand, want `locale` is een
+# procesbrede instelling die op de VPS (en in een testrun) net zo goed
+# "C" kan zijn: `strftime('%B')` geeft dan "October" in een Nederlandse
+# mail, en erger, het antwoord hangt af van wie de vorige aanroep deed.
+# Een tabel van twaalf woorden kan niet drift oplopen.
+_MONTHS = {
+    "nl": ("januari", "februari", "maart", "april", "mei", "juni",
+           "juli", "augustus", "september", "oktober", "november", "december"),
+    "en": ("January", "February", "March", "April", "May", "June",
+           "July", "August", "September", "October", "November", "December"),
+}
+
+
+def _format_date(value: Optional[object], lang: str) -> str:
+    """"2026-10-12" wordt "12 oktober 2026" (nl) of "12 October 2026" (en).
+
+    Een ISO-datum is een technisch formaat; in een bericht aan een
+    consument hoort een datum zoals mensen hem schrijven. De aanroepers
+    (services/scheduler.py's slapend-accountjob, routers/admin.py's
+    referral-endpoint) blijven gewoon een ISO-string of een date
+    doorgeven -- de taal is hier bekend en daar niet, en bij het
+    tweetalige bericht (render() met lang=None) moet dezelfde ctx-waarde
+    twee keer anders worden opgemaakt.
+
+    Wat niet als datum te lezen is, gaat onveranderd terug: deze module
+    rendert wat zij krijgt en een rare datum mag nooit een bericht
+    tegenhouden dat iemands account moet redden."""
+    if value is None:
+        return ""
+    text = str(value).strip()
+    if not text:
+        return ""
+    try:
+        year, month, day = (int(part) for part in text[:10].split("-"))
+        if not 1 <= month <= 12:
+            return text
+        return f"{day} {_MONTHS[lang][month - 1]} {year}"
+    except (ValueError, IndexError, KeyError):
+        return text
+
+
 def _link_html(url_escaped: str, label_escaped: str) -> str:
     """The one link a template body is allowed -- `url_escaped` and
     `label_escaped` must already be html.escape()'d by the caller."""
@@ -108,7 +195,7 @@ def _link_html(url_escaped: str, label_escaped: str) -> str:
 
 _VERIFY_TEXT = {
     "nl": Template(
-        "Beste $full_name,\n\n"
+        "$greeting\n\n"
         "Bedankt voor je registratie bij GSP Recruitment. Bevestig je e-mailadres via onderstaande link:\n"
         "$link\n\n"
         "Deze link is $ttl_hours uur geldig.\n\n"
@@ -116,7 +203,7 @@ _VERIFY_TEXT = {
         "Met vriendelijke groet,\nGSP Recruitment\ninfo@gsprecruitment.nl\n"
     ),
     "en": Template(
-        "Dear $full_name,\n\n"
+        "$greeting\n\n"
         "Thank you for registering with GSP Recruitment. Please confirm your e-mail address via the link below:\n"
         "$link\n\n"
         "This link is valid for $ttl_hours hours.\n\n"
@@ -131,14 +218,14 @@ _VERIFY_SUBJECT = {
 _VERIFY_HEADING = {"nl": "Bevestig je e-mailadres", "en": "Confirm your e-mail address"}
 _VERIFY_HTML_BODY = {
     "nl": Template(
-        "<p>Beste $full_name,</p>"
+        "<p>$greeting</p>"
         "<p>Bedankt voor je registratie bij GSP Recruitment. Bevestig je e-mailadres via onderstaande link:</p>"
         "$link_html"
         "<p>Deze link is $ttl_hours uur geldig. Heb je dit account niet aangemaakt? "
         "Dan kun je dit bericht negeren.</p>"
     ),
     "en": Template(
-        "<p>Dear $full_name,</p>"
+        "<p>$greeting</p>"
         "<p>Thank you for registering with GSP Recruitment. Please confirm your e-mail address via the link below:</p>"
         "$link_html"
         "<p>This link is valid for $ttl_hours hours. Didn't create this account? "
@@ -152,9 +239,9 @@ def _verify_email_parts(ctx: dict, lang: str):
     language render and the NL+EN bilingual default in render() both build
     on this, so the two never drift apart."""
     subject = _VERIFY_SUBJECT[lang].substitute()
-    text = _VERIFY_TEXT[lang].substitute(full_name=ctx.get("full_name") or "", link=ctx["link"], ttl_hours=ctx["ttl_hours"])
+    text = _VERIFY_TEXT[lang].substitute(greeting=_greeting(ctx.get("full_name"), lang), link=ctx["link"], ttl_hours=ctx["ttl_hours"])
     link_html = _link_html(_esc(ctx["link"]), _esc(ctx["link"]))
-    body_html = _VERIFY_HTML_BODY[lang].substitute(full_name=_esc(ctx.get("full_name")), ttl_hours=_esc(ctx["ttl_hours"]), link_html=link_html)
+    body_html = _VERIFY_HTML_BODY[lang].substitute(greeting=_greeting(ctx.get("full_name"), lang, escape=True), ttl_hours=_esc(ctx["ttl_hours"]), link_html=link_html)
     return subject, _VERIFY_HEADING[lang], text, body_html
 
 
@@ -168,7 +255,7 @@ def _render_verify_email(ctx: dict, lang: str):
 
 _RESET_TEXT = {
     "nl": Template(
-        "Beste $full_name,\n\n"
+        "$greeting\n\n"
         "Je hebt een wachtwoord reset aangevraagd voor je GSP Recruitment account.\n\n"
         "Klik op de volgende link om je wachtwoord te resetten:\n$link\n\n"
         "Deze link is $ttl_hours uur geldig.\n\n"
@@ -176,7 +263,7 @@ _RESET_TEXT = {
         "Met vriendelijke groet,\nGSP Recruitment\ninfo@gsprecruitment.nl\n"
     ),
     "en": Template(
-        "Dear $full_name,\n\n"
+        "$greeting\n\n"
         "You requested a password reset for your GSP Recruitment account.\n\n"
         "Click the link below to reset your password:\n$link\n\n"
         "This link is valid for $ttl_hours hours.\n\n"
@@ -191,14 +278,14 @@ _RESET_SUBJECT = {
 _RESET_HEADING = {"nl": "Wachtwoord resetten", "en": "Reset your password"}
 _RESET_HTML_BODY = {
     "nl": Template(
-        "<p>Beste $full_name,</p>"
+        "<p>$greeting</p>"
         "<p>Je hebt een wachtwoord reset aangevraagd voor je GSP Recruitment account.</p>"
         "$link_html"
         "<p>Deze link is $ttl_hours uur geldig. Als je geen wachtwoord reset hebt aangevraagd, "
         "kun je dit bericht negeren.</p>"
     ),
     "en": Template(
-        "<p>Dear $full_name,</p>"
+        "<p>$greeting</p>"
         "<p>You requested a password reset for your GSP Recruitment account.</p>"
         "$link_html"
         "<p>This link is valid for $ttl_hours hours. If you did not request a password reset, "
@@ -209,9 +296,9 @@ _RESET_HTML_BODY = {
 
 def _reset_password_parts(ctx: dict, lang: str):
     subject = _RESET_SUBJECT[lang].substitute()
-    text = _RESET_TEXT[lang].substitute(full_name=ctx.get("full_name") or "", link=ctx["link"], ttl_hours=ctx["ttl_hours"])
+    text = _RESET_TEXT[lang].substitute(greeting=_greeting(ctx.get("full_name"), lang), link=ctx["link"], ttl_hours=ctx["ttl_hours"])
     link_html = _link_html(_esc(ctx["link"]), _esc(ctx["link"]))
-    body_html = _RESET_HTML_BODY[lang].substitute(full_name=_esc(ctx.get("full_name")), ttl_hours=_esc(ctx["ttl_hours"]), link_html=link_html)
+    body_html = _RESET_HTML_BODY[lang].substitute(greeting=_greeting(ctx.get("full_name"), lang, escape=True), ttl_hours=_esc(ctx["ttl_hours"]), link_html=link_html)
     return subject, _RESET_HEADING[lang], text, body_html
 
 
@@ -293,14 +380,14 @@ def _render_talentpool_confirm(ctx: dict, lang: str):
 
 _TP_REMINDER_TEXT = {
     "nl": Template(
-        "Beste $full_name,\n\n"
+        "$greeting\n\n"
         "Je staat in de talentpool van GSP Recruitment. Over ongeveer een maand loopt je toestemming af "
         "(bewaartermijn 12 maanden). Wil je verlengd blijven staan, meld je dan hier opnieuw aan:\n$link\n\n"
         "Doe je niets, dan verwijderen wij je gegevens uit de talentpool zodra de termijn is verstreken.\n\n"
         "Met vriendelijke groet,\nGSP Recruitment\ninfo@gsprecruitment.nl\n"
     ),
     "en": Template(
-        "Dear $full_name,\n\n"
+        "$greeting\n\n"
         "You are in GSP Recruitment's talent pool. Your consent expires in about a month "
         "(12-month retention period). To stay in the pool, sign up again here:\n$link\n\n"
         "If you do nothing, we will remove your data from the talent pool once the period has passed.\n\n"
@@ -314,14 +401,14 @@ _TP_REMINDER_SUBJECT = {
 _TP_REMINDER_HEADING = {"nl": "Je talentpool-aanmelding loopt bijna af", "en": "Your talent pool sign-up is about to expire"}
 _TP_REMINDER_HTML_BODY = {
     "nl": Template(
-        "<p>Beste $full_name,</p>"
+        "<p>$greeting</p>"
         "<p>Je staat in de talentpool van GSP Recruitment. Over ongeveer een maand loopt je toestemming af "
         "(bewaartermijn 12 maanden). Wil je verlengd blijven staan, meld je dan hier opnieuw aan:</p>"
         "$link_html"
         "<p>Doe je niets, dan verwijderen wij je gegevens uit de talentpool zodra de termijn is verstreken.</p>"
     ),
     "en": Template(
-        "<p>Dear $full_name,</p>"
+        "<p>$greeting</p>"
         "<p>You are in GSP Recruitment's talent pool. Your consent expires in about a month "
         "(12-month retention period). To stay in the pool, sign up again here:</p>"
         "$link_html"
@@ -332,9 +419,9 @@ _TP_REMINDER_HTML_BODY = {
 
 def _talentpool_reminder_parts(ctx: dict, lang: str):
     subject = _TP_REMINDER_SUBJECT[lang].substitute()
-    text = _TP_REMINDER_TEXT[lang].substitute(full_name=ctx.get("full_name") or "", link=ctx["link"])
+    text = _TP_REMINDER_TEXT[lang].substitute(greeting=_greeting(ctx.get("full_name"), lang), link=ctx["link"])
     link_html = _link_html(_esc(ctx["link"]), _esc(ctx["link"]))
-    body_html = _TP_REMINDER_HTML_BODY[lang].substitute(full_name=_esc(ctx.get("full_name")), link_html=link_html)
+    body_html = _TP_REMINDER_HTML_BODY[lang].substitute(greeting=_greeting(ctx.get("full_name"), lang, escape=True), link_html=link_html)
     return subject, _TP_REMINDER_HEADING[lang], text, body_html
 
 
@@ -348,7 +435,7 @@ def _render_talentpool_reminder(ctx: dict, lang: str):
 
 _TEAM_INVITE_TEXT = {
     "nl": Template(
-        "Beste $full_name,\n\n"
+        "$greeting\n\n"
         "Je bent uitgenodigd om je aan te sluiten bij het team van $inviter_company op GSP Recruitment. "
         "Stel je wachtwoord in via onderstaande link om je account te activeren:\n$link\n\n"
         "Deze link is 24 uur geldig.\n\n"
@@ -356,7 +443,7 @@ _TEAM_INVITE_TEXT = {
         "Met vriendelijke groet,\nGSP Recruitment\ninfo@gsprecruitment.nl\n"
     ),
     "en": Template(
-        "Dear $full_name,\n\n"
+        "$greeting\n\n"
         "You have been invited to join $inviter_company's team on GSP Recruitment. "
         "Set your password via the link below to activate your account:\n$link\n\n"
         "This link is valid for 24 hours.\n\n"
@@ -371,14 +458,14 @@ _TEAM_INVITE_SUBJECT = {
 _TEAM_INVITE_HEADING = {"nl": "Uitnodiging teamlid", "en": "Team invitation"}
 _TEAM_INVITE_HTML_BODY = {
     "nl": Template(
-        "<p>Beste $full_name,</p>"
+        "<p>$greeting</p>"
         "<p>Je bent uitgenodigd om je aan te sluiten bij het team van $inviter_company op GSP Recruitment. "
         "Stel je wachtwoord in via onderstaande link om je account te activeren:</p>"
         "$link_html"
         "<p>Deze link is 24 uur geldig. Als je deze uitnodiging niet verwachtte, kun je dit bericht negeren.</p>"
     ),
     "en": Template(
-        "<p>Dear $full_name,</p>"
+        "<p>$greeting</p>"
         "<p>You have been invited to join $inviter_company's team on GSP Recruitment. "
         "Set your password via the link below to activate your account:</p>"
         "$link_html"
@@ -391,11 +478,11 @@ _TEAM_INVITE_HTML_BODY = {
 def _client_team_invite_parts(ctx: dict, lang: str):
     subject = _TEAM_INVITE_SUBJECT[lang].substitute()
     text = _TEAM_INVITE_TEXT[lang].substitute(
-        full_name=ctx.get("full_name") or "", inviter_company=ctx.get("inviter_company") or "GSP Recruitment", link=ctx["link"],
+        greeting=_greeting(ctx.get("full_name"), lang), inviter_company=ctx.get("inviter_company") or "GSP Recruitment", link=ctx["link"],
     )
     link_html = _link_html(_esc(ctx["link"]), _esc(ctx["link"]))
     body_html = _TEAM_INVITE_HTML_BODY[lang].substitute(
-        full_name=_esc(ctx.get("full_name")), inviter_company=_esc(ctx.get("inviter_company") or "GSP Recruitment"), link_html=link_html,
+        greeting=_greeting(ctx.get("full_name"), lang, escape=True), inviter_company=_esc(ctx.get("inviter_company") or "GSP Recruitment"), link_html=link_html,
     )
     return subject, _TEAM_INVITE_HEADING[lang], text, body_html
 
@@ -421,6 +508,18 @@ def _render_client_team_invite(ctx: dict, lang: str):
 # letterlijk in, zodat dezelfde weigeringslogica deze tekst zou
 # goedkeuren als hij langs die poort was gekomen -- code-getest in
 # tests/test_ws3bc_referral_alerts.py.
+#
+# HET GEDACHTESTREEPJE IN DE STOP-ZIN IS OPZET en de enige in deze
+# codebase. De huisregel (CLAUDE.md) verbiedt gedachtestreepjes in eigen
+# tekst; dit blok is geen eigen tekst maar een letterlijk citaat van de
+# vaste tekst uit docs/SOURCING-SOP.md §3.2, en §6 punt 3 verklaart elke
+# afwijking buiten de vierkante haken tot een weigeringsgrond. Een "--"
+# waar de SOP een "—" voorschrijft is precies zo'n afwijking. De twee
+# regels spreken elkaar hier niet tegen: de SOP wint in wat hij
+# letterlijk voorschrijft, de huisregel geldt overal daarbuiten.
+# tests/test_ws3bc_referral_alerts.py legt deze zinnen woord voor woord
+# naast de tekst die het uit docs/SOURCING-SOP.md leest -- geen kopie in
+# de test, zodat een wijziging in de SOP hier opvalt.
 
 _REFERRAL_ART14_NL = (
     'Dit bericht komt van GSP Recruitment (Brainport/Eindhoven), info@gsprecruitment.nl. '
@@ -429,7 +528,7 @@ _REFERRAL_ART14_NL = (
     'Wij bewaren deze gegevens 3 maanden na $date_found als u niet reageert; bij interesse gelden de '
     'bewaartermijnen op gsprecruitment.nl/privacy. U kunt op elk moment inzage, correctie of verwijdering vragen. '
     'U heeft het recht om bezwaar te maken tegen deze verwerking (art. 21 AVG). '
-    'U kunt zich afmelden door te antwoorden met "STOP" -- wij verwerken dat binnen 24 uur: wij verwijderen uw '
+    'U kunt zich afmelden door te antwoorden met "STOP" — wij verwerken dat binnen 24 uur: wij verwijderen uw '
     'gegevens uit onze actieve bestanden en uw e-mailadres blijft alleen op een blokkeerlijst zodat wij u niet '
     'opnieuw benaderen. Een klacht over deze verwerking kunt u indienen bij de Autoriteit Persoonsgegevens '
     '(autoriteitpersoonsgegevens.nl).'
@@ -441,7 +540,7 @@ _REFERRAL_ART14_EN = (
     'We retain this data for 3 months after $date_found if you do not respond; if you show interest, the '
     'retention periods at gsprecruitment.nl/privacy apply. You can request access, correction or deletion at '
     'any time. You have the right to object to this processing (Art. 21 GDPR). '
-    'You can opt out by replying "STOP" -- we process that within 24 hours: we remove your data from our active '
+    'You can opt out by replying "STOP" — we process that within 24 hours: we remove your data from our active '
     'files, and your e-mail address is kept only on a suppression list so we do not contact you again. '
     'You can file a complaint about this processing with the Dutch Data Protection Authority '
     '(Autoriteit Persoonsgegevens, autoriteitpersoonsgegevens.nl).'
@@ -458,7 +557,7 @@ _REFERRAL_ART14_EN = (
 # formulering spreekt dat blok tegen.
 _REFERRAL_TEXT = {
     "nl": Template(
-        "Beste $full_name,\n\n"
+        "$greeting\n\n"
         "$art14\n\n"
         "Wij doen niets met uw gegevens tot u dit zelf bevestigt. Bevestig via onderstaande link:\n$link\n\n"
         "Deze link is $ttl_hours uur geldig. Doet u niets, dan benaderen wij u niet verder en bewaren wij "
@@ -468,7 +567,7 @@ _REFERRAL_TEXT = {
         "Met vriendelijke groet,\nGSP Recruitment\ninfo@gsprecruitment.nl\n"
     ),
     "en": Template(
-        "Dear $full_name,\n\n"
+        "$greeting\n\n"
         "$art14\n\n"
         "We do nothing with your details until you confirm this yourself. Please confirm via the link below:\n$link\n\n"
         "This link is valid for $ttl_hours hours. If you do nothing, we will not approach you further and we "
@@ -485,7 +584,7 @@ _REFERRAL_SUBJECT = {
 _REFERRAL_HEADING = {"nl": "U bent bij ons aangedragen", "en": "You were introduced to us"}
 _REFERRAL_HTML_BODY = {
     "nl": Template(
-        "<p>Beste $full_name,</p>"
+        "<p>$greeting</p>"
         "<p>$art14</p>"
         "<p>Wij doen niets met uw gegevens tot u dit zelf bevestigt. Bevestig via onderstaande link:</p>"
         "$link_html"
@@ -495,7 +594,7 @@ _REFERRAL_HTML_BODY = {
         "&quot;STOP&quot; of vraag ons om verwijdering; dat handelen wij binnen 24 uur af.</p>"
     ),
     "en": Template(
-        "<p>Dear $full_name,</p>"
+        "<p>$greeting</p>"
         "<p>$art14</p>"
         "<p>We do nothing with your details until you confirm this yourself. Please confirm via the link below:</p>"
         "$link_html"
@@ -510,18 +609,21 @@ _REFERRAL_ART14_TEMPLATES = {"nl": Template(_REFERRAL_ART14_NL), "en": Template(
 
 def _referral_confirm_parts(ctx: dict, lang: str):
     referred_by = ctx.get("referred_by") or ("een bekende van u" if lang == "nl" else "someone you know")
-    date_found = ctx.get("date_found") or ""
+    # Datums in een bericht aan een consument staan er zoals mensen ze
+    # schrijven, per taal: "11 september 2026" / "11 September 2026",
+    # niet de ISO-vorm waarin de aanroeper hem doorgeeft.
+    date_found = _format_date(ctx.get("date_found"), lang)
     art14 = _REFERRAL_ART14_TEMPLATES[lang].substitute(referred_by=referred_by, date_found=date_found)
     art14_html = _REFERRAL_ART14_TEMPLATES[lang].substitute(
         referred_by=_esc(referred_by), date_found=_esc(date_found),
     )
     subject = _REFERRAL_SUBJECT[lang].substitute()
     text = _REFERRAL_TEXT[lang].substitute(
-        full_name=ctx.get("full_name") or "", art14=art14, link=ctx["link"], ttl_hours=ctx["ttl_hours"],
+        greeting=_greeting(ctx.get("full_name"), lang), art14=art14, link=ctx["link"], ttl_hours=ctx["ttl_hours"],
     )
     link_html = _link_html(_esc(ctx["link"]), _esc(ctx["link"]))
     body_html = _REFERRAL_HTML_BODY[lang].substitute(
-        full_name=_esc(ctx.get("full_name")), art14=art14_html,
+        greeting=_greeting(ctx.get("full_name"), lang, escape=True), art14=art14_html,
         ttl_hours=_esc(ctx["ttl_hours"]), link_html=link_html,
     )
     return subject, _REFERRAL_HEADING[lang], text, body_html
@@ -568,7 +670,7 @@ _DORMANT_LAST_LOGIN_LINE = {
 }
 _DORMANT_TEXT = {
     "nl": Template(
-        "Beste $full_name,\n\n"
+        "$greeting\n\n"
         "Je hebt je GSP Recruitment-account lange tijd niet gebruikt.$last_login_line\n\n"
         "Log in vóór $deadline om je account actief te houden:\n$link\n\n"
         "Doe je dat niet, dan komt je account daarna op onze maandelijkse verwijderlijst: een beheerder "
@@ -576,7 +678,7 @@ _DORMANT_TEXT = {
         "Met vriendelijke groet,\nGSP Recruitment\ninfo@gsprecruitment.nl\n"
     ),
     "en": Template(
-        "Dear $full_name,\n\n"
+        "$greeting\n\n"
         "You have not used your GSP Recruitment account for a long time.$last_login_line\n\n"
         "Log in before $deadline to keep your account active:\n$link\n\n"
         "If you do not, your account goes onto our monthly deletion list after that date: an administrator "
@@ -594,7 +696,7 @@ _DORMANT_HEADING = {
 }
 _DORMANT_HTML_BODY = {
     "nl": Template(
-        "<p>Beste $full_name,</p>"
+        "<p>$greeting</p>"
         "<p>Je hebt je GSP Recruitment-account lange tijd niet gebruikt.$last_login_line Log in vóór "
         "$deadline om je account actief te houden:</p>"
         "$link_html"
@@ -602,7 +704,7 @@ _DORMANT_HTML_BODY = {
         "beoordeelt die lijst en verwijdert je account en profiel. Inloggen is genoeg, je hoeft verder niets te doen.</p>"
     ),
     "en": Template(
-        "<p>Dear $full_name,</p>"
+        "<p>$greeting</p>"
         "<p>You have not used your GSP Recruitment account for a long time.$last_login_line Log in before "
         "$deadline to keep your account active:</p>"
         "$link_html"
@@ -614,7 +716,8 @@ _DORMANT_HTML_BODY = {
 
 def _dormant_warning_parts(ctx: dict, lang: str):
     subject = _DORMANT_SUBJECT[lang].substitute()
-    last_login = ctx.get("last_login") or ""
+    deadline = _format_date(ctx["deadline"], lang)
+    last_login = _format_date(ctx.get("last_login"), lang)
     line = (
         Template(_DORMANT_LAST_LOGIN_LINE[lang]).substitute(last_login=last_login)
         if last_login else ""
@@ -624,12 +727,12 @@ def _dormant_warning_parts(ctx: dict, lang: str):
         if last_login else ""
     )
     text = _DORMANT_TEXT[lang].substitute(
-        full_name=ctx.get("full_name") or "", link=ctx["link"], deadline=ctx["deadline"],
+        greeting=_greeting(ctx.get("full_name"), lang), link=ctx["link"], deadline=deadline,
         last_login_line=line,
     )
     link_html = _link_html(_esc(ctx["link"]), _esc(ctx["link"]))
     body_html = _DORMANT_HTML_BODY[lang].substitute(
-        full_name=_esc(ctx.get("full_name")), deadline=_esc(ctx["deadline"]), link_html=link_html,
+        greeting=_greeting(ctx.get("full_name"), lang, escape=True), deadline=_esc(deadline), link_html=link_html,
         last_login_line=line_html,
     )
     return subject, _DORMANT_HEADING[lang], text, body_html
@@ -656,14 +759,14 @@ def _render_dormant_warning(ctx: dict, lang: str):
 
 _JOB_ALERT_TEXT = {
     "nl": Template(
-        "Beste $full_name,\n\n"
+        "$greeting\n\n"
         "Deze vacatures passen bij je profiel:\n\n"
         "$job_lines\n"
         "Wil je geen vacature-alerts meer ontvangen? Meld je hier met één klik af:\n$unsubscribe_link\n\n"
         "Met vriendelijke groet,\nGSP Recruitment\ninfo@gsprecruitment.nl\n"
     ),
     "en": Template(
-        "Dear $full_name,\n\n"
+        "$greeting\n\n"
         "These vacancies match your profile:\n\n"
         "$job_lines\n"
         "No longer want job alerts? Unsubscribe here with one click:\n$unsubscribe_link\n\n"
@@ -677,14 +780,14 @@ _JOB_ALERT_SUBJECT = {
 _JOB_ALERT_HEADING = {"nl": "Nieuwe vacatures die bij je passen", "en": "New vacancies that match your profile"}
 _JOB_ALERT_HTML_BODY = {
     "nl": Template(
-        "<p>Beste $full_name,</p>"
+        "<p>$greeting</p>"
         "<p>Deze vacatures passen bij je profiel:</p>"
         "$job_list_html"
         "<p>Wil je geen vacature-alerts meer ontvangen? Meld je hier met één klik af:</p>"
         "$unsubscribe_html"
     ),
     "en": Template(
-        "<p>Dear $full_name,</p>"
+        "<p>$greeting</p>"
         "<p>These vacancies match your profile:</p>"
         "$job_list_html"
         "<p>No longer want job alerts? Unsubscribe here with one click:</p>"
@@ -712,12 +815,12 @@ def _job_alert_parts(ctx: dict, lang: str):
 
     subject = _JOB_ALERT_SUBJECT[lang].substitute()
     text = _JOB_ALERT_TEXT[lang].substitute(
-        full_name=ctx.get("full_name") or "", job_lines=job_lines,
+        greeting=_greeting(ctx.get("full_name"), lang), job_lines=job_lines,
         unsubscribe_link=ctx["unsubscribe_link"],
     )
     unsubscribe_html = _link_html(_esc(ctx["unsubscribe_link"]), _esc(_JOB_ALERT_UNSUB_LABEL[lang]))
     body_html = _JOB_ALERT_HTML_BODY[lang].substitute(
-        full_name=_esc(ctx.get("full_name")), job_list_html=job_list_html,
+        greeting=_greeting(ctx.get("full_name"), lang, escape=True), job_list_html=job_list_html,
         unsubscribe_html=unsubscribe_html,
     )
     return subject, _JOB_ALERT_HEADING[lang], text, body_html

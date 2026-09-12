@@ -62,7 +62,15 @@ _lock_conn: Optional[asyncpg.Connection] = None
 
 
 async def _flag_enabled(key: str) -> bool:
-    """Read a system_settings boolean flag. Missing key == enabled."""
+    """Read a system_settings boolean flag. Missing key == enabled.
+
+    Die default blijft staan: geen enkele andere vlag hoeft eerst te
+    worden aangemaakt om "aan" te zijn, en hem hier omdraaien zou elke
+    bestaande aanroeper stilletjes uitzetten. Voor `job_alerts_enabled`
+    is de oplossing daarom dat de RIJ bestaat: migratie 042 zet hem
+    idempotent op 'false', zodat de tweede rem uit
+    docs/VERWERKINGSREGISTER.md rij 20 en core/config.py er echt is en
+    niet alleen beschreven wordt."""
     value = await fetch_val("SELECT value FROM system_settings WHERE key = $1", key)
     if value is None:
         return True

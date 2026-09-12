@@ -82,6 +82,20 @@ door `routers/auth.py` en `routers/mfa.py`). NOT NULL DEFAULT 0 zodat
 bestaande rijen meteen een bruikbare waarde hebben en de selector geen
 NULL-tak nodig heeft.
 
+`system_settings.job_alerts_enabled` (reparatieronde, de tweede rem):
+`docs/VERWERKINGSREGISTER.md` rij 20 en `core/config.py` beschrijven twee
+schakelaars die allebei standaard op droogloop staan -- de env-master
+`JOB_ALERTS_ENABLED` en deze admin-bewerkbare DB-vlag. Die tweede bestond
+niet: `services/scheduler.py`'s `_flag_enabled()` geeft True terug bij een
+ONTBREKENDE sleutel (dat is de bedoeling -- geen enkele andere vlag hoeft
+eerst te worden aangemaakt om "aan" te zijn), en geen migratie maakte deze
+rij aan. Er was dus precies één rem, en de twee documenten beloofden er
+twee. Deze INSERT maakt de belofte waar op de manier die de eigenaar
+daarna kan bedienen: de rij staat er, op `false`, en het adminpaneel kan
+hem omzetten. `ON CONFLICT DO NOTHING` zodat een bestaande waarde -- ook
+een die de eigenaar zelf al op `true` heeft gezet -- nooit wordt
+teruggezet door een herhaalde deploy.
+
 Patroon van 030/032/033/034/036/037/039/040/041: idempotent (ADD COLUMN
 IF NOT EXISTS, CREATE INDEX IF NOT EXISTS), geen `DO $$ ... END $$`-blokken
 (migrations/_runner.py splitst op een letterlijke ";"), geen DELETE/DROP.
@@ -106,6 +120,10 @@ ALTER TABLE job_alert_sends ADD COLUMN IF NOT EXISTS oneclick_used_at TIMESTAMPT
 ALTER TABLE users ADD COLUMN IF NOT EXISTS dormant_warning_skipped_at TIMESTAMPTZ;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS dormant_warning_attempts INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS dormant_warning_attempt_at TIMESTAMPTZ;
+
+INSERT INTO system_settings (key, value, description) VALUES
+    ('job_alerts_enabled', 'false', 'Tweede rem op de dagelijkse vacature-alerts, naast JOB_ALERTS_ENABLED in env')
+ON CONFLICT (key) DO NOTHING;
 """
 
 if __name__ == "__main__":

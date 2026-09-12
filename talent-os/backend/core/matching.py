@@ -1,5 +1,5 @@
 """
-Talent OS — de matchscore-schaal en de suggestiedrempel, op één plek.
+Talent OS: de matchscore-schaal en de suggestiedrempel, op één plek.
 
 `matches.match_score` staat overal op de 0-100-schaal, terwijl
 services/matcher.py intern met cosinusgelijkenis op 0-1 rekent en bij het

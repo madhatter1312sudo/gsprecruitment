@@ -111,6 +111,10 @@ class Settings(BaseSettings):
     # wordt aangevuld met de admin-bewerkbare DB-vlag
     # system_settings.job_alerts_enabled, net zoals bij Apollo: de env-
     # schakelaar is de master, de DB-vlag de tweede rem daarbovenop.
+    # Die DB-rij wordt door migrations/042_alerts_token_binding_dormant_
+    # skip.py idempotent op 'false' gezet -- zonder haar gaf
+    # services/scheduler.py's _flag_enabled() True terug bij een
+    # ontbrekende sleutel en was er in werkelijkheid maar één rem.
     dormant_warning_enabled: bool = False
     job_alerts_enabled: bool = False
 

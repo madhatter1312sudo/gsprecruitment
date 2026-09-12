@@ -326,7 +326,56 @@ Tot die uitzondering er is, werkt het afmelden via de zichtbare link in de
 voettekst van het bericht wél: die gaat langs de website en de gewone
 browser van de ontvanger.
 
-## 9. Deployvolgorde: eerst migreren, dan de nieuwe code live zetten
+## 9. Eigenaarschecklist na de merge
+
+In deze volgorde. Elke stap gaat over iets wat niemand anders dan de
+eigenaar kan doen, en de volgorde is niet vrij: stap 4 moet vóór stap 6,
+anders belooft de privacyverklaring een afmeldknop die niet werkt.
+
+1. **Deploy en controleer dat de basis het doet.** De migraties (041 en
+   042) draaien mee in de deploy en draaien sinds §10 vóór de nieuwe code
+   live gaat, dus er is geen venster meer waarin een login op een
+   ontbrekende kolom stukloopt. Na afloop: de health check groen, en één
+   keer zelf inloggen op het adminpaneel. Dat laatste is de goedkoopste
+   test die er is -- alle vier de inlogpaden schrijven
+   `dormant_warning_attempts` en `dormant_warning_attempt_at`
+   (`core/retention.py LOGIN_STAMP_SQL`).
+
+2. **Vervalt.** Deze stap was "zet `system_settings.job_alerts_enabled`
+   expliciet op `false`, zodat de tweede rem bestaat". Migratie 042 doet
+   dat nu zelf: zij voegt de rij idempotent toe op `false`
+   (`INSERT ... ON CONFLICT DO NOTHING`), dus de tweede rem staat er na
+   de deploy van stap 1 al. Niets te doen; hooguit één keer kijken of de
+   rij er inderdaad staat.
+
+3. **Een week droogloop.** Beide verzendschakelaars blijven uit. De jobs
+   selecteren en tellen wel. Lees in de logs
+   `dormant_account_warning_job: accounts_due=...` -- dat getal is de
+   achterstand vóór het dagplafond, dus het echte aantal accounts dat aan
+   de beurt is. Bij een grote achterstand is dat het getal waarop u
+   besluit of stap 5 direct of gefaseerd gaat.
+
+4. **WAF-uitzondering in Cloudflare** (zie §8 voor het waarom), zo smal
+   mogelijk: alleen `POST`, alleen het pad `/api/public/unsubscribe` op
+   `api.gsprecruitment.nl`, en alleen de user-agent-eis eraf -- de rest
+   van de WAF-bescherming blijft staan. Dit moet vóór stap 6: zonder deze
+   uitzondering wordt de een-klik-afmelding van de mailprovider geblokkeerd
+   terwijl de ontvanger "je bent afgemeld" te zien krijgt, en dan belooft
+   de privacyverklaring iets wat niet gebeurt.
+
+5. **`DORMANT_WARNING_ENABLED=true`** in `talent-os/.env`, backend
+   herstarten. Pas doen als u akkoord bent met de achterstand uit stap 3:
+   vanaf dat moment gaan er waarschuwingen uit, tot het dagplafond per
+   dag, oudste account eerst.
+
+6. **`JOB_ALERTS_ENABLED=true`** in `talent-os/.env` én
+   `system_settings.job_alerts_enabled` op `true` (de twee remmen uit stap
+   2 -- allebei, of er gaat niets uit), backend herstarten. Test daarna de
+   een-klik-afmeldknop op een eigen adres: meld uzelf aan voor alerts,
+   wacht de digest af en klik in uw mailclient op "Afmelden". Dat is de
+   enige test die stap 4 werkelijk bewijst.
+
+## 10. Deployvolgorde: eerst migreren, dan de nieuwe code live zetten
 
 `.github/workflows/deploy.yml` bouwde tot deze reparatieronde eerst de
 nieuwe backend en startte hem ook meteen (`docker compose up -d --build

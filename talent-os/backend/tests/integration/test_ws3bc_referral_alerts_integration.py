@@ -1490,7 +1490,14 @@ def test_dormant_warning_mail_names_the_last_login_date(db_run, monkeypatch):
 
     for lang in ("nl", "en"):
         _s, text, html = email_templates.render("dormant_warning", mine[0], lang)
-        assert expected in text and expected in html
+        # De job geeft de datum in ISO door (dat is zijn contract, zie de
+        # assert hierboven); de template schrijft hem uit zoals mensen
+        # dat doen -- per taal, want dit bericht gaat tweetalig de deur
+        # uit. tests/test_email_templates.py legt de maandnamen vast.
+        day = last_login["last_login_at"].date()
+        for part in (text, html):
+            assert expected not in part
+            assert f"{day.day} " in part and str(day.year) in part
         for part in (text, html):
             assert "18 maanden" not in part and "18 months" not in part
 

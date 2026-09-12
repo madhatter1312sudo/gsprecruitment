@@ -23,6 +23,7 @@ rather than weakened or silently passed.
 import importlib
 import inspect
 import logging
+import os
 import pathlib
 import re
 from datetime import datetime, timezone
@@ -566,17 +567,47 @@ def test_verify_email_template_escapes_html_in_full_name():
     assert "<b>x</b>" not in html
 
 
+# Eén uitzondering op het gedachtestreepjesverbod, en precies één: het
+# Art. 14-blok van `referral_confirm` citeert de vaste tekst uit
+# docs/SOURCING-SOP.md §3.2 woordelijk, en §6 punt 3 verbiedt elke
+# afwijking buiten de vierkante haken -- ook een "--" waar de SOP een
+# "—" schrijft. De uitzondering wordt hieronder niet als kopie
+# opgeschreven maar uit de SOP zelf gelezen, zodat zij niet breder kan
+# worden dan wat daar staat.
+_SOP_PATH = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))),
+    "docs", "SOURCING-SOP.md",
+)
+
+
+def _sop_quoted_sentences_with_an_em_dash(lang):
+    """De zinnen uit het §3.2-blok die zelf een em-dash dragen."""
+    with open(_SOP_PATH, encoding="utf-8") as f:
+        lines = f.read().splitlines()
+    marker = "**NL:**" if lang == "nl" else "**EN:**"
+    start = next(i for i, line in enumerate(lines) if line.strip() == marker)
+    quote = next(line for line in lines[start:start + 4] if line.startswith("> *"))
+    block = quote[len("> *"):].rstrip().rstrip("*")
+    return [part for part in block.split(". ") if "\u2014" in part]
+
+
 @_skip_no_040
 @pytest.mark.parametrize("lang", ["nl", "en"])
 def test_every_template_has_nonempty_subject_kvk_footer_and_no_em_dash(lang):
     names = sorted(email_templates._RENDERERS.keys())
     assert names, "services/email_templates.py registers no templates at all"
+    allowed = _sop_quoted_sentences_with_an_em_dash(lang)
+    assert allowed, "de SOP-tekst met de em-dash is niet gevonden"
     for name in names:
         subject, text, html = email_templates.render(name, dict(_GENERIC_CTX), lang)
         assert subject.strip(), f"{name}/{lang} has an empty subject"
         assert "KvK 75545586" in html, f"{name}/{lang} html is missing the shared footer"
         for label, value in (("subject", subject), ("text", text), ("html", html)):
-            assert "\u2014" not in value, f"{name}/{lang} {label} contains an em dash (U+2014): {value!r}"
+            stripped = value
+            if name == "referral_confirm":
+                for sentence in allowed:
+                    stripped = stripped.replace(sentence, "")
+            assert "\u2014" not in stripped, f"{name}/{lang} {label} contains an em dash (U+2014): {value!r}"
 
 
 @_skip_no_040

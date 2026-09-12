@@ -108,6 +108,78 @@ def test_referral_confirm_renders_bilingually_by_default():
     assert subject.startswith("U bent bij ons aangedragen")
 
 
+# ── Het Art. 14-blok woordelijk tegen de SOP (reparatieronde) ─────────
+#
+# docs/SOURCING-SOP.md §3.2 legt de vaste tekst vast en §6 punt 3 maakt
+# elke afwijking buiten de vierkante haken een weigeringsgrond. De
+# template schreef daar `"STOP" -- wij verwerken` waar de SOP een em-dash
+# voorschrijft. Deze test leest de SOP-tekst IN (geen kopie hier), knipt
+# het staartstuk eruit dat de SOP voor referral ongewijzigd laat -- alles
+# vanaf de afmeldzin -- en legt dat woord voor woord naast wat de
+# template rendert. Verandert de SOP, dan faalt deze test in plaats van
+# stilletjes te verlopen.
+
+SOP_PATH = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))),
+    "docs", "SOURCING-SOP.md",
+)
+
+
+def _sop_art14_block(lang: str) -> str:
+    """De blockquote-regel onder "**NL:**"/"**EN:**" in §3.2, ontdaan van
+    de Markdown-opmaak (`> *...*`)."""
+    with open(SOP_PATH, encoding="utf-8") as f:
+        lines = f.read().splitlines()
+    marker = "**NL:**" if lang == "nl" else "**EN:**"
+    start = next(i for i, line in enumerate(lines) if line.strip() == marker)
+    quote = next(line for line in lines[start:start + 4] if line.startswith("> *"))
+    return quote[len("> *"):].rstrip().rstrip("*")
+
+
+def _sop_optout_tail(lang: str) -> str:
+    """Alles vanaf de afmeldzin: het deel van het blok dat voor referral
+    ongewijzigd blijft (alleen de tweede zin wordt vervangen, §3.2)."""
+    block = _sop_art14_block(lang)
+    needle = "U kunt zich afmelden" if lang == "nl" else "You can opt out"
+    return block[block.index(needle):]
+
+
+@pytest.mark.parametrize("lang", ["nl", "en"])
+def test_referral_art14_optout_tail_is_the_sop_text_verbatim(lang):
+    _subject, text, _html = email_templates.render("referral_confirm", _REFERRAL_CTX, lang)
+    tail = _sop_optout_tail(lang)
+    assert tail in text, f"wijkt af van docs/SOURCING-SOP.md §3.2:\n{tail}"
+
+
+@pytest.mark.parametrize("lang", ["nl", "en"])
+def test_referral_art14_uses_the_sop_dash_not_the_house_style_one(lang):
+    """De huisregel verbiedt gedachtestreepjes; dit blok is een letterlijk
+    citaat en valt daarbuiten (§6 punt 3 verbiedt juist de afwijking).
+    Expliciet getest zodat niemand het "netjes" terugdraait."""
+    _subject, text, _html = email_templates.render("referral_confirm", _REFERRAL_CTX, lang)
+    quoted_stop = '"STOP" \u2014 wij verwerken' if lang == "nl" else '"STOP" \u2014 we process'
+    plain_stop = '"STOP" -- wij verwerken' if lang == "nl" else '"STOP" -- we process'
+    assert quoted_stop in text
+    assert plain_stop not in text
+
+
+def test_referral_confirm_addresses_the_reader_formally_and_the_others_informally():
+    """Bewuste keuze, vastgelegd in de moduledocstring van
+    services/email_templates.py: referral_confirm is een koud eerste
+    contact (u), dormant_warning en job_alert gaan naar iemand met een
+    bestaande relatie (je)."""
+    _s, referral, _h = email_templates.render("referral_confirm", _REFERRAL_CTX, "nl")
+    assert "uw gegevens" in referral
+    assert "je gegevens" not in referral
+
+    _s, dormant, _h = email_templates.render(
+        "dormant_warning",
+        {"full_name": "Jan", "link": "https://gsprecruitment.nl/candidate/", "deadline": "2026-10-11"}, "nl",
+    )
+    assert "je account" in dormant
+    assert "uw account" not in dormant
+
+
 # ══════════════════════════════════════════════════════════════════════
 # WS3b -- referral retentieselector
 # ══════════════════════════════════════════════════════════════════════
@@ -134,7 +206,9 @@ def test_dormant_warning_promises_only_what_the_code_does():
     _s, nl, _h = email_templates.render("dormant_warning", ctx, "nl")
     _s, en, _h = email_templates.render("dormant_warning", ctx, "en")
 
-    assert "2026-10-11" in nl and "2026-10-11" in en
+    # De datum staat er nog steeds, alleen niet meer in ISO-vorm
+    # (reparatieronde: consumentenmail schrijft "11 oktober 2026").
+    assert "11 oktober 2026" in nl and "11 October 2026" in en
     assert "verwijderlijst" in nl and "deletion list" in en
     assert "beheerder" in nl and "administrator" in en
     assert "Inloggen is genoeg" in nl and "Logging in is enough" in en
@@ -150,7 +224,8 @@ def test_dormant_warning_does_not_claim_a_term_the_job_does_not_use():
         subject, text, html = email_templates.render("dormant_warning", ctx, lang)
         for part in (subject, text, html):
             assert "18 maanden" not in part and "18 months" not in part
-        assert "2026-10-11" in text and "2026-10-11" in html
+        day = "11 oktober 2026" if lang == "nl" else "11 October 2026"
+        assert day in text and day in html
 
 
 def test_referral_confirm_promises_only_what_the_code_does():
