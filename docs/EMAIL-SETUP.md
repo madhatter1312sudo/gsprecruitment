@@ -267,3 +267,147 @@ twee stromen leesbaar gescheiden.
 
 Leeg laten (de default) betekent: geen eigenaarsmail, alleen de bestaande
 Telegram-melding.
+
+## 8. Eigenaarsactie: WAF-uitzondering voor het een-klik-afmelden
+
+**Nog te doen, door de eigenaar, in het Cloudflare-dashboard. Deze
+reparatieronde heeft niets aan de WAF veranderd.**
+
+Elke job-alert draagt twee RFC 8058-headers:
+
+```
+List-Unsubscribe: <https://api.gsprecruitment.nl/api/public/unsubscribe?token=...&scope=alerts>
+List-Unsubscribe-Post: List-Unsubscribe=One-Click
+```
+
+Klikt iemand in Gmail of Outlook op "Afmelden", dan POST'et de
+MAILPROVIDER naar die URL -- niet de browser van de ontvanger, en niet
+onze eigen frontend. Die POST draagt de header `User-Agent: gsp-ops`
+dus niet: de provider stuurt zijn eigen user-agent en er is geen plek waar
+wij daar iets aan kunnen toevoegen. De WAF-regel die bare curl 403't
+(zie `CLAUDE.md`, "API facts that bite") blokkeert die POST daarmee ook.
+
+Het gevolg is onzichtbaar en precies de verkeerde kant op: het
+afmeldendpoint antwoordt met opzet altijd hetzelfde generieke bericht, een
+provider probeert zo'n POST niet opnieuw, en de ontvanger ziet in zijn
+mailclient "je bent afgemeld" terwijl er niets is gebeurd. Morgen krijgt
+hij dezelfde digest.
+
+Nodig is dus één uitzondering, zo smal mogelijk:
+
+- alleen `POST`;
+- alleen het pad `/api/public/unsubscribe` op `api.gsprecruitment.nl`;
+- alleen de user-agent-eis eraf, niet de overige WAF-bescherming.
+
+Wat aan onze kant al is geregeld, zodat die uitzondering niets opent wat
+dicht hoorde te blijven: het endpoint heeft geen authenticatie om te
+omzeilen, doet niets zonder een geldig token van 32 random bytes, verbruikt
+dat token bij de eerste aanroep (`job_alert_sends.used_at`) en laat het na
+90 dagen verlopen.
+
+En het token in die URL is niet hetzelfde token als in de zichtbare
+afmeldlink. Elke verzending draagt er twee, met twee aparte hashes op
+dezelfde `job_alert_sends`-rij. Het token in de `List-Unsubscribe`-URL
+hierboven levert ALTIJD `scope=alerts` op: `routers/public.py
+unsubscribe()` zoekt eerst op `oneclick_token_hash`, en een treffer daar
+betekent `alerts`, ongeacht wat de body, de querystring of een opgegeven
+scope zegt. `scope=all` (toestemming intrekken plus blokkeerlijst,
+onomkeerbaar) is uitsluitend bereikbaar met het ANDERE token, dat in het
+fragment van de voettekstlink staat en dus in geen enkele log terechtkomt.
+Wie de URL hierboven uit een logregel plukt en het token in de body plakt,
+komt daarmee niet verder dan een afmelding voor vacature-alerts.
+Daarbovenop geldt onveranderd dat een token in de querystring nooit meer
+dan `alerts` oplevert, ook het fragmenttoken niet.
+
+De rate limit op dit pad staat op 60/minuut, ruim genoeg voor de gedeelde
+uitgaande IP-adressen van een mailprovider.
+
+Tot die uitzondering er is, werkt het afmelden via de zichtbare link in de
+voettekst van het bericht wél: die gaat langs de website en de gewone
+browser van de ontvanger.
+
+## 9. Eigenaarschecklist na de merge
+
+In deze volgorde. Elke stap gaat over iets wat niemand anders dan de
+eigenaar kan doen, en de volgorde is niet vrij: stap 4 moet vóór stap 6,
+anders belooft de privacyverklaring een afmeldknop die niet werkt.
+
+1. **Deploy en controleer dat de basis het doet.** De migraties (041 en
+   042) draaien mee in de deploy en draaien sinds §10 vóór de nieuwe code
+   live gaat, dus er is geen venster meer waarin een login op een
+   ontbrekende kolom stukloopt. Na afloop: de health check groen, en één
+   keer zelf inloggen op het adminpaneel. Dat laatste is de goedkoopste
+   test die er is -- alle vier de inlogpaden schrijven
+   `dormant_warning_attempts` en `dormant_warning_attempt_at`
+   (`core/retention.py LOGIN_STAMP_SQL`).
+
+2. **Vervalt.** Deze stap was "zet `system_settings.job_alerts_enabled`
+   expliciet op `false`, zodat de tweede rem bestaat". Migratie 042 doet
+   dat nu zelf: zij voegt de rij idempotent toe op `false`
+   (`INSERT ... ON CONFLICT DO NOTHING`), dus de tweede rem staat er na
+   de deploy van stap 1 al. Niets te doen; hooguit één keer kijken of de
+   rij er inderdaad staat.
+
+3. **Een week droogloop.** Beide verzendschakelaars blijven uit. De jobs
+   selecteren en tellen wel. Lees in de logs
+   `dormant_account_warning_job: accounts_due=...` -- dat getal is de
+   achterstand vóór het dagplafond, dus het echte aantal accounts dat aan
+   de beurt is. Bij een grote achterstand is dat het getal waarop u
+   besluit of stap 5 direct of gefaseerd gaat.
+
+4. **WAF-uitzondering in Cloudflare** (zie §8 voor het waarom), zo smal
+   mogelijk: alleen `POST`, alleen het pad `/api/public/unsubscribe` op
+   `api.gsprecruitment.nl`, en alleen de user-agent-eis eraf -- de rest
+   van de WAF-bescherming blijft staan. Dit moet vóór stap 6: zonder deze
+   uitzondering wordt de een-klik-afmelding van de mailprovider geblokkeerd
+   terwijl de ontvanger "je bent afgemeld" te zien krijgt, en dan belooft
+   de privacyverklaring iets wat niet gebeurt.
+
+5. **`DORMANT_WARNING_ENABLED=true`** in `talent-os/.env`, backend
+   herstarten. Pas doen als u akkoord bent met de achterstand uit stap 3:
+   vanaf dat moment gaan er waarschuwingen uit, tot het dagplafond per
+   dag, oudste account eerst.
+
+6. **`JOB_ALERTS_ENABLED=true`** in `talent-os/.env` én
+   `system_settings.job_alerts_enabled` op `true` (de twee remmen uit stap
+   2 -- allebei, of er gaat niets uit), backend herstarten. Test daarna de
+   een-klik-afmeldknop op een eigen adres: meld uzelf aan voor alerts,
+   wacht de digest af en klik in uw mailclient op "Afmelden". Dat is de
+   enige test die stap 4 werkelijk bewijst.
+
+## 10. Deployvolgorde: eerst migreren, dan de nieuwe code live zetten
+
+`.github/workflows/deploy.yml` bouwde tot deze reparatieronde eerst de
+nieuwe backend en startte hem ook meteen (`docker compose up -d --build
+backend`), en draaide de migraties pas in de stap daarna. Tussen die twee
+stappen draaide de nieuwe code dus op het oude schema.
+
+Dat is niet theoretisch. `core/retention.py`'s `LOGIN_STAMP_SQL` schrijft
+`users.dormant_warning_attempts` en `users.dormant_warning_attempt_at`
+(migratie 042) en wordt in alle vier de inlogpaden aangeroepen
+(`routers/auth.py` wachtwoord en Google, `routers/mfa.py` twee
+tweede-factorstappen), zonder try/except. Bestaan die kolommen nog niet,
+dan geeft élke login in dat venster een 500 (`UndefinedColumnError`) --
+ook die van de beheerder, die daarmee net dan niet bij het adminpaneel
+kan. Hetzelfde geldt voor elke toekomstige migratie: dit is een
+eigenschap van de volgorde, niet van dit spoor.
+
+De stappen staan daarom nu zo:
+
+1. **Build the new backend image and make sure postgres is up** --
+   `docker compose build backend` bouwt en tagt dezelfde image die `up
+   --build` tagde, maar vervangt de draaiende container niet.
+   `docker compose up -d --wait postgres` start postgres expliciet: de
+   migratiestap gebruikt `--no-deps` en kreeg die afhankelijkheid tot nu
+   toe stilzwijgend van de `up -d --build backend` die hier stond.
+2. **Run database migrations** -- inhoudelijk onveranderd: nog steeds
+   `docker compose run --rm -T --no-deps backend` over `migrations/0*.py`
+   in bestandsnaamvolgorde, op de zojuist gebouwde image, met dezelfde
+   `env_file`-regels en dus dezelfde database-URL als de service zelf.
+   Alleen de plaats in de volgorde is veranderd.
+3. **Start the new backend image** -- `docker compose up -d backend`.
+   Pas hier gaat de nieuwe code live, op een schema dat er al bij past.
+
+Mislukt stap 2, dan draait de oude backend nog gewoon: er is dan niets
+omgeschakeld en de rollback-tak onderaan het bestand (image `:previous`
+terugtaggen) doet wat hij altijd deed.

@@ -584,7 +584,7 @@ def test_talentpool_confirm_creates_new_candidate_with_no_source_url(patch_publi
     source_url required for candidates created via this channel."""
     from models.schemas import TalentpoolConfirmRequest
     pending = {"id": 1, "email": "new@example.com", "scope": "matching_and_contact",
-               "source": "blog_cta", "job_id": None}
+               "source": "blog_cta", "job_id": None, "job_alerts": False}
     db = _PublicDB(pending_row=pending, existing_candidate=None)
     router = patch_public_router(db)
     result = asyncio.run(router.talentpool_confirm(request=_fake_request(), data=TalentpoolConfirmRequest(token="tok")))
@@ -603,7 +603,7 @@ def test_talentpool_confirm_updates_existing_candidate_preserving_other_basis(pa
     silently overwritten) but still gets the consent columns recorded."""
     from models.schemas import TalentpoolConfirmRequest
     pending = {"id": 1, "email": "existing@example.com", "scope": "matching_only",
-               "source": "kandidaten_page", "job_id": None}
+               "source": "kandidaten_page", "job_id": None, "job_alerts": False}
     db = _PublicDB(
         pending_row=pending,
         existing_candidate={"id": 99, "lawful_basis": "gerechtvaardigd_belang"},
@@ -615,7 +615,14 @@ def test_talentpool_confirm_updates_existing_candidate_preserving_other_basis(pa
     _, args = update_calls[0]
     # args: now, until, scope, source, set_lawful_basis, candidate_id
     assert args[4] is False  # set_lawful_basis=False -- existing basis untouched
-    assert args[5] == 99
+    # WS3c (migrations/041) inserted two parameters between set_lawful_basis
+    # and the candidate id: $6 is_referral and $7 wants_alerts. The
+    # candidate id is the LAST positional argument either way, so assert on
+    # that rather than on a fixed index that moves whenever the SET list
+    # grows.
+    assert args[5] is False   # is_referral -- source is 'kandidaten_page'
+    assert args[6] is False   # wants_alerts -- job_alerts was not ticked
+    assert args[-1] == 99
 
 
 def test_talentpool_confirm_never_flips_portal_registratie_lawful_basis(patch_public_router):
@@ -624,7 +631,7 @@ def test_talentpool_confirm_never_flips_portal_registratie_lawful_basis(patch_pu
     same rule as the portal endpoint, not just 'any other basis'."""
     from models.schemas import TalentpoolConfirmRequest
     pending = {"id": 2, "email": "portal@example.com", "scope": "matching_only",
-               "source": "kandidaten_page", "job_id": None}
+               "source": "kandidaten_page", "job_id": None, "job_alerts": False}
     db = _PublicDB(
         pending_row=pending,
         existing_candidate={"id": 100, "lawful_basis": "portal_registratie"},
@@ -640,7 +647,7 @@ def test_talentpool_confirm_never_flips_portal_registratie_lawful_basis(patch_pu
 def test_talentpool_confirm_marks_the_pending_request_confirmed(patch_public_router):
     from models.schemas import TalentpoolConfirmRequest
     pending = {"id": 5, "email": "new2@example.com", "scope": "matching_only",
-               "source": "kandidaten_page", "job_id": None}
+               "source": "kandidaten_page", "job_id": None, "job_alerts": False}
     db = _PublicDB(pending_row=pending, existing_candidate=None)
     router = patch_public_router(db)
     asyncio.run(router.talentpool_confirm(request=_fake_request(), data=TalentpoolConfirmRequest(token="tok")))
@@ -657,7 +664,7 @@ def test_talentpool_confirm_marks_the_pending_request_confirmed(patch_public_rou
 def test_talentpool_confirm_with_still_open_job_creates_match_and_returns_applied_job(patch_public_router):
     from models.schemas import TalentpoolConfirmRequest
     pending = {"id": 6, "email": "applicant@example.com", "scope": "matching_only",
-               "source": "vacancy_apply", "job_id": 55}
+               "source": "vacancy_apply", "job_id": 55, "job_alerts": False}
     db = _PublicDB(
         pending_row=pending, existing_candidate=None,
         job_row={"id": 55, "title": "Senior Embedded C++ Engineer"},
@@ -678,7 +685,7 @@ def test_talentpool_confirm_with_still_open_job_creates_match_and_returns_applie
 def test_talentpool_confirm_with_no_job_id_returns_applied_job_none(patch_public_router):
     from models.schemas import TalentpoolConfirmRequest
     pending = {"id": 7, "email": "plain@example.com", "scope": "matching_only",
-               "source": "kandidaten_page", "job_id": None}
+               "source": "kandidaten_page", "job_id": None, "job_alerts": False}
     db = _PublicDB(pending_row=pending, existing_candidate=None)
     router = patch_public_router(db)
     result = asyncio.run(
@@ -695,7 +702,7 @@ def test_talentpool_confirm_with_job_closed_since_optin_returns_applied_job_none
     eligible, and must say so via applied_job=None rather than an error."""
     from models.schemas import TalentpoolConfirmRequest
     pending = {"id": 8, "email": "late@example.com", "scope": "matching_only",
-               "source": "vacancy_apply", "job_id": 55}
+               "source": "vacancy_apply", "job_id": 55, "job_alerts": False}
     db = _PublicDB(pending_row=pending, existing_candidate=None, job_row=None)
     router = patch_public_router(db)
     result = asyncio.run(

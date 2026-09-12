@@ -125,7 +125,8 @@ def test_talentpool_reminder_handles_empty_full_name():
         "talentpool_reminder", {"full_name": "", "link": "https://gsprecruitment.nl/kandidaten#talentpoolOptin"}, "nl",
     )
     assert "None" not in text
-    assert "Beste ,\n\n" in text
+    assert "Beste,\n\n" in text
+    assert "Beste ,\n\n" not in text
 
 
 # ── client_team_invite ────────────────────────────────────────────────────
@@ -290,3 +291,139 @@ def test_html_never_carries_none_literal_for_missing_full_name():
         "talentpool_reminder", {"full_name": None, "link": "https://x/y"}, "nl",
     )
     assert ">None<" not in html
+
+
+# ── aanhef: _greeting() (reparatieronde) ──────────────────────────────────
+#
+# Eén helper voor elke template die iemand aanspreekt, omdat er twee
+# manieren waren om een onzinnige aanhef te krijgen: een lege naam
+# ("Beste ,") en een naam die in werkelijkheid een e-mailadres is
+# ("Beste jan@example.com,", want routers/public.py vult
+# candidates.full_name met het adres als een talentpool-opt-in geen naam
+# heeft en de kolom NOT NULL is).
+
+_GREETED_TEMPLATES = {
+    "verify_email": {"link": "https://gsprecruitment.nl/verify", "ttl_hours": 24},
+    "reset_password": {"link": "https://gsprecruitment.nl/reset", "ttl_hours": 2},
+    "talentpool_reminder": {"link": "https://gsprecruitment.nl/kandidaten"},
+    "client_team_invite": {"link": "https://gsprecruitment.nl/verify", "inviter_company": "Acme B.V."},
+    "referral_confirm": {
+        "link": "https://gsprecruitment.nl/talentpool-confirm", "ttl_hours": 24,
+        "referred_by": "Piet de Vries", "date_found": "2026-09-11",
+    },
+    "dormant_warning": {
+        "link": "https://gsprecruitment.nl/candidate/", "deadline": "2026-10-12",
+        "last_login": "2025-04-01",
+    },
+    "job_alert": {
+        "jobs": [{"title": "Embedded Software Engineer", "location": "Eindhoven", "url": "https://x"}],
+        "unsubscribe_link": "https://gsprecruitment.nl/unsubscribe",
+    },
+}
+
+
+@pytest.mark.parametrize("name", sorted(_GREETED_TEMPLATES))
+@pytest.mark.parametrize("lang,greeting", [("nl", "Beste"), ("en", "Dear")])
+def test_every_greeting_template_drops_an_email_shaped_name(name, lang, greeting):
+    """Een e-mailadres is geen naam. Geen enkele template mag iemand met
+    zijn eigen adres aanspreken, in de platte tekst noch in de HTML."""
+    ctx = dict(_GREETED_TEMPLATES[name], full_name="jan.jansen@example.com")
+    _subject, text, html = email_templates.render(name, ctx, lang)
+    assert f"{greeting},\n" in text or f"{greeting},</p>" in html
+    assert "jan.jansen@example.com" not in text
+    assert "jan.jansen@example.com" not in html
+    assert f"{greeting} ," not in text
+
+
+@pytest.mark.parametrize("name", sorted(_GREETED_TEMPLATES))
+@pytest.mark.parametrize("lang,greeting", [("nl", "Beste"), ("en", "Dear")])
+def test_every_greeting_template_drops_an_empty_name(name, lang, greeting):
+    ctx = dict(_GREETED_TEMPLATES[name], full_name="")
+    _subject, text, html = email_templates.render(name, ctx, lang)
+    assert f"{greeting},\n" in text
+    assert f"{greeting} ," not in text
+    assert f"<p>{greeting},</p>" in html
+    assert "None" not in text
+
+
+@pytest.mark.parametrize("name", sorted(_GREETED_TEMPLATES))
+@pytest.mark.parametrize("lang,greeting", [("nl", "Beste"), ("en", "Dear")])
+def test_every_greeting_template_keeps_a_normal_name(name, lang, greeting):
+    ctx = dict(_GREETED_TEMPLATES[name], full_name="Jan Jansen")
+    _subject, text, html = email_templates.render(name, ctx, lang)
+    assert f"{greeting} Jan Jansen," in text
+    assert f"<p>{greeting} Jan Jansen,</p>" in html
+
+
+def test_greeting_escapes_the_name_in_html_but_not_in_text():
+    ctx = dict(_GREETED_TEMPLATES["verify_email"], full_name="Jan <script>")
+    _subject, text, html = email_templates.render("verify_email", ctx, "nl")
+    assert "Beste Jan <script>," in text
+    assert "<script>" not in html
+    assert "Jan &lt;script&gt;," in html
+
+
+def test_greeting_ignores_a_name_that_is_only_whitespace():
+    ctx = dict(_GREETED_TEMPLATES["verify_email"], full_name="   ")
+    _subject, text, _html = email_templates.render("verify_email", ctx, "nl")
+    assert "Beste,\n" in text
+
+
+# ── datums: _format_date() (reparatieronde) ───────────────────────────────
+
+def test_dormant_warning_writes_dates_the_way_people_write_them():
+    """ISO-datums zijn een technisch formaat; deze mail gaat naar een
+    consument. Geen locale-afhankelijkheid: de maandnamen staan in een
+    eigen tabel in de module."""
+    _subject, text, html = email_templates.render(
+        "dormant_warning",
+        {"full_name": "Jan", "link": "https://x", "deadline": "2026-10-12", "last_login": "2025-04-01"},
+        "nl",
+    )
+    assert "12 oktober 2026" in text and "12 oktober 2026" in html
+    assert "1 april 2025" in text
+    assert "2026-10-12" not in text and "2026-10-12" not in html
+
+
+def test_dormant_warning_dates_in_english():
+    _subject, text, _html = email_templates.render(
+        "dormant_warning",
+        {"full_name": "Jan", "link": "https://x", "deadline": "2026-10-12", "last_login": "2025-04-01"},
+        "en",
+    )
+    assert "12 October 2026" in text
+    assert "1 April 2025" in text
+
+
+def test_bilingual_render_formats_the_same_date_per_language():
+    """render() zonder taal zet NL en EN in één bericht. Dezelfde
+    ctx-waarde moet dan twee keer anders worden opgemaakt -- dat kan
+    alleen als het opmaken hier gebeurt en niet bij de aanroeper."""
+    _subject, text, _html = email_templates.render(
+        "dormant_warning",
+        {"full_name": "Jan", "link": "https://x", "deadline": "2026-10-12", "last_login": ""},
+        None,
+    )
+    assert "12 oktober 2026" in text
+    assert "12 October 2026" in text
+
+
+def test_referral_confirm_formats_date_found():
+    _subject, text, _html = email_templates.render(
+        "referral_confirm",
+        dict(_GREETED_TEMPLATES["referral_confirm"], full_name="Jan"),
+        "nl",
+    )
+    assert "11 september 2026" in text
+    assert "2026-09-11" not in text
+
+
+def test_format_date_leaves_an_unreadable_value_alone():
+    """Deze module rendert wat zij krijgt: een rare datum mag nooit de
+    mail tegenhouden die iemands account moet redden."""
+    _subject, text, _html = email_templates.render(
+        "dormant_warning",
+        {"full_name": "Jan", "link": "https://x", "deadline": "zo snel mogelijk", "last_login": ""},
+        "nl",
+    )
+    assert "zo snel mogelijk" in text

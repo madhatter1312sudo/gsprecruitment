@@ -27,6 +27,7 @@ import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 
+from core import retention
 from core.database import fetch_one, execute
 from core.deps import get_current_user
 from core.mfa import (
@@ -261,7 +262,7 @@ async def mfa_verify(request: Request, data: MfaVerifyRequest):
     # FIX (security-audit FIX FIRST, retention-kolommen branch, blocking
     # point 7): no more try/except swallowing this -- see login()'s
     # updated comment for why.
-    await execute("UPDATE users SET last_login_at = NOW() WHERE id = $1", user_id)
+    await execute(retention.LOGIN_STAMP_SQL, user_id)
 
     return _build_token_response(row)
 
@@ -299,6 +300,6 @@ async def mfa_recovery(request: Request, data: MfaRecoveryRequest):
     await _audit("mfa_recovery_code_used", user_id, user_id, {"codes_remaining": len(remaining)})
     # WS-E.8 follow-up -- see mfa_verify() above (blocking point 7: no more
     # try/except here either).
-    await execute("UPDATE users SET last_login_at = NOW() WHERE id = $1", user_id)
+    await execute(retention.LOGIN_STAMP_SQL, user_id)
 
     return _build_token_response(row)

@@ -504,6 +504,54 @@
         "title": "AdminJobUpdate",
         "type": "object"
       },
+      "AdminReferralCreate": {
+        "description": "Admin: POST /api/v1/admin/candidates/referral.\n\nLegt een door een mens aangedragen referral vast (SOP \u00a71.3,\n`lawful_basis = 'toestemming_referral'`) en stuurt de betrokkene \u00e9\u00e9n\nbevestigingsmail met het Art. 14-blok in de referral-variant. Er\ngebeurt verder niets met de gegevens tot de persoon zelf bevestigt.\n\n`referred_by` is intern: de naam of relatie van degene die aandroeg,\nzoals het Art. 14-blok die noemt (\"via een aanbeveling van ...\"). Het\nstaat daarmee w\u00e9l in de mail aan de betrokkene -- dat is de bedoeling\nvan art. 14 (de bron noemen) -- maar nergens in Telegram of een\nlogregel.\n\n`evidence` is verplicht, net als bij AdminTalentpoolConsentUpdate en\nAdminSpecPresentationConsentUpdate hierboven, en om een sterkere\nreden dan daar (CR R8). Dit endpoint legt toestemming vast die een\nDERDE namens de betrokkene claimt -- de referrer zegt dat hij die\nheeft, de betrokkene zelf heeft op dit moment nog niets gezegd. Art.\n7 lid 1 legt de bewijslast voor die toestemming bij ons, en het was\nvan de drie toestemmingsendpoints juist het enige waar een beheerder\nniets hoefde op te schrijven. Kort volstaat (\"mondeling bevestigd\ndoor X op 3 september, hij heeft haar gevraagd\"), zolang er \u00edets\nstaat.\n\n`evidence` en `note` zijn allebei vrije tekst van de beheerder en\ngaan nooit ongefilterd het audit_log in: routers/admin.py haalt ze\neerst door privacy.redact_emails().",
+        "properties": {
+          "email": {
+            "format": "email",
+            "title": "Email",
+            "type": "string"
+          },
+          "evidence": {
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Evidence",
+            "type": "string"
+          },
+          "full_name": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Full Name",
+            "type": "string"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "referred_by": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Referred By",
+            "type": "string"
+          }
+        },
+        "required": [
+          "full_name",
+          "email",
+          "referred_by",
+          "evidence"
+        ],
+        "title": "AdminReferralCreate",
+        "type": "object"
+      },
       "AdminSpecPresentationConsentUpdate": {
         "description": "Admin: PATCH /api/v1/admin/candidates/{id}/spec-presentation-consent.\nRecords (or withdraws) the candidate's consent for\n`routers/client.py` to show their `full_name` to clients for one\nspecific role -- website/privacy.html's \"toestemming voor een\nspecifieke rol\". Modelled on AdminTalentpoolConsentUpdate above:\n`evidence` is mandatory (this endpoint records consent an admin has\nevidence for -- a signed form, an e-mail on file -- not a live tick\nof a box), and `job_id` is mandatory when granting (consent=True) so\nthe grant is always tied to the role it was given for, per\nmigrations/035_spec_presentation_consent_job.py. `job_id` is ignored\n(and cleared) on withdrawal (consent=False).",
         "properties": {
@@ -1000,6 +1048,20 @@
           }
         },
         "title": "CandidateDashboard",
+        "type": "object"
+      },
+      "CandidateJobAlertsUpdate": {
+        "description": "Candidate portal: PUT /api/v1/candidate/job-alerts.",
+        "properties": {
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "enabled"
+        ],
+        "title": "CandidateJobAlertsUpdate",
         "type": "object"
       },
       "CandidatePortalProfile": {
@@ -7794,6 +7856,70 @@
         ]
       }
     },
+    "/api/public/unsubscribe": {
+      "post": {
+        "description": "Meld af voor vacature-alerts (`scope='alerts'`) of voor elk contact\n(`scope='all'`). Zie het blok hierboven voor de twee aanroepers en\nvoor waarom het antwoord altijd identiek is.\n\nBody (optioneel, JSON): `{\"token\": \"...\", \"scope\": \"alerts\"|\"all\"}` --\nzie models.schemas.UnsubscribeRequest voor de vorm. Beide velden\nmogen ook als queryparameter (`?token=...&scope=...`), voor de\none-click-header.\n\nE\u00e9n asymmetrie tussen die twee wegen, met opzet: `scope='all'` is\nalleen bereikbaar met het token uit het URL-FRAGMENT van de\nvoettekstlink, in de body. Het token uit de List-Unsubscribe-URL\nlevert altijd `alerts`, ongeacht body, querystring of opgegeven\nscope -- zie het blok hierboven voor waarom dat aan het token hangt en\nniet aan de plek in het verzoek.",
+        "operationId": "unsubscribe_api_public_unsubscribe_post",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Token"
+            }
+          },
+          {
+            "in": "query",
+            "name": "scope",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Scope"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Unsubscribe",
+        "tags": [
+          "public-talentpool"
+        ]
+      }
+    },
     "/api/v1/admin/activities": {
       "get": {
         "operationId": "list_activities_api_v1_admin_activities_get",
@@ -8614,6 +8740,51 @@
           }
         ],
         "summary": "List All Candidates",
+        "tags": [
+          "admin-portal"
+        ]
+      }
+    },
+    "/api/v1/admin/candidates/referral": {
+      "post": {
+        "description": "Legt een aangedragen referral vast en stuurt de betrokkene \u00e9\u00e9n\nbevestigingsmail (Art. 14-blok, referral-variant) met een\none-time-link.\n\nWeigert in twee gevallen, allebei fail-closed:\n  - het adres staat op de suppressielijst (STOP ontvangen: nooit meer\n    mailen, op geen enkele grondslag -- SOP \u00a73.3);\n  - er bestaat al een `candidates`-rij met dit adres. Dan is er al een\n    grondslag en een geschiedenis voor deze persoon, en die mag een\n    referral-invoer niet overschrijven (dezelfde redenering als\n    privacy.should_set_talentpool_lawful_basis(): een bestaande\n    grondslag wordt nooit stilletjes vervangen).\n\nAnders dan de publieke opt-in geeft dit endpoint die twee gevallen w\u00e9l\nals fout terug: de aanroeper is een ingelogde beheerder die de\nbetreffende persoon zelf voor zich heeft, geen anonieme bezoeker, dus\ner valt hier niets te enumereren wat hij niet al mag zien -- en een\nstille 201 zou hem laten denken dat de mail eruit ging.",
+        "operationId": "admin_create_referral_api_v1_admin_candidates_referral_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdminReferralCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Admin Create Referral",
         "tags": [
           "admin-portal"
         ]
@@ -12055,6 +12226,51 @@
         ]
       }
     },
+    "/api/v1/candidate/job-alerts": {
+      "put": {
+        "description": "Zet vacature-alerts aan of uit voor de ingelogde kandidaat.",
+        "operationId": "update_job_alerts_api_v1_candidate_job_alerts_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CandidateJobAlertsUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Update Job Alerts",
+        "tags": [
+          "candidate-portal"
+        ]
+      }
+    },
     "/api/v1/candidate/matches": {
       "get": {
         "description": "Get match list for the candidate with pagination.",
@@ -13770,7 +13986,7 @@
     },
     "/api/v1/gdpr/export": {
       "get": {
-        "description": "Art. 15/20 \u2014 export all personal data we hold on the requesting user.\n\nCovers the same table set erase_person() erases: users,\ncandidate_profiles, candidates, plus everything keyed off the resolved\ncandidate id (matches/saved_jobs) and off the account itself\n(outreach addressed to this email, quiz/contact submissions, prior\ndata_subject_requests).",
+        "description": "Art. 15/20 \u2014 export all personal data we hold on the requesting user.\n\nCovers the same table set erase_person() erases: users,\ncandidate_profiles, candidates, plus everything keyed off the resolved\ncandidate id (matches/saved_jobs) and off the account itself\n(outreach addressed to this email, quiz/contact submissions, job\nalerts received, prior data_subject_requests).",
         "operationId": "export_my_data_api_v1_gdpr_export_get",
         "responses": {
           "200": {

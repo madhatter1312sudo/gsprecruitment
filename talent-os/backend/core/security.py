@@ -35,8 +35,21 @@ def hash_token(token: str) -> str:
     to the database (users.verification_token_hash) -- the raw token
     exists only in the outbound e-mail and the URL the recipient clicks,
     same principle as password hashing above, just a fast digest since
-    this is a high-entropy random value, not a low-entropy user secret."""
-    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+    this is a high-entropy random value, not a low-entropy user secret.
+
+    `errors="ignore"` is not cosmetic. Every token this function ever
+    hashes is a `secrets.token_urlsafe()` value, so pure ASCII -- but the
+    string reaching it can come straight out of a public JSON body
+    (routers/public.py's unsubscribe endpoint), and a JSON body may carry
+    a lone surrogate (\\udcff), which a plain .encode("utf-8") raises
+    UnicodeEncodeError on. In that endpoint the whole point is that every
+    caller gets the same generic 200: a 500 on one specific body shape is
+    the single answer that differs, and therefore an oracle. Dropping the
+    unencodable code points cannot change the digest of any string that
+    could be encoded before, so no existing token hashes differently; it
+    only turns "crash" into "hash of something that will simply not
+    match"."""
+    return hashlib.sha256(token.encode("utf-8", "ignore")).hexdigest()
 
 
 def verify_webhook_signature(payload_body: bytes, signature_header: str, secret: str) -> bool:

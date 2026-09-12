@@ -162,13 +162,46 @@ CANDIDATE_NO_REACTION_GUARD_SQL = _CANDIDATE_ENGAGEMENT_SIGNALS_SQL + _CANDIDATE
 # (services/scheduler.py generate_retention_review()) reads this to show
 # "verstreken sinds" per person without recomputing the period in Python
 # and risking it drifting from the WHERE clause that actually enforces it.
-SOURCED_NO_RESPONSE_SQL = """
+_SOURCED_NO_RESPONSE_BASE_SQL = """
     SELECT c.id, c.email, c.date_found + INTERVAL '3 months' AS term_expired_op
       FROM candidates c WHERE c.lawful_basis = $1
       AND c.status = 'sourced' AND c.date_found IS NOT NULL
       AND c.date_found <= (CURRENT_DATE - INTERVAL '3 months')
       AND c.consent_withdrawn_at IS NULL AND c.deleted_at IS NULL AND c.email IS NOT NULL
-""" + CANDIDATE_NO_REACTION_GUARD_SQL
+"""
+
+SOURCED_NO_RESPONSE_SQL = _SOURCED_NO_RESPONSE_BASE_SQL + CANDIDATE_NO_REACTION_GUARD_SQL
+
+# WS3b: referral had, tot dit spoor, letterlijk SOURCED_NO_RESPONSE_SQL als
+# selector -- alleen de `lawful_basis`-parameter ('toestemming_referral' in
+# plaats van 'gerechtvaardigd_belang') verschilde. Dezelfde bewaartermijn
+# (3 maanden na `date_found`, VERWERKINGSREGISTER §1.4 rij 7 / SOP §6 rij 7)
+# is ook precies wat blijft; wat verandert is wie er als "geen reactie"
+# telt.
+#
+# Een referral krijgt sinds WS3b een eigen bevestigingsmail met het Art.
+# 14-blok in de referral-variant (services/email_templates.py
+# `referral_confirm`, aangemaakt door POST /api/v1/admin/candidates/
+# referral). Klikt die persoon zelf op de bevestigingslink, dan stempelt
+# routers/public.py's talentpool_confirm() `referral_confirmed_at`. Dat is
+# per definitie een reactie van de betrokkene zelf: het is de enige
+# handeling die deze flow van hem vraagt, en de meest expliciete die er
+# bestaat. Zonder de regel hieronder zou zo iemand drie maanden na
+# `date_found` gewoon op de maandelijkse beoordelingslijst belanden terwijl
+# hij nota bene toestemming had bevestigd -- exact de fout die
+# CANDIDATE_NO_REACTION_GUARD_SQL's eigen commentaar hierboven beschrijft
+# ("status = 'sourced' alleen is nooit bewijs dat niemand heeft
+# gereageerd"), alleen voor een signaal dat vóór WS3b nog niet bestond.
+#
+# Bewust alleen op de referral-rij en niet in de gedeelde guard: de kolom
+# wordt uitsluitend door de referral-flow geschreven, dus voor elke andere
+# categorie zou hij altijd NULL zijn (geen effect) of, erger, per ongeluk
+# betekenis krijgen als een ander pad hem ooit gaat vullen.
+REFERRAL_NO_RESPONSE_SQL = (
+    _SOURCED_NO_RESPONSE_BASE_SQL
+    + "      AND c.referral_confirmed_at IS NULL\n"
+    + CANDIDATE_NO_REACTION_GUARD_SQL
+)
 
 # Same "the status column isn't kept in sync" problem on the prospect
 # side: routers/outreach.py never writes back to client_prospects.status
@@ -208,6 +241,45 @@ TALENTPOOL_EXPIRED_SQL = """
       AND c.consent_talentpool_until <= (NOW() - INTERVAL '30 days')
       AND c.deleted_at IS NULL AND c.email IS NOT NULL
 """ + CANDIDATE_NO_REACTION_GUARD_SQL
+
+# ── Wie een vacature-alert zou kunnen ontvangen (WS3c) ──────────────────
+#
+# Alles behalve de twee alert-kolommen zelf: "zou deze kandidaat een alert
+# kunnen krijgen als hij zich aanmeldde". Hier en niet in
+# services/scheduler.py, hoewel job_alert_job de grootste lezer is: dit is
+# een toestemmings- en bewaartermijnvoorwaarde, hij deelt zijn
+# belangrijkste clausule met TALENTPOOL_EXPIRED_SQL hierboven, en de
+# tweede lezer is routers/candidate.py's portaalschakelaar -- die haalde
+# hem tot nu toe uit services/scheduler.py en sleepte daarmee de hele
+# scheduler (APScheduler incluis) een router-import in.
+#
+# Tabelalias `c`, in beide lezers.
+#
+# De portaalschakelaar leest hem om dezelfde reden als de job: hij gaf
+# `enabled: true` terug aan iemand die de selector nooit oppikt (een
+# gesourcete kandidaat zonder `consent_scope`, bijvoorbeeld), en het
+# portaal kon dat verschil niet zien, dus stond er "aan" bij iemand die
+# nooit iets zou ontvangen.
+#
+# De laatste twee regels zijn de toestemmingsgeldigheid. `consent_scope`
+# en `consent_withdrawn_at` zeggen alleen iets over toestemming die ooit
+# is gegeven en niet actief is ingetrokken -- niet of hij nog geldt.
+# Talentpool-toestemming loopt na 12 maanden af (migrations/030,
+# TALENTPOOL_EXPIRED_SQL hierboven) en verloopt stil: geen kolom
+# verandert, `consent_scope` blijft staan. Zonder die clausule mailt de
+# job dagelijks naar iemand wiens toestemming al een jaar verlopen is en
+# die daarna zelfs op de beoordelingslijst staat. Wie
+# `lawful_basis = 'portal_registratie'` heeft, valt erbuiten omdat zijn
+# grondslag zijn eigen account is (art. 13), niet die toestemming, en die
+# kent geen einddatum.
+JOB_ALERT_ELIGIBILITY_SQL = """
+       c.consent_withdrawn_at IS NULL
+       AND c.deleted_at IS NULL
+       AND c.email IS NOT NULL
+       AND (c.consent_scope = 'matching_and_contact' OR c.lawful_basis = 'portal_registratie')
+       AND (c.lawful_basis = 'portal_registratie'
+            OR (c.consent_talentpool_until IS NOT NULL AND c.consent_talentpool_until > NOW()))
+"""
 
 # migrations/032_retention_anchor_columns.py adds candidates.rejected_at,
 # stamped by the only two write paths onto candidates.status
@@ -321,12 +393,40 @@ PROSPECT_RESPONDING_SQL = f"""
 # satisfy this condition, so no account (dormant however long) reaches
 # the review list without one -- the selector fails closed rather than
 # silently keeping the pre-fix behaviour of ignoring the warning.
+#
+# Tweede reparatieronde (B3): `dormant_warning_skipped_at` telt hier
+# gelijk met `dormant_warning_sent_at`, met dezelfde 30 dagen ertussen.
+# Een account waarvan het adres op de blokkeerlijst staat krijgt géén
+# waarschuwingsmail -- STOP is STOP -- maar een STOP is een verbod op
+# berichten, geen toestemming om de gegevens onbeperkt te bewaren. Zonder
+# deze tweede tak bleef zo'n account voor altijd buiten deze lijst, en
+# daarmee buiten de enige plek waar iemand ooit besluit het te wissen.
+# services/scheduler.py's dormant_account_warning_job stempelt die kolom
+# mailloos, met een audit-regel in plaats van een bericht.
+#
+# Derde reparatieronde (C1): allebei de stempels moeten ook NIEUWER zijn
+# dan `last_login_at`. Een stempel van 30 dagen oud is op zichzelf geen
+# bewijs dat er in DEZE inactiviteitscyclus is gewaarschuwd. Gewaarschuwd
+# op t+17 maanden, daarna een login op t+17m+5d: die login begint een
+# nieuwe cyclus (_DORMANT_WARNING_WHERE_SQL vergelijkt precies zo) en de
+# oude stempel blijft staan, want LOGIN_STAMP_SQL nult hem bewust niet.
+# Slaapt de persoon daarna opnieuw 18 maanden en gaat de nieuwe
+# waarschuwing om welke reden dan ook niet uit -- schakelaar uit,
+# dagplafond, blokkeerlijst, onbezorgbaar adres -- dan kwalificeerde dit
+# account op de oude stempel, en landde het op de beoordelingslijst met
+# een notice die over een vorige cyclus ging. De vergelijking hieronder
+# is dezelfde als die van de waarschuwingsselector, zodat de twee helften
+# van de belofte hetzelfde begrip "cyclus" hanteren.
 PORTAL_ACCOUNT_INACTIVE_SQL = f"""
     SELECT id, email, last_login_at + INTERVAL '18 months' AS term_expired_op
       FROM users u WHERE u.role = 'candidate' AND u.deleted_at IS NULL
       AND u.last_login_at IS NOT NULL AND u.last_login_at <= (NOW() - INTERVAL '18 months')
-      AND u.dormant_warning_sent_at IS NOT NULL
-      AND u.dormant_warning_sent_at < (NOW() - INTERVAL '30 days')
+      AND ((u.dormant_warning_sent_at IS NOT NULL
+            AND u.dormant_warning_sent_at > u.last_login_at
+            AND u.dormant_warning_sent_at < (NOW() - INTERVAL '30 days'))
+           OR (u.dormant_warning_skipped_at IS NOT NULL
+               AND u.dormant_warning_skipped_at > u.last_login_at
+               AND u.dormant_warning_skipped_at < (NOW() - INTERVAL '30 days')))
       AND NOT EXISTS (
           SELECT 1 FROM candidate_profiles cpf
           JOIN candidates c ON c.id = cpf.candidate_id
@@ -334,6 +434,125 @@ PORTAL_ACCOUNT_INACTIVE_SQL = f"""
             AND NOT (TRUE{_CANDIDATE_ENGAGEMENT_SIGNALS_SQL})
       )
 """
+
+# ── Waarschuwing vooraf bij een slapend account (WS3b) ───────────────────
+#
+# De andere helft van PORTAL_ACCOUNT_INACTIVE_SQL hierboven, en daarom
+# staat hij hier ernaast en niet in services/scheduler.py (CR R7): die
+# module haalde hier een private constante (_CANDIDATE_ENGAGEMENT_
+# SIGNALS_SQL) vandaan om er zijn eigen selector mee te bouwen, waarmee
+# de twee helften van dezelfde belofte in twee bestanden stonden en
+# alleen de een een reden had om mee te veranderen.
+#
+# `dormant_warning_sent_at` gates die selector: een account komt pas op
+# de maandelijkse beoordelingslijst als de waarschuwing hieronder
+# daadwerkelijk is verstuurd en 30 dagen oud is. services/scheduler.py's
+# dormant_account_warning_job is wat die kolom stempelt.
+#
+# Ondergrens 17 maanden, GEEN bovengrens (besluit van de eigenaar). Een
+# venster van precies één maand breed laat iedereen die op de dag van
+# invoering al langer dan 18 maanden slaapt permanent boven het venster
+# vallen: nooit gewaarschuwd, dus nooit beoordeeld, dus de publiek
+# beloofde 18 maanden wordt voor precies die achterstand nooit gehaald.
+# Zonder bovengrens loopt die achterstand in één ronde mee, met dezelfde
+# 30 dagen notice als iedereen.
+#
+# Twee keer waarschuwen kan daardoor niet: `dormant_warning_sent_at IS
+# NULL OR < last_login_at` betekent "nog nooit gewaarschuwd in deze
+# inactiviteitscyclus" -- logt iemand in, dan schuift last_login_at
+# vooruit en begint een nieuwe cyclus; doet hij niets, dan blijft de
+# stempel nieuwer dan zijn laatste login en valt hij hier morgen niet
+# opnieuw uit. De LIMIT is dus een dagplafond op een aflopende
+# achterstand, geen filter dat iemand structureel overslaat.
+#
+# `dormant_warning_skipped_at` doet hetzelfde voor de mailloze afhandeling
+# van een geblokkeerd adres (B3), met exact dezelfde vergelijking en dus
+# dezelfde cyclus. Zonder die regel bleef een geblokkeerd account elke dag
+# opnieuw geselecteerd, vooraan onder `ORDER BY last_login_at ASC`, en
+# hield het permanent een plek onder het dagplafond bezet: bij een paar
+# honderd zulke accounts bereikt de job niemand anders meer.
+#
+# `dormant_warning_attempts < 3` doet hetzelfde voor een adres dat
+# structureel niet te bezorgen is (B4). Een mislukte verzending stempelt
+# `dormant_warning_sent_at` met opzet niet -- anders zou
+# PORTAL_ACCOUNT_INACTIVE_SQL 30 dagen later een account op de
+# beoordelingslijst zetten waar nooit een waarschuwing over aankwam -- en
+# zonder teller betekent dat: elke dag opnieuw proberen, elke dag dezelfde
+# plek onder het plafond. Na drie pogingen valt de rij eruit; elke login
+# zet de teller terug op 0 (LOGIN_STAMP_SQL hieronder).
+#
+# Derde reparatieronde (C2): tussen twee pogingen zit voortaan
+# DORMANT_WARNING_RETRY_DAYS. Zonder die wachttijd zijn drie mislukkingen
+# drie opeenvolgende dagen, en een storing bij de e-maildienstverlener van
+# een etmaal of twee verklaart daarmee een werkend adres onbezorgbaar --
+# met sinds C2 een echt gevolg: de derde mislukking stempelt
+# `dormant_warning_skipped_at`, en 30 dagen later staat het account op de
+# beoordelingslijst. Dit is de hele backoff: een vast interval, geen
+# oplopende reeks, geen extra kolomlogica. Drie pogingen beslaan daarmee
+# minstens zes dagen.
+DORMANT_WARNING_MAX_ATTEMPTS = 3
+DORMANT_WARNING_RETRY_DAYS = 3
+
+_DORMANT_WARNING_WHERE_SQL = f"""
+       u.role = 'candidate' AND u.deleted_at IS NULL AND u.email IS NOT NULL
+       AND u.last_login_at IS NOT NULL
+       AND u.last_login_at <= (NOW() - INTERVAL '17 months')
+       AND (u.dormant_warning_sent_at IS NULL OR u.dormant_warning_sent_at < u.last_login_at)
+       AND (u.dormant_warning_skipped_at IS NULL OR u.dormant_warning_skipped_at < u.last_login_at)
+       AND u.dormant_warning_attempts < {DORMANT_WARNING_MAX_ATTEMPTS}
+       AND (u.dormant_warning_attempt_at IS NULL
+            OR u.dormant_warning_attempt_at < (NOW() - INTERVAL '{DORMANT_WARNING_RETRY_DAYS} days'))
+       AND NOT EXISTS (
+           SELECT 1 FROM candidate_profiles cpf
+           JOIN candidates c ON c.id = cpf.candidate_id
+           WHERE cpf.user_id = u.id
+             AND NOT (TRUE{_CANDIDATE_ENGAGEMENT_SIGNALS_SQL})
+       )
+"""
+
+# $1 = dagplafond. Oudste eerst: wie het langst slaapt, is het langst
+# over tijd en gaat voor.
+DORMANT_WARNING_SQL = f"""
+    SELECT u.id, u.email, u.full_name, u.last_login_at
+      FROM users u
+     WHERE {_DORMANT_WARNING_WHERE_SQL}
+     ORDER BY u.last_login_at ASC
+     LIMIT $1
+"""
+
+# Hetzelfde WHERE, zonder plafond: het aantal dat vandaag aan de beurt is.
+# Zonder dit telde een droogloop alleen wat na het knippen overbleef en
+# rapporteerde een achterstand van 5000 accounts als "200" -- precies het
+# getal dat niets zegt (CR L2).
+DORMANT_WARNING_COUNT_SQL = f"""
+    SELECT COUNT(*) AS due
+      FROM users u
+     WHERE {_DORMANT_WARNING_WHERE_SQL}
+"""
+
+# $1 = users.id. Elk inlogpad stempelt `last_login_at`: routers/auth.py
+# (wachtwoord en Google) en routers/mfa.py (de twee tweede-factorstappen).
+# Daarom staat het statement hier en niet vier keer met de hand uitgetypt:
+# `dormant_warning_attempts` hoort bij een inactiviteitscyclus, en een
+# login begint een nieuwe -- wie inlogt heeft een werkend adres, wat de
+# drie mislukte pogingen ervoor ze ook waren. Een van de vier plekken
+# vergeten betekent: een account dat wel inlogt maar via dat ene pad,
+# blijft voor altijd boven de drempel van B4 hangen.
+#
+# `dormant_warning_sent_at` en `dormant_warning_skipped_at` worden hier
+# bewust NIET genuld: _DORMANT_WARNING_WHERE_SQL vergelijkt ze met
+# `last_login_at` en een verse login maakt beide stempels vanzelf ouder
+# dan die kolom. Nullen zou hetzelfde doen en een historisch gegeven
+# weggooien -- wanneer deze persoon is gewaarschuwd, is precies wat het
+# audit-spoor van §1.4 rij 6 moet kunnen tonen.
+#
+# `dormant_warning_attempt_at` hoort bij dezelfde teller (de backoff van
+# C2) en wordt daarom samen met die teller teruggezet: een nieuwe cyclus
+# begint zonder wachttijd uit de vorige.
+LOGIN_STAMP_SQL = (
+    "UPDATE users SET last_login_at = NOW(), dormant_warning_attempts = 0, "
+    "dormant_warning_attempt_at = NULL WHERE id = $1"
+)
 
 
 # ── Apollo bulk-pool cleanup (VERWERKINGSREGISTER.md §2.6, §5.7) ─────────
@@ -595,8 +814,15 @@ RETENTION_TABLE: Tuple[RetentionRow, ...] = (
         anchor_column="candidates.date_found",
         action="anonymise",
         schema_ready=True,
-        selector_sql=SOURCED_NO_RESPONSE_SQL,  # same guarded query; lawful_basis is the $1 parameter
-        signal_missing_nl=_SIGNAL_MISSING_ENGAGEMENT_PREFIX_NL + "het vinden van de persoon",
+        # WS3b: not SOURCED_NO_RESPONSE_SQL any more -- same period and
+        # the same guards, plus `referral_confirmed_at IS NULL` as this
+        # category's own reaction signal (see REFERRAL_NO_RESPONSE_SQL).
+        # lawful_basis is still the $1 parameter.
+        selector_sql=REFERRAL_NO_RESPONSE_SQL,
+        signal_missing_nl=(
+            _SIGNAL_MISSING_ENGAGEMENT_PREFIX_NL
+            + "het vinden van de persoon, en de referral-bevestigingslink is nooit aangeklikt"
+        ),
         subject_table="candidates", email_field="email", selector_params=("toestemming_referral",),
         public_nl=PublicRetentionText(
             categorie="Referral",

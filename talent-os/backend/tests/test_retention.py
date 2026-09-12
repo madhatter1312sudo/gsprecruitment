@@ -226,11 +226,46 @@ def test_sourced_no_response_sql_guards_against_every_reaction_signal():
     assert "outreach_drafts" not in sql
 
 
-def test_sourced_and_referral_rows_share_the_same_guarded_selector():
+# WS3b split this in two. Until this spoor both rows literally shared
+# SOURCED_NO_RESPONSE_SQL (only the lawful_basis $1 parameter differed);
+# referral now has its own selector with one extra reaction signal on top
+# of exactly the same period and guards. The two tests below say both
+# halves of that out loud, so a later edit cannot quietly re-merge them or
+# let the referral selector drift away from the shared period/guards.
+
+def test_sourced_row_uses_the_shared_guarded_selector():
+    sourced = retention.get_row("sourced_no_response")
+    assert sourced.selector_sql is retention.SOURCED_NO_RESPONSE_SQL
+    assert sourced.selector_params == ("gerechtvaardigd_belang",)
+
+
+def test_referral_row_adds_the_confirmation_signal_to_the_same_guarded_selector():
+    referral = retention.get_row("referral")
+    assert referral.selector_sql is retention.REFERRAL_NO_RESPONSE_SQL
+    assert referral.selector_params == ("toestemming_referral",)
+
+    # The extra signal: a referral who clicked their own confirmation link
+    # has reacted and must never reach the monthly review list.
+    assert "referral_confirmed_at IS NULL" in retention.REFERRAL_NO_RESPONSE_SQL
+    assert "referral_confirmed_at" not in retention.SOURCED_NO_RESPONSE_SQL
+
+    # Same period and the same protective guards as the sourced row --
+    # WS3b changes who counts as "no reaction", never how long we keep.
+    assert "date_found + INTERVAL '3 months'" in retention.REFERRAL_NO_RESPONSE_SQL
+    assert "date_found <= (CURRENT_DATE - INTERVAL '3 months')" in retention.REFERRAL_NO_RESPONSE_SQL
+    assert retention.CANDIDATE_NO_REACTION_GUARD_SQL in retention.REFERRAL_NO_RESPONSE_SQL
+
+
+def test_referral_and_sourced_keep_the_same_public_retention_period():
+    """The four consumers of core/retention.py (register, privacy.html,
+    the approval list, the tests) must keep showing identical periods --
+    splitting the selector must not have moved the published term."""
     sourced = retention.get_row("sourced_no_response")
     referral = retention.get_row("referral")
-    assert sourced.selector_sql is retention.SOURCED_NO_RESPONSE_SQL
-    assert referral.selector_sql is retention.SOURCED_NO_RESPONSE_SQL
+    assert "3 maanden" in sourced.bewaartermijn
+    assert "3 maanden" in referral.bewaartermijn
+    assert "3 maanden" in referral.public_nl.bewaartermijn
+    assert "3 months" in referral.public_en.bewaartermijn
 
 
 def test_prospect_no_response_sql_guards_against_sent_drafts():
@@ -921,3 +956,33 @@ def test_migration_030_is_idempotent_and_matches_the_documented_columns():
     assert "DO $$" not in sql  # _runner.py splits SQL on literal ";"
     assert "DELETE" not in sql.upper()
     assert "DROP" not in sql.upper()
+
+
+# ── privacy.html: de notice van 30 dagen (reparatieronde) ────────────────
+#
+# De pagina zei "na dezelfde 18 maanden plus 30 dagen" voor de twee
+# mailloze gevallen (blokkeerlijst en onbezorgbaar adres). Dat is te
+# precies en daarmee onjuist: core/retention.py's
+# _DORMANT_WARNING_WHERE_SQL kan de skip-stempel al vanaf 17 maanden
+# zetten, en PORTAL_ACCOUNT_INACTIVE_SQL eist vervolgens 18 maanden
+# inactiviteit EN een stempel van minstens 30 dagen oud. Wie op 17
+# maanden wordt gestempeld, komt dus op 18 maanden op de lijst -- niet op
+# 19. Wat wél voor iedereen klopt, en wat de pagina nu zegt: nooit eerder
+# dan 18 maanden, en nooit eerder dan 30 dagen na die notitie.
+
+def test_privacy_html_does_not_add_up_the_18_months_and_the_30_days():
+    with open(PRIVACY_HTML_PATH, encoding="utf-8") as f:
+        text = f.read()
+    assert "plus 30 dagen" not in text
+    assert "plus 30 days" not in text
+    assert text.count("na dezelfde 18 maanden, en nooit eerder dan 30 dagen na die notitie") == 2
+    assert text.count("after the same 18 months, and never sooner than 30 days after that note") == 2
+
+
+def test_the_skip_stamp_can_be_set_before_18_months_which_is_why_the_wording_changed():
+    """De reden dat de zin hierboven niet mag optellen, in code: de
+    waarschuwing (en dus de skip-stempel) begint bij 17 maanden, terwijl
+    de beoordelingslijst zelf 18 maanden eist."""
+    assert "INTERVAL '17 months'" in retention.DORMANT_WARNING_SQL
+    assert "INTERVAL '18 months'" in retention.PORTAL_ACCOUNT_INACTIVE_SQL
+    assert "INTERVAL '30 days'" in retention.PORTAL_ACCOUNT_INACTIVE_SQL

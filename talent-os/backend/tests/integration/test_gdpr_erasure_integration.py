@@ -241,14 +241,34 @@ def test_erase_person_scrubs_a_padded_address_from_every_secondary_table(db_run)
         "INSERT INTO data_subject_requests (request_type, request_email) VALUES ('access', $1)",
         padded_email,
     )
+    # R7: een gegenereerd subject_id, geen vaste sentinel.
+    # `retention_review_items` heeft een UNIQUE op (category,
+    # subject_table, subject_id), dus een vast id maakt deze test
+    # eenmalig: breekt een run af voordat de rij is opgeruimd, dan botst
+    # elke volgende run erop en is de database vergiftigd. Het id wijst
+    # naar geen enkele quiz_submissions-rij -- dat hoeft ook niet, er is
+    # geen FK -- maar hij is nu uniek per run, en de opruiming hieronder
+    # staat in een finally zodat een falende assert hem evenmin laat
+    # staan.
+    unique_subject_id = uuid.uuid4().int % 2_000_000_000
     review_item = db_run(
         fetch_one,
         """INSERT INTO retention_review_items
                (category, subject_table, subject_id, email, action, signal_missing_nl)
-           VALUES ('leads_quiz', 'quiz_submissions', 999999999, $1, 'anonymise', 'test seed')
+           VALUES ('leads_quiz', 'quiz_submissions', $2, $1, 'anonymise', 'test seed')
            RETURNING id""",
-        padded_email,
+        padded_email, unique_subject_id,
     )
+
+    try:
+        _assert_padded_address_is_gone_everywhere(db_run, clean_email, review_item["id"])
+    finally:
+        db_run(execute, "DELETE FROM retention_review_items WHERE id = $1", review_item["id"])
+
+
+def _assert_padded_address_is_gone_everywhere(db_run, clean_email, review_item_id):
+    from core.database import fetch_all, fetch_one
+    from routers.gdpr import erase_person
 
     result = db_run(erase_person, clean_email, None, "padded-address integration test")
     assert result["status"] == "complete", result
@@ -268,7 +288,7 @@ def test_erase_person_scrubs_a_padded_address_from_every_secondary_table(db_run)
     dsr = db_run(fetch_all, "SELECT id, request_email FROM data_subject_requests WHERE request_email ILIKE $1", f"%{clean_email}%")
     assert dsr == [], f"data_subject_requests still carries the padded address: {dsr}"
 
-    review_row = db_run(fetch_one, "SELECT email FROM retention_review_items WHERE id = $1", review_item["id"])
+    review_row = db_run(fetch_one, "SELECT email FROM retention_review_items WHERE id = $1", review_item_id)
     assert review_row["email"] is None, "retention_review_items.email must be nulled, padded address or not"
 
 
