@@ -60,30 +60,38 @@
       </tr>`)}`);
   },
 
+  // De vijf tabbladen van het detailpaneel. Sinds WS5 stap 3 is dit een
+  // ui.drawer (Bootstrap Offcanvas) met ui.tabs in plaats van een brede
+  // modal met een handgerolde tabstrip: de tabstrip krijgt daarmee
+  // role="tablist" en aria-selected, en het paneel schuift in vanaf rechts
+  // zoals een detailpaneel hoort. Het DOM-anker #clientDrawerTabContent
+  // blijft hetzelfde, zodat elke tabloader ongewijzigd bleef.
+  _clientTabs: [
+    { key: 'info', label: 'Info' },
+    { key: 'contacts', label: 'Contacten' },
+    { key: 'jobs', label: 'Vacatures' },
+    { key: 'activity', label: 'Notities/Activiteit' },
+    { key: 'prospects', label: 'Prospects' },
+  ],
+
   openClientDrawer(clientId) {
     const client = (this._data.clients || []).find(c => c.id === clientId);
-    const tabs = [
-      ['info', 'Info'], ['contacts', 'Contacten'], ['jobs', 'Vacatures'],
-      ['activity', 'Notities/Activiteit'], ['prospects', 'Prospects'],
-    ];
-    this.openModal('clientDrawer', html`
-      <h3 class="a-cell-strong mb-1">${client?.company_name || 'Opdrachtgever'}</h3>
-      <div class="a-soft mb-4">${client?.domain || '—'}</div>
-      <div class="a-tabbar">
-        ${tabs.map(([key, label]) => html`
-          <button class="btn btn-sm ${key === 'info' ? 'btn-primary' : 'btn-ghost-secondary'}"
-            data-action="client-tab" data-client-id="${clientId}" data-tab="${key}">${label}</button>`)}
-      </div>
-      <div id="clientDrawerTabContent" class="a-tabpane"><i class="fa-solid fa-spinner fa-spin"></i></div>
-    `, { wide: true });
+    this._clientDrawer = ui.drawer({
+      id: 'clientDrawer',
+      title: client?.company_name || 'Opdrachtgever',
+      tabs: this._clientTabs,
+      tabAction: 'client-tab',
+      activeTab: 'info',
+      dataset: { clientId },
+      subtitle: client?.domain || '—',
+      body: html`<div id="clientDrawerTabContent" class="a-tabpane"><i class="fa-solid fa-spinner fa-spin"></i></div>`,
+      onClose: () => { this._clientDrawer = null; },
+    });
     this.switchClientTab(clientId, 'info');
   },
 
   switchClientTab(clientId, tab) {
-    document.querySelectorAll('#adminModalOverlay [data-action="client-tab"]').forEach(btn => {
-      btn.classList.toggle('btn-primary', btn.dataset.tab === tab);
-      btn.classList.toggle('btn-ghost-secondary', btn.dataset.tab !== tab);
-    });
+    if (this._clientDrawer) this._clientDrawer.selectTab(tab);
     const loaders = {
       info: () => this.loadClientInfoTab(clientId),
       contacts: () => this.loadClientContacts(clientId),
@@ -221,7 +229,7 @@
     if (!formEl) return;
     mount(formEl, html`
       <div class="a-panel">
-        <h4 class="a-modal__title">${contact ? 'Contact bewerken' : 'Nieuw contact'}</h4>
+        <h4 class="a-cell-strong mb-3">${contact ? 'Contact bewerken' : 'Nieuw contact'}</h4>
         <div class="form-group"><label>Naam</label><input type="text" id="ccFullName" value="${contact?.full_name || ''}"></div>
         <div class="form-group"><label>E-mail</label><input type="email" id="ccEmail" value="${contact?.email || ''}"></div>
         <div class="form-group"><label>Telefoon</label><input type="text" id="ccPhone" value="${contact?.phone || ''}"></div>

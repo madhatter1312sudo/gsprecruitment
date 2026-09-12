@@ -353,15 +353,21 @@ const Admin = {
   openModal(id, bodyHtml, opts = {}) {
     this._modal = ui.modal({
       id: 'adminModalOverlay',
+      // opts.title vult aria-labelledby met de echte kop van het paneel;
+      // zonder titel valt ui.modal terug op een generiek aria-label.
+      title: opts.title,
       body: bodyHtml,
       wide: !!opts.wide,
       ariaLabel: opts.ariaLabel || 'Detailpaneel',
+      onClose: () => { this._modal = null; },
     });
     return this._modal;
   },
 
+  // Sluit het bovenste open paneel: de modal, of de drawer van het
+  // Opdrachtgevers-detailpaneel als die erboven ligt.
   closeModal() {
-    if (this._modal) { this._modal.close(); this._modal = null; }
+    ui.closeTop();
   },
 
   /* ============================================================
@@ -388,7 +394,7 @@ const Admin = {
 Admin.registerActions({
   // navigateTo() is een page-level global uit admin/js/nav.js.
   navigate: (el) => { if (typeof navigateTo === 'function') navigateTo(el.dataset.section); },
-  'close-modal': () => Admin.closeModal(),
+  'close-modal': () => ui.closeTop(),
   page: (el) => Admin.goToPage(el.dataset.section, Number(el.dataset.page)),
 });
 

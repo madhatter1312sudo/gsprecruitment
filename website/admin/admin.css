@@ -52,9 +52,9 @@
 :root,
 [data-bs-theme="dark"] {
   /* Gedempte tekst in het paneel is --navy-200, niet --navy-300.
-     --navy-300 (#4A6F9F) haalt op --navy-800 maar 3,3:1 en zakt daarmee
-     onder de AA-ondergrens van 4,5:1 voor kleine tekst; --navy-200
-     (#7FA0C9) haalt 6,6:1 op --navy-800 en 6,0:1 op --navy-700. Bewuste
+     --navy-300 (#4A6F9F) haalt 3,51:1 op --navy-800 en 3,26:1 op
+     --navy-700, en zakt daarmee onder de AA-ondergrens van 4,5:1 voor
+     kleine tekst; --navy-200 (#7FA0C9) haalt 6,6:1 op --navy-800. Bewuste
      afwijking van de "muted text"-omschrijving bij --navy-300 in
      SITE-DESIGN-SPEC.md §1.2, gemeld voor de componentspec §7.
      --navy-300 blijft in gebruik voor niet-tekst (hairlines, iconen). */
@@ -67,9 +67,15 @@
   --admin-danger: #f87171;
   --admin-warn: #fb923c;
   --admin-alt: #a78bfa;
+  /* Informatieblauw voor badges. Tablers eigen --tblr-blue (#066FD1) haalt
+     op zijn eigen 10%-tint maar 3,96:1; deze haalt 9,9:1 op --navy-700. */
+  --admin-info: #7dd3fc;
 
   /* ==== Tabler 1.4 op de merktokens ==== */
   --tblr-primary: var(--gold-500);
+  /* css-tokens-check: rgb-triple -- Tabler bouwt hier rgba(var(--x-rgb), a)
+     mee voor tinten, randen en de focusring; een triple kan niet uit een
+     kleur-var komen, dus deze regel moet letterlijk zijn. */
   --tblr-primary-rgb: 250, 200, 0;
   --tblr-body-bg: var(--navy-800);
   --tblr-body-color: var(--navy-100);
@@ -84,7 +90,44 @@
   --tblr-border-radius-sm: var(--radius-sm);
   --tblr-border-radius-lg: var(--radius-lg);
   --tblr-secondary: var(--navy-200);
+  /* css-tokens-check: rgb-triple -- Tabler bouwt hier rgba(var(--x-rgb), a)
+     mee voor tinten en randen; een triple kan niet uit een kleur-var komen,
+     dus deze regels moeten letterlijk zijn. */
   --tblr-secondary-rgb: 127, 160, 201;
+
+  /* Knoptekst op goud: Tabler pakt --tblr-primary-fg (default #FFFFFF,
+     1,51:1 op --gold-500). Navy-900 haalt 12,3:1. */
+  --tblr-primary-fg: var(--navy-900);
+
+  /* Focusring op volle dekking in plaats van 25% (1,78:1). */
+  --tblr-focus-ring-color: var(--gold-500);
+  --tblr-focus-ring-opacity: 1;
+
+  /* Badgekleuren: .bg-*-lt neemt de tekstkleur uit --tblr-<kleur> en de
+     achtergrond uit een 10%-tint daarvan. Tablers defaults zijn op navy
+     te donker (blauw 3,96:1, rood 4,24:1); deze vier halen 6:1 of meer. */
+  --tblr-blue: var(--admin-info);
+  --tblr-red: var(--admin-danger);
+  --tblr-green: var(--admin-positive);
+  --tblr-yellow: var(--gold-400);
+  /* css-tokens-check: rgb-triple -- zie hierboven, zelfde reden. */
+  --tblr-blue-rgb: 125, 211, 252;
+  --tblr-red-rgb: 248, 113, 113;
+  --tblr-green-rgb: 74, 222, 128;
+  --tblr-yellow-rgb: 251, 215, 74;
+}
+
+/* ==== Focusindicator ====
+   Tabler zet :focus{box-shadow:none} op formuliervelden en ghost-knoppen,
+   waardoor er met het toetsenbord niets zichtbaar is. Eén regel voor alle
+   vier de plekken waar dat opgaat. */
+.btn:focus-visible,
+.btn-ghost-secondary:focus-visible,
+.form-control:focus-visible,
+.form-select:focus-visible {
+  outline: 2px solid var(--gold-500);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 4px var(--gold-glow);
 }
 
 /* ==== Typografie (SITE-DESIGN-SPEC.md §1.3) ==== */
@@ -122,6 +165,13 @@ h1, h2, h3, h4,
 .toast-icon { font-size: 1.1rem; line-height: 1; }
 
 /* ==== Compatibiliteitsklassen voor door JS gegenereerde markup ==== */
+/* Kopje boven een groep sidebarlinks. Stond zes keer als
+   style="font-size:10px;letter-spacing:.1em" in index.html, buiten de
+   typeschaal van §1.3. */
+.a-nav-caption {
+  font-size: var(--font-size-xs);
+  letter-spacing: .1em;
+}
 .portal-section { display: none; }
 .portal-section.active { display: block; }
 .action-menu-wrap { position: relative; display: inline-block; }
@@ -231,6 +281,11 @@ h1, h2, h3, h4,
   margin: 4px 0 0;
 }
 
+.a-tabbar .btn {
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+}
 .a-tabbar {
   display: flex;
   gap: 4px;
@@ -285,15 +340,34 @@ h1, h2, h3, h4,
   cursor: pointer;
   font-size: 1.2rem;
   z-index: 2;
+  /* Aanraakvlak van 44px, met negatieve marge zodat het optisch even
+     groot blijft als voorheen. */
+  min-width: 44px;
+  min-height: 44px;
+  margin: -0.5rem;
 }
 .a-modal__close:hover,
 .a-modal__close:focus-visible { color: var(--gold-400); }
-.a-modal__title { color: var(--white); margin: 0 var(--space-xl) var(--space-lg) 0; }
-.a-drawer.offcanvas { width: min(760px, 100vw); }
+.a-modal__title { color: var(--white); margin: 0 var(--space-xl) var(--space-sm) 0; }
+.a-modal__subtitle { margin-bottom: var(--space-lg); font-size: var(--font-size-sm); }
+.a-drawer.offcanvas {
+  width: min(760px, 100vw);
+  /* Boven de backdrop (1050). Tablers offcanvas erft 1045 en verdween
+     anders achter zijn eigen verduistering. */
+  z-index: 1055;
+}
 .a-drawer .offcanvas-body { padding: var(--space-xl); }
 
 /* Getypte bevestiging voor destructieve acties. */
 .a-confirm-hint { color: var(--admin-muted); font-size: var(--font-size-sm); margin-bottom: var(--space-sm); }
+/* Tablers danger-outline is op navy-900 4,17:1; --admin-danger haalt 6,5:1. */
+.a-modal .btn-outline-danger,
+.a-drawer .btn-outline-danger {
+  --tblr-btn-color: var(--admin-danger);
+  --tblr-btn-border-color: var(--admin-danger);
+  --tblr-btn-hover-bg: var(--admin-danger);
+  --tblr-btn-hover-color: var(--navy-900);
+}
 .a-confirm-hint code { color: var(--gold-400); }
 
 /* Sorteerbare kolomkoppen (ui.table). aria-sort is de bron van waarheid;

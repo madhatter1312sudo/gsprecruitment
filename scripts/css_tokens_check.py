@@ -45,7 +45,12 @@ failing the build:
          al met een andere waarde declareert;
      (b) admin.css mag geen navy- of goudwaarde hardcoderen -- elke navy/
          goudkleur gaat via var(--navy-*)/var(--gold-*). Een letterlijke
-         hex/rgb uit de navy- of goudschaal faalt.
+         hex/rgb uit de navy- of goudschaal faalt, in elke schrijfwijze:
+         #RRGGBB, #RGB, rgb(r,g,b), de moderne rgb(r g b / a), en een kale
+         triple "r, g, b" zoals Tabler die in zijn --*-rgb-variabelen wil.
+         Een regel met het commentaar "css-tokens-check: rgb-triple" is
+         daarvan uitgezonderd: Tabler bouwt daar zelf rgba(var(--x-rgb), a)
+         mee, en een triple kan niet uit een kleur-var komen.
      Semantisch groen/rood/oranje/paars zijn geen merkkleuren en mogen wel
      als hex in admin.css staan (--admin-positive en broertjes).
 
@@ -84,20 +89,32 @@ SURFACE_SPECIFIC = {
 # Elke navy- en goudwaarde uit SITE-DESIGN-SPEC.md §1.2, plus de twee
 # waarden die de oude inline shim in admin/index.html gebruikte
 # (#142235 / #0E1B2E) -- die mogen nooit terugkeren.
-BRAND_LITERALS = {
+BRAND_HEXES = {
     "#030812": "--navy-950", "#060d1a": "--navy-900", "#0a1628": "--navy-800",
     "#0f1d35": "--navy-700", "#152b4a": "--navy-600", "#1e3a5e": "--navy-500",
     "#2a4a75": "--navy-400", "#4a6f9f": "--navy-300", "#7fa0c9": "--navy-200",
     "#c5d6eb": "--navy-100",
     "#fac800": "--gold-500", "#fbd74a": "--gold-400", "#fce488": "--gold-300",
     "#d4a800": "--gold-600", "#ad8800": "--gold-700",
-    "#142235": "oude shim-navy", "#0e1b2e": "oude shim-navy",
-    "#18293d": "oude shim-navy", "#1a2a42": "oude shim-navy",
-    "#24354f": "oude shim-navy", "#8695ac": "oude shim-navy",
-    "#b8c4d6": "oude shim-navy", "#e2e8f0": "oude shim-navy",
-    "rgb(250,200,0)": "--gold-500", "rgba(250,200,0": "--gold-500",
-    "rgba(74,111,159": "--navy-300", "rgba(6,13,26": "--navy-900",
+    "#142235": "de oude shim-navy", "#0e1b2e": "de oude shim-navy",
+    "#18293d": "de oude shim-navy", "#1a2a42": "de oude shim-navy",
+    "#24354f": "de oude shim-navy", "#8695ac": "de oude shim-navy",
+    "#b8c4d6": "de oude shim-navy", "#e2e8f0": "de oude shim-navy",
 }
+
+# Dezelfde kleuren als rgb-triple, zodat rgb(10,22,40), rgb(10 22 40 / 1)
+# en de kale "10, 22, 40" van een --*-rgb-variabele ook gevonden worden.
+BRAND_TRIPLES = {
+    tuple(int(h[i:i + 2], 16) for i in (1, 3, 5)): name
+    for h, name in BRAND_HEXES.items()
+}
+
+RGB_TRIPLE_ALLOW = "css-tokens-check: rgb-triple"
+# #rgb -> #rrggbb, zodat een korte hex dezelfde treffer geeft.
+SHORT_HEX_RE = re.compile(r"#([0-9a-f])([0-9a-f])([0-9a-f])(?![0-9a-f])")
+# Elke groep van drie getallen, gescheiden door komma's en/of spaties, al
+# dan niet met een /alpha erachter.
+TRIPLE_RE = re.compile(r"(?<![\w.])(\d{1,3})\s*[, ]\s*(\d{1,3})\s*[, ]\s*(\d{1,3})(?![\d.%])")
 
 GRAY_TEXT_BANNED = ("gray-100", "gray-200", "gray-300")
 GOLD_UNCONDITIONAL_BANNED = ("gold-600", "gold-700")
@@ -276,13 +293,33 @@ def check_admin_css(allowlist):
             parity.append(f"{name}: admin.css={aval!r} maar styles/theme.css={bval!r}")
 
     literals = []
-    clean = strip_comments_keep_lines(ADMIN_CSS.read_text(encoding="utf-8"))
+    raw_text = ADMIN_CSS.read_text(encoding="utf-8")
+    raw_lines = raw_text.splitlines()
+    clean = strip_comments_keep_lines(raw_text)
+    # Een regel met het allow-commentaar erop, of met dat commentaar op de
+    # regels er direct boven (een blokcommentaar dat de uitzondering
+    # uitlegt), is vrijgesteld voor de triple-check.
+    exempt = set()
+    for i, line in enumerate(raw_lines):
+        if RGB_TRIPLE_ALLOW in line:
+            for j in range(i, min(i + 6, len(raw_lines))):
+                exempt.add(j)
     for i, line in enumerate(clean.splitlines()):
-        low = line.lower().replace(" ", "")
-        for lit, token in BRAND_LITERALS.items():
-            if lit in low:
-                literals.append(f"admin.css:{i + 1}  hardcoded {lit} -- gebruik var({token})\n      {line.strip()}")
+        low = SHORT_HEX_RE.sub(r"#\1\1\2\2\3\3", line.lower())
+        hit = None
+        for lit, token in BRAND_HEXES.items():
+            if lit in low.replace(" ", ""):
+                hit = (lit, token)
                 break
+        if hit is None and i not in exempt:
+            for m in TRIPLE_RE.finditer(low):
+                triple = tuple(int(g) for g in m.groups())
+                if triple in BRAND_TRIPLES:
+                    hit = (m.group(0), BRAND_TRIPLES[triple])
+                    break
+        if hit:
+            literals.append(
+                f"admin.css:{i + 1}  hardcoded {hit[0]} -- gebruik var({hit[1]})\n      {line.strip()}")
     return parity, literals
 
 

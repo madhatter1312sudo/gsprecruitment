@@ -124,7 +124,6 @@
   async openNewJobModal() {
     const clients = await this.fetchClientOptions();
     this.openModal('newJobModal', html`
-      <h3 class="a-modal__title">Nieuwe vacature</h3>
       ${!clients.length ? html`
         <div class="alert alert-warning" role="alert">Nog geen opdrachtgevers met een portal-account gevonden.</div>
       ` : ''}
@@ -186,7 +185,7 @@
         <button class="btn btn-primary" data-action="save-new-job" ${raw(!clients.length ? 'disabled' : '')}>Vacature aanmaken</button>
         <button class="btn btn-ghost-secondary" data-action="close-modal">Annuleren</button>
       </div>
-    `);
+    `, { title: 'Nieuwe vacature' });
   },
 
   async saveNewJob() {

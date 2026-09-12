@@ -99,24 +99,22 @@
       if (!res?.ok) {
         const d = await res?.json().catch(() => null);
         this.openModal('viewCandidateModal', html`
-          <h3 class="a-modal__title">Kon profiel niet laden</h3>
           <p class="a-soft">${d?.detail || 'Er ging iets mis bij het ophalen van dit profiel.'}</p>
           <div class="a-actions">
             <button class="btn btn-primary btn-sm" data-action="view-candidate" data-kind="${kind}" data-id="${itemId}">Opnieuw proberen</button>
             <button class="btn btn-ghost-secondary btn-sm" data-action="close-modal">Sluiten</button>
-          </div>`);
+          </div>`, { title: 'Kon profiel niet laden' });
         return;
       }
       const detail = await res.json();
       this.renderCandidateDetailModal(kind, itemId, detail);
     } catch {
       this.openModal('viewCandidateModal', html`
-        <h3 class="a-modal__title">Netwerkfout</h3>
         <p class="a-soft">Kon geen verbinding maken met de server.</p>
         <div class="a-actions">
           <button class="btn btn-primary btn-sm" data-action="view-candidate" data-kind="${kind}" data-id="${itemId}">Opnieuw proberen</button>
           <button class="btn btn-ghost-secondary btn-sm" data-action="close-modal">Sluiten</button>
-        </div>`);
+        </div>`, { title: 'Netwerkfout' });
     }
   },
 
@@ -244,17 +242,17 @@
       <div class="d-flex gap-3 flex-wrap mb-4">
         <div class="a-stat">
           <div class="a-stat__value">${p('match_count') ?? 0}</div>
-          <div class="a-meta">Matches</div>
+          <div class="a-stat__label">Matches</div>
         </div>
         <div class="a-stat">
           <div class="a-stat__value a-stat__value--positive">${p('placement_count') ?? 0}</div>
-          <div class="a-meta">Placed</div>
+          <div class="a-stat__label">Placed</div>
         </div>
       </div>
       <div class="d-flex gap-3">
         <button class="btn btn-ghost-secondary btn-sm" data-action="close-modal">Close</button>
       </div>
-    `);
+    `, { ariaLabel: 'Kandidaatprofiel: ' + fullName });
   },
   });
 

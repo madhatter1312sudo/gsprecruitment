@@ -74,7 +74,6 @@
     if (!d) return;
     const editable = d.status === 'draft';
     this.openModal('outreachDraftModal', html`
-      <h3 class="a-modal__title">Outreach Draft</h3>
       <div class="detail-grid">
         <div><div class="a-field-label">To</div><div>${d.target_name || '—'} &lt;${d.target_email || ''}&gt;</div></div>
         <div><div class="a-field-label">Company</div><div>${d.company || '—'}</div></div>
@@ -100,7 +99,7 @@
           <button class="btn btn-ghost-secondary a-danger" data-action="reject-draft" data-id="${d.id}"><i class="fa-solid fa-xmark"></i> Reject</button>` : ''}
         <button class="btn btn-ghost-secondary" data-action="close-modal">Close</button>
       </div>
-    `);
+    `, { title: 'Outreach Draft' });
   },
 
   async saveDraft(id) {

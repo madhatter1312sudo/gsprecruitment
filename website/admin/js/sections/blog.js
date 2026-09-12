@@ -74,7 +74,6 @@
   openBlogModal(id) {
     const p = id ? (this._data.blog?.items || []).find(x => x.id === id) : null;
     this.openModal('blogModal', html`
-      <h3 class="a-modal__title">${p ? 'Edit Post' : 'New Post'}</h3>
       <div class="form-group">
         <label>Slug</label>
         <input type="text" id="blogSlug" value="${p?.slug || ''}">
@@ -115,7 +114,7 @@
         <button class="btn btn-primary" data-action="save-blog-post" data-id="${p ? p.id : ''}">Save</button>
         <button class="btn btn-ghost-secondary" data-action="close-modal">Cancel</button>
       </div>
-    `);
+    `, { title: p ? 'Edit Post' : 'New Post' });
   },
 
   async saveBlogPost(id) {

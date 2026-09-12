@@ -42,7 +42,6 @@
 
   editContent(id, key, value) {
     this.openModal('editContentModal', html`
-      <h3 class="a-modal__title">Edit: ${key}</h3>
       <div class="form-group">
         <label>Value</label>
         <textarea id="editContentValue" rows="5" class="a-textarea">${value}</textarea>
@@ -51,7 +50,7 @@
         <button class="btn btn-primary" data-action="save-content" data-id="${id}">Save</button>
         <button class="btn btn-ghost-secondary" data-action="close-modal">Cancel</button>
       </div>
-    `);
+    `, { title: 'Edit: ' + key });
   },
 
   async saveContent(id) {

@@ -39,12 +39,6 @@
     }
   },
 
-  // Dienstlijn label for a job's raw `employment_type` value -- used by the
-  // client drawer's Vacatures tab and the Rapportage breakdown so a raw
-  // enum string (or an unrecognised one) never renders straight into the
-  // UI. Unknown values fall back to the raw value itself (still escaped by
-  // html``, never raw()) rather than a silent "—", so a value this map
-  // hasn't caught up with is still visible instead of hidden.
   // source_page + referrer_host (WS2, migrations/038_leads_origin.py) as
   // one compact column — a lead with neither renders "—" rather than an
   // empty cell.
@@ -86,12 +80,11 @@
       if (!res?.ok) {
         const d = await res?.json().catch(() => null);
         this.openModal('leadDetailModal', html`
-          <h3 class="a-modal__title">Kon lead niet laden</h3>
           <p class="a-soft">${d?.detail || 'Er ging iets mis bij het ophalen van deze lead.'}</p>
           <div class="a-actions">
             <button class="btn btn-primary btn-sm" data-action="view-lead" data-source="${source}" data-id="${leadId}">Opnieuw proberen</button>
             <button class="btn btn-ghost-secondary btn-sm" data-action="close-modal">Sluiten</button>
-          </div>`);
+          </div>`, { title: 'Kon lead niet laden' });
         return;
       }
       const detail = await res.json();
@@ -99,12 +92,11 @@
       this.renderLeadDetailModal(detail);
     } catch {
       this.openModal('leadDetailModal', html`
-        <h3 class="a-modal__title">Netwerkfout</h3>
         <p class="a-soft">Kon geen verbinding maken met de server.</p>
         <div class="a-actions">
           <button class="btn btn-primary btn-sm" data-action="view-lead" data-source="${source}" data-id="${leadId}">Opnieuw proberen</button>
           <button class="btn btn-ghost-secondary btn-sm" data-action="close-modal">Sluiten</button>
-        </div>`);
+        </div>`, { title: 'Netwerkfout' });
     }
   },
 
@@ -124,7 +116,6 @@
       : raw('—');
 
     this.openModal('leadDetailModal', html`
-      <h3 class="a-modal__title">${isQuiz ? 'Quiz-inzending' : (detail.name || 'Lead')}</h3>
       ${field('E-mail', detail.email || '—')}
       ${isQuiz ? html`
         ${field('Score', (detail.score != null && detail.max_score != null) ? `${detail.score} / ${detail.max_score}` : '—')}
@@ -147,7 +138,7 @@
           ${detail.is_read ? 'Markeer als ongelezen' : 'Markeer als gelezen'}
         </button>
         <button class="btn btn-ghost-secondary btn-sm" data-action="close-modal">Sluiten</button>
-      </div>`);
+      </div>`, { title: isQuiz ? 'Quiz-inzending' : (detail.name || 'Lead') });
   },
 
   // Called from the explicit modal button only (never from a row click —

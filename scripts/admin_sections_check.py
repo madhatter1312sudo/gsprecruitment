@@ -8,7 +8,9 @@ PII, no real network calls).
 Covers:
   - Opdrachtgevers: list renders (name, domain, open-jobs count, primary
     contact, "onbekend" erkend-referent column), row click opens the
-    tabbed detail drawer, and each of its four tabs (contacten, vacatures,
+    tabbed detail drawer (WS5 stap 3: een echte Offcanvas met id
+    #clientDrawer in plaats van de gedeelde #adminModalOverlay -- vandaar
+    dat de sluitknoppen hieronder per paneel gescoped zijn), and each of its four tabs (contacten, vacatures,
     notities/activiteit, prospects) renders without a console error. The
     activiteit tab has no backing endpoint on main (see js/admin.js) so
     this only checks its empty-state text, never a network call.
@@ -433,7 +435,7 @@ def main():
                     f"{CLIENTS[0]['erkend_referent']!r}/{CLIENTS[0]['notes']!r}"
                 )
             # Roster badge must reflect the edit without a full reload.
-            page.click('[data-action="close-modal"]')
+            page.click('#clientDrawer [data-action="close-modal"]')
             page.wait_for_timeout(300)
             roster_text = page.eval_on_selector('#section-clients table tbody tr', "el => el.textContent") or ""
             if "Nee" not in roster_text:
@@ -461,7 +463,7 @@ def main():
                     if "werving_selectie" in text:
                         failures.append("clients: raw employment_type value leaked into the jobs tab")
 
-        page.click('[data-action="close-modal"]')
+        page.click('#clientDrawer [data-action="close-modal"]')
         page.wait_for_timeout(300)
         new_errors = console_errors[errors_before:]
         if new_errors:
@@ -511,7 +513,7 @@ def main():
         if "Markeer als ongelezen" not in modal_text2:
             failures.append(f"leads: modal button did not flip to 'Markeer als ongelezen' after marking read — got: {modal_text2[:200]!r}")
 
-        page.click('[data-action="close-modal"]')
+        page.click('#adminModalOverlay [data-action="close-modal"]')
         page.wait_for_timeout(300)
 
         # A quiz_submissions row's detail must show score/tier, not the
@@ -521,7 +523,7 @@ def main():
         quiz_modal_text = page.eval_on_selector('#adminModalOverlay', "el => el.textContent") or ""
         if "8 / 10" not in quiz_modal_text or "senior" not in quiz_modal_text:
             failures.append(f"leads: quiz lead detail missing score/tier — got: {quiz_modal_text[:200]!r}")
-        page.click('[data-action="close-modal"]')
+        page.click('#adminModalOverlay [data-action="close-modal"]')
         page.wait_for_timeout(300)
 
         new_errors = console_errors[errors_before:]

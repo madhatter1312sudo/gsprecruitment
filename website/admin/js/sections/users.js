@@ -83,7 +83,6 @@
     const user = (this._data.users?.items || []).find(u => u.id === userId);
     if (!user) return;
     this.openModal('editUserModal', html`
-      <h3 class="a-modal__title">Edit User: ${user.full_name || user.email}</h3>
       <div class="form-group">
         <label>Full Name</label>
         <input type="text" id="editUserName" value="${user.full_name || ''}">
@@ -107,7 +106,7 @@
         <button class="btn btn-primary" data-action="save-user-edit" data-id="${userId}">Save Changes</button>
         <button class="btn btn-ghost-secondary" data-action="close-modal">Cancel</button>
       </div>
-    `);
+    `, { title: 'Edit User: ' + (user.full_name || user.email) });
   },
 
   async saveUserEdit(userId) {

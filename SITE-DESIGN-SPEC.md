@@ -303,12 +303,16 @@ Tabler 1.4 blijft, geen herbouw. De schil is wel op de canonieke tokens gezet en
 | Secties | `website/admin/js/sections/<naam>.js` | één module per sectie, registreert zich via `Admin.registerSection({id, title, loader, skeletonHtml, filters, actions})` |
 | Navigatie | `website/admin/js/nav.js` | leest de registry voor titels, loaders en filterbinding |
 
-Twee bewuste afwijkingen van §1.2 in dit paneel:
+Vier bewuste tokencorrecties in dit paneel:
 
 - De inline compat-shim die `--navy-*` op eigen waarden zette (`#142235`, `#0E1B2E`) en radius 8–20px gaf, is verwijderd. Het paneel draait nu op `--navy-800 #0A1628`, `--navy-700 #0F1D35` en radius 3px.
-- Gedempte tekst in het paneel is `--navy-200`, niet `--navy-300`. `--navy-300` haalt op `--navy-800` 3,3:1 en zakt onder de AA-ondergrens van 4,5:1; `--navy-200` haalt 6,6:1. `--navy-300` blijft in gebruik voor hairlines en iconen. `scripts/css_tokens_check.py` bewaakt de tokenpariteit van `admin.css` en faalt op elke hardcoded navy- of goudwaarde daarin.
+- Gedempte tekst is `--navy-200`, niet `--navy-300`. `--navy-300` haalt 3,51:1 op `--navy-800` en 3,26:1 op `--navy-700`, en zakt daarmee onder de AA-ondergrens van 4,5:1; `--navy-200` haalt 6,6:1. `--navy-300` blijft in gebruik voor hairlines en iconen.
+- De kaartrand is van Tablers doorschijnende default naar een opake `--navy-500` gegaan (`--tblr-border-color`/`--tblr-card-border-color`). Een doorschijnende rand op navy leest niet als rand; op deze schaal is de rand het enige wat een kaart van de achtergrond scheidt, nu de schaduwen op een donker vlak nauwelijks dragen.
+- Knoptekst op goud is `--navy-900` in plaats van Tablers `#FFFFFF` (1,51:1 naar 12,3:1), de focusring staat op volle dekking `--gold-500` in plaats van 25%, en de vier badgekleuren (`--tblr-blue/red/green/yellow`) zijn vervangen door varianten die op navy 6:1 of meer halen. Tablers defaults haalden 3,96:1 (blauw) en 4,24:1 (rood) op hun eigen tint.
 
-Bekend openstaand punt: de gevendorde `admin/vendor/tabler/js/tabler.min.js` van Tabler 1.4 bevat Bootstrap zelf niet, dus `window.bootstrap` bestaat niet in het paneel. `ui.js` gebruikt de Bootstrap Modal/Offcanvas als die er is en valt anders terug op dezelfde markup en klassen met eigen focustrap, Escape en backdrop. Het mobiele sidebarmenu (`data-bs-toggle="collapse"`) werkt daardoor niet.
+`scripts/css_tokens_check.py` bewaakt de tokenpariteit van `admin.css` en faalt op elke hardcoded navy- of goudwaarde daarin, in elke schrijfwijze (hex, `rgb()`, moderne `rgb(r g b / a)` en kale triples). De twee `--tblr-*-rgb`-regels zijn met een `css-tokens-check: rgb-triple`-commentaar vrijgesteld: Tabler bouwt daar zelf `rgba(var(--x-rgb), a)` mee en een triple kan niet uit een kleur-var komen.
+
+Bootstrap komt uit de gevendorde `admin/vendor/tabler/js/tabler.min.js`: die UMD exporteert `window.tabler` met daarin de volledige `bootstrap`-namespace (Modal, Offcanvas, Collapse, Tab, Toast), maar zet `window.bootstrap` zelf niet. `js/vendor-fallback-tabler-js.js` zet die na het laden door, voor zowel de lokale kopie als de CDN-fallback. Zonder die doorzet draait `ui.js` permanent op zijn vangnet en sluit het mobiele sidebarmenu niet na een navigatie. `ui.js` houdt het vangnet (dezelfde markup en klassen, eigen backdrop, focustrap en Escape) als vangnet voor een ontbrekende bundel; `scripts/admin_ui_check.py` draait beide paden.
 
 ---
 
