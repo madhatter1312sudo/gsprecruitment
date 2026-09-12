@@ -559,6 +559,15 @@ class CandidatePortalProfile(BaseModel):
     consent_talentpool_until: Optional[datetime] = None
     consent_scope: Optional[str] = None
     consent_source: Optional[str] = None
+    # WS5 BV4 (§7.3.7): the job-alert switch has a third reason for being
+    # off -- consent was withdrawn (a STOP, or an unsubscribe with
+    # scope=all) -- and the portal could not tell that apart from "never
+    # given" without these two. Same `candidates`-row origin and the same
+    # None-when-no-row-yet rule as the four above; `lawful_basis` is the
+    # column the retention and outreach guards read, so the portal states
+    # the ground it is actually processing on rather than guessing.
+    consent_withdrawn_at: Optional[datetime] = None
+    lawful_basis: Optional[str] = None
     created_at: datetime
     updated_at: Optional[datetime] = None
 

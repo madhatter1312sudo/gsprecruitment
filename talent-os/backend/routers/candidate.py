@@ -67,10 +67,15 @@ async def _attach_talentpool_consent(profile: dict, user_id: int) -> dict:
     profile["consent_talentpool_until"] = None
     profile["consent_scope"] = None
     profile["consent_source"] = None
+    # WS5 BV4: two more columns from the same row, same None default --
+    # see CandidatePortalProfile for why the job-alert switch needs them.
+    profile["consent_withdrawn_at"] = None
+    profile["lawful_basis"] = None
     candidate_id = await _get_candidate_id(user_id)
     if candidate_id:
         consent = await fetch_one(
-            "SELECT consent_talentpool_at, consent_talentpool_until, consent_scope, consent_source "
+            "SELECT consent_talentpool_at, consent_talentpool_until, consent_scope, consent_source, "
+            "consent_withdrawn_at, lawful_basis "
             "FROM candidates WHERE id = $1",
             candidate_id,
         )

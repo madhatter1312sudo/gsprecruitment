@@ -406,7 +406,7 @@ def test_admin_erase_refuses_admin_target_without_confirm(patch_users_lookup):
 
     with pytest.raises(HTTPException) as exc_info:
         asyncio.run(gdpr.admin_erase_person(
-            gdpr.AdminEraseRequest(email="target-admin@example.com", confirm=False),
+            gdpr.AdminEraseRequest(email="target-admin@example.com", confirm="target-admin@example.com"),
             current_user={"id": 1, "role": "admin"},
         ))
     assert exc_info.value.status_code == 409
@@ -419,7 +419,7 @@ def test_admin_erase_refuses_self_target_without_confirm(patch_users_lookup):
 
     with pytest.raises(HTTPException) as exc_info:
         asyncio.run(gdpr.admin_erase_person(
-            gdpr.AdminEraseRequest(email="me@example.com", confirm=False),
+            gdpr.AdminEraseRequest(email="me@example.com", confirm="me@example.com"),
             current_user={"id": 1, "role": "admin"},
         ))
     assert exc_info.value.status_code == 409
@@ -429,7 +429,8 @@ def test_admin_erase_refuses_self_target_without_confirm(patch_users_lookup):
 def test_admin_erase_allows_admin_target_with_confirm(patch_users_lookup):
     gdpr, calls = patch_users_lookup([{"id": 5, "role": "admin"}])
     result = asyncio.run(gdpr.admin_erase_person(
-        gdpr.AdminEraseRequest(email="target-admin@example.com", confirm=True),
+        gdpr.AdminEraseRequest(email="target-admin@example.com", confirm="target-admin@example.com",
+                               confirm_admin_or_self=True),
         current_user={"id": 1, "role": "admin"},
     ))
     assert result["status"] == "complete"
@@ -441,7 +442,7 @@ def test_admin_erase_allows_ordinary_sourced_person_without_confirm(patch_users_
     registered) -- the confirm gate must not block the common case."""
     gdpr, calls = patch_users_lookup([])
     result = asyncio.run(gdpr.admin_erase_person(
-        gdpr.AdminEraseRequest(email="sourced-only@example.com", confirm=False),
+        gdpr.AdminEraseRequest(email="sourced-only@example.com", confirm="sourced-only@example.com"),
         current_user={"id": 1, "role": "admin"},
     ))
     assert result["status"] == "complete"
@@ -469,7 +470,7 @@ def test_admin_erase_person_users_lookup_uses_trimmed_comparison(monkeypatch):
     monkeypatch.setattr(gdpr, "erase_person", fake_erase_person)
 
     asyncio.run(gdpr.admin_erase_person(
-        gdpr.AdminEraseRequest(email="target@example.com", confirm=False),
+        gdpr.AdminEraseRequest(email="target@example.com", confirm="target@example.com"),
         current_user={"id": 1, "role": "admin"},
     ))
     assert captured_sql, "expected a users lookup"

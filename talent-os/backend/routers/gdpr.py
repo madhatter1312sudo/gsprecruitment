@@ -14,7 +14,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, EmailStr
 
-from core.database import fetch_one, fetch_all, execute
+from core.database import fetch_one, fetch_all, execute, fetch_val
 from core.deps import get_current_user, require_role
 from core import privacy
 from services import storage
@@ -753,8 +753,34 @@ async def erase_my_account(current_user: dict = Depends(get_current_user)):
 # ── Admin: erase a sourced person who never had a portal account ─────────
 
 class AdminEraseRequest(BaseModel):
+    """WS5 BV9 (SITE-DESIGN-SPEC.md §7.6 besluit 3, §7.7 BV9).
+
+    `confirm` used to be a boolean that defaulted to False and only ever
+    mattered for the admin/self guard below -- which meant the plain case
+    (erase a sourced person) needed no confirmation of any kind: one
+    field, one call, irreversible. The typed-address threshold the admin
+    panel applies is a UI measure, and a UI measure binds only that UI,
+    not a routine or a second client hitting the same endpoint. So the
+    field now carries the address itself, and the endpoint refuses when
+    it does not match `email` after strip()/lower(). Every caller is now
+    held to the same threshold and the panel repeats the rule instead of
+    carrying it alone.
+
+    The admin/self question is a genuinely different one -- "this address
+    also owns platform access, are you sure" -- so it keeps its own
+    field, `confirm_admin_or_self`, rather than being folded into the
+    same yes. Two questions, two answers.
+
+    The match itself is checked in the endpoint below, not in a pydantic
+    validator: a validator's ValidationError carries the offending input
+    back to the caller (pydantic puts the whole payload in `input`), and
+    that would put two e-mail addresses into every 422 body and into
+    whatever logs or error trackers see it. The endpoint refuses with a
+    structured detail that names neither.
+    """
     email: EmailStr
-    confirm: bool = False
+    confirm: str
+    confirm_admin_or_self: bool = False
 
 
 @admin_router.post("/erase")
@@ -770,21 +796,36 @@ async def admin_erase_person(
     role='admin'), or the calling admin's own account, through this
     endpoint would delete platform-admin access as a side effect of what
     looks like a routine PII-erasure request. Refuse unless the caller
-    explicitly opts in with confirm=true."""
+    explicitly opts in with confirm_admin_or_self=true (WS5 BV9 renamed
+    this from the old boolean `confirm`, which now carries the typed
+    address -- see AdminEraseRequest)."""
     email_norm = privacy.normalize_email(payload.email)
+    # WS5 BV9: the typed-address threshold, before anything else happens
+    # and before any lookup tells the caller whether the address exists.
+    if privacy.normalize_email(payload.confirm) != email_norm:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "erase_confirm_must_match_email",
+                "message": (
+                    "confirm must repeat the e-mail address in `email` exactly. "
+                    "Case and surrounding whitespace are ignored; nothing else is."
+                ),
+            },
+        )
     matching_users = await fetch_all(
         "SELECT id, role FROM users WHERE LOWER(TRIM(email)) = $1", email_norm,
     )
     is_admin_or_self = any(
         u["role"] == "admin" or u["id"] == current_user["id"] for u in matching_users
     )
-    if is_admin_or_self and not payload.confirm:
+    if is_admin_or_self and not payload.confirm_admin_or_self:
         raise HTTPException(
             status_code=409,
             detail={
                 "code": "erase_admin_or_self_requires_confirm",
                 "message": "This e-mail matches an admin account or your own account. "
-                            "Resend with confirm: true to proceed.",
+                            "Resend with confirm_admin_or_self: true to proceed.",
             },
         )
     return await erase_person(payload.email, actor_id=current_user["id"], reason="admin request")
@@ -848,4 +889,10 @@ async def list_suppression(
         "ORDER BY created_at DESC LIMIT $1 OFFSET $2",
         limit, offset,
     )
-    return {"items": rows}
+    # WS5 BV5: `total` next to `items`, the same shape every other admin
+    # list route returns, so §7.3.5 can page instead of offering a "Meer
+    # laden" button that can never say how much is left. A count of rows
+    # on the suppression list is not personal data -- the rows themselves
+    # carry only a hash and a domain, and this stays behind the admin JWT.
+    total = await fetch_val("SELECT COUNT(*) FROM suppression_list") or 0
+    return {"items": rows, "total": total, "limit": limit, "offset": offset}
