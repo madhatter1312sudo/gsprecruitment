@@ -91,6 +91,14 @@
       portal_account_inactive: 'Actief portalaccount zonder sollicitatie',
       referral: 'Referral',
       leads_quiz: 'Leads/quiz',
+      // Deze twee komen nooit in de beoordelingslijst (action retain
+      // respectievelijk infra_only), maar wel in de bewaartabel en in de
+      // droogloop, dus zonder deze twee regels staat daar de ruwe sleutel.
+      placed_candidate: 'Geplaatste kandidaat (contract- en factuurdata)',
+      logs: 'Logs',
+      // De enige UI-eigen naam: apollo_pool_purge heeft geen
+      // RETENTION_TABLE-rij (services/scheduler.py zet hem rechtstreeks in
+      // de wachtrij), dus er is geen backendlabel om over te nemen.
       apollo_pool_purge: 'Apollo-bulkpool',
     },
     retentieactie: {

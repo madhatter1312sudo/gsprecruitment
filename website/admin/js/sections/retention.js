@@ -65,7 +65,7 @@
 
   const STATUS_OPTIONS = [
     ['pending', 'Te beoordelen'],
-    ['rejected', 'Afgewezen (bewaard)'],
+    ['rejected', AdminLabels.label('retentiestatus', 'rejected')],
     ['purging', 'Wordt verwerkt'],
     ['purged', 'Verwerkt'],
     ['no_longer_eligible', 'Niet meer van toepassing'],
@@ -128,13 +128,20 @@
     if (d.code) {
       // Alleen de code, nooit een persoonsgegeven, en nooit op het scherm.
       console.warn('retention: API-foutcode', d.code);
-      if (ERROR_TEXT[d.code]) return ERROR_TEXT[d.code];
     }
     if (Array.isArray(d.extra && d.extra.allowed)) {
       console.warn('retention: toegestane kolommen', d.extra.allowed);
     }
-    if (d.message) return d.message;
-    if (status === 403) return 'Je hebt geen rechten voor deze handeling.';
+    // Rechten gaan voor: een 401 of 403 is geen fout om opnieuw te
+    // proberen, en de Engelse zin die de backend erbij levert helpt
+    // niemand verder.
+    if (status === 401 || status === 403) return 'Je hebt geen rechten voor deze handeling.';
+    if (d.code && ERROR_TEXT[d.code]) return ERROR_TEXT[d.code];
+    // Een onbekende code of een kale string van een ouder endpoint is
+    // ontwikkelaarstekst: die gaat naar de console, niet naar het scherm.
+    if (d.code || d.message) {
+      console.warn('retention: onbekende foutmelding', d.code || '', d.message || '');
+    }
     return 'Er ging iets mis, probeer het opnieuw.';
   },
 
@@ -174,14 +181,23 @@
         // één rij, dus geen afleiding uit een pagina.
         Auth.fetch('/v1/admin/retention/review?status=all&sort=last_seen_at&order=desc&limit=1'),
       ]);
+      if (sumRes && (sumRes.status === 401 || sumRes.status === 403)) {
+        this.showRetentionNoRights();
+        return;
+      }
       if (!sumRes || !sumRes.ok) throw new Error('summary');
       this._retention.summary = await sumRes.json();
+      // Drie staten voor "Laatst gegenereerd": bekend, leeg (er staat nog
+      // niets in de lijst) en mislukt. De derde is geen "n.v.t.": dat zou
+      // een reden verzinnen voor iets wat gewoon niet geladen is.
       if (lastRes && lastRes.ok) {
         const last = await lastRes.json();
         this._retention.lastGeneratedAt = (last.items && last.items[0]) ? last.items[0].last_seen_at : null;
         this._retention.lastGeneratedKnown = true;
+        this._retention.lastGeneratedFailed = false;
       } else {
         this._retention.lastGeneratedKnown = false;
+        this._retention.lastGeneratedFailed = true;
       }
       this.renderRetentionSummary();
       this.renderRetentionCategories();
@@ -190,6 +206,21 @@
       this.setContainerLoadError(document.getElementById('retentionSummary'), () => this.loadRetentionSummary());
       this.setLoadError('#retentionCategoryBody', 5, () => this.loadRetentionSummary());
     }
+  },
+
+  // Geen rechten is geen fout om opnieuw te proberen: geen retrylink, en
+  // de knoppen die iets zouden doen gaan uit.
+  showRetentionNoRights() {
+    this._retention.noRights = true;
+    mount(document.getElementById('retentionSummary'), html`
+      <div class="col-12"><div class="a-state-block">Je hebt geen rechten om de bewaartermijnen te bekijken.</div></div>`);
+    this.setEmpty('#retentionCategoryBody', 5, 'Je hebt geen rechten om deze gegevens te bekijken.');
+    document.querySelectorAll('#section-retention [data-action="retention-generate"], '
+      + '#section-retention [data-action="retention-dryrun"], '
+      + '#section-retention [data-action="retention-apollo-dryrun"]').forEach(btn => {
+      btn.disabled = true;
+      btn.title = 'Je hebt geen rechten voor deze handeling';
+    });
   },
 
   retentionCategoryCounts() {
@@ -206,6 +237,8 @@
     return Array.from(byKey.values()).sort((a, b) => b.pending - a.pending || a.key.localeCompare(b.key));
   },
 
+  // De waarde staat in .a-num--xl; een datum of "n.v.t." zakt daarbinnen
+  // naar de leesmaat met .a-num--date (D10: een datum is geen KPI-cijfer).
   retentionTile(label, valueHtml, note) {
     return html`
       <div class="col-sm-6 col-lg">
@@ -238,14 +271,27 @@
     mount(el, html`
       ${this.retentionTile('Te beoordelen', s.pending_total ?? 0)}
       ${this.retentionTile('Categorieën met items', cats)}
-      ${lastKnown
-        ? this.retentionTile('Laatst gegenereerd', this.retentionDate(this._retention.lastGeneratedAt))
-        : this.retentionTile('Laatst gegenereerd', html`<span class="a-soft">n.v.t.</span>`,
-            'er staat nog niets in de lijst')}
+      ${this.retentionLastGeneratedTile()}
       ${this._retention.reappeared > 0
-        ? this.retentionTile('Eerder afgewezen, opnieuw verschenen', this._retention.reappeared,
+        ? this.retentionTile('Heropend na afwijzing', this._retention.reappeared,
             'geteld in de nu geladen lijst')
         : ''}`);
+  },
+
+  // Drie staten (§7.2g): een datum, "n.v.t." met de reden wanneer de lijst
+  // leeg is, en een streepje met een retrylink wanneer de meting zelf niet
+  // geladen kon worden.
+  retentionLastGeneratedTile() {
+    if (this._retention.lastGeneratedFailed) {
+      return this.retentionTile('Laatst gegenereerd', html`<span class="a-soft">--</span>`,
+        html`<a href="#" data-action="retention-refresh-summary">Kon niet laden, probeer opnieuw</a>`);
+    }
+    if (this._retention.lastGeneratedKnown && this._retention.lastGeneratedAt) {
+      return this.retentionTile('Laatst gegenereerd',
+        html`<span class="a-num--date">${this.retentionDate(this._retention.lastGeneratedAt)}</span>`);
+    }
+    return this.retentionTile('Laatst gegenereerd', html`<span class="a-soft a-num--date">n.v.t.</span>`,
+      'er staat nog niets in de lijst');
   },
 
   renderRetentionCategories() {
@@ -294,10 +340,11 @@
       // sorteerbaar; de rest is een gewone <th>.
       serverSort: true,
       page: { container: 'retentionPagination', section: 'retention', size: PAGE_SIZE },
-      empty: html`Er staat op dit moment niets te beoordelen.
-        <div class="a-meta mt-2">De lijst wordt maandelijks automatisch aangevuld.</div>
-        <div class="mt-3"><button type="button" class="btn btn-outline-secondary"
-          data-action="retention-generate">Lijst genereren</button></div>`,
+      // De lege staat hangt van het actieve filter af: "genereer de lijst"
+      // klopt alleen voor de standaardweergave. Onder een statusfilter of
+      // een categoriefilter is er simpelweg niets dat aan dat filter
+      // voldoet, en dan is genereren niet de vervolgstap.
+      empty: () => this.retentionEmptyHtml(),
       cols: [
         { key: '_check' },
         { key: 'category', sortable: true },
@@ -320,6 +367,34 @@
       },
     });
     return this._retentionTable;
+  },
+
+  retentionEmptyHtml() {
+    const p = this._lastParams.retention || {};
+    const status = p.status || 'pending';
+    if (p.category || status !== 'pending') {
+      return html`Geen items die aan dit filter voldoen.
+        <div class="a-meta mt-2">Pas het status- of categoriefilter aan om meer te zien.</div>`;
+    }
+    // Eén affordance voor genereren op dit scherm: de knop in de kop van
+    // de samenvatting. Hier staat alleen waar hij zit.
+    return html`Er staat op dit moment niets te beoordelen.
+      <div class="a-meta mt-2">De lijst wordt maandelijks automatisch aangevuld; met
+        <span class="a-cell-strong">Lijst genereren</span> hierboven vul je hem nu aan.</div>`;
+  },
+
+  // Eén regel per geraakt item, met scheiding, in plaats van een lap
+  // voorgevormde tekst: dit is een lijst die iemand naloopt.
+  retentionBulkRowList(items) {
+    return html`
+      <div class="a-scrollbox a-scrollbox--rows">
+        ${items.map(i => html`
+          <div class="a-listrow">
+            <span class="a-num a-truncate-col">${this.retentionSubject(i)}</span>
+            <span class="a-soft text-nowrap">${this.retentionDate(i.term_expired_at)}</span>
+            <span class="text-nowrap">${AdminLabels.label('retentieactie', i.action)}</span>
+          </div>`)}
+      </div>`;
   },
 
   async loadRetentionReview(params) {
@@ -360,10 +435,16 @@
     const ids = new Set(items.map(i => i.id));
     Array.from(this._retention.selected).forEach(id => { if (!ids.has(id)) this._retention.selected.delete(id); });
     this.renderRetentionFooterCount();
-    this.renderRetentionSummary();
+    // Alleen hertekenen wanneer er een samenvatting IS: anders zou een
+    // mislukte samenvatting (met zijn retrylink) door de laadstaat van
+    // deze lijstlading overschreven worden en nooit meer terugkomen.
+    if (this._retention.summary) this.renderRetentionSummary();
     // De bulkbalk hangt aan de selectie; die tekent na het schilderen van
     // de rijen opnieuw (zie renderRetentionBulkbar).
-    setTimeout(() => this.renderRetentionBulkbar(), 0);
+    setTimeout(() => {
+      this.renderRetentionBulkbar();
+      this.syncRetentionClamps();
+    }, 0);
     return data || {};
   },
 
@@ -384,7 +465,7 @@
     const canReject = item.status !== 'purged' && item.status !== 'purging';
     const busyReason = 'Dit item is al verwerkt of wordt verwerkt';
     return html`
-      <tr>
+      <tr class="${this._retention.selected.has(item.id) ? 'a-row-selected' : ''}" data-row-id="${item.id}">
         <td class="a-col-check">
           <label class="a-tap">
             <input class="form-check-input" type="checkbox" data-action="retention-select" data-id="${item.id}"
@@ -392,22 +473,24 @@
               ${raw(canApprove ? '' : 'disabled')}>
           </label>
         </td>
-        <td data-label="Categorie" class="a-cell-name">
+        <td data-label="Categorie" class="a-cell-name a-col-cat" title="${this.retentionCategoryLabel(item.category)}">
           ${reappeared ? raw('<i class="fa-solid fa-rotate-left me-1 text-warning-ink" aria-hidden="true"></i>') : ''}${this.retentionCategoryLabel(item.category)}
         </td>
         <td data-label="Onderwerp" class="a-num">${subject}</td>
-        <td data-label="Termijn verlopen">
+        <td data-label="Termijn verlopen" class="text-nowrap">
           ${this.retentionDate(item.term_expired_at)}
-          ${days === null ? '' : html`<div class="a-meta">${days} dagen</div>`}
+          ${days === null ? '' : html`<span class="a-meta ms-1">(${days} d)</span>`}
         </td>
         <td data-label="Ontbrekend signaal">
-          <div class="a-clamp" id="retSignal${item.id}">${item.signal_missing_nl || '—'}</div>
-          <button type="button" class="btn btn-sm btn-ghost-secondary px-0"
-            data-action="retention-toggle-signal" data-id="${item.id}" aria-expanded="false"
-            aria-controls="retSignal${item.id}">meer</button>
+          <div class="d-flex gap-2 align-items-start">
+            <div class="a-clamp flex-fill" id="retSignal${item.id}">${item.signal_missing_nl || '—'}</div>
+            <button type="button" class="btn btn-sm btn-ghost-secondary px-1 flex-shrink-0"
+              data-action="retention-toggle-signal" data-id="${item.id}" aria-expanded="false"
+              aria-controls="retSignal${item.id}" hidden>meer</button>
+          </div>
         </td>
-        <td data-label="Actie">${AdminLabels.label('retentieactie', item.action)}</td>
-        <td data-label="Status">
+        <td data-label="Actie" class="text-nowrap">${AdminLabels.label('retentieactie', item.action)}</td>
+        <td data-label="Status" class="a-col-status">
           <span class="${AdminLabels.badgeClass('retentiestatus', item.status)}">${AdminLabels.label('retentiestatus', item.status)}</span>
           ${reappeared ? html`<div class="a-meta">Eerder afgewezen, opnieuw verschenen op ${this.retentionDate(item.reappeared_after_rejection_at)}</div>` : ''}
         </td>
@@ -415,17 +498,31 @@
           <button type="button" class="btn btn-sm btn-ghost-secondary"
             data-action="retention-approve" data-id="${item.id}"
             aria-label="Goedkeuren en verwerken: ${subject}"
-            ${raw(canApprove ? '' : `disabled title="${GSP.esc(busyReason)}"`)}>
+            title="${canApprove ? 'Goedkeuren en verwerken' : busyReason}"
+            ${raw(canApprove ? '' : 'disabled')}>
             <i class="fa-solid fa-check" aria-hidden="true"></i><span class="d-md-none ms-1">Goedkeuren</span>
           </button>
           <button type="button" class="btn btn-sm btn-ghost-secondary"
             data-action="retention-reject" data-id="${item.id}"
             aria-label="Afwijzen en bewaren: ${subject}"
-            ${raw(canReject ? '' : `disabled title="${GSP.esc(busyReason)}"`)}>
+            title="${canReject ? 'Afwijzen en bewaren' : busyReason}"
+            ${raw(canReject ? '' : 'disabled')}>
             <i class="fa-solid fa-xmark" aria-hidden="true"></i><span class="d-md-none ms-1">Afwijzen</span>
           </button>
         </td>
       </tr>`;
+  },
+
+  // De uitklapknop hoort alleen te staan waar de tekst daadwerkelijk is
+  // ingekort. Dat is pas na het schilderen te meten, want het hangt van de
+  // kolombreedte af.
+  syncRetentionClamps() {
+    document.querySelectorAll('#retentionBody .a-clamp').forEach(el => {
+      const btn = el.parentElement && el.parentElement.querySelector('[data-action="retention-toggle-signal"]');
+      if (!btn) return;
+      const clipped = el.scrollHeight > el.clientHeight + 1;
+      btn.hidden = !clipped && !el.classList.contains('a-clamp--open');
+    });
   },
 
   toggleRetentionSignal(id, btn) {
@@ -439,6 +536,8 @@
   /* ---- Rijselectie en bulkbalk (§7.2a) ---- */
   toggleRetentionSelection(id, checked) {
     if (checked) this._retention.selected.add(id); else this._retention.selected.delete(id);
+    const row = document.querySelector(`#retentionBody tr[data-row-id="${id}"]`);
+    if (row) row.classList.toggle('a-row-selected', checked);
     this.renderRetentionBulkbar();
   },
 
@@ -448,7 +547,10 @@
       if (checked) this._retention.selected.add(i.id); else this._retention.selected.delete(i.id);
     });
     document.querySelectorAll('#retentionBody input[data-action="retention-select"]').forEach(box => {
-      if (!box.disabled) box.checked = checked;
+      if (box.disabled) return;
+      box.checked = checked;
+      const row = box.closest('tr');
+      if (row) row.classList.toggle('a-row-selected', checked);
     });
     this.renderRetentionBulkbar();
   },
@@ -456,6 +558,7 @@
   clearRetentionSelection() {
     this._retention.selected.clear();
     document.querySelectorAll('#retentionBody input[data-action="retention-select"]').forEach(box => { box.checked = false; });
+    document.querySelectorAll('#retentionBody tr.a-row-selected').forEach(row => row.classList.remove('a-row-selected'));
     this.renderRetentionBulkbar();
   },
 
@@ -549,11 +652,17 @@
         this.focusRetentionTable();
         return;
       }
-      this.retentionAlert('retentionApproveAlert', this.retentionErrorText(data, res && res.status));
+      this.retentionShowItemError(handle, this.retentionErrorText(data, res && res.status));
     } catch {
-      this.retentionAlert('retentionApproveAlert', 'Netwerkfout, probeer het opnieuw.');
+      this.retentionShowItemError(handle, 'Netwerkfout, probeer het opnieuw.');
     }
     handle.setBusy(false);
+  },
+
+  retentionShowItemError(handle, text) {
+    const open = handle && handle.el && handle.el.classList.contains('show');
+    if (open) { this.retentionAlert('retentionApproveAlert', text); return; }
+    Auth.toast(text, 'error');
   },
 
   async openRetentionReject(id) {
@@ -615,7 +724,7 @@
           <div class="a-metric-row"><span class="a-soft">Aantal items</span><span class="a-num">${ids.length}</span></div>
           <div class="a-metric-row"><span class="a-soft">Categorieën</span><span>${cats.join(', ')}</span></div>
         </div>
-        <div class="a-scrollbox">${items.map(i => html`${this.retentionSubject(i)} · ${this.retentionDate(i.term_expired_at)} · ${AdminLabels.label('retentieactie', i.action)}\n`)}</div>
+        ${this.retentionBulkRowList(items)}
         <div class="form-group mt-3 mb-0">
           <label for="retentionBulkNote">Notitie (optioneel)</label>
           <textarea id="retentionBulkNote" rows="2" class="a-textarea"></textarea>
@@ -630,27 +739,17 @@
     });
   },
 
-  async bulkRejectSelection() {
+  // §7.3.1: afwijzen van een selectie is één klik met een toast, geen
+  // modal en geen getypte bevestiging. Er wordt niets vernietigd, dus er
+  // is ook niets om ongedaan te maken; de rijen blijven bewaard en
+  // verdwijnen alleen uit de te beoordelen lijst.
+  async bulkRejectSelection(btn) {
     const ids = Array.from(this._retention.selected);
     if (!ids.length) return;
-    let note = null;
-    const ok = await ui.confirm(
-      `${ids.length} item(s) blijven bewaard en verdwijnen uit de lijst met te beoordelen items.`,
-      {
-        title: 'Afwijzen (bewaren)',
-        confirmLabel: `Afwijzen (${ids.length} items)`,
-        danger: false,
-        body: html`
-          <div class="form-group mb-0">
-            <label for="retentionRejectNote">Notitie (optioneel)</label>
-            <textarea id="retentionRejectNote" rows="2" class="a-textarea"></textarea>
-          </div>`,
-        onConfirm: () => { note = (document.getElementById('retentionRejectNote') || {}).value || null; },
-      });
-    if (!ok) return;
+    if (btn) btn.disabled = true;
     try {
       const res = await Auth.fetch('/v1/admin/retention/review/bulk', {
-        method: 'POST', body: JSON.stringify({ decision: 'rejected', ids, note: note || null }),
+        method: 'POST', body: JSON.stringify({ decision: 'rejected', ids }),
       });
       const data = res ? await res.json().catch(() => null) : null;
       if (res && res.ok) {
@@ -659,6 +758,7 @@
         Auth.toast(failed
           ? `${results.length - failed} afgewezen, ${failed} mislukt`
           : `${results.length} afgewezen en bewaard`, failed ? 'warning' : 'success');
+        this.retentionAnnounce(`${results.length - failed} items afgewezen en bewaard.`);
         this._retention.selected.clear();
         await this.refreshRetention();
         return;
@@ -667,6 +767,7 @@
     } catch {
       Auth.toast('Netwerkfout, probeer het opnieuw.', 'error');
     }
+    if (btn) btn.disabled = false;
   },
 
   // Categoriebreed: de modal haalt bij openen opnieuw op, zonder limit,
@@ -686,36 +787,86 @@
         label: 'Goedkeuren en verwerken',
         keepOpen: true,
         onClick: () => {
+          // bulkExpected is alleen gevuld door een geslaagde, verse
+          // ophaling van deze categorie (zie fillRetentionCategoryModal,
+          // dat hem eerst op 0 zet). Nul betekent: dit scherm heeft niet
+          // gezien wat het zou goedkeuren, dus er gaat niets weg.
           const expected = this._retention.bulkExpected;
-          if (!expected) return false;
+          if (!expected) {
+            this.retentionAlert('retentionBulkAlert',
+              'De lijst voor deze categorie is niet geladen, dus er is niets om goed te keuren. '
+              + 'Ververs en probeer opnieuw.',
+              { action: 'retention-bulk-refresh', actionLabel: 'Verversen' });
+            return false;
+          }
           this.submitRetentionBulk(handle, { category, expected_count: expected });
           return true;
         },
       },
+      onClose: () => {
+        this._retentionCategoryModal = null;
+        this._retention.bulkExpected = 0;
+        if (this._retentionMobileWatch) {
+          this._retentionMobileWatch.removeEventListener('change', this._retentionMobileClose);
+          this._retentionMobileWatch = null;
+        }
+      },
     });
     this._retentionCategoryModal = handle;
     this._retentionCategoryModalCategory = category;
+    // Besluit 1 uit §7.6 geldt niet alleen bij het openen: wordt het venster
+    // tijdens deze modal smaller dan 600px, dan hoort deze handeling daar
+    // niet meer thuis en sluit het paneel.
+    if (typeof window.matchMedia === 'function') {
+      this._retentionMobileWatch = window.matchMedia('(max-width: 600px)');
+      this._retentionMobileClose = (e) => { if (e.matches) handle.close(); };
+      this._retentionMobileWatch.addEventListener('change', this._retentionMobileClose);
+      if (this._retentionMobileWatch.matches) { handle.close(); return; }
+    }
     await this.fillRetentionCategoryModal(handle, category);
   },
 
   async fillRetentionCategoryModal(handle, category) {
-    handle.setBody(html`<div class="a-state-block"><i class="fa-solid fa-spinner fa-spin" aria-hidden="true"></i> Laden…</div>`);
+    handle.setBody(html`<div id="retentionBulkAlert"></div>
+      <div class="a-state-block"><i class="fa-solid fa-spinner fa-spin" aria-hidden="true"></i> Laden…</div>`);
+    // Zolang de verse telling er niet is, is er geen aantal om goed te
+    // keuren: niet dat van de vorige categorie en niet dat van de vorige
+    // poging (S1/S3).
+    this._retention.bulkExpected = 0;
+    const lockBtn = handle.button('danger');
+    if (lockBtn) { lockBtn.disabled = true; lockBtn.dataset.gspLock = '1'; }
     try {
       // Bewust zonder limit: de volledige categorie, want dit getal wordt
       // expected_count.
       const res = await Auth.fetch(`/v1/admin/retention/review?status=pending&category=${encodeURIComponent(category)}`);
       const data = res ? await res.json().catch(() => null) : null;
       if (!res || !res.ok) {
-        handle.setBody(html`<div class="a-state-block">${this.retentionErrorText(data, res && res.status)}</div>`);
+        handle.setBody(html`<div id="retentionBulkAlert"></div>`);
+        this.retentionAlert('retentionBulkAlert', this.retentionErrorText(data, res && res.status),
+          { action: 'retention-bulk-refresh', actionLabel: 'Verversen' });
         return;
       }
       const items = (data && data.items) || [];
-      this._retention.bulkExpected = items.length;
       const over = items.length > BULK_CAP;
+      // Boven de cap of zonder items blijft het aantal 0: dan is er niets
+      // dat deze modal in één keer mag goedkeuren.
+      this._retention.bulkExpected = (over || !items.length) ? 0 : items.length;
       const dangerBtn = handle.button('danger');
-      if (dangerBtn && (over || !items.length)) {
-        dangerBtn.disabled = true;
-        dangerBtn.title = over ? `Maximaal ${BULK_CAP} per keer` : 'Geen items om goed te keuren';
+      if (dangerBtn) {
+        if (over || !items.length) {
+          dangerBtn.disabled = true;
+          // gspLock: de getypte bevestiging mag deze knop niet weer
+          // aanzetten (ui.js slaat een vergrendelde knop over).
+          dangerBtn.dataset.gspLock = '1';
+          dangerBtn.title = over ? `Maximaal ${BULK_CAP} per keer` : 'Geen items om goed te keuren';
+        } else {
+          delete dangerBtn.dataset.gspLock;
+          dangerBtn.removeAttribute('title');
+          // Het slot is eraf; de getypte bevestiging bepaalt weer of de
+          // knop aan mag. Zonder dit blijft hij uit na een verversing,
+          // want er is intussen niets in het veld getypt.
+          handle.syncGate();
+        }
       }
       handle.setBody(html`
         <div id="retentionBulkAlert"></div>
@@ -724,13 +875,15 @@
           <div class="a-metric-row"><span class="a-soft">Handeling</span><span>${Array.from(new Set(items.map(i => AdminLabels.label('retentieactie', i.action)))).join(', ') || '—'}</span></div>
           ${over ? html`<div class="a-meta mt-2">Maximaal ${BULK_CAP} per keer; keur deze categorie in kleinere delen goed.</div>` : ''}
         </div>
-        <div class="a-scrollbox">${items.map(i => html`${this.retentionSubject(i)} · ${this.retentionDate(i.term_expired_at)} · ${AdminLabels.label('retentieactie', i.action)}\n`)}</div>
+        ${this.retentionBulkRowList(items)}
         <div class="form-group mt-3 mb-0">
           <label for="retentionBulkNote">Notitie (optioneel)</label>
           <textarea id="retentionBulkNote" rows="2" class="a-textarea"></textarea>
         </div>`);
     } catch {
-      handle.setBody(html`<div class="a-state-block">Kon niet laden, probeer opnieuw.</div>`);
+      handle.setBody(html`<div id="retentionBulkAlert"></div>`);
+      this.retentionAlert('retentionBulkAlert', 'Kon niet laden, probeer opnieuw.',
+        { action: 'retention-bulk-refresh', actionLabel: 'Verversen' });
     }
   },
 
@@ -753,16 +906,28 @@
       const d = this.errorDetail(data);
       if (d.code === 'retention_review_bulk_expected_count_mismatch' && payload.category) {
         // Nooit stilzwijgend opnieuw proberen met het nieuwe getal: de
-        // modal blijft staan, het aantal wordt opnieuw opgehaald.
-        this.retentionAlert('retentionBulkAlert', ERROR_TEXT[d.code],
+        // modal blijft staan en het oude aantal vervalt, zodat een tweede
+        // klik niet hetzelfde verouderde getal opnieuw stuurt. Alleen
+        // "Verversen" vult het weer.
+        this._retention.bulkExpected = 0;
+        this.retentionShowModalError(handle, ERROR_TEXT[d.code],
           { action: 'retention-bulk-refresh', actionLabel: 'Verversen' });
       } else {
-        this.retentionAlert('retentionBulkAlert', this.retentionErrorText(data, res && res.status));
+        this.retentionShowModalError(handle, this.retentionErrorText(data, res && res.status));
       }
     } catch {
-      this.retentionAlert('retentionBulkAlert', 'Netwerkfout, probeer het opnieuw.');
+      this.retentionShowModalError(handle, 'Netwerkfout, probeer het opnieuw.');
     }
     handle.setBusy(false);
+  },
+
+  // Een melding die bij een paneel hoort, maar dat paneel kan intussen
+  // gesloten zijn (iemand drukt Escape terwijl de POST loopt). Dan mag de
+  // uitkomst niet in een onzichtbaar paneel belanden.
+  retentionShowModalError(handle, text, opts) {
+    const open = handle && handle.el && handle.el.classList.contains('show');
+    if (open) { this.retentionAlert('retentionBulkAlert', text, opts); return; }
+    Auth.toast(text, 'error');
   },
 
   renderRetentionBulkResult(handle, results) {
@@ -781,7 +946,12 @@
             data-ids="${failed.map(f => f.id).join(',')}">Mislukte items opnieuw proberen</button>
         </div>` : ''}`);
     const danger = handle.button('danger');
-    if (danger) danger.disabled = true;
+    if (danger) {
+      danger.disabled = true;
+      // Vergrendeld: de bevestiging staat er nog, maar deze bulk is klaar.
+      danger.dataset.gspLock = '1';
+      danger.title = 'Deze bulk is al verwerkt';
+    }
     Auth.toast(failed.length ? `${done} verwerkt, ${failed.length} mislukt` : `${done} verwerkt`,
       failed.length ? 'warning' : 'success');
     this.retentionAnnounce(`${done} verwerkt, ${failed.length} mislukt.`);
@@ -848,7 +1018,7 @@
         const rows = (data && data.categories) || [];
         mount(el, html`
           <div class="table-responsive">
-            <table class="table table-vcenter card-table a-cardlist" aria-label="Droogloop per categorie">
+            <table class="table table-vcenter card-table a-cardlist a-cardlist--compact" aria-label="Droogloop per categorie">
               <thead><tr><th scope="col">Categorie</th><th scope="col">Telling</th><th scope="col">Toelichting</th></tr></thead>
               <tbody>${rows.map(r => html`
                 <tr>
@@ -878,11 +1048,11 @@
         mount(el, html`<div class="a-state-block">${this.retentionErrorText(data, res && res.status)}</div>`);
       } else {
         mount(el, html`
-          <div class="d-flex flex-wrap gap-3">
-            <div class="a-stat"><div class="a-stat__value">${data.total ?? 0}</div><div class="a-stat__label">In de pool</div></div>
-            <div class="a-stat"><div class="a-stat__value">${data.would_anonymise ?? 0}</div><div class="a-stat__label">Zou anonimiseren</div></div>
-            <div class="a-stat"><div class="a-stat__value">${data.would_hard_delete ?? 0}</div><div class="a-stat__label">Zou hard verwijderen</div></div>
-            <div class="a-stat"><div class="a-stat__value">${data.skipped ?? 0}</div><div class="a-stat__label">Overgeslagen</div></div>
+          <div class="row row-cards">
+            ${this.retentionTile('In de pool', data.total ?? 0)}
+            ${this.retentionTile('Zou anonimiseren', data.would_anonymise ?? 0)}
+            ${this.retentionTile('Zou hard verwijderen', data.would_hard_delete ?? 0)}
+            ${this.retentionTile('Overgeslagen', data.skipped ?? 0)}
           </div>
           <p class="a-meta mt-3">Overgeslagen: rijen die een beschermend signaal hebben opgepikt en daarom buiten de selectie vallen.</p>`);
       }
@@ -987,7 +1157,7 @@
       <div class="card mb-3">
         <div class="card-header"><h3 class="card-title mb-0">Per categorie</h3></div>
         <div class="table-responsive">
-          <table class="table table-vcenter card-table a-cardlist" aria-label="Bewaartermijnen per categorie">
+          <table class="table table-vcenter card-table a-cardlist a-cardlist--compact" aria-label="Bewaartermijnen per categorie">
             <thead>
               <tr>
                 <th scope="col">Categorie</th>
@@ -1078,13 +1248,14 @@
     ],
     actions: {
       'retention-generate': (el) => Admin.generateRetentionList(el),
+      'retention-refresh-summary': (el, e) => { e.preventDefault(); Admin.loadRetentionSummary(); },
       'retention-approve': (el) => Admin.openRetentionApprove(Number(el.dataset.id)),
       'retention-reject': (el) => Admin.openRetentionReject(Number(el.dataset.id)),
       'retention-select': (el) => Admin.toggleRetentionSelection(Number(el.dataset.id), el.checked),
       'retention-select-all': (el) => Admin.toggleRetentionSelectAll(el.checked),
       'retention-clear-selection': () => Admin.clearRetentionSelection(),
       'retention-bulk-approve': () => Admin.openRetentionBulkApprove(),
-      'retention-bulk-reject': () => Admin.bulkRejectSelection(),
+      'retention-bulk-reject': (el) => Admin.bulkRejectSelection(el),
       'retention-bulk-retry': (el) => Admin.retryRetentionBulk((el.dataset.ids || '').split(',').map(Number).filter(Boolean)),
       'retention-bulk-refresh': () => {
         if (Admin._retentionCategoryModal && Admin._retentionCategoryModalCategory) {
