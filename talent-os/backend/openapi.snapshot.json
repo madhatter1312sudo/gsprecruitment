@@ -196,10 +196,15 @@
         "type": "object"
       },
       "AdminEraseRequest": {
+        "description": "WS5 BV9 (SITE-DESIGN-SPEC.md \u00a77.6 besluit 3, \u00a77.7 BV9).\n\n`confirm` used to be a boolean that defaulted to False and only ever\nmattered for the admin/self guard below -- which meant the plain case\n(erase a sourced person) needed no confirmation of any kind: one\nfield, one call, irreversible. The typed-address threshold the admin\npanel applies is a UI measure, and a UI measure binds only that UI,\nnot a routine or a second client hitting the same endpoint. So the\nfield now carries the address itself, and the endpoint refuses when\nit does not match `email` after strip()/lower(). Every caller is now\nheld to the same threshold and the panel repeats the rule instead of\ncarrying it alone.\n\nThe admin/self question is a genuinely different one -- \"this address\nalso owns platform access, are you sure\" -- so it keeps its own\nfield, `confirm_admin_or_self`, rather than being folded into the\nsame yes. Two questions, two answers.\n\nThe match itself is checked in the endpoint below, not in a pydantic\nvalidator: a validator's ValidationError carries the offending input\nback to the caller (pydantic puts the whole payload in `input`), and\nthat would put two e-mail addresses into every 422 body and into\nwhatever logs or error trackers see it. The endpoint refuses with a\nstructured detail that names neither.",
         "properties": {
           "confirm": {
-            "default": false,
             "title": "Confirm",
+            "type": "string"
+          },
+          "confirm_admin_or_self": {
+            "default": false,
+            "title": "Confirm Admin Or Self",
             "type": "boolean"
           },
           "email": {
@@ -209,7 +214,8 @@
           }
         },
         "required": [
-          "email"
+          "email",
+          "confirm"
         ],
         "title": "AdminEraseRequest",
         "type": "object"
@@ -1113,6 +1119,18 @@
             ],
             "title": "Consent Talentpool Until"
           },
+          "consent_withdrawn_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Consent Withdrawn At"
+          },
           "created_at": {
             "format": "date-time",
             "title": "Created At",
@@ -1203,6 +1221,17 @@
             },
             "title": "Languages",
             "type": "array"
+          },
+          "lawful_basis": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lawful Basis"
           },
           "linkedin_url": {
             "anyOf": [
@@ -4233,6 +4262,15 @@
           },
           "stage": {
             "default": "sourced",
+            "enum": [
+              "sourced",
+              "new",
+              "screening",
+              "interview",
+              "offer",
+              "placed",
+              "rejected"
+            ],
             "title": "Stage",
             "type": "string"
           }
@@ -4247,8 +4285,15 @@
       "PipelineStageUpdate": {
         "properties": {
           "stage": {
-            "maxLength": 50,
-            "minLength": 1,
+            "enum": [
+              "sourced",
+              "new",
+              "screening",
+              "interview",
+              "offer",
+              "placed",
+              "rejected"
+            ],
             "title": "Stage",
             "type": "string"
           }
@@ -8712,6 +8757,42 @@
               "title": "Offset",
               "type": "integer"
             }
+          },
+          {
+            "description": "Sortable column (WS5 BV10); default created_at.",
+            "in": "query",
+            "name": "sort",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Sortable column (WS5 BV10); default created_at.",
+              "title": "Sort"
+            }
+          },
+          {
+            "description": "'asc' or 'desc'; default 'desc'.",
+            "in": "query",
+            "name": "order",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "'asc' or 'desc'; default 'desc'.",
+              "title": "Order"
+            }
           }
         ],
         "responses": {
@@ -9540,7 +9621,7 @@
     },
     "/api/v1/admin/gdpr/erase": {
       "post": {
-        "description": "Art. 17 for people who were only ever sourced (LinkedIn/GitHub/\nreferral/meetup/Apollo), never registered a portal account. Same\nerase_person() routine as self-service erasure.\n\nGuard: erasing an admin account (any matching users row with\nrole='admin'), or the calling admin's own account, through this\nendpoint would delete platform-admin access as a side effect of what\nlooks like a routine PII-erasure request. Refuse unless the caller\nexplicitly opts in with confirm=true.",
+        "description": "Art. 17 for people who were only ever sourced (LinkedIn/GitHub/\nreferral/meetup/Apollo), never registered a portal account. Same\nerase_person() routine as self-service erasure.\n\nGuard: erasing an admin account (any matching users row with\nrole='admin'), or the calling admin's own account, through this\nendpoint would delete platform-admin access as a side effect of what\nlooks like a routine PII-erasure request. Refuse unless the caller\nexplicitly opts in with confirm_admin_or_self=true (WS5 BV9 renamed\nthis from the old boolean `confirm`, which now carries the typed\naddress -- see AdminEraseRequest).",
         "operationId": "admin_erase_person_api_v1_admin_gdpr_erase_post",
         "requestBody": {
           "content": {
@@ -9717,6 +9798,42 @@
               ],
               "description": "1-based page number; overrides offset when given (offset = (page-1)*limit).",
               "title": "Page"
+            }
+          },
+          {
+            "description": "Sortable column (WS5 BV10); default created_at.",
+            "in": "query",
+            "name": "sort",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Sortable column (WS5 BV10); default created_at.",
+              "title": "Sort"
+            }
+          },
+          {
+            "description": "'asc' or 'desc'; default 'desc'.",
+            "in": "query",
+            "name": "order",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "'asc' or 'desc'; default 'desc'.",
+              "title": "Order"
             }
           }
         ],
@@ -10416,6 +10533,114 @@
         ]
       }
     },
+    "/api/v1/admin/pipeline": {
+      "get": {
+        "description": "WS5 BV1 (\u00a77.3.4): the admin panel's pipeline tab needs an entry_id\nbefore it can call PATCH .../{entry_id}/stage or GET .../history, and\nuntil now no admin route listed pipeline entries at all -- the only\nlist route was GET /api/v1/client/pipeline, scoped to the client\nbehind the JWT and therefore unusable with an admin token.\n\nSame row shape as that client route plus `client_id`, and the same\npresentation-consent gate on `full_name`: a pipeline entry existing\nis not consent to be named, and this route deliberately does not hand\nan admin panel more personal data than the client portal already\nshows for the same row. An admin who needs the name has\nGET /candidates and GET /candidates/{kind}/{id} for that, both of\nwhich are the routes where naming a candidate is the point.",
+        "operationId": "admin_list_pipeline_api_v1_admin_pipeline_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "candidate_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Candidate Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "client_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Client Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "job_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Admin List Pipeline",
+        "tags": [
+          "admin-portal"
+        ]
+      }
+    },
     "/api/v1/admin/pipeline/{entry_id}/history": {
       "get": {
         "operationId": "admin_get_pipeline_stage_history_api_v1_admin_pipeline__entry_id__history_get",
@@ -10605,6 +10830,42 @@
               "minimum": 0,
               "title": "Offset",
               "type": "integer"
+            }
+          },
+          {
+            "description": "Sortable column (WS5 BV10); default created_at.",
+            "in": "query",
+            "name": "sort",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Sortable column (WS5 BV10); default created_at.",
+              "title": "Sort"
+            }
+          },
+          {
+            "description": "'asc' or 'desc'; default 'desc'.",
+            "in": "query",
+            "name": "order",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "'asc' or 'desc'; default 'desc'.",
+              "title": "Order"
             }
           }
         ],
@@ -11169,7 +11430,7 @@
     },
     "/api/v1/admin/retention/review": {
       "get": {
-        "description": "The monthly list itself \u2014 one row per person/subject currently (or\npreviously, with status != 'pending') queued, carrying exactly what\nthe owner asked for: category, term_expired_at (the date the term\nexpired), and signal_missing_nl (which protective signal was absent).\n`status=\"all\"` lists every status; the default `status=\"pending\"`\nmatches what an admin screen's default view should show.",
+        "description": "The monthly list itself \u2014 one row per person/subject currently (or\npreviously, with status != 'pending') queued, carrying exactly what\nthe owner asked for: category, term_expired_at (the date the term\nexpired), and signal_missing_nl (which protective signal was absent).\n`status=\"all\"` lists every status; the default `status=\"pending\"`\nmatches what an admin screen's default view should show.\n\nWS5 BV6: `limit`/`offset`/`total`. `limit` has no default on purpose.\nThe category-wide approve path (POST .../review/bulk with\n`expected_count`) reads the number an admin saw against the number\nthe server finds; a default page size here would quietly turn \"the\nwhole category\" into \"the first page of it\", and the mismatch would\nsurface as a refused bulk call rather than as anything the admin\ncould act on. So a caller that passes nothing still gets every\nmatching row, exactly as before, and `total` (always the full count,\nnever the page length) is what a pager needs.",
         "operationId": "list_review_items_api_v1_admin_retention_review_get",
         "parameters": [
           {
@@ -11196,6 +11457,73 @@
                 }
               ],
               "title": "Category"
+            }
+          },
+          {
+            "description": "WS5 BV6: omit for the full set (the historical behaviour).",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 1000,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "WS5 BV6: omit for the full set (the historical behaviour).",
+              "title": "Limit"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Sortable column (WS5 BV10); default term_expired_at.",
+            "in": "query",
+            "name": "sort",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Sortable column (WS5 BV10); default term_expired_at.",
+              "title": "Sort"
+            }
+          },
+          {
+            "description": "'asc' or 'desc'; default 'asc'.",
+            "in": "query",
+            "name": "order",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "'asc' or 'desc'; default 'asc'.",
+              "title": "Order"
             }
           }
         ],
@@ -11758,6 +12086,42 @@
               "minimum": 0,
               "title": "Offset",
               "type": "integer"
+            }
+          },
+          {
+            "description": "Sortable column (WS5 BV10); default created_at.",
+            "in": "query",
+            "name": "sort",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Sortable column (WS5 BV10); default created_at.",
+              "title": "Sort"
+            }
+          },
+          {
+            "description": "'asc' or 'desc'; default 'desc'.",
+            "in": "query",
+            "name": "order",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "'asc' or 'desc'; default 'desc'.",
+              "title": "Order"
             }
           }
         ],
