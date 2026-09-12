@@ -334,9 +334,14 @@ def patch_public_router(monkeypatch):
         monkeypatch.setattr(public_router, "fetch_one", db.fetch_one)
         monkeypatch.setattr(public_router, "execute", db.execute)
 
-        async def _fake_send_email(**kwargs):
+        # WS3: _send_talentpool_confirm_email() now renders through
+        # send_template() (services/email_templates.py's
+        # "talentpool_confirm") instead of building its own body_text and
+        # calling send_email() directly -- patch the method actually
+        # called.
+        async def _fake_send_template(name, to_email, ctx, lang="nl"):
             return send_ok
-        monkeypatch.setattr(public_router.email_service, "send_email", _fake_send_email)
+        monkeypatch.setattr(public_router.email_service, "send_template", _fake_send_template)
         return public_router
     return _patch
 
@@ -376,10 +381,13 @@ def test_talentpool_optin_with_valid_job_id_stores_it_and_names_the_job_in_the_e
 
     sent = []
 
-    async def _fake_send_email(**kwargs):
-        sent.append(kwargs)
+    # WS3: same rename as patch_public_router above -- the job title now
+    # travels as ctx["job_title"] into send_template(), not as a rendered
+    # body_text string.
+    async def _fake_send_template(name, to_email, ctx, lang="nl"):
+        sent.append({"name": name, "to_email": to_email, "ctx": ctx, "lang": lang})
         return True
-    monkeypatch.setattr(public_router.email_service, "send_email", _fake_send_email)
+    monkeypatch.setattr(public_router.email_service, "send_template", _fake_send_template)
 
     data = TalentpoolOptinRequest(
         email="applicant@example.com", consent=True, scope="matching_only",
@@ -393,7 +401,9 @@ def test_talentpool_optin_with_valid_job_id_stores_it_and_names_the_job_in_the_e
     assert job_alerts is True
     assert source == "vacancy_apply"
     assert len(sent) == 1
-    assert "Senior Embedded C++ Engineer" in sent[0]["body_text"]
+    assert sent[0]["name"] == "talentpool_confirm"
+    assert sent[0]["to_email"] == "applicant@example.com"
+    assert sent[0]["ctx"]["job_title"] == "Senior Embedded C++ Engineer"
 
 
 def test_talentpool_optin_with_unknown_job_id_stores_no_job_id(patch_public_router):
@@ -527,10 +537,11 @@ def test_talentpool_optin_second_role_within_ten_minutes_gets_its_own_row(monkey
 
     sent = []
 
-    async def _fake_send_email(**kwargs):
-        sent.append(kwargs)
+    # WS3: send_template(), not send_email() -- see patch_public_router above.
+    async def _fake_send_template(name, to_email, ctx, lang="nl"):
+        sent.append({"name": name, "to_email": to_email, "ctx": ctx})
         return True
-    monkeypatch.setattr(public_router.email_service, "send_email", _fake_send_email)
+    monkeypatch.setattr(public_router.email_service, "send_template", _fake_send_template)
 
     data1 = TalentpoolOptinRequest(
         email="dubbel@example.com", consent=True, scope="matching_only",
@@ -573,7 +584,7 @@ def test_talentpool_confirm_creates_new_candidate_with_no_source_url(patch_publi
     source_url required for candidates created via this channel."""
     from models.schemas import TalentpoolConfirmRequest
     pending = {"id": 1, "email": "new@example.com", "scope": "matching_and_contact",
-               "source": "blog_cta", "job_id": None}
+               "source": "blog_cta", "job_id": None, "job_alerts": False}
     db = _PublicDB(pending_row=pending, existing_candidate=None)
     router = patch_public_router(db)
     result = asyncio.run(router.talentpool_confirm(request=_fake_request(), data=TalentpoolConfirmRequest(token="tok")))
@@ -592,7 +603,7 @@ def test_talentpool_confirm_updates_existing_candidate_preserving_other_basis(pa
     silently overwritten) but still gets the consent columns recorded."""
     from models.schemas import TalentpoolConfirmRequest
     pending = {"id": 1, "email": "existing@example.com", "scope": "matching_only",
-               "source": "kandidaten_page", "job_id": None}
+               "source": "kandidaten_page", "job_id": None, "job_alerts": False}
     db = _PublicDB(
         pending_row=pending,
         existing_candidate={"id": 99, "lawful_basis": "gerechtvaardigd_belang"},
@@ -604,7 +615,14 @@ def test_talentpool_confirm_updates_existing_candidate_preserving_other_basis(pa
     _, args = update_calls[0]
     # args: now, until, scope, source, set_lawful_basis, candidate_id
     assert args[4] is False  # set_lawful_basis=False -- existing basis untouched
-    assert args[5] == 99
+    # WS3c (migrations/041) inserted two parameters between set_lawful_basis
+    # and the candidate id: $6 is_referral and $7 wants_alerts. The
+    # candidate id is the LAST positional argument either way, so assert on
+    # that rather than on a fixed index that moves whenever the SET list
+    # grows.
+    assert args[5] is False   # is_referral -- source is 'kandidaten_page'
+    assert args[6] is False   # wants_alerts -- job_alerts was not ticked
+    assert args[-1] == 99
 
 
 def test_talentpool_confirm_never_flips_portal_registratie_lawful_basis(patch_public_router):
@@ -613,7 +631,7 @@ def test_talentpool_confirm_never_flips_portal_registratie_lawful_basis(patch_pu
     same rule as the portal endpoint, not just 'any other basis'."""
     from models.schemas import TalentpoolConfirmRequest
     pending = {"id": 2, "email": "portal@example.com", "scope": "matching_only",
-               "source": "kandidaten_page", "job_id": None}
+               "source": "kandidaten_page", "job_id": None, "job_alerts": False}
     db = _PublicDB(
         pending_row=pending,
         existing_candidate={"id": 100, "lawful_basis": "portal_registratie"},
@@ -629,7 +647,7 @@ def test_talentpool_confirm_never_flips_portal_registratie_lawful_basis(patch_pu
 def test_talentpool_confirm_marks_the_pending_request_confirmed(patch_public_router):
     from models.schemas import TalentpoolConfirmRequest
     pending = {"id": 5, "email": "new2@example.com", "scope": "matching_only",
-               "source": "kandidaten_page", "job_id": None}
+               "source": "kandidaten_page", "job_id": None, "job_alerts": False}
     db = _PublicDB(pending_row=pending, existing_candidate=None)
     router = patch_public_router(db)
     asyncio.run(router.talentpool_confirm(request=_fake_request(), data=TalentpoolConfirmRequest(token="tok")))
@@ -646,7 +664,7 @@ def test_talentpool_confirm_marks_the_pending_request_confirmed(patch_public_rou
 def test_talentpool_confirm_with_still_open_job_creates_match_and_returns_applied_job(patch_public_router):
     from models.schemas import TalentpoolConfirmRequest
     pending = {"id": 6, "email": "applicant@example.com", "scope": "matching_only",
-               "source": "vacancy_apply", "job_id": 55}
+               "source": "vacancy_apply", "job_id": 55, "job_alerts": False}
     db = _PublicDB(
         pending_row=pending, existing_candidate=None,
         job_row={"id": 55, "title": "Senior Embedded C++ Engineer"},
@@ -667,7 +685,7 @@ def test_talentpool_confirm_with_still_open_job_creates_match_and_returns_applie
 def test_talentpool_confirm_with_no_job_id_returns_applied_job_none(patch_public_router):
     from models.schemas import TalentpoolConfirmRequest
     pending = {"id": 7, "email": "plain@example.com", "scope": "matching_only",
-               "source": "kandidaten_page", "job_id": None}
+               "source": "kandidaten_page", "job_id": None, "job_alerts": False}
     db = _PublicDB(pending_row=pending, existing_candidate=None)
     router = patch_public_router(db)
     result = asyncio.run(
@@ -684,7 +702,7 @@ def test_talentpool_confirm_with_job_closed_since_optin_returns_applied_job_none
     eligible, and must say so via applied_job=None rather than an error."""
     from models.schemas import TalentpoolConfirmRequest
     pending = {"id": 8, "email": "late@example.com", "scope": "matching_only",
-               "source": "vacancy_apply", "job_id": 55}
+               "source": "vacancy_apply", "job_id": 55, "job_alerts": False}
     db = _PublicDB(pending_row=pending, existing_candidate=None, job_row=None)
     router = patch_public_router(db)
     result = asyncio.run(
@@ -884,17 +902,22 @@ def test_talentpool_reminder_job_sends_one_email_and_stamps_reminder_sent_at(mon
 
     sent_calls = []
 
-    async def _fake_send_email(**kwargs):
-        sent_calls.append(kwargs)
+    # WS3: talentpool_reminder_job() now calls send_template() (the
+    # "talentpool_reminder" template) instead of building its own
+    # body_text and calling send_email() directly.
+    async def _fake_send_template(name, to_email, ctx, lang="nl"):
+        sent_calls.append({"name": name, "to_email": to_email, "ctx": ctx})
         return True
 
     import services.email_service as email_service_module
-    monkeypatch.setattr(email_service_module.email_service, "send_email", _fake_send_email)
+    monkeypatch.setattr(email_service_module.email_service, "send_template", _fake_send_template)
 
     result = asyncio.run(scheduler.talentpool_reminder_job())
     assert result == {"candidates_due": 1, "sent": 1}
     assert len(sent_calls) == 1
+    assert sent_calls[0]["name"] == "talentpool_reminder"
     assert sent_calls[0]["to_email"] == "due@example.com"
+    assert sent_calls[0]["ctx"]["full_name"] == "Jane Doe"
     stamp_calls = [c for c in db.executed if "consent_reminder_sent_at = NOW()" in c[0]]
     assert len(stamp_calls) == 1
     assert stamp_calls[0][1] == (1,)
@@ -907,11 +930,11 @@ def test_talentpool_reminder_job_does_not_stamp_when_send_fails(monkeypatch):
     monkeypatch.setattr(scheduler, "fetch_all", db.fetch_all)
     monkeypatch.setattr(scheduler, "execute", db.execute)
 
-    async def _fake_send_email(**kwargs):
+    async def _fake_send_template(name, to_email, ctx, lang="nl"):
         return False
 
     import services.email_service as email_service_module
-    monkeypatch.setattr(email_service_module.email_service, "send_email", _fake_send_email)
+    monkeypatch.setattr(email_service_module.email_service, "send_template", _fake_send_template)
 
     result = asyncio.run(scheduler.talentpool_reminder_job())
     assert result == {"candidates_due": 1, "sent": 0}

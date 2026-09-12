@@ -491,16 +491,35 @@ const GSP_WHATSAPP = '31617913965';
       $('loginBtn')?.click();
     });
 
-    // Wire up social login buttons
+    // Wire up the Google sign-in button. Role comes from the register
+    // form's account-type select when the click starts there (#regRole,
+    // "I'm looking for a role" / "I'm looking to hire"); the login form has
+    // no such select, so its role follows the page instead: werkgevers.html
+    // is the employer page, everything else defaults to candidate. next is
+    // the portal path matching whichever role wins, so the backend can send
+    // the user straight there after the Google consent screen.
+    function googleLoginRole(btn) {
+      const select = btn.closest('form')?.querySelector('#regRole');
+      if (select) return select.value === 'client' ? 'client' : 'candidate';
+      return /\/werkgevers\.html$/.test(window.location.pathname) ? 'client' : 'candidate';
+    }
+
     const socialBtns = qsa('.social-btns button');
     socialBtns.forEach(btn => {
       btn.addEventListener('click', () => {
-        if (btn.querySelector('.fa-google')) {
-          window.location.href = `${Auth.API}/auth/google/login`;
-          return;
-        }
-        const provider = btn.textContent.trim() || 'Social';
-        Auth.toast(`${provider} login coming soon!`, 'info');
+        // A visitor who has not yet dealt with the cookie banner clicks this
+        // button as often as one who already accepted -- that is the normal
+        // first-time case, not an edge case. The redirect to the portal path
+        // that follows needs setAuth() to actually store the session there,
+        // and setAuth() refuses to write to localStorage without consent. The
+        // banner's own copy is "functionele cookies, geen tracking"; a signed-
+        // in session is exactly that kind of functional storage, so granting
+        // it here (rather than failing the login silently) matches what the
+        // banner already promises.
+        try { localStorage.setItem('gsp_cookie_consent', 'true'); } catch (e) { /* ignore */ }
+        const role = googleLoginRole(btn);
+        const next = role === 'client' ? '/client/' : '/candidate/';
+        window.location.href = `${Auth.API}/auth/google/login?role=${role}&next=${encodeURIComponent(next)}`;
       });
     });
 
@@ -1521,9 +1540,14 @@ const GSP_WHATSAPP = '31617913965';
   // fragment is never sent to the server at all) or
   // ?google_auth_error=<code> (still a query param -- it's just a short
   // error code, nothing secret) after the user completes Google's consent
-  // screen. Pick up the token, strip it from the URL immediately, then
-  // fetch the user's profile to finish signing them in the same way a
-  // normal email/password login does.
+  // screen. Codes: not_configured, invalid_state, missing_code,
+  // token_exchange_failed, email_not_verified, account_disabled,
+  // admin_use_password, access_denied, server_error, plus cookie_consent
+  // (set locally by auth.js, not by the backend, when a session landed on
+  // a portal path but consent was missing so it could not be stored;
+  // unknown codes fall back to the server_error text). Pick up the token, strip it from the URL
+  // immediately, then fetch the user's profile to finish signing them in
+  // the same way a normal email/password login does.
   function handleGoogleAuthCallback() {
     const params = new URLSearchParams(window.location.search);
     const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ''));
@@ -1534,11 +1558,25 @@ const GSP_WHATSAPP = '31617913965';
     window.history.replaceState({}, document.title, window.location.pathname);
 
     if (error) {
+      const lang = localStorage.getItem('gsp_lang') || 'nl';
       const messages = {
-        access_denied: 'Google sign-in was cancelled.',
-        email_not_verified: 'Your Google email is not verified yet. Please verify it with Google first.',
+        not_configured: { nl: 'Inloggen met Google is nog niet ingeschakeld.', en: 'Signing in with Google is not enabled yet.' },
+        invalid_state: { nl: 'De aanmelding is verlopen, probeer opnieuw.', en: 'The sign-in expired, please try again.' },
+        missing_code: { nl: 'Google gaf geen geldig antwoord, probeer opnieuw.', en: 'Google did not return a valid response, please try again.' },
+        token_exchange_failed: { nl: 'Google gaf geen geldig antwoord, probeer opnieuw.', en: 'Google did not return a valid response, please try again.' },
+        email_not_verified: { nl: 'Je Google-adres is niet geverifieerd.', en: 'Your Google address is not verified.' },
+        account_disabled: { nl: 'Dit account is uitgeschakeld, neem contact op via info@gsprecruitment.nl.', en: 'This account has been disabled, contact info@gsprecruitment.nl.' },
+        admin_use_password: { nl: 'Beheerders loggen in met wachtwoord en TOTP, niet via Google.', en: 'Admins sign in with a password and TOTP, not Google.' },
+        access_denied: { nl: 'Je hebt de aanmelding bij Google geannuleerd.', en: 'You cancelled the Google sign-in.' },
+        server_error: { nl: 'Er ging iets mis, probeer het later opnieuw.', en: 'Something went wrong, please try again later.' },
+        // Set by auth.js's consumeGoogleAuthRedirect() when a session
+        // arrives on a portal path but setAuth() refused to store it
+        // (cookie consent not granted). Not a code the backend sends.
+        cookie_consent: { nl: 'Je bent aangemeld bij Google, maar we konden je sessie niet opslaan. Accepteer de cookiemelding en probeer opnieuw.', en: 'You signed in with Google, but we could not store your session. Please accept the cookie notice and try again.' },
       };
-      Auth.toast(messages[error] || 'Google sign-in failed. Please try again.', 'error');
+      const fallback = { nl: 'Er ging iets mis, probeer het later opnieuw.', en: 'Something went wrong, please try again later.' };
+      const copy = messages[error] || fallback;
+      Auth.toast(copy[lang] || copy.nl, 'error');
       return;
     }
 

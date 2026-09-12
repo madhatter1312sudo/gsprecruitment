@@ -9,6 +9,7 @@ from core.security import hash_password, verify_password, create_access_token, d
 from core.deps import get_current_user, get_optional_user, require_role, _token_predates_password_change
 from core.mfa import mfa_required_for_user, issue_mfa_pending_token
 from core import privacy
+from core import retention
 from core.config import settings
 from models.schemas import (
     UserRegister, UserLogin, TokenResponse, UserResponse, UserUpdate,
@@ -16,6 +17,7 @@ from models.schemas import (
     ResendVerificationRequest, SetPasswordRequest, ChangePasswordRequest,
 )
 from services.email_service import email_service
+from services.notify import notify_owner
 from services.candidate_link import get_or_create_candidate_id
 from typing import Optional
 from urllib.parse import urlencode, quote
@@ -64,41 +66,14 @@ async def _issue_verification_token(user_id: int) -> str:
 
 async def _send_verification_email(user: dict, token: str) -> None:
     link = f"https://gsprecruitment.nl/verify?token={token}"
-    body = f"""Beste {user['full_name']},
-
-Bedankt voor je registratie bij GSP Recruitment. Bevestig je e-mailadres via onderstaande link:
-{link}
-
-Deze link is {VERIFICATION_TOKEN_TTL_HOURS} uur geldig.
-
-Heb je dit account niet aangemaakt? Dan kun je dit bericht negeren.
-
-Met vriendelijke groet,
-GSP Recruitment
-info@gsprecruitment.nl
-
----
-
-Dear {user['full_name']},
-
-Thank you for registering with GSP Recruitment. Please confirm your e-mail address via the link below:
-{link}
-
-This link is valid for {VERIFICATION_TOKEN_TTL_HOURS} hours.
-
-Didn't create this account? You can ignore this message.
-
-Kind regards,
-GSP Recruitment
-info@gsprecruitment.nl
-"""
-    sent = await email_service.send_email(
-        to_email=user["email"],
-        subject="Bevestig je e-mailadres — GSP Recruitment",
-        body_text=body,
+    # WS3: content moved into services/email_templates.py's "verify_email"
+    # template (same link, same promise as before this spoor).
+    sent = await email_service.send_template(
+        "verify_email", user["email"],
+        {"full_name": user["full_name"], "link": link, "ttl_hours": VERIFICATION_TOKEN_TTL_HOURS},
     )
     if not sent:
-        logger.warning(f"Failed to send verification email to {user['email']}")
+        logger.warning("Failed to send verification email to user_id=%s", user["id"])
 
 
 def _build_token_response(user: dict) -> dict:
@@ -158,22 +133,19 @@ async def register(request: Request, data: UserRegister):
             user["id"],
         )
     elif data.role == "client":
-        # Without this, the client portal's _get_client_by_user() lookup
-        # never finds a row and every endpoint silently no-ops (blank
-        # dashboard, empty everything) -- there was no other code path that
-        # ever created this linkage for a client signup.
-        client = await fetch_one(
-            "INSERT INTO clients (company_name, domain) VALUES ($1, $2) RETURNING id",
-            user["full_name"], privacy.normalize_domain(email.split("@")[1] if "@" in email else None),
-        )
-        if client:
-            await execute(
-                "INSERT INTO user_clients (user_id, client_id) VALUES ($1, $2) ON CONFLICT DO NOTHING",
-                user["id"], client["id"],
-            )
+        # WS3: extracted into _create_client_account() (below) so
+        # google_callback()'s new-user, role=client path shares this exact
+        # branch instead of duplicating it.
+        await _create_client_account(user["id"], email, user["full_name"])
 
     verification_token = await _issue_verification_token(user["id"])
     await _send_verification_email(user, verification_token)
+
+    # WS3: best-effort owner notification -- see services/notify.py.
+    await notify_owner(
+        "candidate_registered" if data.role == "candidate" else "client_registered",
+        {"full_name": data.full_name, "anchor": "candidates" if data.role == "candidate" else "leads"},
+    )
 
     return _build_token_response(user)
 
@@ -283,7 +255,11 @@ async def login(request: Request, data: UserLogin):
     # would still drift toward the purge window with nobody able to tell.
     # last_login_at is a plain UPDATE on an existing row (no jsonb, no FK
     # it could violate) -- there is no expected failure mode left to catch.
-    await execute("UPDATE users SET last_login_at = NOW() WHERE id = $1", user["id"])
+    #
+    # The statement itself lives in core/retention.py (LOGIN_STAMP_SQL):
+    # it also resets users.dormant_warning_attempts, and all four login
+    # paths in this codebase have to agree on that. See that constant.
+    await execute(retention.LOGIN_STAMP_SQL, user["id"])
 
     return _build_token_response(user)
 
@@ -480,34 +456,26 @@ async def forgot_password(request: Request, data: ForgotPasswordRequest):
         # Don't reveal whether the email exists
         return {"message": "If that email exists, a reset link has been sent"}
 
+    # WS3: reset_token is now stored hashed (core.security.hash_token),
+    # matching every other one-time token in this file
+    # (verification_token_hash, talentpool_optin_requests.token_hash) --
+    # previously this was the one plaintext token in `users`. The raw
+    # token exists only in the outbound e-mail; the lookup in
+    # reset_password() below hashes the caller's input to compare. A
+    # pre-existing plaintext token in the database becomes unusable the
+    # moment this ships -- acceptable, these tokens live one hour.
     reset_token = secrets.token_urlsafe(32)
     await execute(
         "UPDATE users SET reset_token = $1, reset_token_expires_at = NOW() + INTERVAL '1 hour' WHERE id = $2",
-        reset_token, user["id"],
+        hash_token(reset_token), user["id"],
     )
 
-    # Send reset email via Gmail API
-    email_sent = await email_service.send_email(
-        to_email=email,
-        subject="Wachtwoord resetten - GSP Recruitment",
-        body_text=f"""Beste {user['full_name']},
-
-Je hebt een wachtwoord reset aangevraagd voor je GSP Recruitment account.
-
-Klik op de volgende link om je wachtwoord te resetten:
-https://gsprecruitment.nl/reset-password?token={reset_token}
-
-Deze link is 1 uur geldig.
-
-Als je geen wachtwoord reset hebt aangevraagd, kun je dit bericht negeren.
-
-Met vriendelijke groet,
-GSP Recruitment
-info@gsprecruitment.nl
-""",
+    link = f"https://gsprecruitment.nl/reset-password?token={reset_token}"
+    email_sent = await email_service.send_template(
+        "reset_password", email, {"full_name": user["full_name"], "link": link, "ttl_hours": 1},
     )
     if not email_sent:
-        logger.warning(f"Failed to send password reset email for user_id={user['id']}")
+        logger.warning("Failed to send password reset email for user_id=%s", user["id"])
 
     return {"message": "If that email exists, a reset link has been sent"}
 
@@ -520,7 +488,7 @@ async def reset_password(request: Request, data: ResetPasswordRequest):
     """Reset a user's password using a valid, unexpired reset token."""
     user = await fetch_one(
         "SELECT id FROM users WHERE reset_token = $1 AND reset_token_expires_at > NOW() AND deleted_at IS NULL",
-        data.token,
+        hash_token(data.token),
     )
     if not user:
         raise HTTPException(status_code=400, detail="Invalid or expired reset token")
@@ -622,9 +590,13 @@ async def change_password(
 # Reuses the same Google Cloud OAuth client already configured for sending
 # transactional email (GOOGLE_CLIENT_ID/SECRET) -- it just needs this
 # callback URL added as an additional authorized redirect URI in Google
-# Cloud Console. Uses the standard Authorization Code flow with a
-# short-lived signed cookie for CSRF (`state`) protection, since there's no
-# server-side session store to keep state in otherwise.
+# Cloud Console. Uses the standard Authorization Code flow. CSRF
+# protection is a nonce carried two ways that must agree: inside the
+# signed, 10-minute `state` JWT (which also carries the requested role
+# and the post-login `next` path, so neither survives only in a cookie a
+# proxy or CDN could drop) and in the plain `google_oauth_state` cookie.
+# decode_token() rejects an expired or tampered JWT the same way, so an
+# expired flow reports the same `invalid_state` as a forged one.
 #
 # WS-E.3 finding: the successful branch used to redirect with the freshly
 # issued JWT as a `?google_auth=<jwt>` QUERY-STRING parameter. A query
@@ -645,30 +617,93 @@ async def change_password(
 
 GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
-GOOGLE_REDIRECT_URI = "https://api.gsprecruitment.nl/api/auth/google/callback"
-FRONTEND_URL = "https://gsprecruitment.nl"
+GOOGLE_STATE_TTL_MINUTES = 10
+GOOGLE_NEXT_MAX_LENGTH = 200
+
+
+def _validate_next_path(next_path: Optional[str]) -> Optional[str]:
+    """`next` only ever comes from a link this API itself generated, so a
+    value that doesn't fit the shape is treated as tampering, not a typo
+    worth surfacing: it is silently dropped (falls back to the role's
+    default landing page) rather than rejected with an error. Must start
+    with exactly one '/' -- '//host/path' is a protocol-relative URL and
+    would send the browser off-site -- and be at most 200 characters."""
+    if not next_path:
+        return None
+    if len(next_path) > GOOGLE_NEXT_MAX_LENGTH:
+        return None
+    if not next_path.startswith("/") or next_path.startswith("//"):
+        return None
+    return next_path
+
+
+def _default_next_for_role(role: str) -> str:
+    return "/client/" if role == "client" else "/"
+
+
+def _next_matches_role(next_path: str, role: str) -> bool:
+    """A client only ever lands under /client/, a candidate never does --
+    `next` is honoured only when it agrees with the account's actual
+    (stored, not requested) role, otherwise the role's own default wins."""
+    is_client_path = next_path.startswith("/client")
+    return is_client_path if role == "client" else not is_client_path
+
+
+async def _create_client_account(user_id: int, email: str, full_name: str) -> None:
+    """Link a user row (already INSERTed with role='client') to a new
+    clients row -- without this, the client portal's _get_client_by_user()
+    lookup never finds a row and every endpoint silently no-ops (blank
+    dashboard, empty everything). Same branch register() uses for a
+    role='client' self-registration; google_callback()'s new-user,
+    role=client path shares it rather than duplicating the INSERTs."""
+    client = await fetch_one(
+        "INSERT INTO clients (company_name, domain) VALUES ($1, $2) RETURNING id",
+        full_name, privacy.normalize_domain(email.split("@")[1] if "@" in email else None),
+    )
+    if client:
+        await execute(
+            "INSERT INTO user_clients (user_id, client_id) VALUES ($1, $2) ON CONFLICT DO NOTHING",
+            user_id, client["id"],
+        )
 
 
 @router.get("/google/login")
 @limiter.limit("10/minute")
-async def google_login(request: Request):
-    """Redirect the browser to Google's OAuth consent screen."""
-    if not settings.google_client_id:
-        raise HTTPException(status_code=503, detail="Google sign-in is not configured")
+async def google_login(request: Request, role: str = "candidate", next: Optional[str] = None):
+    """Redirect the browser to Google's OAuth consent screen.
 
-    state = secrets.token_urlsafe(24)
+    `role` (candidate|client, default candidate) is the role a NEW account
+    should get -- an existing account keeps its own stored role regardless
+    (see google_callback). `next` is an optional post-login path, used
+    only when it matches the account's actual role.
+    """
+    if role not in ("candidate", "client"):
+        role = "candidate"
+
+    if not settings.google_client_id:
+        # No JSON-503: this is a top-level browser navigation from a link
+        # click, not an XHR a frontend can catch -- a plain redirect back
+        # with an error code is the only thing that renders sensibly.
+        return RedirectResponse(f"{settings.frontend_url}/?google_auth_error=not_configured")
+
+    next_path = _validate_next_path(next)
+    nonce = secrets.token_urlsafe(24)
+    state_jwt = create_access_token(
+        {"sub": "google_oauth_state", "nonce": nonce, "role": role, "next": next_path},
+        expires_delta=timedelta(minutes=GOOGLE_STATE_TTL_MINUTES),
+    )
     params = {
         "client_id": settings.google_client_id,
-        "redirect_uri": GOOGLE_REDIRECT_URI,
+        "redirect_uri": settings.google_redirect_uri,
         "response_type": "code",
         "scope": "openid email profile",
         "access_type": "online",
         "prompt": "select_account",
-        "state": state,
+        "state": state_jwt,
     }
     response = RedirectResponse(f"{GOOGLE_AUTH_URL}?{urlencode(params)}")
     response.set_cookie(
-        "google_oauth_state", state,
+        "google_oauth_state", nonce,
         max_age=600, httponly=True, secure=True, samesite="lax",
     )
     return response
@@ -683,14 +718,22 @@ async def google_callback(
 ):
     """Handle Google's redirect back: exchange code, find-or-create user, issue our JWT."""
     if error:
-        return RedirectResponse(f"{FRONTEND_URL}/?google_auth_error={quote(error)}")
+        # Google's own error codes (e.g. access_denied) are not secret --
+        # passed straight through, same as before this spoor.
+        return RedirectResponse(f"{settings.frontend_url}/?google_auth_error={quote(error)}")
 
-    cookie_state = request.cookies.get("google_oauth_state")
-    if not state or not cookie_state or state != cookie_state:
-        return RedirectResponse(f"{FRONTEND_URL}/?google_auth_error=invalid_state")
+    state_payload = decode_token(state) if state else None
+    cookie_nonce = request.cookies.get("google_oauth_state")
+    if not state_payload or not cookie_nonce or state_payload.get("nonce") != cookie_nonce:
+        return RedirectResponse(f"{settings.frontend_url}/?google_auth_error=invalid_state")
+
+    requested_role = state_payload.get("role") or "candidate"
+    if requested_role not in ("candidate", "client"):
+        requested_role = "candidate"
+    next_path = state_payload.get("next")
 
     if not code:
-        return RedirectResponse(f"{FRONTEND_URL}/?google_auth_error=missing_code")
+        return RedirectResponse(f"{settings.frontend_url}/?google_auth_error=missing_code")
 
     try:
         async with httpx.AsyncClient() as client:
@@ -698,56 +741,99 @@ async def google_callback(
                 "client_id": settings.google_client_id,
                 "client_secret": settings.google_client_secret,
                 "code": code,
-                "redirect_uri": GOOGLE_REDIRECT_URI,
+                "redirect_uri": settings.google_redirect_uri,
                 "grant_type": "authorization_code",
             })
         if token_res.status_code != 200:
             logger.warning(f"Google token exchange failed: {token_res.text}")
-            return RedirectResponse(f"{FRONTEND_URL}/?google_auth_error=token_exchange_failed")
+            return RedirectResponse(f"{settings.frontend_url}/?google_auth_error=token_exchange_failed")
 
         id_token_str = token_res.json().get("id_token")
         if not id_token_str:
-            return RedirectResponse(f"{FRONTEND_URL}/?google_auth_error=no_id_token")
+            return RedirectResponse(f"{settings.frontend_url}/?google_auth_error=token_exchange_failed")
+    except httpx.HTTPError as e:
+        logger.warning(f"Google token exchange failed: {e}")
+        return RedirectResponse(f"{settings.frontend_url}/?google_auth_error=token_exchange_failed")
 
+    try:
         idinfo = google_id_token.verify_oauth2_token(
             id_token_str, google_auth_requests.Request(), settings.google_client_id,
         )
     except Exception as e:
         logger.warning(f"Google sign-in failed: {e}")
-        return RedirectResponse(f"{FRONTEND_URL}/?google_auth_error=verification_failed")
+        return RedirectResponse(f"{settings.frontend_url}/?google_auth_error=server_error")
 
     if not idinfo.get("email_verified"):
-        return RedirectResponse(f"{FRONTEND_URL}/?google_auth_error=email_not_verified")
+        return RedirectResponse(f"{settings.frontend_url}/?google_auth_error=email_not_verified")
 
     email = idinfo["email"].lower().strip()
     full_name = idinfo.get("name") or email.split("@")[0]
 
+    # No `deleted_at IS NULL` filter here (unlike every other lookup in
+    # this file): a soft-deleted account must report account_disabled,
+    # not silently fall through to the "no such user" branch below and
+    # collide on the e-mail's UNIQUE constraint when we try to INSERT a
+    # second row for the same address.
     user = await fetch_one(
-        "SELECT id, email, full_name, role, is_verified FROM users WHERE email = $1 AND deleted_at IS NULL",
+        "SELECT id, email, full_name, role, is_verified, deleted_at FROM users WHERE email = $1",
         email,
     )
+    if user and user["deleted_at"] is not None:
+        return RedirectResponse(f"{settings.frontend_url}/?google_auth_error=account_disabled")
+
+    # Security-auditor finding: an admin account reached via this branch
+    # skipped login()'s mfa_required_for_user() check entirely -- Google
+    # Sign-In issued a full admin JWT for an account that login() itself
+    # would have stopped at an mfa_required challenge. core.deps's
+    # admin-MFA enforcement only checks that totp_enabled_at is set, not
+    # that this particular sign-in actually passed a second factor, so
+    # that JWT worked on every admin route. Whoever controls the matching
+    # Google account (or the Workspace domain) would get admin with no
+    # TOTP. Admins keep signing in with a password and TOTP; Google
+    # Sign-In is for candidates and clients only.
+    if user and user["role"] == "admin":
+        return RedirectResponse(f"{settings.frontend_url}/?google_auth_error=admin_use_password")
+
     if not user:
-        # New account via Google -- default role candidate (matches public
-        # self-registration's default), pre-verified since Google already
-        # confirmed the email, unusable random password (Google-only login).
+        # New account via Google -- role is whatever was requested at
+        # /google/login (default candidate), pre-verified since Google
+        # already confirmed the e-mail, unusable random password
+        # (Google-only login).
         random_password_hash = hash_password(secrets.token_urlsafe(32))
+        new_role = "client" if requested_role == "client" else "candidate"
         user = await fetch_one(
             """INSERT INTO users (email, password_hash, full_name, role, is_verified)
-               VALUES ($1, $2, $3, 'candidate', TRUE)
+               VALUES ($1, $2, $3, $4, TRUE)
                RETURNING id, email, full_name, role, is_verified""",
-            email, random_password_hash, full_name,
+            email, random_password_hash, full_name, new_role,
         )
-        await execute(
-            "INSERT INTO candidate_profiles (user_id) VALUES ($1) ON CONFLICT DO NOTHING",
-            user["id"],
-        )
+        if new_role == "client":
+            await _create_client_account(user["id"], email, full_name)
+        else:
+            await execute(
+                "INSERT INTO candidate_profiles (user_id) VALUES ($1) ON CONFLICT DO NOTHING",
+                user["id"],
+            )
+        # WS3: best-effort owner notification -- see services/notify.py.
+        await notify_owner("google_signup", {
+            "full_name": full_name,
+            "anchor": "leads" if new_role == "client" else "candidates",
+        })
+    # An existing account keeps its own stored role -- the role requested
+    # in this login attempt is never applied to it.
 
     # WS-E.8 follow-up -- see login()'s comment above (blocking point 7:
     # no more try/except here either).
-    await execute("UPDATE users SET last_login_at = NOW() WHERE id = $1", user["id"])
+    await execute(retention.LOGIN_STAMP_SQL, user["id"])
+
+    resolved_role = user["role"]
+    resolved_next = (
+        next_path if (next_path and _next_matches_role(next_path, resolved_role))
+        else _default_next_for_role(resolved_role)
+    )
 
     token_response = _build_token_response(user)
     # Fragment, not query string -- see the module-level comment above.
-    response = RedirectResponse(f"{FRONTEND_URL}/#google_auth={token_response['access_token']}")
+    response = RedirectResponse(f"{settings.frontend_url}{resolved_next}#google_auth={token_response['access_token']}")
     response.delete_cookie("google_oauth_state")
     return response

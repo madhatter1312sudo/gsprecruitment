@@ -69,10 +69,64 @@ class Settings(BaseSettings):
     # which is safe to always run -- there is nothing left for a flag to
     # gate. Deliberately not kept as a dead/unused setting.
 
+    # ── E-mail (WS3) ─────────────────────────────────────────────────────
+    # EMAIL_PROVIDER kiest de provider in services/email_service.py;
+    # "gmail" is het huidige gedrag (GmailApiProvider, ongewijzigd) en de
+    # default zodat een bestaande deploy zonder .env-wijziging identiek
+    # blijft werken. EMAIL_FROM's default is het huidige afzenderadres
+    # (services/email_service.py regel 68, vóór dit spoor hardcoded) --
+    # het subdomeinadres no-reply@mail.gsprecruitment.nl wordt pas gezet
+    # zodra docs/EMAIL-SETUP.md is doorlopen (devops), niet door deze
+    # default. OWNER_NOTIFY_EMAIL is leeg = geen eigenaarsmail (alleen
+    # Telegram via services/notify.py); een lege waarde mag nooit een
+    # e-mail naar niemand of naar EMAIL_FROM sturen.
+    email_provider: str = "gmail"
+    email_from: str = "GSP Recruitment <info@gsprecruitment.nl>"
+    email_reply_to: str = "info@gsprecruitment.nl"
+    owner_notify_email: str = ""
+
     smtp_host: str = "smtp.zoho.com"
     smtp_port: int = 587
     smtp_user: str = ""
     smtp_pass: str = ""
+
+    # ── WS3b/WS3c: twee droog-standaard schakelaars ──────────────────────
+    # Beide default False, en "uit" betekent hier niet "de job draait
+    # niet" maar "de job draait en telt, maar verzendt niets" (droogloop):
+    # de selectie is dan zichtbaar in de logs en in het teruggegeven dict
+    # voordat er ook maar één mail uitgaat. Zelfde fail-closed keuze als
+    # apollo_sync_enabled hierboven: een verse of staging-deploy mailt
+    # nooit iemand zonder dat dat expliciet in env is aangezet.
+    #
+    # DORMANT_WARNING_ENABLED gaat over services/scheduler.py's
+    # dormant_account_warning_job (dagelijks 04:45): de waarschuwing 30
+    # dagen vóór de 18-maandengrens uit core/retention.py's
+    # PORTAL_ACCOUNT_INACTIVE_SQL. Zolang deze uit staat wordt
+    # users.dormant_warning_sent_at nooit gestempeld, en die kolom is
+    # precies wat die selector eist -- er komt dus ook geen enkel account
+    # op de maandelijkse beoordelingslijst. Dat is de bedoelde volgorde:
+    # geen verwijderlijst zonder verstuurde waarschuwing.
+    #
+    # JOB_ALERTS_ENABLED gaat over job_alert_job (dagelijks 08:00) en
+    # wordt aangevuld met de admin-bewerkbare DB-vlag
+    # system_settings.job_alerts_enabled, net zoals bij Apollo: de env-
+    # schakelaar is de master, de DB-vlag de tweede rem daarbovenop.
+    # Die DB-rij wordt door migrations/042_alerts_token_binding_dormant_
+    # skip.py idempotent op 'false' gezet -- zonder haar gaf
+    # services/scheduler.py's _flag_enabled() True terug bij een
+    # ontbrekende sleutel en was er in werkelijkheid maar één rem.
+    dormant_warning_enabled: bool = False
+    job_alerts_enabled: bool = False
+
+    # Publieke basis-URL van deze API. Bestond nog niet als losse setting
+    # (google_redirect_uri had hem tot nu toe als enige, ingebakken in een
+    # langere default). WS3c heeft hem nodig voor de
+    # List-Unsubscribe-header van een job-alert: RFC 8058 eist daar een
+    # POST-bare https-URL, en dat kan per definitie niet de statische
+    # website zijn. Geen schakelaar maar een adres; default is het echte
+    # productieadres, zodat een deploy zonder deze key hetzelfde blijft
+    # doen.
+    api_base_url: str = "https://api.gsprecruitment.nl"
 
     backend_host: str = "127.0.0.1"
     backend_port: int = 8000
@@ -112,6 +166,15 @@ class Settings(BaseSettings):
     google_client_id: str = ""
     google_client_secret: str = ""
     google_refresh_token: str = ""
+
+    # ── Google Sign-In (WS3) ─────────────────────────────────────────────
+    # Reuses the same OAuth client as above; these two were hardcoded
+    # module constants in routers/auth.py before this spoor -- moved here
+    # so devops/frontend can point a staging deploy elsewhere without a
+    # code change. Defaults are the current production values, so an
+    # unset .env keeps today's behaviour.
+    google_redirect_uri: str = "https://api.gsprecruitment.nl/api/auth/google/callback"
+    frontend_url: str = "https://gsprecruitment.nl"
 
     # ── Cloudflare R2 (CV file storage, S3-compatible) ──────────────────────
     # Empty defaults so the app still boots before these are set; callers

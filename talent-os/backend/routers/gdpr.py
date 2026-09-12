@@ -41,8 +41,8 @@ async def export_my_data(current_user: dict = Depends(get_current_user)):
     Covers the same table set erase_person() erases: users,
     candidate_profiles, candidates, plus everything keyed off the resolved
     candidate id (matches/saved_jobs) and off the account itself
-    (outreach addressed to this email, quiz/contact submissions, prior
-    data_subject_requests)."""
+    (outreach addressed to this email, quiz/contact submissions, job
+    alerts received, prior data_subject_requests)."""
     email = current_user["email"]
     user_id = current_user["id"]
 
@@ -66,6 +66,7 @@ async def export_my_data(current_user: dict = Depends(get_current_user)):
         )
     applications = []
     saved = []
+    job_alert_sends = []
     if candidate:
         applications = await fetch_all(
             """SELECT m.status, m.match_score, m.created_at, j.title AS job_title
@@ -77,6 +78,22 @@ async def export_my_data(current_user: dict = Depends(get_current_user)):
             """SELECT sj.created_at, j.title AS job_title
                FROM saved_jobs sj JOIN job_orders j ON j.id = sj.job_id
                WHERE sj.candidate_id = $1""",
+            candidate["id"],
+        )
+        # Art. 15 (R2): welke vacature-alerts deze persoon heeft
+        # ontvangen, wanneer, en of hij zich via zo'n bericht heeft
+        # afgemeld. Dat zijn persoonsgegevens over hem en ze horen dus in
+        # zijn eigen export.
+        #
+        # UITDRUKKELIJK NIET de twee tokenhashes. Die zijn geen gegeven
+        # over deze persoon maar een authenticatiemiddel: wie de export
+        # van iemand anders in handen krijgt, zou er anders een
+        # afmeldtoken uit kunnen aflezen. Ze staan om dezelfde reden niet
+        # in de export als `users.password_hash` en
+        # `verification_token_hash` er niet in staan.
+        job_alert_sends = await fetch_all(
+            "SELECT id, job_ids, sent_at, used_at, oneclick_used_at FROM job_alert_sends "
+            "WHERE candidate_id = $1 ORDER BY sent_at DESC",
             candidate["id"],
         )
 
@@ -127,6 +144,7 @@ async def export_my_data(current_user: dict = Depends(get_current_user)):
         "candidate_record": _clean(candidate),
         "applications": [_clean(r) for r in applications],
         "saved_jobs": [_clean(r) for r in saved],
+        "job_alerts_received": [_clean(r) for r in job_alert_sends],
         "outreach_drafts_received": [_clean(r) for r in outreach_drafts],
         "outreach_messages_received": [_clean(r) for r in outreach_messages],
         "quiz_submissions": [_clean(r) for r in quiz],
@@ -513,11 +531,27 @@ async def erase_person(
     # a placed candidate's PII (core/retention.py) -- they exist only to
     # support a placement, so they're nulled here alongside every other
     # candidates.* PII column, not retained separately.
+    # Security-audit B5 (WS3b/WS3c, migrations/041): the five columns that
+    # migration added were not in this list, so an Art. 17 erasure left
+    # them standing. `referred_by` is the worst of them -- it is the NAME
+    # OF A THIRD PERSON, free text an admin typed, and it survived a
+    # "delete everything you have about me" untouched. The three
+    # job-alert timestamps are behavioural data about this person (that
+    # they asked for alerts, when, and when we last mailed them) with
+    # nothing left to support once the row is anonymised.
+    #
+    # `job_alert_unsubscribed_at` is deliberately NOT cleared: it is the
+    # one column here that means "do not send this person anything", the
+    # same direction as the suppression-list row this erasure writes.
+    # Nulling it would be the only change in this statement that makes a
+    # message more likely rather than less.
     _CANDIDATES_ANONYMIZE_UPDATE_SQL = """UPDATE candidates SET
              full_name = 'Erased', email = $2, phone = NULL, linkedin_url = NULL,
              github_url = NULL, portfolio_url = NULL, cv_text = NULL, cv_file_path = NULL,
              education = NULL, nationality = NULL, needs_work_permit = NULL,
              kennismigrant_status = NULL, ruling_30pct_status = NULL, ind_case_number = NULL,
+             referred_by = NULL, referral_confirmed_at = NULL,
+             job_alert_optin_at = NULL, job_alert_last_sent_at = NULL,
              deleted_at = NOW(), consent_withdrawn_at = COALESCE(consent_withdrawn_at, NOW())
            WHERE id = $1"""
     # Round 6 re-check: id-only when this call is scoped to candidates,
@@ -537,16 +571,17 @@ async def erase_person(
     # match above wouldn't have reached (see extra_ids above) -- reuses
     # _anonymize_by_id with an id list instead of an e-mail as the $1
     # filter, same per-row placeholder reasoning.
+    #
+    # Dezelfde UPDATE als hierboven, letterlijk dezelfde constante en niet
+    # een tweede kopie ervan. Twee woordelijke kopieën betekenen: wie er
+    # een kolom aan toevoegt, moet aan twee plekken denken, en de tweede
+    # wordt alleen geraakt door een pad (een FK-gekoppelde rij met een
+    # afwijkend adres) dat zelden in beeld komt. Alleen de SELECT
+    # verschilt, en dat is ook het enige dat hoort te verschillen.
     if extra_ids:
         await _anonymize_by_id(
             "SELECT id FROM candidates WHERE id = ANY($1::int[])",
-            """UPDATE candidates SET
-                 full_name = 'Erased', email = $2, phone = NULL, linkedin_url = NULL,
-                 github_url = NULL, portfolio_url = NULL, cv_text = NULL, cv_file_path = NULL,
-                 education = NULL, nationality = NULL, needs_work_permit = NULL,
-                 kennismigrant_status = NULL, ruling_30pct_status = NULL, ind_case_number = NULL,
-                 deleted_at = NOW(), consent_withdrawn_at = COALESCE(consent_withdrawn_at, NOW())
-               WHERE id = $1""",
+            _CANDIDATES_ANONYMIZE_UPDATE_SQL,
             extra_ids, email_hash,
         )
     for uid in user_ids:
@@ -573,6 +608,17 @@ async def erase_person(
     # so it isn't reached by any of the LOWER(email)=... updates above.
     for cid in candidate_ids:
         await execute("UPDATE pipeline_entries SET notes = NULL WHERE candidate_id = $1", cid)
+
+    # Security-audit B5: job_alert_sends (migrations/041) is a per-send
+    # log keyed by candidate_id -- which vacancies this person was mailed
+    # and when. Its ON DELETE CASCADE only fires on a HARD delete of the
+    # candidates row, and erase_person() never hard-deletes: it anonymises
+    # in place. So without this, an erased person's send history (and a
+    # live unsubscribe token pointing at their row) outlived the erasure.
+    # Deleted rather than nulled: there is nothing in this table that is
+    # not about this person, and no retention floor claims it.
+    if candidate_ids:
+        await execute("DELETE FROM job_alert_sends WHERE candidate_id = ANY($1::int[])", candidate_ids)
 
     await _anonymize_by_id(
         "SELECT id FROM quiz_submissions WHERE LOWER(TRIM(email)) = $1",

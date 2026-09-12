@@ -15,6 +15,23 @@ logger = logging.getLogger("talent_os.matches")
 router = APIRouter(prefix="/api/matches", tags=["matches"], dependencies=[Depends(verify_api_key)])
 
 
+# ── De matchscore-schaal ────────────────────────────────────────────────
+#
+# De schaal en de suggestiedrempel staan in core/matching.py, niet hier:
+# services/matcher.py en services/scheduler.py's job_alert_job lezen ze
+# ook, en een constante in routers/ kunnen zij alleen via een lazy import
+# in de functie bereiken (routers importeren services, dus andersom is
+# een cyclus). Zie die module voor wat de twee getallen betekenen en wat
+# de ondergrens uitdrukkelijk niet doet.
+#
+# Hier geherexporteerd omdat dit de module is die `match_score` schrijft
+# (_run_matching_for_job hieronder) en omdat bestaande lezers deze namen
+# op deze plek verwachten.
+from core.matching import (  # noqa: F401
+    MATCH_SCORE_SCALE, MATCH_SUGGESTION_MIN_SCORE, MATCH_SUGGESTION_MIN_STORED_SCORE,
+)
+
+
 def _consent_gate_sql(prefix: str = "") -> str:
     """FIX 3 (chief-of-staff, ai-pseudonimisering branch): the matching gate
     used to accept `source_url OR lawful_basis = 'opt_in_talentpool'`
@@ -68,7 +85,7 @@ async def _run_matching_for_job(job_id: int) -> None:
 
         job_text = f"{job['title']} {job['description'] or ''} {job['requirements'] or ''}"
         results = await matcher.match_job_to_candidates(
-            job_text, [dict(c) for c in candidates], min_score=0.3,
+            job_text, [dict(c) for c in candidates], min_score=MATCH_SUGGESTION_MIN_SCORE,
         )
 
         for r in results:
