@@ -566,6 +566,37 @@ def _dormant_warning_link() -> str:
     return f"{settings.frontend_url}{_DORMANT_WARNING_PATH}"
 
 
+async def _stamp_dormant_warning_skipped(user_id: int, email: Optional[str], reason: str) -> None:
+    """"Aan de beurt geweest, geen mail verstuurd." Stempelt
+    `users.dormant_warning_skipped_at` en schrijft de audit-regel die
+    daarbij hoort.
+
+    Twee aanroepers, één patroon: een adres op de blokkeerlijst
+    (`reason='suppression_list'`, B3) en een adres dat na
+    DORMANT_WARNING_MAX_ATTEMPTS pogingen niet te bezorgen bleek
+    (`reason='undeliverable'`, C2). In beide gevallen geldt hetzelfde:
+    er gaat geen bericht uit, maar dat is geen grond om de gegevens
+    onbeperkt te bewaren -- deze stempel is wat
+    `core/retention.py PORTAL_ACCOUNT_INACTIVE_SQL` 30 dagen later op de
+    maandelijkse beoordelingslijst zet.
+
+    Nooit het adres in de audit-regel, alleen de sha256 (core/privacy.py),
+    zoals elke andere regel die een adres aanraakt. json.dumps, nooit een
+    ruwe dict (commit 72b4bcd)."""
+    await execute(
+        "UPDATE users SET dormant_warning_skipped_at = NOW() WHERE id = $1", user_id,
+    )
+    await execute(
+        "INSERT INTO audit_log (action, actor_id, target_type, target_id, changes) "
+        "VALUES ($1, NULL, $2, $3, $4::jsonb)",
+        "dormant_warning_suppressed", "user", user_id,
+        json.dumps({
+            "reason": reason,
+            "email_hash": privacy.email_hash(email) if email else None,
+        }),
+    )
+
+
 async def dormant_account_warning_job() -> dict:
     """Dagelijks (04:45). Waarschuwt kandidaataccounts die minstens 17
     maanden niet zijn gebruikt dat ze na 18 maanden op de maandelijkse
@@ -628,21 +659,7 @@ async def dormant_account_warning_job() -> dict:
 
     suppressed = 0
     for row in to_skip:
-        await execute(
-            "UPDATE users SET dormant_warning_skipped_at = NOW() WHERE id = $1", row["id"],
-        )
-        # Nooit het adres, alleen de sha256 (core/privacy.py), zoals elke
-        # andere audit-regel die een adres aanraakt. json.dumps, nooit een
-        # ruwe dict (commit 72b4bcd).
-        await execute(
-            "INSERT INTO audit_log (action, actor_id, target_type, target_id, changes) "
-            "VALUES ($1, NULL, $2, $3, $4::jsonb)",
-            "dormant_warning_suppressed", "user", row["id"],
-            json.dumps({
-                "reason": "suppression_list",
-                "email_hash": privacy.email_hash(row["email"]) if row["email"] else None,
-            }),
-        )
+        await _stamp_dormant_warning_skipped(row["id"], row["email"], "suppression_list")
         suppressed += 1
 
     deadline = (datetime.now(timezone.utc) + timedelta(days=DORMANT_WARNING_GRACE_DAYS)).date().isoformat()
@@ -677,11 +694,28 @@ async def dormant_account_warning_job() -> dict:
             # hele achterstand voor zich uit;
             # _DORMANT_WARNING_WHERE_SQL laat de rij na drie pogingen
             # vallen, en elke login zet de teller terug op 0.
-            await execute(
-                "UPDATE users SET dormant_warning_attempts = dormant_warning_attempts + 1 "
-                "WHERE id = $1", row["id"],
+            #
+            # C2: `dormant_warning_attempt_at` erbij, de backoff van
+            # DORMANT_WARNING_RETRY_DAYS -- anders zijn drie mislukkingen
+            # drie opeenvolgende dagen en verklaart een storing van twee
+            # etmalen een werkend adres onbezorgbaar.
+            attempt = await fetch_one(
+                "UPDATE users SET dormant_warning_attempts = dormant_warning_attempts + 1, "
+                "dormant_warning_attempt_at = NOW() WHERE id = $1 "
+                "RETURNING dormant_warning_attempts", row["id"],
             )
             failed += 1
+            # C2: bij de laatste poging valt de rij niet alleen uit de
+            # selector maar wordt hij ook mailloos AFGEHANDELD, precies
+            # zoals een adres op de blokkeerlijst. Zonder deze regel
+            # stempelde niets zo'n account ooit, werd
+            # PORTAL_ACCOUNT_INACTIVE_SQL nooit bereikt en bewaarden wij
+            # de gegevens van iemand die wij niet kunnen bereiken tot in
+            # het oneindige -- de enige categorie die stilletjes buiten de
+            # bewaartermijn van §1.4 rij 6 viel.
+            if attempt and attempt["dormant_warning_attempts"] >= retention.DORMANT_WARNING_MAX_ATTEMPTS:
+                await _stamp_dormant_warning_skipped(row["id"], row["email"], "undeliverable")
+                suppressed += 1
             # Nooit het adres in een logregel -- het id is genoeg, en
             # services/email_service.py schreef zelf al een email_log-rij
             # op core.privacy.email_hash().
@@ -859,7 +893,13 @@ async def job_alert_job() -> dict:
     en telt deze job wel maar verstuurt hij niets, schrijft hij geen
     job_alert_sends-rij en stempelt hij geen job_alert_last_sent_at --
     een droogloop mag geen enkel spoor achterlaten dat een echte
-    verzending suggereert."""
+    verzending suggereert. Eén uitzondering, en met opzet: een kandidaat
+    op de blokkeerlijst wordt ook in droogloop afgehandeld (B5,
+    `job_alert_unsubscribed_at` plus een audit-regel
+    `job_alert_suppressed`) -- dat spoor zegt juist dat er niets is
+    verstuurd en nooit iets verstuurd zal worden, en zonder die stempel
+    houdt zo'n rij elke dag opnieuw een plek onder JOB_ALERT_RUN_CAP
+    bezet."""
     from services.email_service import email_service
 
     env_enabled = settings.job_alerts_enabled

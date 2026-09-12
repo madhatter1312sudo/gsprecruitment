@@ -403,13 +403,29 @@ PROSPECT_RESPONDING_SQL = f"""
 # daarmee buiten de enige plek waar iemand ooit besluit het te wissen.
 # services/scheduler.py's dormant_account_warning_job stempelt die kolom
 # mailloos, met een audit-regel in plaats van een bericht.
+#
+# Derde reparatieronde (C1): allebei de stempels moeten ook NIEUWER zijn
+# dan `last_login_at`. Een stempel van 30 dagen oud is op zichzelf geen
+# bewijs dat er in DEZE inactiviteitscyclus is gewaarschuwd. Gewaarschuwd
+# op t+17 maanden, daarna een login op t+17m+5d: die login begint een
+# nieuwe cyclus (_DORMANT_WARNING_WHERE_SQL vergelijkt precies zo) en de
+# oude stempel blijft staan, want LOGIN_STAMP_SQL nult hem bewust niet.
+# Slaapt de persoon daarna opnieuw 18 maanden en gaat de nieuwe
+# waarschuwing om welke reden dan ook niet uit -- schakelaar uit,
+# dagplafond, blokkeerlijst, onbezorgbaar adres -- dan kwalificeerde dit
+# account op de oude stempel, en landde het op de beoordelingslijst met
+# een notice die over een vorige cyclus ging. De vergelijking hieronder
+# is dezelfde als die van de waarschuwingsselector, zodat de twee helften
+# van de belofte hetzelfde begrip "cyclus" hanteren.
 PORTAL_ACCOUNT_INACTIVE_SQL = f"""
     SELECT id, email, last_login_at + INTERVAL '18 months' AS term_expired_op
       FROM users u WHERE u.role = 'candidate' AND u.deleted_at IS NULL
       AND u.last_login_at IS NOT NULL AND u.last_login_at <= (NOW() - INTERVAL '18 months')
       AND ((u.dormant_warning_sent_at IS NOT NULL
+            AND u.dormant_warning_sent_at > u.last_login_at
             AND u.dormant_warning_sent_at < (NOW() - INTERVAL '30 days'))
            OR (u.dormant_warning_skipped_at IS NOT NULL
+               AND u.dormant_warning_skipped_at > u.last_login_at
                AND u.dormant_warning_skipped_at < (NOW() - INTERVAL '30 days')))
       AND NOT EXISTS (
           SELECT 1 FROM candidate_profiles cpf
@@ -464,13 +480,28 @@ PORTAL_ACCOUNT_INACTIVE_SQL = f"""
 # zonder teller betekent dat: elke dag opnieuw proberen, elke dag dezelfde
 # plek onder het plafond. Na drie pogingen valt de rij eruit; elke login
 # zet de teller terug op 0 (LOGIN_STAMP_SQL hieronder).
+#
+# Derde reparatieronde (C2): tussen twee pogingen zit voortaan
+# DORMANT_WARNING_RETRY_DAYS. Zonder die wachttijd zijn drie mislukkingen
+# drie opeenvolgende dagen, en een storing bij de e-maildienstverlener van
+# een etmaal of twee verklaart daarmee een werkend adres onbezorgbaar --
+# met sinds C2 een echt gevolg: de derde mislukking stempelt
+# `dormant_warning_skipped_at`, en 30 dagen later staat het account op de
+# beoordelingslijst. Dit is de hele backoff: een vast interval, geen
+# oplopende reeks, geen extra kolomlogica. Drie pogingen beslaan daarmee
+# minstens zes dagen.
+DORMANT_WARNING_MAX_ATTEMPTS = 3
+DORMANT_WARNING_RETRY_DAYS = 3
+
 _DORMANT_WARNING_WHERE_SQL = f"""
        u.role = 'candidate' AND u.deleted_at IS NULL AND u.email IS NOT NULL
        AND u.last_login_at IS NOT NULL
        AND u.last_login_at <= (NOW() - INTERVAL '17 months')
        AND (u.dormant_warning_sent_at IS NULL OR u.dormant_warning_sent_at < u.last_login_at)
        AND (u.dormant_warning_skipped_at IS NULL OR u.dormant_warning_skipped_at < u.last_login_at)
-       AND u.dormant_warning_attempts < 3
+       AND u.dormant_warning_attempts < {DORMANT_WARNING_MAX_ATTEMPTS}
+       AND (u.dormant_warning_attempt_at IS NULL
+            OR u.dormant_warning_attempt_at < (NOW() - INTERVAL '{DORMANT_WARNING_RETRY_DAYS} days'))
        AND NOT EXISTS (
            SELECT 1 FROM candidate_profiles cpf
            JOIN candidates c ON c.id = cpf.candidate_id
@@ -514,8 +545,13 @@ DORMANT_WARNING_COUNT_SQL = f"""
 # dan die kolom. Nullen zou hetzelfde doen en een historisch gegeven
 # weggooien -- wanneer deze persoon is gewaarschuwd, is precies wat het
 # audit-spoor van §1.4 rij 6 moet kunnen tonen.
+#
+# `dormant_warning_attempt_at` hoort bij dezelfde teller (de backoff van
+# C2) en wordt daarom samen met die teller teruggezet: een nieuwe cyclus
+# begint zonder wachttijd uit de vorige.
 LOGIN_STAMP_SQL = (
-    "UPDATE users SET last_login_at = NOW(), dormant_warning_attempts = 0 WHERE id = $1"
+    "UPDATE users SET last_login_at = NOW(), dormant_warning_attempts = 0, "
+    "dormant_warning_attempt_at = NULL WHERE id = $1"
 )
 
 

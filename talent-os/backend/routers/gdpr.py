@@ -92,7 +92,7 @@ async def export_my_data(current_user: dict = Depends(get_current_user)):
         # in de export als `users.password_hash` en
         # `verification_token_hash` er niet in staan.
         job_alert_sends = await fetch_all(
-            "SELECT id, job_ids, sent_at, used_at FROM job_alert_sends "
+            "SELECT id, job_ids, sent_at, used_at, oneclick_used_at FROM job_alert_sends "
             "WHERE candidate_id = $1 ORDER BY sent_at DESC",
             candidate["id"],
         )

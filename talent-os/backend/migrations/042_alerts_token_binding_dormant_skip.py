@@ -23,6 +23,28 @@ hoort bij de `List-Unsubscribe`-URL en levert altijd `alerts`, wat de
 body, de querystring of de opgegeven scope ook zegt. Een gelekt
 one-click-token kan daarmee niet méér dan waarvoor het is uitgegeven.
 
+`job_alert_sends.oneclick_used_at` (C3, derde ronde): twee tokens deelden
+één `used_at`. Wie een one-click-URL uit een access log haalde en één keer
+POSTte, meldde de ontvanger niet alleen af voor alerts maar doodde daarmee
+ook diens FRAGMENTtoken uit dezelfde verzending -- de enige weg naar
+`scope=all`. De ontvanger merkte daar niets van: het antwoord van
+`POST /api/public/unsubscribe` is voor elk token identiek, ook voor een
+verbruikt token. Daarmee kon een gelekt one-click-token wél iets wat het
+niet mag: iemand de weg naar een volledige intrekking afsnijden. Elk token
+kijkt en stempelt vanaf nu uitsluitend zijn eigen kolom, zodat de twee
+links elk één keer en onafhankelijk van elkaar werken. Nullable en zonder
+default: NULL betekent onverbruikt, exact zoals `used_at`.
+
+`users.dormant_warning_attempt_at` (C2, backoff): `dormant_warning_attempts`
+telde drie mislukte verzendingen op drie opeenvolgende dagen, en sinds C2
+stempelt de derde mislukking `dormant_warning_skipped_at` -- waarmee een
+storing van twee etmalen bij de e-maildienstverlener een werkend adres
+onbezorgbaar zou verklaren en het account 30 dagen later op de
+beoordelingslijst zou zetten. Deze kolom houdt het tijdstip van de laatste
+poging vast; `DORMANT_WARNING_SQL` eist er `core/retention.py
+DORMANT_WARNING_RETRY_DAYS` tussen. Een vast interval, geen oplopende
+reeks. `LOGIN_STAMP_SQL` zet hem samen met de teller terug op NULL.
+
 Nullable, want de rijen van vóór deze migratie hebben geen tweede token;
 die houden hun bestaande `token_hash`-weg. UNIQUE om dezelfde reden als
 `token_hash` dat is: twee verzendingen kunnen nooit hetzelfde token
@@ -79,8 +101,11 @@ ALTER TABLE job_alert_sends ADD COLUMN IF NOT EXISTS oneclick_token_hash TEXT;
 CREATE UNIQUE INDEX IF NOT EXISTS uq_job_alert_sends_oneclick_token_hash
     ON job_alert_sends(oneclick_token_hash);
 
+ALTER TABLE job_alert_sends ADD COLUMN IF NOT EXISTS oneclick_used_at TIMESTAMPTZ;
+
 ALTER TABLE users ADD COLUMN IF NOT EXISTS dormant_warning_skipped_at TIMESTAMPTZ;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS dormant_warning_attempts INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS dormant_warning_attempt_at TIMESTAMPTZ;
 """
 
 if __name__ == "__main__":

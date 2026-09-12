@@ -254,7 +254,14 @@ def _stub_scheduler_db(monkeypatch, rows_by_sql=None, default_rows=None):
     async def _fake_fetch_one(sql, *args):
         if sql.lstrip().upper().startswith(("INSERT", "UPDATE", "DELETE")):
             executed.append((sql, args))
-            return {"id": 1}
+            # Eén rij die elke RETURNING-kolom dekt die deze jobs opvragen:
+            # `id` (de tokenrij van B7) en `dormant_warning_attempts` (C2,
+            # waar de teller bepaalt of de derde mislukking het account ook
+            # mailloos afhandelt). Altijd 1, dus onder
+            # DORMANT_WARNING_MAX_ATTEMPTS -- de derde poging zelf wordt
+            # tegen een echte database getest
+            # (tests/integration/test_ws3bc_referral_alerts_integration.py).
+            return {"id": 1, "dormant_warning_attempts": 1}
         rows = _match(sql)
         if rows is None and "COUNT(*) AS due" in sql:
             return {"due": len(default_rows or [])}
@@ -462,6 +469,11 @@ def test_portal_account_inactive_accepts_a_skipped_warning():
     assert "dormant_warning_skipped_at IS NOT NULL" in sql
     assert "u.dormant_warning_skipped_at < (NOW() - INTERVAL '30 days')" in sql
     assert "u.dormant_warning_sent_at < (NOW() - INTERVAL '30 days')" in sql
+    # C1: en allebei de stempels horen bij DEZE inactiviteitscyclus --
+    # dezelfde vergelijking als de waarschuwingsselector. Een stempel van
+    # vóór de laatste login is een notice over een andere periode.
+    assert "u.dormant_warning_sent_at > u.last_login_at" in sql
+    assert "u.dormant_warning_skipped_at > u.last_login_at" in sql
 
 
 def test_every_login_path_resets_the_dormant_attempt_counter():

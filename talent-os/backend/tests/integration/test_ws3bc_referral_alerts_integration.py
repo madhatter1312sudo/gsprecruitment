@@ -1286,6 +1286,16 @@ def test_a_dead_address_stops_after_three_attempts_and_resets_on_login(db_run, m
         db_run(scheduler.dormant_account_warning_job)
         row = db_run(fetch_one, "SELECT dormant_warning_attempts FROM users WHERE id = $1", user["id"])
         assert row["dormant_warning_attempts"] == expected
+        # C2: tussen twee pogingen zit DORMANT_WARNING_RETRY_DAYS. De
+        # eigen mutatietest daarvan staat hieronder; hier alleen de klok
+        # vooruit, zodat deze test over de teller gaat en niet over de
+        # wachttijd.
+        db_run(
+            execute,
+            "UPDATE users SET dormant_warning_attempt_at = "
+            f"NOW() - INTERVAL '{retention.DORMANT_WARNING_RETRY_DAYS + 1} days' WHERE id = $1",
+            user["id"],
+        )
 
     assert user["id"] not in _selected(), "na drie mislukte pogingen hoort de rij de selector te verlaten"
 
@@ -1294,6 +1304,155 @@ def test_a_dead_address_stops_after_three_attempts_and_resets_on_login(db_run, m
     db_run(execute, retention.LOGIN_STAMP_SQL, user["id"])
     row = db_run(fetch_one, "SELECT dormant_warning_attempts FROM users WHERE id = $1", user["id"])
     assert row["dormant_warning_attempts"] == 0
+
+
+def test_a_warning_from_a_previous_inactivity_cycle_is_no_notice(db_run):
+    """C1. Gewaarschuwd op t+17 maanden, daarna ingelogd op t+17m+5d,
+    daarna opnieuw 18 maanden stil. Gaat de nieuwe waarschuwing om welke
+    reden dan ook niet uit (schakelaar uit, dagplafond, blokkeerlijst,
+    onbezorgbaar adres), dan mag de stempel van de VORIGE cyclus dit
+    account niet op de beoordelingslijst zetten: die notice ging over een
+    andere periode. De normale cyclus moet wel gewoon door."""
+    from core.database import execute, fetch_all
+    from core import retention
+
+    def _listed(user_id):
+        return user_id in [r["id"] for r in db_run(fetch_all, retention.PORTAL_ACCOUNT_INACTIVE_SQL)]
+
+    for column in ("dormant_warning_sent_at", "dormant_warning_skipped_at"):
+        user = _dormant_user(db_run, "18 months")
+        # De stempel is ruim ouder dan 30 dagen, maar dateert van vóór de
+        # laatste login: een vorige cyclus.
+        db_run(
+            execute,
+            f"UPDATE users SET {column} = NOW() - INTERVAL '18 months 25 days' WHERE id = $1",
+            user["id"],
+        )
+        assert not _listed(user["id"]), (
+            f"{column} van vóór de laatste login is geen waarschuwing voor deze cyclus"
+        )
+
+        # Dezelfde stempel, nu uit de huidige cyclus: gewoon op de lijst.
+        db_run(
+            execute,
+            f"UPDATE users SET {column} = NOW() - INTERVAL '31 days' WHERE id = $1", user["id"],
+        )
+        assert _listed(user["id"]), "de normale cyclus hoort de lijst wel te halen"
+
+
+def test_an_undeliverable_address_is_stamped_and_reaches_the_review_list(db_run, monkeypatch, no_send):
+    """C2. Bij `attempts >= 3` viel de rij uit de waarschuwingsselector
+    zonder dat iets werd gestempeld: `PORTAL_ACCOUNT_INACTIVE_SQL` werd
+    daardoor nooit bereikt en wij bewaarden de gegevens van iemand die wij
+    niet kunnen bereiken onbeperkt. De derde mislukking stempelt nu
+    `dormant_warning_skipped_at` met een audit-regel
+    `dormant_warning_suppressed`, reason `undeliverable`."""
+    from core import privacy
+    from core.config import settings
+    from core.database import execute, fetch_all, fetch_one
+    from core import retention
+    from services import scheduler
+
+    user = _dormant_user(db_run, "21 months")
+    monkeypatch.setattr(settings, "dormant_warning_enabled", True)
+
+    class _AlwaysFails:
+        async def send_template(self, name, to_email, ctx, lang=None, headers=None):
+            return False
+
+    import services.email_service as es
+
+    monkeypatch.setattr(es, "email_service", _AlwaysFails())
+
+    for _ in range(retention.DORMANT_WARNING_MAX_ATTEMPTS):
+        db_run(scheduler.dormant_account_warning_job)
+        db_run(
+            execute,
+            "UPDATE users SET dormant_warning_attempt_at = "
+            f"NOW() - INTERVAL '{retention.DORMANT_WARNING_RETRY_DAYS + 1} days' WHERE id = $1",
+            user["id"],
+        )
+
+    row = db_run(
+        fetch_one,
+        "SELECT dormant_warning_sent_at, dormant_warning_skipped_at FROM users WHERE id = $1",
+        user["id"],
+    )
+    assert row["dormant_warning_sent_at"] is None, "niets verstuurd is niet als verstuurd stempelen"
+    assert row["dormant_warning_skipped_at"] is not None, (
+        "een dood adres moet worden afgehandeld, anders bewaren wij de gegevens voor altijd"
+    )
+
+    audit = db_run(
+        fetch_one,
+        "SELECT changes FROM audit_log WHERE action = 'dormant_warning_suppressed' "
+        "AND target_id = $1", user["id"],
+    )
+    assert audit is not None
+    assert "undeliverable" in str(audit["changes"])
+    assert privacy.email_hash(user["email"]) in str(audit["changes"])
+    assert user["email"] not in str(audit["changes"])
+
+    db_run(
+        execute,
+        "UPDATE users SET dormant_warning_skipped_at = NOW() - INTERVAL '31 days' WHERE id = $1",
+        user["id"],
+    )
+    listed = [r["id"] for r in db_run(fetch_all, retention.PORTAL_ACCOUNT_INACTIVE_SQL)]
+    assert user["id"] in listed, "na dezelfde 18 maanden plus 30 dagen hoort dit account op de lijst"
+
+
+def test_three_failures_on_three_consecutive_days_do_not_declare_an_address_dead(
+    db_run, monkeypatch, no_send,
+):
+    """C2, de backoff. Drie mislukkingen op drie opeenvolgende dagen zijn
+    geen bewijs van een dood adres maar het profiel van een storing van
+    een etmaal of twee. Tussen twee pogingen zit
+    DORMANT_WARNING_RETRY_DAYS; na die wachttijd komt de rij gewoon
+    terug."""
+    from core.config import settings
+    from core.database import execute, fetch_all, fetch_one
+    from core import retention
+    from services import scheduler
+
+    user = _dormant_user(db_run, "21 months")
+    monkeypatch.setattr(settings, "dormant_warning_enabled", True)
+
+    class _AlwaysFails:
+        async def send_template(self, name, to_email, ctx, lang=None, headers=None):
+            return False
+
+    import services.email_service as es
+
+    monkeypatch.setattr(es, "email_service", _AlwaysFails())
+
+    db_run(scheduler.dormant_account_warning_job)
+
+    def _selected():
+        return [r["id"] for r in db_run(fetch_all, retention.DORMANT_WARNING_SQL, 500)]
+
+    # De dag erna, en de dag daarna: nog niet aan de beurt.
+    for day in (1, 2):
+        db_run(
+            execute,
+            f"UPDATE users SET dormant_warning_attempt_at = NOW() - INTERVAL '{day} days' "
+            "WHERE id = $1", user["id"],
+        )
+        assert user["id"] not in _selected(), "een dag na een mislukte poging is te vroeg"
+
+    db_run(scheduler.dormant_account_warning_job)
+    row = db_run(fetch_one, "SELECT dormant_warning_attempts FROM users WHERE id = $1", user["id"])
+    assert row["dormant_warning_attempts"] == 1, "binnen de wachttijd hoort er niets te gebeuren"
+    row = db_run(fetch_one, "SELECT dormant_warning_skipped_at FROM users WHERE id = $1", user["id"])
+    assert row["dormant_warning_skipped_at"] is None
+
+    db_run(
+        execute,
+        "UPDATE users SET dormant_warning_attempt_at = "
+        f"NOW() - INTERVAL '{retention.DORMANT_WARNING_RETRY_DAYS + 1} days' WHERE id = $1",
+        user["id"],
+    )
+    assert user["id"] in _selected(), "na de wachttijd hoort de rij gewoon terug te komen"
 
 
 def test_dormant_warning_mail_names_the_last_login_date(db_run, monkeypatch):
@@ -1413,32 +1572,92 @@ def test_a_fragment_token_in_the_body_still_reaches_scope_all(client, db_run):
     assert supp is not None
 
 
-def test_both_tokens_are_single_use(client, db_run):
-    """Allebei eenmalig, en het verbruiken van het ene verbruikt ook de
-    andere: `used_at` zit op de verzending, niet op het token. Een tweede
-    aanroep doet niets meer, langs welke van de twee wegen dan ook."""
+def test_each_token_is_single_use_on_its_own_column(client, db_run):
+    """C3, eerste helft. Elk token is eenmalig op zijn EIGEN kolom: een
+    tweede aanroep met hetzelfde token doet niets meer, maar raakt het
+    andere token van dezelfde verzending niet."""
     from core.database import execute, fetch_one
 
-    for first, second in (("token", "oneclick"), ("oneclick", "token")):
+    for which, column in (("token", "used_at"), ("oneclick", "oneclick_used_at")):
         cand = _insert_alert_candidate(db_run)
         pair = dict(zip(("token", "oneclick"), _issue_alert_tokens(db_run, cand["id"], [1])))
 
         assert client.post(
-            "/api/public/unsubscribe", json={"token": pair[first], "scope": "alerts"},
+            "/api/public/unsubscribe", json={"token": pair[which], "scope": "alerts"},
         ).status_code == 200
+        row = db_run(
+            fetch_one,
+            "SELECT used_at, oneclick_used_at FROM job_alert_sends WHERE candidate_id = $1",
+            cand["id"],
+        )
+        assert row[column] is not None
+        other = "oneclick_used_at" if column == "used_at" else "used_at"
+        assert row[other] is None, "elk token stempelt alleen zijn eigen kolom"
+
         db_run(
             execute,
             "UPDATE candidates SET job_alert_unsubscribed_at = NULL WHERE id = $1", cand["id"],
         )
-
-        res = client.post("/api/public/unsubscribe", json={"token": pair[second], "scope": "alerts"})
-        assert res.status_code == 200
-        row = db_run(
+        assert client.post(
+            "/api/public/unsubscribe", json={"token": pair[which], "scope": "alerts"},
+        ).status_code == 200
+        again = db_run(
             fetch_one, "SELECT job_alert_unsubscribed_at FROM candidates WHERE id = $1", cand["id"],
         )
-        assert row["job_alert_unsubscribed_at"] is None, (
-            f"{second} werkte nog nadat {first} de verzending al had verbruikt"
+        assert again["job_alert_unsubscribed_at"] is None, (
+            f"{which} hoort na het eerste gebruik niets meer te doen"
         )
+
+
+def test_using_one_token_leaves_the_other_usable(client, db_run):
+    """C3, de eigenlijke storing. Eén gedeelde `used_at` betekende dat wie
+    een one-click-URL uit een log haalde en één keer POSTte, daarmee ook
+    het fragmenttoken van dezelfde verzending doodde -- en de ontvanger
+    kon `scope=all` niet meer bereiken zonder dat te merken, want het
+    antwoord is voor elk token identiek. Beide volgordes."""
+    from core import privacy
+    from core.database import execute, fetch_one
+
+    # One-click eerst: het fragmenttoken moet daarna nog `scope=all`
+    # kunnen, de enige weg naar een volledige intrekking.
+    cand = _insert_alert_candidate(db_run)
+    token, oneclick = _issue_alert_tokens(db_run, cand["id"], [1])
+    assert client.post(
+        "/api/public/unsubscribe", json={"token": oneclick, "scope": "all"},
+    ).status_code == 200
+    assert db_run(
+        fetch_one, "SELECT 1 FROM suppression_list WHERE email_hash = $1",
+        privacy.email_hash(cand["email"]),
+    ) is None, "een one-click-token levert nooit meer dan alerts op"
+
+    assert client.post(
+        "/api/public/unsubscribe", json={"token": token, "scope": "all"},
+    ).status_code == 200
+    assert db_run(
+        fetch_one, "SELECT 1 FROM suppression_list WHERE email_hash = $1",
+        privacy.email_hash(cand["email"]),
+    ) is not None, "het fragmenttoken hoort na gebruik van het one-click-token nog te werken"
+
+    # En andersom: het fragmenttoken verbruikt laat het one-click-token
+    # ongemoeid.
+    other = _insert_alert_candidate(db_run)
+    token2, oneclick2 = _issue_alert_tokens(db_run, other["id"], [1])
+    assert client.post(
+        "/api/public/unsubscribe", json={"token": token2, "scope": "alerts"},
+    ).status_code == 200
+    db_run(
+        execute,
+        "UPDATE candidates SET job_alert_unsubscribed_at = NULL WHERE id = $1", other["id"],
+    )
+    assert client.post(
+        "/api/public/unsubscribe", json={"token": oneclick2, "scope": "alerts"},
+    ).status_code == 200
+    row = db_run(
+        fetch_one, "SELECT job_alert_unsubscribed_at FROM candidates WHERE id = $1", other["id"],
+    )
+    assert row["job_alert_unsubscribed_at"] is not None, (
+        "het one-click-token hoort na gebruik van het fragmenttoken nog te werken"
+    )
 
 
 def test_both_tokens_expire_after_ninety_days(client, db_run):
@@ -1555,6 +1774,36 @@ def test_a_suppressed_candidate_leaves_the_alert_selector(db_run, monkeypatch, n
     # onder het plafond".
     selected = db_run(fetch_all, scheduler.JOB_ALERT_CANDIDATE_SQL, 1000)
     assert cand["id"] not in [r["id"] for r in selected]
+
+
+def test_a_suppressed_candidate_is_handled_in_a_dry_run_too(db_run, monkeypatch, no_send):
+    """C4. De docstring van `job_alert_job` zei dat een droogloop geen
+    enkel spoor achterlaat; B5 laat er wél een achter, en met opzet. Een
+    geblokkeerde kandidaat wordt ook met beide schakelaars uit afgehandeld
+    (`job_alert_unsubscribed_at` plus een audit-regel) -- dat spoor zegt
+    juist dat er niets is verstuurd. Deze test legt vast welke van de twee
+    het is, zodat de zin en het gedrag niet opnieuw uit elkaar lopen."""
+    from core.database import fetch_one
+
+    cand = _insert_alert_candidate(db_run)
+    job = _open_job(db_run)
+    _suggest_match(db_run, cand["id"], job["id"])
+    _suppress(db_run, cand["email"])
+
+    result = _run_job_alert(db_run, monkeypatch, env=False, db_flag=False)
+    assert result["status"] == "dry_run"
+    assert no_send.sent == []
+
+    row = db_run(
+        fetch_one, "SELECT job_alert_unsubscribed_at FROM candidates WHERE id = $1", cand["id"],
+    )
+    assert row["job_alert_unsubscribed_at"] is not None
+    audit = db_run(
+        fetch_one,
+        "SELECT 1 FROM audit_log WHERE action = 'job_alert_suppressed' AND target_id = $1",
+        cand["id"],
+    )
+    assert audit is not None
 
 
 def test_unsubscribing_for_alerts_covers_every_row_with_that_address(client, db_run):

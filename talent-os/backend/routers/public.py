@@ -613,9 +613,14 @@ async def talentpool_confirm(request: Request, data: TalentpoolConfirmRequest):
 # rijen. Er wordt dus nooit "eerst gekeken of het token bestaat en dan
 # pas iets gedaan".
 #
-# Het token is eenmalig: de eerste geslaagde aanroep stempelt
-# `used_at`, waarna hergebruik langs dezelfde weg als een onbekend token
-# loopt (en dus ook niets meer doet). Daarom stuurt
+# Elk token is eenmalig EN onafhankelijk van het andere (C3): de eerste
+# geslaagde aanroep stempelt de eigen kolom van dat token -- `used_at`
+# voor het fragmenttoken, `oneclick_used_at` voor het one-click-token --
+# waarna hergebruik van dat ene token langs dezelfde weg als een onbekend
+# token loopt (en dus ook niets meer doet). Eén gedeelde kolom gaf het
+# one-click-token een gevolg dat het niet hoort te hebben: het verbruikte
+# ook het fragmenttoken van dezelfde verzending, en sneed de ontvanger
+# daarmee ongemerkt de weg naar `scope=all` af. Daarom stuurt
 # website/unsubscribe.js niet automatisch bij het laden, maar pas als de
 # bezoeker zelf een van de twee knoppen kiest -- anders zou het token op
 # de "alerts"-keuze verbruikt zijn voordat hij "alles" had kunnen kiezen.
@@ -744,7 +749,17 @@ async def unsubscribe(
     # beide statements nul rijen en blijft candidate_id NULL.
     #
     # `used_at IS NULL` maakt hergebruik onmogelijk zonder een aparte
-    # check die zelf weer een tak zou zijn. Elke parameter krijgt een
+    # check die zelf weer een tak zou zijn. Elk token heeft daarvoor een
+    # EIGEN kolom (C3): `oneclick_used_at` voor het one-click-token,
+    # `used_at` voor het fragmenttoken. Eén gedeelde kolom betekende dat
+    # het verbruiken van het ene het andere doodde -- en omdat het
+    # one-click-token in elke access- en edge-logregel staat, kon wie zo'n
+    # URL uit een log haalde met één POST het fragmenttoken van diezelfde
+    # verzending onbruikbaar maken. De ontvanger merkte daar niets van
+    # (het antwoord is voor elk token identiek, ook voor een verbruikt
+    # token) en kon `scope='all'` niet meer bereiken: precies het ene ding
+    # dat een gelekt one-click-token niet mag kunnen. De twee links werken
+    # nu elk één keer en onafhankelijk van elkaar. Elke parameter krijgt een
     # expliciete cast: asyncpg leidt het type van een placeholder af uit
     # de kolom waarmee hij wordt vergeleken, en juist in dit endpoint
     # staan er placeholders op plekken zonder kolom om van te leren
@@ -766,8 +781,8 @@ async def unsubscribe(
     # daarom nooit meer dan `alerts` -- wat de body, de querystring of de
     # opgegeven scope ook zegt.
     consumed_oneclick = await fetch_one(
-        """UPDATE job_alert_sends SET used_at = NOW()
-           WHERE oneclick_token_hash = $1::text AND used_at IS NULL
+        """UPDATE job_alert_sends SET oneclick_used_at = NOW()
+           WHERE oneclick_token_hash = $1::text AND oneclick_used_at IS NULL
              AND sent_at > NOW() - INTERVAL '90 days'
            RETURNING candidate_id""",
         token_hash,
