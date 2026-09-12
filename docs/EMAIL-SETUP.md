@@ -325,3 +325,40 @@ uitgaande IP-adressen van een mailprovider.
 Tot die uitzondering er is, werkt het afmelden via de zichtbare link in de
 voettekst van het bericht wél: die gaat langs de website en de gewone
 browser van de ontvanger.
+
+## 9. Deployvolgorde: eerst migreren, dan de nieuwe code live zetten
+
+`.github/workflows/deploy.yml` bouwde tot deze reparatieronde eerst de
+nieuwe backend en startte hem ook meteen (`docker compose up -d --build
+backend`), en draaide de migraties pas in de stap daarna. Tussen die twee
+stappen draaide de nieuwe code dus op het oude schema.
+
+Dat is niet theoretisch. `core/retention.py`'s `LOGIN_STAMP_SQL` schrijft
+`users.dormant_warning_attempts` en `users.dormant_warning_attempt_at`
+(migratie 042) en wordt in alle vier de inlogpaden aangeroepen
+(`routers/auth.py` wachtwoord en Google, `routers/mfa.py` twee
+tweede-factorstappen), zonder try/except. Bestaan die kolommen nog niet,
+dan geeft élke login in dat venster een 500 (`UndefinedColumnError`) --
+ook die van de beheerder, die daarmee net dan niet bij het adminpaneel
+kan. Hetzelfde geldt voor elke toekomstige migratie: dit is een
+eigenschap van de volgorde, niet van dit spoor.
+
+De stappen staan daarom nu zo:
+
+1. **Build the new backend image and make sure postgres is up** --
+   `docker compose build backend` bouwt en tagt dezelfde image die `up
+   --build` tagde, maar vervangt de draaiende container niet.
+   `docker compose up -d --wait postgres` start postgres expliciet: de
+   migratiestap gebruikt `--no-deps` en kreeg die afhankelijkheid tot nu
+   toe stilzwijgend van de `up -d --build backend` die hier stond.
+2. **Run database migrations** -- inhoudelijk onveranderd: nog steeds
+   `docker compose run --rm -T --no-deps backend` over `migrations/0*.py`
+   in bestandsnaamvolgorde, op de zojuist gebouwde image, met dezelfde
+   `env_file`-regels en dus dezelfde database-URL als de service zelf.
+   Alleen de plaats in de volgorde is veranderd.
+3. **Start the new backend image** -- `docker compose up -d backend`.
+   Pas hier gaat de nieuwe code live, op een schema dat er al bij past.
+
+Mislukt stap 2, dan draait de oude backend nog gewoon: er is dan niets
+omgeschakeld en de rollback-tak onderaan het bestand (image `:previous`
+terugtaggen) doet wat hij altijd deed.
