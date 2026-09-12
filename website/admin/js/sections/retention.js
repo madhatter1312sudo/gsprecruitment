@@ -123,7 +123,11 @@
   // §7.2f: vertak op detail.code, val terug op detail.message. De code
   // zelf hoort in de console, niet op het scherm -- en er gaat nooit een
   // persoonsgegeven mee.
-  retentionErrorText(payload, status) {
+  // opts.rawFallback:false onderdrukt de terugval op detail.message. Dat
+  // is er voor de uitkomstenlijst van een bulkaanroep: daar is `detail`
+  // een interne markering ("unexpected_error"), geen zin die voor een
+  // beheerder geschreven is.
+  retentionErrorText(payload, status, opts = {}) {
     const d = this.errorDetail(payload);
     if (d.code) {
       // Alleen de code, nooit een persoonsgegeven, en nooit op het scherm.
@@ -137,8 +141,9 @@
     // niemand verder.
     if (status === 401 || status === 403) return 'Je hebt geen rechten voor deze handeling.';
     if (d.code && ERROR_TEXT[d.code]) return ERROR_TEXT[d.code];
-    // Een onbekende code of een kale string van een ouder endpoint is
-    // ontwikkelaarstekst: die gaat naar de console, niet naar het scherm.
+    // §7.2f punt 3: liever een Engelse zin die klopt dan een Nederlandse
+    // die raadt. De code staat al in de console.
+    if (d.message && opts.rawFallback !== false) return d.message;
     if (d.code || d.message) {
       console.warn('retention: onbekende foutmelding', d.code || '', d.message || '');
     }
@@ -187,6 +192,8 @@
       }
       if (!sumRes || !sumRes.ok) throw new Error('summary');
       this._retention.summary = await sumRes.json();
+      // De rechten zijn er (weer): de knoppen die iets doen mogen terug aan.
+      if (this._retention.noRights) this.clearRetentionNoRights();
       // Drie staten voor "Laatst gegenereerd": bekend, leeg (er staat nog
       // niets in de lijst) en mislukt. De derde is geen "n.v.t.": dat zou
       // een reden verzinnen voor iets wat gewoon niet geladen is.
@@ -210,14 +217,27 @@
 
   // Geen rechten is geen fout om opnieuw te proberen: geen retrylink, en
   // de knoppen die iets zouden doen gaan uit.
+  retentionActionButtons() {
+    return document.querySelectorAll(
+      '#section-retention [data-action="retention-generate"], '
+      + '#section-retention [data-action="retention-dryrun"], '
+      + '#section-retention [data-action="retention-apollo-dryrun"]');
+  },
+
+  clearRetentionNoRights() {
+    this._retention.noRights = false;
+    this.retentionActionButtons().forEach(btn => {
+      btn.disabled = false;
+      btn.removeAttribute('title');
+    });
+  },
+
   showRetentionNoRights() {
     this._retention.noRights = true;
     mount(document.getElementById('retentionSummary'), html`
       <div class="col-12"><div class="a-state-block">Je hebt geen rechten om de bewaartermijnen te bekijken.</div></div>`);
     this.setEmpty('#retentionCategoryBody', 5, 'Je hebt geen rechten om deze gegevens te bekijken.');
-    document.querySelectorAll('#section-retention [data-action="retention-generate"], '
-      + '#section-retention [data-action="retention-dryrun"], '
-      + '#section-retention [data-action="retention-apollo-dryrun"]').forEach(btn => {
+    this.retentionActionButtons().forEach(btn => {
       btn.disabled = true;
       btn.title = 'Je hebt geen rechten voor deze handeling';
     });
@@ -575,7 +595,7 @@
     if (!n) {
       bar.hidden = true;
       mount(bar, '');
-      document.documentElement.style.setProperty('--a-bulkbar-h', '0px');
+      this.publishBulkbarHeight(null);
       return;
     }
     const over = n > BULK_CAP;
@@ -591,7 +611,18 @@
         </div>
       </div>`);
     bar.hidden = false;
-    document.documentElement.style.setProperty('--a-bulkbar-h', bar.offsetHeight + 'px');
+    this.publishBulkbarHeight(bar);
+  },
+
+  // De hoogte komt van de balk zelf, niet van de wrapper: op een telefoon
+  // staat .a-bulkbar fixed en is de wrapper daarom 0px hoog. Met die 0px
+  // schoof de toast niet omhoog en lag hij onder de balk. Dezelfde waarde
+  // houdt via padding-bottom op de sectie de laatste rij en de
+  // pagineerfooter vrij van de vaste balk.
+  publishBulkbarHeight(bar) {
+    const inner = bar && (bar.firstElementChild || bar);
+    const h = inner ? inner.offsetHeight : 0;
+    document.documentElement.style.setProperty('--a-bulkbar-h', h + 'px');
   },
 
   /* ============================================================
@@ -940,7 +971,7 @@
       </div>
       ${failed.length ? html`
         <div class="a-field-label">Mislukte items</div>
-        <ul class="a-inline-list">${failed.map(f => html`<li>#${f.id}: ${this.retentionErrorText(f.detail)}</li>`)}</ul>
+        <ul class="a-inline-list">${failed.map(f => html`<li>#${f.id}: ${this.retentionErrorText(f.detail, null, { rawFallback: false })}</li>`)}</ul>
         <div class="a-actions">
           <button type="button" class="btn btn-outline-danger" data-action="retention-bulk-retry"
             data-ids="${failed.map(f => f.id).join(',')}">Mislukte items opnieuw proberen</button>

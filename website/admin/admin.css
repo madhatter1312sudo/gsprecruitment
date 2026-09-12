@@ -194,6 +194,12 @@ h1, h2, h3, h4,
 
 /* ==== Toast (auth.js Auth.toast): het paneel laadt styles.css niet ==== */
 .toast-container { position: fixed; bottom: 24px; right: 24px; z-index: 9998; display: flex; flex-direction: column; gap: 8px; }
+/* Tabler draagt `.toast:not(.show){display:none}` (0,2,0) en dat won van
+   de losse `.toast`-regel hieronder (0,1,0): elke toast van Auth.toast()
+   stond dus op display:none, in het hele paneel. Die markup gebruikt
+   .toast-visible en niet Bootstraps .show, dus de zichtbaarheid komt van
+   deze regel, met gelijke specificiteit en later in de cascade. */
+.toast-container .toast { display: flex; }
 .toast { display: flex; align-items: center; gap: 10px; padding: 14px 20px; border-radius: var(--radius-sm); font-size: .88rem; font-weight: 500; box-shadow: var(--shadow-lg); max-width: 360px; opacity: 0; transform: translateY(16px); transition: opacity var(--transition-base), transform var(--transition-base); }
 .toast-visible { opacity: 1; transform: translateY(0); }
 .toast-removing { opacity: 0; transform: translateX(40px); }
@@ -524,6 +530,10 @@ h1, h2, h3, h4,
     z-index: 1040;
     border-top: 1px solid var(--admin-hairline);
   }
+  /* Een vaste balk dekt af wat eronder ligt: de sectie houdt onderaan
+     evenveel ruimte vrij als de balk hoog is, zodat de laatste rij en de
+     pagineerfooter bereikbaar blijven. */
+  #section-retention { padding-bottom: var(--a-bulkbar-h, 0px); }
   /* De toast schuift omhoog zolang de bulkbalk staat; de balk zet
      --a-bulkbar-h zelf op zijn eigen hoogte en weer op 0px bij verdwijnen. */
   .toast-container {
