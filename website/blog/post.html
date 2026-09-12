@@ -40,13 +40,16 @@
 .article-callout p, .article-callout li { color: rgba(255,255,255,.78); }
 .article-callout h3 { color: #fff; margin-top: 0; }
 .article-callout li::before { background: var(--gold); box-shadow: none; }
-.article-tags { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 26px; }
-.article-tags span { padding: 5px 12px; border-radius: var(--radius-full); background: var(--gold-light); color: var(--gold-dark); font-size: .78rem; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; }
+/* Archetype 5 chip tokens (SITE-DESIGN-SPEC.md §8.x.1): unfilled border,
+   --gold-ink text. The previous gold-light fill + gold-dark text repeated
+   the "gele pil" pattern the kaartsysteem migration removes elsewhere. */
+.article-tags { display: flex; flex-wrap: wrap; gap: var(--space-sm); margin-top: 26px; }
+.article-tags span { padding: 7px 14px; border: 1px solid var(--gray-100); border-radius: var(--radius-full); background: transparent; color: var(--gold-ink); font-family: var(--font-mono); font-size: var(--font-size-xs); font-weight: 400; text-transform: uppercase; letter-spacing: 0.13em; }
 .article-cta { margin-top: 48px; padding: 36px; border-radius: var(--radius); background: linear-gradient(135deg, var(--navy) 0%, var(--navy-light) 100%); color: #fff; text-align: center; }
 .article-cta h2 { color: #fff; margin-bottom: 10px; }
 .article-cta p { color: rgba(255,255,255,.76); max-width: 650px; margin-left: auto; margin-right: auto; }
 .breadcrumb { display:inline-flex; gap:8px; align-items:center; color:var(--text-muted); font-size:.88rem; margin-bottom:20px; }
-.breadcrumb a:hover { color: var(--gold-dark); }
+.breadcrumb a:hover { color: var(--gold-ink); }
 @media (max-width: 768px) { .article-hero { padding-top: 120px; } .article-body { padding: 44px 0; } .article-cta { padding: 28px 20px; } }
 </style>
 </head>
@@ -161,7 +164,7 @@
         </ul></div>
     </div>
     <div class="footer-bottom">
-      <span>© 2026 GSP Recruitment · KvK 75545586 · Brainport Eindhoven · info@gsprecruitment.nl</span>
+      <span>© 2026 GSP Recruitment · KvK 75545586 · Brainport Eindhoven · <a href="mailto:info@gsprecruitment.nl">info@gsprecruitment.nl</a></span>
     </div>
   </div>
 </footer>

@@ -43,6 +43,7 @@
   "description": "Specialist recruitment for employers: embedded software, C++, mechatronics, OT-cybersecurity."
 }
 </script>
+<noscript><style>.fade-in,.fade-in-left,.fade-in-right{opacity:1!important;transform:none!important}</style></noscript>
 </head>
 <body>
 <a href="#main-content" class="skip-link"><span class="lang-en">Skip to main content</span><span class="lang-nl">Ga naar hoofdinhoud</span></a>
@@ -87,15 +88,19 @@
       <a href="#process" class="btn btn-outline"><span class="lang-en">How we work</span><span class="lang-nl">Onze werkwijze</span></a>
     </div>
     <div class="trust-badges">
-      <span class="trust-badge"><svg class="line-icon" viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="6" y="4" width="20" height="24" rx="2"/><path d="M11 11h10M11 16h10M11 21h6"/></svg> <span class="lang-en">GDPR compliant</span><span class="lang-nl">AVG-compliant</span></span>
-      <span class="trust-badge"><svg class="line-icon" viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M6 22V13a4 4 0 0 1 4-4h1"/><path d="M26 22V13a4 4 0 0 0-4-4h-1"/><circle cx="16" cy="8" r="3"/><path d="M6 22h20"/></svg> <span class="lang-en">No cure, no pay</span><span class="lang-nl">No cure no pay</span></span>
-      <span class="trust-badge"><svg class="line-icon" viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M16 4l9 4v7c0 7-4.5 10.5-9 13-4.5-2.5-9-6-9-13V8l9-4z"/><path d="M12 16l3 3 5-6"/></svg> <span class="lang-en">30-day guarantee</span><span class="lang-nl">30-dagen garantie</span></span>
-      <span class="trust-badge"><svg class="line-icon" viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="4" y="9" width="24" height="16" rx="2"/><path d="M10 9V7a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v2"/></svg> <span>KvK 75545586</span></span>
+      <span class="trust-badge"><span class="lang-en">GDPR compliant</span><span class="lang-nl">AVG-compliant</span></span>
+      <span class="trust-badge"><span class="lang-en">No cure, no pay</span><span class="lang-nl">No cure no pay</span></span>
+      <span class="trust-badge"><span class="lang-en">30-day guarantee</span><span class="lang-nl">30-dagen garantie</span></span>
+      <span class="trust-badge"><span>KvK 75545586</span></span>
     </div>
   </div>
 </section>
 <!-- ─── WHY US ────────────────────────────────────────────── -->
-<section>
+<!-- Archetype 2 (lichte inhoudskaart, SITE-DESIGN-SPEC.md §8.x.1) — .mark
+     numeral replaces the former .prop-icon inline SVG (icon-less system,
+     §8.x.3); section gets --bg-alt so a white .card never sits on a white
+     section (§8.x.0 white-on-white rule, structural-preference route). -->
+<section style="background:var(--bg-alt)">
   <div class="container">
     <div class="section-header">
       <div class="section-label"><span class="lang-en">Why GSP</span><span class="lang-nl">Waarom GSP</span></div>
@@ -103,30 +108,42 @@
       <h2 class="lang-nl">Een wervingspartner die levert.</h2>
     </div>
     <div class="props-grid">
-      <div class="prop"><div class="prop-icon"><svg class="line-icon" viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="10" y="10" width="12" height="12" rx="1.5"/><path d="M13 10V5M19 10V5M13 27v-5M19 27v-5M10 13H5M10 19H5M27 13h-5M27 19h-5"/></svg></div>
+      <div class="card">
+        <div class="mark" aria-hidden="true">01</div>
         <h3><span class="lang-en">Embedded &amp; C++ is our core</span><span class="lang-nl">Embedded &amp; C++ is onze kern</span></h3>
         <p class="lang-en">We don't just know tech — we specialise in the hardest-to-fill roles in the Brainport region: embedded software, C++, FPGA, mechatronics.</p>
-        <p class="lang-nl">We kennen niet alleen tech — we zijn gespecialiseerd in de moeilijkst in te vullen rollen in de Brainport regio: embedded software, C++, FPGA, mechatronica.</p></div>
-      <div class="prop"><div class="prop-icon"><svg class="line-icon" viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="13" cy="10" r="4"/><path d="M5 26c0-5 3.5-8 8-8 1.6 0 3 .3 4.2 1"/><path d="M20 22l3 3 5-6"/></svg></div>
+        <p class="lang-nl">We kennen niet alleen tech — we zijn gespecialiseerd in de moeilijkst in te vullen rollen in de Brainport regio: embedded software, C++, FPGA, mechatronica.</p>
+      </div>
+      <div class="card">
+        <div class="mark" aria-hidden="true">02</div>
         <h3><span class="lang-en">One dedicated team, no account managers</span><span class="lang-nl">Eén toegewijd team, geen accountmanagers</span></h3>
         <p class="lang-en">You work directly with the person doing the search. No handovers, no account-management layer, no excuses.</p>
-        <p class="lang-nl">Je werkt direct met de persoon die de search doet. Geen overdrachten, geen accountmanagement-laag, geen smoesjes.</p></div>
-      <div class="prop"><div class="prop-icon"><svg class="line-icon" viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M18 4L8 18h6l-2 10 10-14h-6l2-10z"/></svg></div>
+        <p class="lang-nl">Je werkt direct met de persoon die de search doet. Geen overdrachten, geen accountmanagement-laag, geen smoesjes.</p>
+      </div>
+      <div class="card">
+        <div class="mark" aria-hidden="true">03</div>
         <h3><span class="lang-en">Access to the passive market</span><span class="lang-nl">Toegang tot de passieve markt</span></h3>
         <p class="lang-en">The engineers you need aren't reading job boards. We approach them directly — no spray-and-pray, just a short list of genuinely relevant people.</p>
-        <p class="lang-nl">De engineers die je zoekt lezen geen vacaturesites. Wij benaderen ze direct — geen hagelschot, alleen een korte lijst van echt relevante mensen.</p></div>
-      <div class="prop"><div class="prop-icon"><svg class="line-icon" viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M16 4l9 4v7c0 7-4.5 10.5-9 13-4.5-2.5-9-6-9-13V8l9-4z"/><path d="M12 16l3 3 5-6"/></svg></div>
+        <p class="lang-nl">De engineers die je zoekt lezen geen vacaturesites. Wij benaderen ze direct — geen hagelschot, alleen een korte lijst van echt relevante mensen.</p>
+      </div>
+      <div class="card">
+        <div class="mark" aria-hidden="true">04</div>
         <h3><span class="lang-en">No cure, no pay + replacement guarantee</span><span class="lang-nl">No cure, no pay + vervangingsgarantie</span></h3>
         <p class="lang-en">You pay nothing until your new hire signs. If a placement leaves within 30 days, we replace them at no cost.</p>
-        <p class="lang-nl">Je betaalt niets totdat je nieuwe collega tekent. Vertrekt een plaatsing binnen 30 dagen, dan vervangen we gratis.</p></div>
-      <div class="prop"><div class="prop-icon"><svg class="line-icon" viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="16" cy="16" r="11"/><circle cx="16" cy="16" r="6.5"/><circle cx="16" cy="16" r="1.8"/></svg></div>
+        <p class="lang-nl">Je betaalt niets totdat je nieuwe collega tekent. Vertrekt een plaatsing binnen 30 dagen, dan vervangen we gratis.</p>
+      </div>
+      <div class="card">
+        <div class="mark" aria-hidden="true">05</div>
         <h3><span class="lang-en">Quality over volume</span><span class="lang-nl">Kwaliteit boven volume</span></h3>
         <p class="lang-en">A short list of genuinely relevant people, each with a clear reason for the match. We screen on real substance, not CV keywords.</p>
-        <p class="lang-nl">Een korte lijst van echt relevante mensen, elk met een heldere onderbouwing. We screenen op echte inhoud, niet op steekwoorden in een CV.</p></div>
-      <div class="prop"><div class="prop-icon"><svg class="line-icon" viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M16 28c5-5.5 8-9.8 8-14a8 8 0 1 0-16 0c0 4.2 3 8.5 8 14z"/><circle cx="16" cy="14" r="3"/></svg></div>
+        <p class="lang-nl">Een korte lijst van echt relevante mensen, elk met een heldere onderbouwing. We screenen op echte inhoud, niet op steekwoorden in een CV.</p>
+      </div>
+      <div class="card">
+        <div class="mark" aria-hidden="true">06</div>
         <h3><span class="lang-en">Brainport specialist</span><span class="lang-nl">Brainport specialist</span></h3>
         <p class="lang-en">Deep network in the Eindhoven high-tech ecosystem — ASML, VDL, Prodrive, NTS, Neways, KMWE, Simac and their suppliers.</p>
-        <p class="lang-nl">Diep netwerk in het Eindhovense hightech ecosysteem — ASML, VDL, Prodrive, NTS, Neways, KMWE, Simac en hun toeleveranciers.</p></div>
+        <p class="lang-nl">Diep netwerk in het Eindhovense hightech ecosysteem — ASML, VDL, Prodrive, NTS, Neways, KMWE, Simac en hun toeleveranciers.</p>
+      </div>
     </div>
   </div>
 </section>
@@ -140,57 +157,85 @@
       <p class="lang-en">The right form depends on the role and how long you need it filled. We talk this through with you before a search starts.</p>
       <p class="lang-nl">De juiste vorm hangt af van de rol en hoe lang je de invulling nodig hebt. Dat bespreken we met je voordat een search start.</p>
     </div>
-    <div class="service-ladder-grid">
-      <div class="prop">
-        <div class="prop-icon"><svg class="line-icon" viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M9 5h10l4 4v18H9z"/><path d="M19 5v4h4"/><path d="M12 17l3 3 6-7"/></svg></div>
-        <h3><span class="lang-en">Permanent hire (werving &amp; selectie)</span><span class="lang-nl">Vaste kracht (werving &amp; selectie)</span></h3>
-        <p class="lang-en">We search for and screen a permanent hire for your team. Choose this route when you're hiring for the long term and want to be the employer yourself.</p>
-        <p class="lang-nl">Wij werven en selecteren een vaste medewerker voor je team. Je kiest dit traject als je voor de lange termijn aanneemt en zelf werkgever wilt zijn.</p>
-        <p class="service-ladder-split lang-en">We handle the search and screening; you run the conversation, the offer and the employment contract.</p>
-        <p class="service-ladder-split lang-nl">Wij verzorgen de search en screening; jij doet het gesprek, het aanbod en de arbeidsovereenkomst.</p>
-        <a href="contact.html" class="choice-go"><span class="lang-en">Find a permanent specialist →</span><span class="lang-nl">Vind een vaste specialist →</span></a>
+    <!-- Archetype 4, compacte variant (dienstenladder, SITE-DESIGN-SPEC.md
+     §8.x.1) -- literal CSS grid from §8.x.1: 48px/220px/1fr/140px per
+     .step-row, vijf gelijke rijen (lost de oude 3+2-asymmetrie op).
+     Classificatietags zijn taalneutraal en per rij uniek: VAST, INTERIM,
+     FLEX, DETACHERING, ZZP. De tag noemt de contractvorm van de rij zelf,
+     zodat twee rijen met een verschillende verantwoordelijkheidsverdeling
+     nooit hetzelfde label dragen. -->
+    <div class="step-rail">
+      <div class="step-row">
+        <div class="step-row__num" aria-hidden="true">01</div>
+        <h3 class="step-row__title"><span class="lang-en">Permanent hire (werving &amp; selectie)</span><span class="lang-nl">Vaste kracht (werving &amp; selectie)</span></h3>
+        <div class="step-row__body">
+          <p class="step-row__lead lang-en">We search for and screen a permanent hire for your team. Choose this route when you're hiring for the long term and want to be the employer yourself.</p>
+          <p class="step-row__lead lang-nl">Wij werven en selecteren een vaste medewerker voor je team. Je kiest dit traject als je voor de lange termijn aanneemt en zelf werkgever wilt zijn.</p>
+          <p class="step-row__split lang-en">We handle the search and screening; you run the conversation, the offer and the employment contract.</p>
+          <p class="step-row__split lang-nl">Wij verzorgen de search en screening; jij doet het gesprek, het aanbod en de arbeidsovereenkomst.</p>
+          <a href="contact.html" class="go-link"><span class="lang-en">Find a permanent specialist →</span><span class="lang-nl">Vind een vaste specialist →</span></a>
+        </div>
+        <div class="step-row__tag">VAST</div>
       </div>
-      <div class="prop">
-        <div class="prop-icon"><svg class="line-icon" viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="16" cy="16" r="11"/><path d="M16 9v7l5 3"/></svg></div>
-        <h3><span class="lang-en">Interim specialist</span><span class="lang-nl">Interim-specialist</span></h3>
-        <p class="lang-en">An interim professional strengthens your team temporarily for a project or a spike in demand. Choose interim when you need capacity quickly without a permanent appointment.</p>
-        <p class="lang-nl">Een interim-professional versterkt je team tijdelijk voor een project of piek in de vraag. Je kiest interim als je snel capaciteit nodig hebt zonder vaste aanstelling.</p>
-        <p class="service-ladder-split lang-en">We find and screen the specialist; you set the assignment and the ways of working.</p>
-        <p class="service-ladder-split lang-nl">Wij vinden en screenen de specialist; jij bepaalt de opdracht en werkwijze.</p>
-        <a href="contact.html" class="choice-go"><span class="lang-en">Find an interim specialist →</span><span class="lang-nl">Vind een interim-specialist →</span></a>
+      <div class="step-row">
+        <div class="step-row__num" aria-hidden="true">02</div>
+        <h3 class="step-row__title"><span class="lang-en">Interim specialist</span><span class="lang-nl">Interim-specialist</span></h3>
+        <div class="step-row__body">
+          <p class="step-row__lead lang-en">An interim professional strengthens your team temporarily for a project or a spike in demand. Choose interim when you need capacity quickly without a permanent appointment.</p>
+          <p class="step-row__lead lang-nl">Een interim-professional versterkt je team tijdelijk voor een project of piek in de vraag. Je kiest interim als je snel capaciteit nodig hebt zonder vaste aanstelling.</p>
+          <p class="step-row__split lang-en">We find and screen the specialist; you set the assignment and the ways of working.</p>
+          <p class="step-row__split lang-nl">Wij vinden en screenen de specialist; jij bepaalt de opdracht en werkwijze.</p>
+          <a href="contact.html" class="go-link"><span class="lang-en">Find an interim specialist →</span><span class="lang-nl">Vind een interim-specialist →</span></a>
+        </div>
+        <div class="step-row__tag">INTERIM</div>
       </div>
-      <div class="prop">
-        <div class="prop-icon"><svg class="line-icon" viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M8 12h13l-4-4"/><path d="M24 20H11l4 4"/></svg></div>
-        <h3><span class="lang-en">Staffing (uitzenden)</span><span class="lang-nl">Uitzenden</span></h3>
-        <p class="lang-en">With staffing (uitzenden), the engineer is employed by a backoffice partner and works under your day-to-day direction and supervision. Choose this when you want to start quickly or want to be able to scale the assignment up or down without a long-term commitment.</p>
-        <p class="lang-nl">Bij uitzenden is de engineer in dienst bij een backoffice-partner en werkt onder jouw dagelijkse leiding en toezicht. Je kiest dit als je snel wilt starten of de opdracht flexibel wilt kunnen op- of afschalen zonder langlopende verplichting.</p>
-        <p class="service-ladder-split lang-en">Employership and administration run through a backoffice partner; you direct the work and the planning.</p>
-        <p class="service-ladder-split lang-nl">Het werkgeverschap en de administratie lopen via een backoffice-partner; jij bepaalt het werk en de planning.</p>
-        <a href="contact.html" class="choice-go"><span class="lang-en">Ask about staffing →</span><span class="lang-nl">Vraag naar uitzenden →</span></a>
+      <div class="step-row">
+        <div class="step-row__num" aria-hidden="true">03</div>
+        <h3 class="step-row__title"><span class="lang-en">Staffing (uitzenden)</span><span class="lang-nl">Uitzenden</span></h3>
+        <div class="step-row__body">
+          <p class="step-row__lead lang-en">With staffing (uitzenden), the engineer is employed by a backoffice partner and works under your day-to-day direction and supervision. Choose this when you want to start quickly or want to be able to scale the assignment up or down without a long-term commitment.</p>
+          <p class="step-row__lead lang-nl">Bij uitzenden is de engineer in dienst bij een backoffice-partner en werkt onder jouw dagelijkse leiding en toezicht. Je kiest dit als je snel wilt starten of de opdracht flexibel wilt kunnen op- of afschalen zonder langlopende verplichting.</p>
+          <p class="step-row__split lang-en">Employership and administration run through a backoffice partner; you direct the work and the planning.</p>
+          <p class="step-row__split lang-nl">Het werkgeverschap en de administratie lopen via een backoffice-partner; jij bepaalt het werk en de planning.</p>
+          <a href="contact.html" class="go-link"><span class="lang-en">Ask about staffing →</span><span class="lang-nl">Vraag naar uitzenden →</span></a>
+        </div>
+        <div class="step-row__tag">FLEX</div>
       </div>
-      <div class="prop">
-        <div class="prop-icon"><svg class="line-icon" viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="7" y="12" width="18" height="12" rx="1.5"/><path d="M12 12V9a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v3"/></svg></div>
-        <h3><span class="lang-en">Secondment (detacheren)</span><span class="lang-nl">Detacheren</span></h3>
-        <p class="lang-en">With a fixed-term secondment (detacheren), the engineer likewise works under your direction for a pre-agreed period, employed by a backoffice partner. Choose this for more structural capacity than staffing, with a term that fits your project.</p>
-        <p class="lang-nl">Bij detacheren werkt de engineer eveneens onder jouw leiding, voor een vooraf afgesproken periode, in dienst bij een backoffice-partner. Je kiest dit voor meer structurele capaciteit dan uitzenden, met een looptijd die past bij je project.</p>
-        <p class="service-ladder-split lang-en">Employership runs through a backoffice partner; you direct the engineer's day-to-day work.</p>
-        <p class="service-ladder-split lang-nl">Het werkgeverschap loopt via een backoffice-partner; jij stuurt de engineer inhoudelijk aan.</p>
-        <a href="contact.html" class="choice-go"><span class="lang-en">Ask about secondment →</span><span class="lang-nl">Vraag naar detacheren →</span></a>
+      <div class="step-row">
+        <div class="step-row__num" aria-hidden="true">04</div>
+        <h3 class="step-row__title"><span class="lang-en">Secondment (detacheren)</span><span class="lang-nl">Detacheren</span></h3>
+        <div class="step-row__body">
+          <p class="step-row__lead lang-en">With a fixed-term secondment (detacheren), the engineer likewise works under your direction for a pre-agreed period, employed by a backoffice partner. Choose this for more structural capacity than staffing, with a term that fits your project.</p>
+          <p class="step-row__lead lang-nl">Bij detacheren werkt de engineer eveneens onder jouw leiding, voor een vooraf afgesproken periode, in dienst bij een backoffice-partner. Je kiest dit voor meer structurele capaciteit dan uitzenden, met een looptijd die past bij je project.</p>
+          <p class="step-row__split lang-en">Employership runs through a backoffice partner; you direct the engineer's day-to-day work.</p>
+          <p class="step-row__split lang-nl">Het werkgeverschap loopt via een backoffice-partner; jij stuurt de engineer inhoudelijk aan.</p>
+          <a href="contact.html" class="go-link"><span class="lang-en">Ask about secondment →</span><span class="lang-nl">Vraag naar detacheren →</span></a>
+        </div>
+        <div class="step-row__tag">DETACHERING</div>
       </div>
-      <div class="prop">
-        <div class="prop-icon"><svg class="line-icon" viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="10" cy="16" r="4"/><circle cx="22" cy="16" r="4"/><path d="M14 16h4"/></svg></div>
-        <h3><span class="lang-en">Freelance placement (zzp-bemiddeling)</span><span class="lang-nl">Zzp-bemiddeling</span></h3>
-        <p class="lang-en">With freelance placement (zzp-bemiddeling), we introduce an independent professional to your organisation; you contract directly with the freelancer. Choose this for a well-defined assignment that leaves the professional genuinely independent.</p>
-        <p class="lang-nl">Bij zzp-bemiddeling brengen wij een zelfstandig professional en jouw organisatie bij elkaar; je sluit de overeenkomst rechtstreeks met de zzp'er. Je kiest dit voor een afgebakende opdracht die de professional echte zelfstandigheid laat.</p>
-        <p class="service-ladder-split lang-en">We look with you up front at whether the assignment is suitable for independent work under Dutch DBA rules; the final assessment rests with you as the client.</p>
-        <p class="service-ladder-split lang-nl">Wij kijken vooraf mee of de opdracht zich leent voor zelfstandige uitvoering (Wet DBA); de definitieve beoordeling ligt bij jou als opdrachtgever.</p>
-        <a href="contact.html" class="choice-go"><span class="lang-en">Ask about freelance placement →</span><span class="lang-nl">Vraag naar zzp-bemiddeling →</span></a>
+      <div class="step-row">
+        <div class="step-row__num" aria-hidden="true">05</div>
+        <h3 class="step-row__title"><span class="lang-en">Freelance placement (zzp-bemiddeling)</span><span class="lang-nl">Zzp-bemiddeling</span></h3>
+        <div class="step-row__body">
+          <p class="step-row__lead lang-en">With freelance placement (zzp-bemiddeling), we introduce an independent professional to your organisation; you contract directly with the freelancer. Choose this for a well-defined assignment that leaves the professional genuinely independent.</p>
+          <p class="step-row__lead lang-nl">Bij zzp-bemiddeling brengen wij een zelfstandig professional en jouw organisatie bij elkaar; je sluit de overeenkomst rechtstreeks met de zzp'er. Je kiest dit voor een afgebakende opdracht die de professional echte zelfstandigheid laat.</p>
+          <p class="step-row__split lang-en">We look with you up front at whether the assignment is suitable for independent work under Dutch DBA rules; the final assessment rests with you as the client.</p>
+          <p class="step-row__split lang-nl">Wij kijken vooraf mee of de opdracht zich leent voor zelfstandige uitvoering (Wet DBA); de definitieve beoordeling ligt bij jou als opdrachtgever.</p>
+          <a href="contact.html" class="go-link"><span class="lang-en">Ask about freelance placement →</span><span class="lang-nl">Vraag naar zzp-bemiddeling →</span></a>
+        </div>
+        <div class="step-row__tag">ZZP</div>
       </div>
     </div>
   </div>
 </section>
 <!-- ─── WHAT ARE YOU LOOKING FOR ─────────────────────────── -->
-<section>
+<!-- Archetype 2 (SITE-DESIGN-SPEC.md §8.x.1) -- .mark numeral replaces
+     the former .path-icon Font Awesome icon (icon-less system, §8.x.3);
+     container keeps class "path-card" alongside "card" so the existing
+     :focus-within nested-link rule (styles.css, archetype-2 block) keeps
+     matching the .go-link CTA; section gets --bg-alt (white-on-white
+     rule, §8.x.0). -->
+<section style="background:var(--bg-alt)">
   <div class="container">
     <div class="section-header">
       <div class="section-label"><span class="lang-en">What are you looking for?</span><span class="lang-nl">Waar ben je naar op zoek?</span></div>
@@ -198,33 +243,33 @@
       <h2 class="lang-nl">Vertel ons wie je zoekt.</h2>
     </div>
     <div class="path-grid">
-      <div class="path-card">
-        <div class="path-icon"><i class="fas fa-seedling"></i></div>
+      <div class="card path-card">
+        <div class="mark" aria-hidden="true">01</div>
         <h3><span class="lang-en">Junior with ambition</span><span class="lang-nl">Junior met ambitie</span></h3>
         <p class="lang-en">Fresh talent eager to grow into your team.</p>
         <p class="lang-nl">Vers talent dat graag doorgroeit in je team.</p>
-        <a href="contact.html" class="path-go"><span class="lang-en">Get started →</span><span class="lang-nl">Aan de slag →</span></a>
+        <a href="contact.html" class="go-link"><span class="lang-en">Get started →</span><span class="lang-nl">Aan de slag →</span></a>
       </div>
-      <div class="path-card">
-        <div class="path-icon"><i class="fas fa-screwdriver-wrench"></i></div>
+      <div class="card path-card">
+        <div class="mark" aria-hidden="true">02</div>
         <h3><span class="lang-en">Specific skillset</span><span class="lang-nl">Specifieke skillset</span></h3>
         <p class="lang-en">A specialist for a particular stack or domain (embedded, C++, cloud, etc.).</p>
         <p class="lang-nl">Een specialist voor een bepaalde stack of domein (embedded, C++, cloud, etc.).</p>
-        <a href="contact.html" class="path-go"><span class="lang-en">Get started →</span><span class="lang-nl">Aan de slag →</span></a>
+        <a href="contact.html" class="go-link"><span class="lang-en">Get started →</span><span class="lang-nl">Aan de slag →</span></a>
       </div>
-      <div class="path-card">
-        <div class="path-icon"><i class="fas fa-rocket"></i></div>
+      <div class="card path-card">
+        <div class="mark" aria-hidden="true">03</div>
         <h3><span class="lang-en">Senior to lead</span><span class="lang-nl">Senior die voorop loopt</span></h3>
         <p class="lang-en">An experienced hand who raises the bar.</p>
         <p class="lang-nl">Een ervaren kracht die de lat hoger legt.</p>
-        <a href="contact.html" class="path-go"><span class="lang-en">Get started →</span><span class="lang-nl">Aan de slag →</span></a>
+        <a href="contact.html" class="go-link"><span class="lang-en">Get started →</span><span class="lang-nl">Aan de slag →</span></a>
       </div>
-      <div class="path-card">
-        <div class="path-icon"><i class="fas fa-chess-king"></i></div>
+      <div class="card path-card">
+        <div class="mark" aria-hidden="true">04</div>
         <h3><span class="lang-en">CTO, manager or architect</span><span class="lang-nl">CTO, manager of architect</span></h3>
         <p class="lang-en">Technical leadership for the next phase.</p>
         <p class="lang-nl">Technisch leiderschap voor de volgende fase.</p>
-        <a href="contact.html" class="path-go"><span class="lang-en">Get started →</span><span class="lang-nl">Aan de slag →</span></a>
+        <a href="contact.html" class="go-link"><span class="lang-en">Get started →</span><span class="lang-nl">Aan de slag →</span></a>
       </div>
     </div>
   </div>
@@ -241,31 +286,31 @@
     </div>
     <div class="stories-grid">
       <div class="story-card fade-in">
-        <div class="story-tag">01</div>
+        <div class="story-tag" aria-hidden="true">01</div>
         <h3><span class="lang-en">Briefing</span><span class="lang-nl">Briefing</span></h3>
         <p class="lang-en">We sit down to understand the role, the team, the tech stack, and what "great" looks like for you.</p>
         <p class="lang-nl">We nemen de tijd om de rol, het team, de tech stack en jouw definitie van "goed" te begrijpen.</p>
       </div>
       <div class="story-card fade-in">
-        <div class="story-tag">02</div>
+        <div class="story-tag" aria-hidden="true">02</div>
         <h3><span class="lang-en">Sourcing</span><span class="lang-nl">Sourcing</span></h3>
         <p class="lang-en">Targeted search in our own network of tech professionals in the Netherlands and abroad. No mass cold mailing.</p>
         <p class="lang-nl">Gerichte search binnen ons eigen netwerk van tech-professionals in Nederland en daarbuiten. Geen massamailing.</p>
       </div>
       <div class="story-card fade-in">
-        <div class="story-tag">03</div>
+        <div class="story-tag" aria-hidden="true">03</div>
         <h3><span class="lang-en">Technical screening</span><span class="lang-nl">Technische screening</span></h3>
         <p class="lang-en">We screen on real engineering substance and motivation before anyone reaches your inbox.</p>
         <p class="lang-nl">We screenen op echte technische inhoud en motivatie voordat iemand bij jou op de mat ligt.</p>
       </div>
       <div class="story-card fade-in">
-        <div class="story-tag">04</div>
+        <div class="story-tag" aria-hidden="true">04</div>
         <h3><span class="lang-en">Curated introductions</span><span class="lang-nl">Geselecteerde introducties</span></h3>
         <p class="lang-en">You meet a short list of genuinely relevant people — each with a clear rationale for the match.</p>
         <p class="lang-nl">Je spreekt een korte lijst van echt relevante mensen — elk met een heldere onderbouwing.</p>
       </div>
       <div class="story-card fade-in">
-        <div class="story-tag">05</div>
+        <div class="story-tag" aria-hidden="true">05</div>
         <h3><span class="lang-en">Offer &amp; onboarding</span><span class="lang-nl">Aanbod &amp; onboarding</span></h3>
         <p class="lang-en">We support both sides through offer, resignation, and the first weeks, including relocation and the 30% ruling where these apply.</p>
         <p class="lang-nl">We begeleiden beide kanten door aanbod, opzegging en de eerste weken, inclusief verhuizing en de 30%-regeling waar die van toepassing zijn.</p>
@@ -274,7 +319,13 @@
   </div>
 </section>
 <!-- ─── SPECIALISMS ───────────────────────────────────────── -->
-<section id="specialisms">
+<!-- Archetype 2 (SITE-DESIGN-SPEC.md §8.x.1) -- .mark.code discipline
+     codes replace the former Font Awesome icons (§8.x.3 rule: FA within
+     cards is replaced by mark/code or sprite; no sprite icon fits these
+     disciplines, so the archetype-5 code vocabulary from §8.x.1 is used
+     instead, aria-hidden since the heading already names the discipline
+     in full). Section gets --bg-alt (white-on-white rule, §8.x.0). -->
+<section id="specialisms" style="background:var(--bg-alt)">
   <div class="container">
     <div class="section-header">
       <div class="section-label"><span class="lang-en">Expertise</span><span class="lang-nl">Expertise</span></div>
@@ -284,9 +335,10 @@
       <p class="lang-nl">Gespecialiseerde focus op de tech &amp; IT-rollen waar Nederlandse werkgevers naar zoeken.</p>
     </div>
     <div class="services-grid">
-      <div class="service-card fade-in"><div class="service-icon"><i class="fas fa-microchip"></i></div><h3><span class="lang-en">Embedded Software &amp; C++</span><span class="lang-nl">Embedded Software &amp; C++</span></h3><p class="lang-en">Embedded engineers, C++ devs, firmware specialists — our core focus.</p><p class="lang-nl">Embedded engineers, C++ developers, firmware specialisten — onze kernfocus.</p></div>
-      <div class="service-card fade-in"><div class="service-icon"><i class="fas fa-cogs"></i></div><h3><span class="lang-en">Mechatronics &amp; FPGA</span><span class="lang-nl">Mechatronica &amp; FPGA</span></h3><p class="lang-en">Mechatronics, FPGA, systems engineers for high-tech.</p><p class="lang-nl">Mechatronica, FPGA, systems engineers voor hightech.</p></div>
-      <div class="service-card fade-in"><div class="service-icon"><i class="fas fa-shield-alt"></i></div><h3><span class="lang-en">OT-Cybersecurity</span><span class="lang-nl">OT-Cybersecurity</span></h3><p class="lang-en">Security engineers for industrial and operational technology environments.</p><p class="lang-nl">Security engineers voor industriële en operationele-technologie-omgevingen.</p></div>
+      <div class="card service-card fade-in"><div class="mark code" aria-hidden="true">C++</div><h3><span class="lang-en">Embedded Software &amp; C++</span><span class="lang-nl">Embedded Software &amp; C++</span></h3><p class="lang-en">Embedded engineers, C++ devs, firmware specialists — our core focus.</p><p class="lang-nl">Embedded engineers, C++ developers, firmware specialisten — onze kernfocus.</p></div>
+      <div class="card service-card fade-in"><div class="mark code" aria-hidden="true">MT</div><h3><span class="lang-en">Mechatronics &amp; FPGA</span><span class="lang-nl">Mechatronica &amp; FPGA</span></h3><p class="lang-en">Mechatronics, FPGA, systems engineers for high-tech.</p><p class="lang-nl">Mechatronica, FPGA, systems engineers voor hightech.</p></div>
+      <div class="card service-card fade-in"><div class="mark code" aria-hidden="true">OT</div><h3><span class="lang-en">OT-Cybersecurity</span><span class="lang-nl">OT-Cybersecurity</span></h3><p class="lang-en">Security engineers for industrial and operational technology environments.</p><p class="lang-nl">Security engineers voor industriële en operationele-technologie-omgevingen.</p></div>
+      <div class="card service-card fade-in"><div class="mark code" aria-hidden="true">QA</div><h3><span class="lang-en">Test &amp; QA roles</span><span class="lang-nl">Testrollen</span></h3><p class="lang-en">Test engineers and QA specialists who verify and validate embedded and mechatronic systems before release.</p><p class="lang-nl">Testengineers en QA-specialisten die embedded en mechatronische systemen verifiëren en valideren vóór release.</p></div>
     </div>
   </div>
 </section>
@@ -399,12 +451,11 @@
         </ul></div>
     </div>
     <div class="footer-bottom">
-      <span>© 2026 GSP Recruitment · KvK 75545586 · Brainport Eindhoven · info@gsprecruitment.nl</span>
+      <span>© 2026 GSP Recruitment · KvK 75545586 · Brainport Eindhoven · <a href="mailto:info@gsprecruitment.nl">info@gsprecruitment.nl</a></span>
     </div>
   </div>
 </footer>
 
-<a href="mailto:info@gsprecruitment.nl" class="mail-float" aria-label="E-mail GSP Recruitment"><i class="fas fa-envelope"></i></a>
 <div class="modal-overlay" id="authModal" role="dialog" aria-modal="true" aria-label="Sign in or register">
   <div class="modal">
     <button class="modal-close" id="authClose">&times;</button>

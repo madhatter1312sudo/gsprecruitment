@@ -295,6 +295,324 @@ Empty/error states across the panel use the Dutch "Kon niet laden, probeer opnie
 
 Base components used across the four surfaces: Button (primary/ghost/outline, 3px radius), Input, Select, Card, Modal, Toast, Badge (status/semantic colors from §1.2), mono pill chip (role/level/location tags), Sidebar nav item, KPI stat tile, Table (sortable header, empty/error/loading row states), Avatar.
 
+### 8.x Kaartsysteem
+
+Op 9 september 2026 zijn drie richtingen voor één sitebreed kaartsysteem ontworpen (Editorial/typografisch, Technisch-diagram, Bewegingsgeleid) en door vier onafhankelijke jury's beoordeeld: merk/hiërarchie, toegankelijkheid, bouwbaarheid en een red-team-aanval op tien vectoren. Alle vier wijzen **Richting A — Editorial/typografisch** aan als winnaar (gemiddeld 7,9 over de vier rondes, tegen 6,4 voor Technisch-diagram en 6,9 voor Bewegingsgeleid). Deze subsectie is de bouwbare synthese: A's systeem, aangevuld met vier concrete overnames uit de andere twee richtingen en drie verplichte reparaties die de jury's als harde voorwaarde stelden voordat er gebouwd mag worden.
+
+**Verplichte reparaties op A (niet optioneel):**
+1. Elk interactief `.mark`-element (contactkanalen, niet de decoratieve cijfer- of codemarks) krijgt een tikdoel van minimaal 44×44px op alle breedtes. De bestaande 40×40 (desktop) / 32×32 (390px) haalt deze vloer niet.
+2. De donkere keuzekaart krijgt een eigen achtergrond (`--navy-800`) in plaats van alleen een haarlijn op de sectiekleur (`--navy-900`) — een haarlijn van 1,37–1,69:1 is op een gelijkkleurige achtergrond geen betrouwbare kaartgrens.
+3. Het cijfer in de dienstenladder wordt `--navy-300` (5,17:1), niet een lichte grijstint die de AA-tekstvloer niet haalt.
+
+**Overgenomen uit de andere twee richtingen** (met bron):
+- Van B: hover- en focus-visible-styling op interactieve decoratie zijn **identiek**, geschreven als regel, niet als aanname — voorkomt een muis-only signaal.
+- Van B: elk klikbaar/tikbaar element krijgt de 44px-aanraakdoel-eis expliciet benoemd, niet alleen de contactrail.
+- Van C: touch-fallback voor labels zonder hover — icoon/mark altijd zichtbaar, label alleen als progressive enhancement, betekenis draagt via `aria-label`, geen tooltip-mechaniek.
+- Van C en B: `margin-top: auto` op elke kaart-CTA, zodat een link altijd op dezelfde hoogte landt, ongeacht taallengte — geschreven als harde regel, niet als belofte in proza (de red-team-jury wees terecht op A's onterechte claim "geen layoutsprong bij taalwissel": de kaarthoogte volgt de langste taal, dat is en blijft Nederlands; dat is geen bug, maar de spec zegt het nu eerlijk).
+- Van B en C: laadstaten houden vaste structuurelementen (eyebrow, mark-kader) zichtbaar en vervangen alleen tekst door vlakke placeholder-blokken, voor het schoonste CLS-verhaal.
+
+**Niet overgenomen (harde overtreding in de bron):** B's radial-gradient-stipraster (botst met het gradient-verbod), B en C's `--gold-600`/`--gold-700`/gevulde `--gold-300` als tekst- of chipkleur (breekt de bevochten `--gold-ink`-vloer), de verzonnen trustclaim "NBBU-conform" (komt nergens in de codebase voor), C's mouse-only `:focus-within`-only stapkaart, en elke vorm van een LinkedIn-logo-SVG (merkreproductie van een derde partij; LinkedIn blijft een tekstcode, "IN", zoals nu al in A).
+
+---
+
+#### 8.x.0 Systeemregels (gelden voor alle zes archetypen)
+
+- **Radius**: `var(--radius)` (3px) op elke kaart, elke chip-rand, elke contactrij. `--radius-full` uitsluitend op `.chip`/`.pill`-badges — nooit op een kaart, nooit op de contactrail.
+- **Geen drop-shadow als default**: 1px haarlijn (`--gray-100`, hexwaarde `#E2E8F0` — zie §8.x.2 over de naamgeving) op licht, `--navy-600` op donker vervangt `--shadow*`. **Uitzondering, verplicht**: waar een kaart op een even lichte paginakleur staat (wit kaart op wit vlak, of `--off-white` kaart op `--off-white` sectie) is de haarlijn alleen (≈1,2:1 non-tekst-contrast) onvoldoende als grens. In dat geval krijgt de kaart **`--shadow-sm`** (bestaand token, `0 1px 2px rgba(10,22,40,.05)`) naast de haarlijn. Dit is geen decoratieve schaduw maar een elevatie-signaal en blijft binnen de "geen drop-shadow tenzij functioneel"-regel. Structurele voorkeur: waar mogelijk staat een kaart op `--gray-50`/`--off-white` terwijl de kaart zelf wit is (expertise, blog, vacature), zodat deze uitzondering niet nodig is; alleen de donkere keuzekaart (die op `--navy-900` staat) en losse dienstenladder-panelen op wit vallen terug op `--shadow-sm`.
+- **Hover = focus-visible, altijd identiek.** Elke nieuwe hoverstaat in dit systeem (randkleur, mark-kleur, onderstreping) krijgt exact dezelfde `:focus-visible`-declaratie. Dit is een schrijfregel voor de bouwer, geen aanname: een kaart mag nooit een hoverkleur hebben die het toetsenbord niet ook krijgt. QA verifieert dit met tab-navigatie op alle zes archetypen, niet alleen visueel.
+- **44px-aanraakdoel, expliciet per element.** Elk element dat een `<a>` of `<button>` is (dus daadwerkelijk klikbaar/tikbaar) heeft een hit-area van minimaal 44×44px, ongeacht de visuele grootte van de mark/het icoon erin — via padding op het omhullende element, nooit door de zichtbare vorm zelf te vergroten. Decoratieve marks (cijfers, classificatiecodes die geen link zijn) hebben geen aanraakdoel-eis.
+- **`margin-top: auto` op elke kaart-CTA** (`.go-link`, footer-link) binnen een `display:flex; flex-direction:column` kaart, zodat de link altijd onderaan landt ongeacht de hoogte van de tekst erboven. Dit lost het bestaande "Lees meer zweeft op wisselende hoogte"-probleem structureel op, in plaats van per kaart een vaste hoogte te forceren.
+- **`box-sizing: border-box; width: 100%`** op elke kaart-container, als vangnet tegen horizontale overflow op 390px.
+- **Taalspans**: elke tekstnode die `initLang()` (`website/script.js:30`, `initLang` toggelt inline `display`) toggelt, staat als twee sibling-`<span class="lang-nl">`/`<span class="lang-en">`-elementen, beide altijd in de DOM. Geen enkele nieuwe CSS-regel in dit systeem zet `display` op deze spans en er wordt niet op `:nth-child`/`:last-child` over taalspans gebouwd. Kaarten forceren geen vaste hoogte op tekstcontainers; alleen waar een clamp actief is (vacaturebeschrijving, blogexcerpt) staat een `min-height` zodat een kortere taalversie de rij niet doet inzakken. Kaartbreedtes zijn altijd flexibel (`flex:1`/grid), nooit een vaste px-breedte.
+- **Reduced motion en no-JS**: zie §8.x.6.
+- **`aria-hidden="true"`** op elk decoratief `.mark`-element en elk sprite-icoon; het label ernaast draagt de betekenis, nooit het symbool alleen.
+
+---
+
+#### 8.x.1 De zes archetypen
+
+##### 1. Donkere keuzekaart
+
+*Gebruikt op*: hero-keuzekaarten (index.html, "Ik zoek talent" / "Ik zoek werk").
+
+| | |
+|---|---|
+| Anatomie | eyebrow (mono) → h3 (Newsreader) → body (Plex Sans) → `.go-link` (`margin-top:auto`) |
+| Spacing | kaart-padding `--space-xl` (390: `--space-lg`); eyebrow→kop `--space-md`; kop→body `--space-sm`; body→link `--space-lg`; kaart-tot-kaart gap `--space-lg` |
+| Typescale | eyebrow `--font-size-xs` mono; kop `--font-size-2xl` Newsreader; body `--font-size-base` |
+| Kleur | **achtergrond `--navy-800`** (reparatie 2 — niet meer gelijk aan de `--navy-900`-sectie); rand `--navy-600`; top-accent **2px** (reparatie 2, was 1px) `--gold-500` (kaart 1) / `--navy-300` (kaart 2); kop/body wit / `--navy-100`; link `--gold-500` |
+| Hover/focus-visible | rand → `--navy-400`, top-accent intensiveert (`--gold-400` / `--navy-200`), `translateY(-2px)`, 150ms ease. Focus-visible: identiek + 2px `--gold-500`-outline, offset 2px, geen `overflow:hidden` op de kaart. |
+| Leeg/laden/fout | n.v.t. (statische content) |
+| <=600px | 1 kolom, kaart volledige breedte, padding `--space-lg`, geen verkleining van kop/body |
+| Taalspans | kop, body, linktekst elk een `.lang-nl`/`.lang-en`-paar; kaarthoogte volgt de langere (Nederlandse) versie, geen vaste hoogte |
+
+##### 2. Lichte inhoudskaart met rand
+
+*Gebruikt op*: expertisegrid (4 disciplines, inclusief nieuwe vierde discipline **Testrollen**), blogkaart.
+
+| | |
+|---|---|
+| Anatomie | `.mark` of kicker-regel → h3 → body (geclampt op blog) → `.go-link` |
+| Spacing | kaart-padding `--space-lg`; mark/kicker→kop `--space-md`; kop→body `--space-sm`; body→link `--space-lg`; grid-gap `--space-lg` |
+| Typescale | kop `--font-size-xl` Newsreader; body `--font-size-sm`; meta/kicker `--font-size-xs` mono |
+| Kleur | kaart wit, rand `--gray-100` (`#E2E8F0`), sectie/paginafond `--gray-50`/`--off-white` (nooit wit-op-wit, zie §8.x.0); kop `--navy-900`; body `--gray-500` (7,58:1, ruime marge boven de 4,5:1-vloer); link `--gold-ink` |
+| Hover/focus-visible | rand → `--gold-ink`, `translateY(-2px)`, 150ms. Focus-visible identiek. |
+| Leeg/laden/fout | n.v.t. voor expertise (statisch); blog: laden = vlakke `--gray-50`-blokken op kop/meta/excerpt-posities, structuur (kader) blijft staan; fout = "Kon artikelen niet laden, probeer opnieuw" met tekstlink-retry |
+| <=600px | 1 kolom, geen verkleining van kaartpadding onder `--space-lg` |
+| Taalspans | kop/body/link eigen paar; API-gerenderde blogvelden (titel/excerpt) komen al in actieve taal via `GSP.esc()`, geen span nodig; alleen de statische UI-tekst (kicker, "Lees meer") krijgt het paar |
+
+##### 3. Datakaart (vacature/job)
+
+*Gebruikt op*: `#jobsGrid` (vacatures.html) én `#homeVacanciesGrid` (index.html) — één kaart, twee contexten, sluit het huidige `.job-card`/`.vac-card`-verschil.
+
+| | |
+|---|---|
+| Anatomie | mono meta-regel (discipline · niveau · locatie) → haarlijn → Newsreader-titel → beschrijving (3-regel clamp, `min-height:4.65em` zodat taalwissel de rijhoogte niet laat springen) → haarlijn → footer (mono salaris links, `.go-link` rechts, `margin-top:auto`) |
+| Spacing | kaart-padding `--space-lg`; secties gescheiden door `--space-md` + haarlijn |
+| Typescale | meta `--font-size-xs` mono; titel `--font-size-xl` Newsreader; beschrijving `--font-size-sm`; salaris `--font-size-base` mono |
+| Kleur | kaart wit op `--gray-50`-sectie, rand `--gray-100`; discipline-label `--gold-ink` (enige kleur in de kaart); overige meta `--navy-300`; salaris `--navy-900` |
+| Hover/focus-visible | rand → `--gold-ink`, schaduw-toename via `--shadow-sm` (geen `translateY`, want de kaart bevat een geneste link, zie hieronder), 150ms. Focus-visible identiek. |
+| Nested-link-regel | de kaart is een klikbare `<div>` met een geneste `.go-link` (bestaand patroon, `script.js:688`, `stopPropagation`); deze structuur blijft ongewijzigd. De kaart krijgt daarom **`:focus-within`** als staat (niet `:focus`) zodat toetsenbordgebruikers die de geneste link met Tab bereiken hetzelfde randsignaal zien als bij hover — dit blijft één tab-stop, geen tweede focus-doelwit toegevoegd. |
+| Lege staat | eigen kaart, gecentreerd, `.mark`-cijfer "00", eyebrow "Vacatures", kop NL "Er staan nu geen vacatures open; nieuwe rollen zijn in voorbereiding" / EN "New roles are being opened right now" (`script.js:689`, herzien: de eerdere NL/EN-koppen spraken elkaar tegen), body "Meld je aan voor de talentpool, dan nemen wij contact op zodra een passende rol binnenkomt." CTA **"Meld je aan voor de talentpool →"** naar `kandidaten.html#talentpoolOptin` (wijziging t.o.v. vandaag: niet langer naar `contact.html`, maar naar het bestaande dubbele-opt-in-formulier op die pagina — een concretere en al bestaande actie dan een generiek contactverzoek). |
+| Laadstaat | skeleton: meta-balk en het lege kader blijven zichtbaar op hun plek, titel/beschrijving/footer worden vlakke `--gray-50`-blokken, geen shimmer |
+| Foutstaat | linker haarlijn-accent in `--error` (`#dc2626`, bestaande `.form-error`-kleur, alleen als randkleur, nooit als tekstkleur), kop "Kon vacatures niet laden", CTA "Opnieuw proberen →" |
+| <=600px | kaart volledige breedte gestapeld, `overflow-wrap:anywhere` niet nodig (geen lang e-mailadres hier), beschrijving blijft 3 regels |
+| Homepage-vacatureband bij nul vacatures | **gedragswijziging t.o.v. vandaag.** Vandaag verbergt `initHomeVacancies()` (`script.js:791-793`) de hele sectie zowel bij een lege lijst als bij een fetch-fout — twee verschillende situaties met hetzelfde (niets tonende) gedrag. Nieuw: bij een **lege lijst** (API antwoordt, nul jobs) toont de sectie één compacte lege-staat-kaart (dezelfde component als hierboven, talentpool-CTA), zodat de homepage nooit stilzwijgend een conversiekans laat liggen. Bij een **fetch-fout** (netwerk/5xx) blijft het huidige gedrag: sectie verbergen — de homepage-band is aanvullend, niet de primaire vacaturelijst (dat is `vacatures.html`, waar de foutstaat wel zichtbaar moet zijn), dus een kapotte sectie op de homepage verbergen blijft de juiste, eerlijke keuze. |
+| Taalspans | API-velden (titel/beschrijving) komen al in actieve taal via `GSP.esc()`; lege/laad/foutstaat-tekst en CTA's krijgen het standaardpaar |
+
+##### 4. Genummerde stap
+
+*Gebruikt op*: dienstenladder (werkgevers.html, 5 dienstvormen, compacte rijvariant) en werkwijzestap (werkwijze.html, 6 stappen, uitgeklapte railvariant). Eén onderliggend patroon (cijfer + kop + copy + rand-scheiding), twee dichtheden.
+
+**Compact — dienstenladder:**
+
+| | |
+|---|---|
+| Anatomie | genummerde rij in één paneel, geen kaartengrid. Rij: cijfer · kop + mono-classificatietag rechts · leidende zin · verantwoordelijkheidsverdeling (gedempt) · CTA. Vijf gelijke rijen lost de bestaande 3+2-asymmetrie (twee dubbelbrede kaarten in de onderste rij) structureel op. |
+| Kolomraster | overgenomen van B, letterlijk als CSS-grid zodat de bouwer geen interpretatieruimte heeft: `grid-template-columns: 48px 220px 1fr 140px; gap: var(--space-lg); padding: var(--space-md) var(--space-lg); border-bottom: 1px solid var(--gray-100)` (laatste rij zonder onderrand). Kolommen: cijfer, kop, leidende zin + verantwoordelijkheidsverdeling gestapeld, classificatietag. |
+| Spacing | rij-padding-block `--space-md` (1440) / `--space-lg` (390, gestapeld); cijfer→content-gap `--space-lg` |
+| Typescale | cijfer `--font-size-xl` Newsreader; kop `--font-size-lg`; classificatietag `--font-size-xs` mono; leidende zin `--font-size-sm`; verantwoordelijkheidsverdeling `--font-size-xs` |
+| Kleur | paneel wit op `--off-white`-sectie (of `--shadow-sm` als het paneel zelf op wit staat, zie §8.x.0); **cijfer `--navy-300`** (reparatie 3, was een grijstint onder AA); classificatietag `--gold-ink`; CTA `.go-link` |
+| Hover/focus-visible | alleen op de CTA-link, niet op de hele rij — voorkomt "welke rij is de link"-verwarring (overgenomen van B) |
+| <=767px | cijfer + kop + tag in een header-regel, content eronder met `padding-left:48px` voor uitlijning met de rij erboven; geen vaste px-breedtes op kindelementen, dus geen horizontale scroll. Deze rij schakelt op 767px en niet op 600px zoals de andere archetypen: het raster `48px 220px minmax(0,1fr) 140px` heeft plus gaps en padding circa 768px nodig voordat de bodykolom leesbaar wordt, en de bodykolom staat op `minmax(0, 1fr)` zodat hij wikkelt in plaats van de rij te verbreden. |
+| Taalspans | standaardpaar per kop/zin/CTA; classificatietag is taalneutraal en per rij uniek: VAST, INTERIM, FLEX, DETACHERING, ZZP (de vijf contractvormen op werkgevers.html, in die volgorde) |
+
+**Uitgeklapt — werkwijze:**
+
+| | |
+|---|---|
+| Anatomie | verticale rail: 1440 horizontaal met alle 6 stapnummers compact, onder 601px verticaal langs de linkerkant. De rail is een statisch overzicht, geen voortgangs- of navigatie-element: alle zes de stappen staan tegelijk uitgeklapt als `.step-card-expanded` met volledige copy. Er is dus geen actieve of inactieve staat. |
+| Spacing | rail-item `flex:1` (1440) / `padding-block:--space-sm` (<=600px); rail naar kaart `--space-2xl` (1440) / `--space-lg` (<=600px); kaart-padding `--space-xl` (1440) / `--space-lg` (<=600px) |
+| Typescale | railcijfers `--font-size-lg`; kaartkop `--font-size-2xl`; labels `--font-size-xs` mono |
+| Kleur | railcijfer en -label `--navy-900`; geen onderstreping en geen tweede staat, want er is geen stap om als actief aan te wijzen; kaart-topaccent `--gold-500` |
+| <=600px | verticale rail voorkomt de bestaande botsing tussen stapnummer en icoonkader; er is geen icoonkader meer in dit systeem |
+| Staten | statisch overzicht, geen leeg/laden/fout |
+| Taalspans | standaardpaar per stap-label en kaart-copy |
+
+##### 5. Chip/badge
+
+*Gebruikt op*: discipline-/classificatiecodes (`.mark.code`: C++/MT/OT/QA), contractvorm-tags (VAST/INTERIM/FLEX/DETACHERING/ZZP), trust-badges (KvK, AVG, no cure no pay, garantietermijn, Brainport, reactietijd).
+
+| | |
+|---|---|
+| Anatomie | mono uppercase tekst, letter-spacing 0,13em, in een rand-kader zonder vulling (`.mark.code`) of als losse tekst met een dunne scheidingslijn (trust-badges) |
+| Spacing | interne padding klein (7-8px verticaal, 12-16px horizontaal — geen `--space`-token nodig, dit is de enige bewuste sub-tokenwaarde in het systeem); rij-gap `--space-sm`–`--space-lg` |
+| Typescale | `--font-size-xs` mono, uitzonderloos — **nooit** kleiner dan 12px vast (dat was een fout in een van de verworpen richtingen) |
+| Kleur | **op licht**: altijd `--gold-ink` als tekstkleur op wit/rand, **nooit** `--gold-600`/`--gold-700` als tekst (breekt de bevochten 5,17:1-vloer) en **nooit** een gevulde `--gold-300`-achtergrond (herintroduceert het "gele pil"-patroon dat deze migratie juist opheft). Neutrale chips (niveau/locatie): rand `--gray-100`, tekst `--gray-500`. **Op donker** (trust-strip in de navy-hero-context): rand `--navy-500`, tekst `--navy-100`. |
+| Radius | `--radius-full` toegestaan hier — dit is de bewuste uitzondering op de sitebrede 3px-regel |
+| Staten | statisch, geen interactie (chips zijn label, geen link) |
+| <=600px | trust-badges: `display:grid; grid-template-columns:1fr 1fr`, twee gelijke kolommen in plaats van een links-uitgelijnde, ongelijk brede pillen-wrap. Het media-blok staat in `styles.css` achter de ongeconditioneerde `.trust-badges`-regel, anders wint `display:flex` daarvan op gelijke specificiteit en doet het niets. |
+| Taalspans | standaardpaar behalve taalneutrale waarden ("KVK 75545586", disciplinecodes) |
+
+##### 6. Contactmethode
+
+*Gebruikt op*: contact.html — volledige-breedte rijen (E-MAIL, WHATSAPP, LINKEDIN). Dit is de pagina-eigen, **niet-zwevende** component; de sitebrede zwevende variant staat los beschreven in §8.x.4.
+
+| | |
+|---|---|
+| Anatomie | hele rij is `.go-link`: mono-label (vaste kolombreedte 140px desktop / 84px mobiel) + waarde in Newsreader |
+| Spacing | rij-padding `--space-lg`; label→waarde-gap `--space-lg` |
+| Typescale | label `--font-size-xs` mono; waarde `--font-size-lg` Newsreader |
+| Kleur | label `--gold-ink`; waarde `--navy-900`; haarlijn `--gray-100` |
+| Overflow-fix | `overflow-wrap: anywhere` op de waarde-kolom (lost het bestaande "e-mailadres loopt tot de kaartrand"-probleem op 1440 op, waar `info@gsprecruitment.nl` nu tegen de rand kan lopen) |
+| Hover/focus-visible | hele rij onderstreept de waarde in `--gold-ink`, identiek op focus-visible |
+| <=600px | rijen volledige breedte gestapeld, geen vaste px-veldbreedte meer, dus geen horizontale scroll |
+| Taalspans | labels taalneutraal; reactietijd-tekst krijgt het standaardpaar |
+
+---
+
+#### 8.x.2 Nieuwe tokens in `:root`
+
+**Spacing en typescale** (waarden uit §1.3/§1.4 van dit document, nu ook daadwerkelijk in `website/styles.css` in plaats van alleen hier gedocumenteerd):
+
+```css
+--space-xs: 4px;   --space-sm: 8px;   --space-md: 16px;  --space-lg: 24px;
+--space-xl: 32px;  --space-2xl: 48px; --space-3xl: 64px; --space-4xl: 96px; --space-5xl: 128px;
+
+--font-size-xs: 0.75rem;  --font-size-sm: 0.875rem; --font-size-base: 1rem;
+--font-size-lg: 1.125rem; --font-size-xl: 1.25rem;  --font-size-2xl: 1.5rem;
+--font-size-3xl: 2rem;    --font-size-4xl: 2.5rem;  --font-size-5xl: 3.25rem; --font-size-6xl: 4rem;
+
+--section-pad: var(--space-4xl); /* 1440 sectie-padding, --space-2xl + --space-lg op 390 */
+--gold-ink: #8A6800; /* nieuw: enige toegestane goud-tekstkleur op licht, 5,17:1 op wit */
+```
+
+**`--gray-*`, een correctie op de canvas-specs, niet een nieuwe introductie.** Alle drie de ontworpen richtingen gebruikten een eigen `--gray-50…--gray-500`-schaal in hun canvas en spec-tekst, maar geen ervan komt overeen met de schaal die **al in §1.2 van dit document staat** (`colors_neutral`, regel 66-77) — en die schaal bestaat evenmin nog in `website/styles.css` (nul treffers op `gray-` bij controle). Om verwarring bij de bouwer te voorkomen: **dit systeem gebruikt uitsluitend de namen en waarden uit §1.2**, niet de afwijkende nummering uit de drie canvassen.
+
+| Token (dit document, §1.2) | Hex | Contrast op wit | Toegestaan gebruik |
+|---|---|---|---|
+| `--gray-50` | `#F8FAFC` | — | paginafond onder een witte kaart |
+| `--gray-100` | `#E2E8F0` | 1,23:1 (non-tekst) | hairline/kaartrand — **nooit tekst** |
+| `--gray-200` | `#CBD5E1` | 1,49:1 (non-tekst) | zwaardere hairline waar meer nadruk nodig is; nog steeds geen tekst |
+| `--gray-300` | `#94A3B8` | 2,56:1 | **nooit tekst** (faalt AA ruim); alleen niet-tekst decoratie |
+| `--gray-400` | `#64748B` | 4,76:1 (net AA) | kleine mono meta-tekst waar geen krappere marge gewenst is dan strikt nodig |
+| `--gray-500` | `#475569` | 7,58:1 | de standaardkeuze voor gedempte body-tekst in kaarten (ruime marge boven AA) |
+| `--gray-600` | `#334155` | 12,63:1 | zwaardere secundaire tekst, weinig gebruikt in dit systeem |
+
+Praktische regel voor de bouwer: **onder `--gray-400` mag nooit tekst staan.** Waar een van de drie canvassen "gray-400" of "gray-200" als tekstkleur voorschreef, is in deze synthese gecontroleerd of de bedoelde hexwaarde tekst-AA haalt volgens bovenstaande tabel — en zo niet, vervangen (zie reparatie 3, dienstenladder-cijfer naar `--navy-300`, niet naar een grijstint).
+
+**Vervangen hardcoded CSS-blokken** (regelbereiken uit de CSS-census tegen deze worktree, `website/styles.css`, 1886 regels):
+
+| Bestaand blok | Regels | Vervangen door |
+|---|---|---|
+| `.choice-card` | 1587-1611 | Archetype 1 (donkere keuzekaart) |
+| `.service-card` (+ tweede-rij-variant) | 399-425, 952-957 | Archetype 2 (lichte inhoudskaart) |
+| `.prop` / `.service-ladder-grid .prop` | 1604-1642 | Archetype 4, compacte variant |
+| `.path-card` | 1778-1789 | Archetype 2 (lichte inhoudskaart, waar nog gebruikt) |
+| `.story-card` (incl. werkwijze-hergebruik) | 643-698 | Archetype 4, uitgeklapte variant, of archetype 2 waar het geen stap is |
+| `.step-card` (+ `.step-icon`/`.step-num`) | 953-987 | Archetype 4, uitgeklapte variant |
+| `.job-card` | 487-499 | Archetype 3 (datakaart) |
+| `.vac-card` (+ `.vac-ref`/`.vac-meta`, al dood) | 989-999 | Archetype 3 (datakaart), dezelfde component als `.job-card` |
+| `.trust-badge` | 940-950 | Archetype 5 (chip/badge, trust-variant) |
+| `.ts-item` / `.trust-strip` (dubbele definitie, zie §8.x.7) | 1713-1716, 1763-1765 | Archetype 5, één definitie |
+| `.eco-badge` | 442-456 | Archetype 5 (chip/badge) |
+| `.contact-method` | 1795-1804 | Archetype 6 |
+| `.contact-detail` | 859-876 | Archetype 6 |
+| `.signup-card` | 1650-1711 | Archetype 2, waar de kaartvorm zelf hergebruikt wordt (formulierstructuur blijft eigen) |
+| `.blog-card` (page-local, `blog/index.html:29-40`) | n.v.t. (buiten `styles.css`) | Archetype 2, verplaatst naar het gedeelde systeem in `styles.css` |
+| `.whatsapp-float` / `.mail-float` | 1826-1885 | §8.x.4 (nieuwe contactrail) |
+
+---
+
+#### 8.x.3 Icoonsysteem
+
+De zes kaartarchetypen zelf zijn **icoonloos** (A's kernprincipe: Newsreader-cijfers of Plex Mono 2-lettercodes in een `.mark`-kader in plaats van een pictogram; dit lost het bestaande "drie icoonstijlen door elkaar"-probleem op zonder een vierde stijl toe te voegen, en is immuun voor icon-blokkerende adblockers). Dat deel is gebouwd en staat in deze branch.
+
+**Herscoping (chief-of-staff review):** deze kaartmigratie levert alleen de icoonloze kaarten. Alle iconen buiten de kaarten (filters, formuliervalidatie, footer-links, statusmeldingen, CTA-knoppen, kandidaten.html-bullets) blijven in deze PR gewoon Font Awesome, precies zoals vandaag; dat is geen sluipende scope-inperking maar een expliciete keuze. Een eerdere versie van deze sectie beschreef ook al een same-origin SVG-sprite (`website/icons.svg`, ~24 symbolen, aangeroepen via `<use href="#icon-*">`) voor die resterende iconen; dat bestand is uit deze PR gehaald omdat geen enkele pagina of script er ooit naar verwees (0 treffers op `#icon-`) en een dood, ongebruikt bestand niet meegaat. De sprite-migratie zelf is een apart, eigenstandig werkpakket (fase 2, geen shipdatum), niet iets wat impliciet meelift met de kaartmigratie: het raakt zo goed als elke pagina (CTA-knoppen, kandidaten.html-bullets, script.js-templates) en verdient zijn eigen ui-designer/code-reviewer/qa-ronde in plaats van een losse toevoeging aan deze PR. De onderstaande tabel blijft staan als vastgelegd ontwerp voor wanneer dat werkpakket wordt opgepakt, niet als iets dat al gebouwd is.
+
+**Uitzondering, ook in fase 2**: Font Awesome blijft in gebruik voor **header, login/registratie-modal en back-to-top-knop**; deze drie zijn chrome-elementen buiten de scope van zowel deze kaartmigratie als de toekomstige sprite-migratie en worden apart gepland.
+
+Ontwerp voor de toekomstige sprite (fase 2, nog niet gebouwd): een verborgen `<svg style="display:none">` met een `<symbol id="icon-*">` per pictogram, 24×24-raster, `stroke-width:1.5`, `stroke:currentColor`, `fill:none`, `stroke-linecap/linejoin:round`, aangeroepen via `<use href="#icon-*">`. Elk icoon krijgt `aria-hidden="true"`; het label ernaast draagt de betekenis. ~24 iconen gepland:
+
+| Icoon | Gebruik |
+|---|---|
+| `search` | vacature-/kandidaatfilters |
+| `filter` | filterbalk vacatures.html/kandidaten.html |
+| `chevron-down` | select-velden, uitklapbare filters |
+| `chevron-right` | breadcrumb, generieke inline-verwijzing (niet de kaart-CTA-pijl, die blijft het letterlijke "→"-teken uit A's spec) |
+| `check` | formuliervalidatie (geslaagd veld) |
+| `check-circle` | succesmelding (bv. talentpool-opt-in bevestigd) |
+| `alert-circle` | waarschuwingsmelding |
+| `info-circle` | informatieve toast |
+| `x-circle` | foutmelding, sluiten van een validatiestaat |
+| `mail` | footer-contactlink, formulierveld-icoon |
+| `phone` | footer-contactlink |
+| `map-pin` | locatiefilter, footer-adres |
+| `external-link` | uitgaande links in blogartikelen |
+| `download` | CV-download in de portalen |
+| `upload` | CV-upload (registratie, profiel) |
+| `eye` / `eye-off` | wachtwoordveld-toggle buiten de login-modal (bv. wachtwoord-resetpagina) |
+| `lock` | beveiligde-sectie-indicatie in de portalen |
+| `arrow-right` | generieke inline tekstlink buiten het kaartsysteem |
+| `arrow-left` | terugnavigatie (bv. vacature.html terug naar vacatures.html) |
+| `plus` / `minus` | uitklapbare FAQ/accordeon-elementen indien aanwezig |
+| `spinner` | knop-laadstaat buiten de kaartskeletons |
+| `paper-plane` | vervangt `fa-paper-plane` op de verzend-/CTA-knoppen sitebreed (contactformulier, CV-uploads, "Deel je vacature", "Neem contact op" e.d.; circa 15 plekken in de huidige HTML, zie `grep -rn "fa-paper-plane" website/`), niet meer op de kaarten zelf (die zijn icoonloos, zie boven) |
+
+---
+
+#### 8.x.4 Contactrail (sitebreed, vervangt `.whatsapp-float` en `.mail-float`)
+
+Vervangt de groene pulserende WhatsApp-bubbel (`#25D366`, `website/styles.css:1826-1858`) en de losse navy mail-knop (`1860-1885`) die vandaag op elke pagina zweven. Nieuw: één navy pil, radius `var(--radius)` (3px; ondanks de naam "pil" géén `--radius-full`, dat blijft gereserveerd voor chips), opgebouwd uit items van 48×48px met een mono-glyph wit op navy (`WA` / `@`, consistent met A's `.mark.code`-systeem; geen icoon, geen kleur buiten navy/wit, geen puls-animatie, nooit `#25D366`). Boven 600px twee items (WhatsApp, e-mail) gestapeld linksonder; op ≤600px één item (alleen WhatsApp) rechtsonder, zie "390px" hieronder. **Rand + schaduw:** `border: 1px solid var(--navy-600)` plus `box-shadow: var(--shadow-md)`. De pil staat op de navy hero/footer op precies dezelfde kleur als de achtergrond erachter. De rand alleen lost dat niet op: `--navy-600` op `--navy-900` is 1,35:1, ruim onder de 3:1 voor een niet-tekstueel onderscheid. De zichtbare scheiding komt van `--shadow-md`; de rand tekent alleen de vorm af. Tegen de lichte secties draagt de rand wel, daar is het contrast ruim voldoende.
+
+- **Positie**: `position:fixed; z-index:9995`, met `bottom:var(--space-lg)` als basiswaarde. Op >600px linksonder (`left:var(--space-lg)`), op ≤600px rechtsonder met een inset van 16px (`right:16px; left:auto`, en dezelfde 16px in de `bottom`-calc). 16px in plaats van de 24px van `var(--space-lg)`: dichter in de hoek betekent meetbaar minder tekst onder de pil, en het is de inset die `.whatsapp-float` in productie al gebruikt. De hoekkeuze op ≤600px is geen botsingsvrije oplossing en wordt hier ook niet als zodanig geclaimd: alleen de laatste regel van een alinea eindigt rafelig, binnenregels lopen op 390px tot de rechtermarge. Een vast element in een onderhoek dekt dus in beide hoeken tekst af zodra je scrollt. Wat de hoek wél doet is de kans verkleinen dat het afgedekte deel het begin van een regel is, waar het verlies aan leesbaarheid het grootst is.
+- **<=600px: één tikdoel**. Op ≤600px toont de rail alleen het WhatsApp-item (48×48, geen verkleining); het e-mailitem is verborgen met `.contact-rail__item--mail { display:none }` in het media-block, dus op de rail zelf en niet via `.lang-nl`/`.lang-en` (die klassen sturen uitsluitend taal). Dat halveert de afdekkende breedte van 96px naar 48px. **E-mail blijft op mobiel bereikbaar**: het adres in de onderste footerregel is op elke publieke pagina een echte `mailto:`-link (`.footer-bottom a`, kleur van de regel eromheen plus onderstreping, hover/focus naar goud), en `contact.html` heeft de niet-zwevende `.contact-row`-rij E-MAIL.
+- **Gemeten afdekking van lopende tekst, hele scrollrange.** Chromium, acht pagina's (index, kandidaten, werkgevers, werkwijze, over-ons, vacatures, contact, blogindex), 390×844 en 390×664, NL en EN, in stappen van viewport/3 van boven tot onder, per frame de doorsnede van tekstregelrechthoeken met de pil, met `elementFromPoint`-controle dat de pil er ook echt bovenop ligt. 32 combinaties, 808-844 frames per opstelling. Voor elke veeg staat `scroll-behavior` op `auto` en zijn de `.fade-in`-klassen vooraf doorgezet, zodat elk gemeten frame uitgeregeld is en de bijbehorende screenshot hetzelfde frame toont als de meting. Alle drie de rijen zijn met dit harnas gemeten; de regel voor deze versie op de tip van deze branch, dus inclusief de `.signup-split`- en `.signup-panel`-reparaties.
+
+  | Opstelling | Totaal over alle frames | Ergste frame | Combinaties met overlap | Frames met overlap |
+  |---|---|---|---|---|
+  | `.whatsapp-float` + `.mail-float` (huidige productie) | 119.487 px2 | 2.309 px2 | 32/32 | 269/808 |
+  | Tweedelige pil rechtsonder (eerdere ronde) | 347.289 px2 | 4.925 px2 | 31/32 | 296/840 |
+  | Eén item rechtsonder, inset 16px (deze versie) | 71.654 px2 | 1.401 px2 | 31/32 | 206/844 |
+
+  Eerdere metingen op alleen scrollpositie 0 en onderaan de pagina waren een artefact: onderaan de pagina staat de pil boven de extra `padding-bottom` van de footer en meet je per definitie nul.
+- **Restrisico, eerlijk benoemd.** Nul is dit niet en wordt het met een vast element in een onderhoek ook niet. In 31 van de 32 combinaties raakt de pil ergens in de scrollrange tekst, in 206 van de 844 gemeten frames; productie raakt in 32 van de 32 combinaties en in 269 frames. Het ergste frame is 1.401 px2: het woord "not" in de gecentreerde kop over de kandidaat die voorop staat, op over-ons EN 390×844, circa 13% van de regelbreedte. Daarna volgen twee regels van dezelfde alinea op over-ons NL (1.382 px2) en EN (1.297 px2). Het gaat steeds om het einde van een regel, of om een gecentreerde regel die tot in de rechtermarge loopt, nooit om het begin van een regel. Ten opzichte van productie is dat 40% minder totale afdekking en een 39% lager ergste frame, bij één in plaats van twee zwevende knoppen. Verdere reductie vraagt om iets anders dan een hoekkeuze (bijvoorbeeld de pil pas tonen na een scroll-drempel, of hem helemaal weglaten op mobiel); dat is een ui-designer-beslissing, geen implementatiedetail.
+- **Vaste-elementenstapel op ≤600px.** Afstanden vanaf de onderrand, gemeten op 390×844 met zichtbare toast en zichtbare back-to-top, in beide back-to-top-varianten (de CSS-variant op index/over-ons/werkwijze/404, en de variant die `script.js` injecteert op de overige pagina's). Zonder cookiebanner: rail 16-66px, back-to-top 80-122px (CSS) respectievelijk 80-124px (JS), toastcontainer vanaf 132px; onderlinge overlap 0 px2 in alle vier de combinaties.
+- **Cookiebanner in dezelfde stapel.** `#cookieConsentBanner` (`script.js`, `bottom:16px; z-index:10000; width:calc(100% - 32px)`) is op 390px geen enkele regel maar drie, gemeten 358×144. Zonder maatregel legt hij zich bij elk eerste mobiel bezoek over de hele rail (4.900 px2, beide items niet aantikbaar: `elementFromPoint` geeft `#cookieConsentAccept`) en over de toast (9.800 px2). `applyBodyOffset()` zet daarom naast de bestaande `padding-bottom` op `body` ook `--fixed-stack-offset` op de gemeten `offsetHeight` van de banner, en bij accepteren weer op `0px`; dezelfde functie loopt al op `resize`, zodat de waarde meeschuift als de banner van hoogte verandert. `.contact-rail`, `.back-to-top` (CSS-variant) en `.toast-container` krijgen in hun ≤600px-blok `bottom: calc(<waarde> + var(--fixed-stack-offset, 0px))`; de JS-variant zet dezelfde `calc()` in zijn eigen `style.cssText`. Gemeten met zichtbare banner: offset 144px, rail 160-210px, back-to-top 224-266px (CSS) respectievelijk 224-268px (JS), toast vanaf 276px, alle onderlinge overlappen 0 px2 en het WhatsApp-item aantikbaar. Na accepteren staat de offset op 0px en zit de stapel terug op 16/80/132px. Geen scroll-afhankelijke logica, geen extra elementen.
+- **Verklapping op hover/focus**: in rust toont elk item alleen het mono-glyph; op hover/focus-visible (identiek, zie §8.x.0) schuift een tekstlabel ("WhatsApp" / "E-mail") uit naast het glyph, `max-width:0→120px`, 200ms ease. Op touch werkt dit niet (geen hover); het glyph blijft dus altijd zelfstandig leesbaar en elk item heeft een `aria-label` ("Stuur een WhatsApp-bericht" / "Stuur een e-mail") zodat de betekenis nooit alleen van de uitklap-tekst afhangt.
+- **Toetsenbordbediening**: de pil is een `<nav aria-label="Direct contact">` met echte `<a href="https://wa.me/...">`/`<a href="mailto:...">`-elementen erin, elk een natuurlijke tab-stop. Focus-visible toont dezelfde uitgeklapte tekst als hover, dus geen apart, onzichtbaar toetsenbordpad. Het op ≤600px verborgen mail-item staat op `display:none` en valt dus ook uit de tabvolgorde; de footer-mailtolink neemt die rol daar over.
+- **Footer-botsing**: `.footer` heeft op ≤600px `padding-bottom: var(--space-5xl)` (128px), zodat de laatste footerregel (copyright/KvK/AVG, inclusief de mailtolink) bij elke scrollpositie boven de pil blijft. Dit geldt voor elke pagina met de gedeelde footer. In de scrollsweep hierboven komt op geen enkele pagina een footerregel in de lijst afgedekte tekst voor.
+- **Reduced motion**: de uitklap-transitie volgt de globale regel (`website/styles.css:1281-1290`), duur naar 0,01ms; de eindtoestand (glyph zichtbaar, tekst wel/niet uitgeklapt) blijft functioneel gelijk.
+
+---
+
+#### 8.x.5 Lege-vacaturestaat
+
+Zie archetype 3 hierboven voor de volledige kaartspecificatie. Samengevat:
+
+- **Status**: dit is een reële, actuele staat (`script.js:681`), geen hypothetische placeholder.
+- **NL**: kop "Er staan nu geen vacatures open; nieuwe rollen zijn in voorbereiding", body "Meld je aan voor de talentpool, dan nemen wij contact op zodra een passende rol binnenkomt.", CTA "Meld je aan voor de talentpool →".
+- **EN**: kop "New roles are being opened right now", body "Join the talent pool and we will reach out as soon as a suitable role comes in.", CTA "Join the talent pool →".
+- **Doel**: `kandidaten.html#talentpoolOptin` (bestaand element, dubbele opt-in-formulier — een concretere actie dan de huidige `contact.html`-link).
+- **Homepage-vacatureband** (`#homeVacancies`/`#homeVacanciesGrid`): bij nul vacatures toont de sectie voortaan deze compacte lege-staat-kaart in plaats van zichzelf volledig te verbergen (gedragswijziging, zie archetype 3-tabel); bij een fetch-fout blijft de sectie verborgen, ongewijzigd.
+
+---
+
+#### 8.x.6 Bewegingsregels
+
+**Wel**: één overgang per interactief element — `border-color` (of `background-color` op de chip/contactrail) plus `translateY(-2px)` waar de kaart geen geneste link bevat (dus niet op de datakaart, zie archetype 3), 150ms ease. Focus-visible krijgt exact dezelfde overgang als hover (§8.x.0). De bestaande paginabrede fade-in (`initScrollAnimations`, `website/script.js:258-`, klassen `.fade-in`/`.fade-in-left`/`.fade-in-right`, met een 1,5s-fallbacktimer) mag op kaarten blijven staan als puur decoratief intrede-effect — nooit inhoudsdragend: elke kaart in dit systeem is compleet en leesbaar met alle duraties op 0.
+
+**Niet**: geen shimmer op skeletons (vlakke `--gray-50`-blokken volstaan en zijn reduced-motion-neutraal), geen pulse (de contactrail vervangt juist de pulserende WhatsApp-bubbel), geen decoratieve gradients, geen `.fade-in-stagger` (bestaat in CSS, `styles.css:1462-1478`, maar wordt in geen enkel HTML-bestand gebruikt — blijft ongebruikt, zie §8.x.7 voor de opschoning van dat blok en de rest van de dode animatie-utilities).
+
+**Reduced motion**: de bestaande globale regel (`website/styles.css:1281-1290`) zet alle animatie-/transitieduur op 0,01ms voor `prefers-reduced-motion: reduce`, ongewijzigd van toepassing op elk nieuw element in dit systeem. Omdat geen enkele hierboven beschreven staat content toont of verbergt (alleen kleur/positie van al-zichtbare elementen), is de eindtoestand met reduced motion functioneel en visueel compleet.
+
+**No-JS-vangnet, nieuw**: een `<noscript><style>.fade-in,.fade-in-left,.fade-in-right{opacity:1!important;transform:none!important}</style></noscript>`-blok in de `<head>` van elke pagina die deze klassen gebruikt, naast de bestaande 1,5s-fallbacktimer in `initScrollAnimations`. Dit voorkomt dat een sessie zonder JavaScript kaarten permanent op `opacity:0` laat staan; het gebruikt de bestaande klassenamen (`fade-in`, niet een nieuwe `is-visible`/`reveal-group`-naam) zodat er geen wijziging aan `script.js`'s `SELECTOR` (`website/script.js:259`) nodig is.
+
+---
+
+#### 8.x.7 Dode CSS die in dezelfde PR verdwijnt
+
+Bevestigd nul gebruik in HTML/JS (CSS-census, deze worktree, `website/styles.css`, 1886 regels):
+
+| Blok | Regels | Omvang |
+|---|---|---|
+| Testimonials-carousel (`.testimonial-card` en varianten; `initTestimonials()` vindt nooit een `#testimonials`-element) | 700-812 (CSS) + `script.js` `initTestimonials()` | 113 regels CSS |
+| Cookie-banner (`.cookie-banner` en subklassen; hele cookie-UI bestaat niet meer in HTML/JS) | 1305-1367 | 63 regels |
+| `.hero` (los van het levende `.page-hero`) | 354-387 | 34 regels |
+| Animatie-utilities: `.animate-float`, `.animate-pulse`, `.animate-shimmer`, `.animate-gradient`, `.animate-slide-up`, `.animate-scale-in`, `.fade-in-stagger`, `.floating-shape` | 1441-1495 | 55 regels |
+| Losse dode selectors: `.sr-only`, `.btn-lg`, `.hero-content`, `.on-dark`, `.story-result`, `.vac-ref`, `.vac-meta`, `.stat-number` | verspreid | — |
+| `.whatsapp-float`, `.mail-float` (vervangen door §8.x.4) | 1826-1885 | 60 regels |
+| Dubbele `.trust-strip`/`.ts-item`-definitie (1713-1716 is al dood voor kleur, specificiteit van 1763-1765 wint; wordt met de archetype-5-migratie tot één definitie samengevoegd) | 1713-1716 | 4 regels |
+
+Totaal circa 330 regels aantoonbaar dode of te consolideren CSS, te verwijderen in dezelfde PR als de archetype-migratie (niet erna, om te voorkomen dat de census meteen weer verouderd raakt).
+
+---
+
+#### 8.x.8 Bouwvolgorde en verificatie
+
+1. **`website/styles.css` eerst, één bouwer.** Tokens toevoegen (§8.x.2), de zes archetype-klassen bouwen, dode CSS verwijderen (§8.x.7), `--gray-*` corrigeren naar de §1.2-namen. Niets aan HTML raken in deze stap.
+2. **`website/script.js`-templates, één bouwer, na stap 1.** De drie template-strings (`script.js:681` lege staat, `job-card`-template, `vac-card`-template) migreren naar archetype 3; nieuwe contactrail-markup (§8.x.4) toevoegen aan het gedeelde `<footer>`/shell-include; `<noscript>`-vangnet (§8.x.6) toevoegen. Alle API-velden blijven door `GSP.esc`/`GSP.safeUrl`.
+3. **Pagina's per cluster, parallel, na stap 1 en 2.** Cluster A: index.html + vacatures.html + vacature.html (archetypen 1, 2, 3). Cluster B: werkgevers.html + werkwijze.html (archetype 4, twee varianten). Cluster C: over-ons.html + contact.html (archetype 5, 6, §8.x.4). Cluster D: blog/index.html + blog/post.html (archetype 2, blogvariant). Elke cluster is onafhankelijk van de andere drie zodra stap 1-2 klaar zijn.
+4. **Verificatie, verplicht vóór PR:**
+   - Playwright-screenshots op 1440 en 390, beide talen (NL/EN), voor elk van de zes archetypen in situ.
+   - `scripts/csp_violation_check.py --warnings`
+   - `scripts/xss_static_check.py`
+   - `scripts/verify_csp_coverage.py`
+   - `scripts/check_website_extensions.py`
+   - `node --check` op `website/script.js` en `website/blog/blog-index.js`
+   - Toetsenbord-QA: tab door alle zes archetypen, bevestig dat elke `:focus-visible`-staat zichtbaar identiek is aan de bijbehorende `:hover`-staat (§8.x.0), en dat de datakaart één tab-stop blijft ondanks de geneste link.
+   - **Nieuw, twee scripts te schrijven als onderdeel van deze PR**: `scripts/css_class_census.py` (herbruikbare versie van de handmatige census hierboven, zodat "0 gebruik"-claims bij een volgende migratie automatisch geverifieerd worden) en `scripts/css_tokens_check.py` (faalt de build als een `--gray-*`/`--gold-*`-waarde als tekstkleur onder de 4,5:1-vloer wordt gebruikt, of als een kaartklasse een `border-radius` anders dan 3px/`--radius-full` zet).
+
 ---
 
 ## 9. Not-yet-built items
