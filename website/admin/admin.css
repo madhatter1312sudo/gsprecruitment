@@ -51,22 +51,36 @@
      .a-disclosure    in- en uitklapbare kaart (<details>)
      .a-col-check     selectievakjeskolom (36px)
      .a-col-actions   actiekolom rechts, zonder koptekst
+     .a-col-cat       categoriekolom, één regel met ellipsis (volledige naam in title=)
+     .a-col-status    statuskolom; op een telefoon naast de identiteit bovenin de kaart
+     .a-row-selected  geselecteerde rij: eigen vlak plus gouden linkerrand
      .a-tap           label om een selectievakje, 44px tikdoel op een telefoon
+     .a-confirm-mismatch  "Komt niet overeen" onder het bevestigingsveld
      .text-success-ink .text-danger-ink .text-warning-ink .text-info-ink
                       de vier semantische tekstkleuren uit §7.1.3, op de
                       --ink-*-tokens uit §7.1.2
      .a-accent        het goudaccent (geen semantische familie, §7.2e)
    Panelen (ui.js): .a-modal (+ --wide, __title, __subtitle, __close), .a-drawer,
    .a-backdrop, .a-confirm-hint, .a-sortable (kolomkop met aria-sort), .a-nav-caption (sidebarkopje).
-   Samen 40 .a-klassen: de 29 uit §7.1.3 plus de elf die de sectie
-   Bewaartermijnen (§7.3.1) nodig had. Die elf horen bij de componenten
-   van §7.2: .a-eyebrow en .a-num zijn de `gsp-eyebrow`/`gsp-num` uit
-   §7.1.3 met de .a-prefix die diezelfde subsectie voorschrijft,
-   .a-cardlist is de `gsp-cardlist` uit §7.2a, en .a-bulkbar is de
-   bulkbalk uit dezelfde subsectie. Die publiceert zijn eigen hoogte als
-   --a-bulkbar-h zodat de toast eronder vandaan schuift (§7.2f; de spec
-   noemt dat token --gsp-bulkbar-h, hier met dezelfde a-prefix als
-   --a-bar-h).
+   Samen 43 klassenamen: de 29 uit §7.1.3 plus de veertien die de sectie
+   Bewaartermijnen (§7.3.1) nodig had (.a-eyebrow, .a-num, .a-wide-only,
+   .a-bulkbar, .a-cardlist, .a-clamp, .a-disclosure, .a-col-check,
+   .a-col-actions, .a-col-cat, .a-col-status, .a-row-selected, .a-tap,
+   .a-confirm-mismatch). Modifiers tellen niet als eigen naam: .a-num--xl,
+   --date en --loading, .a-clamp--open, .a-cardlist--compact,
+   .a-scrollbox--rows en .a-modal__title--danger horen bij hun basisklasse.
+   Die veertien horen bij de componenten van §7.2: .a-eyebrow en .a-num
+   zijn de `gsp-eyebrow`/`gsp-num` uit §7.1.3 met de .a-prefix die
+   diezelfde subsectie voorschrijft, .a-cardlist is de `gsp-cardlist` uit
+   §7.2a, en .a-bulkbar is de bulkbalk uit dezelfde subsectie. Die
+   publiceert zijn eigen hoogte als --a-bulkbar-h zodat de toast eronder
+   vandaan schuift (§7.2f; de spec noemt dat token --gsp-bulkbar-h, hier
+   met dezelfde a-prefix als --a-bar-h).
+
+   De destructieve outline-knop staat paneelbreed op --ink-error
+   (.portal-section .btn-outline-danger, naast .a-modal en .a-drawer):
+   Tablers eigen danger-outline haalt 4,17:1 op --navy-900 en zakt daarmee
+   onder de tekstvloer, en dat geldt in elke sectie, niet alleen in deze.
 
    Geometrie zonder merkbetekenis (mb-3, d-flex, gap-2, text-center,
    flex-fill, text-nowrap) komt uit Bootstrap 5 en staat hier niet.
@@ -328,6 +342,12 @@ h1, h2, h3, h4,
 .a-tabpane { min-height: 120px; }
 
 .a-clickable { cursor: pointer; }
+/* Geselecteerde rij (§7.2a): eigen vlak plus een gouden linkerrand op de
+   eerste cel. Geen aria-selected: dat attribuut geldt alleen binnen
+   role="grid" en dit is een gewone tabel; het checked-vakje draagt de
+   staat al voor een schermlezer. */
+.a-row-selected > td { background: var(--navy-600); --tblr-table-bg: var(--navy-600); }
+.a-row-selected > td:first-child { box-shadow: inset 2px 0 0 0 var(--gold-500); }
 .a-row-unread { font-weight: 600; }
 
 .a-barchart { display: flex; align-items: flex-end; gap: 6px; height: 120px; width: 100%; }
@@ -386,7 +406,8 @@ h1, h2, h3, h4,
 }
 .a-modal__close:hover,
 .a-modal__close:focus-visible { color: var(--gold-400); }
-.a-modal__title { color: var(--white); margin: 0 var(--space-xl) var(--space-sm) 0; }
+.a-modal__title { color: var(--white); font-size: var(--font-size-xl); margin: 0 var(--space-xl) var(--space-sm) 0; }
+.a-modal__title--danger { display: flex; align-items: baseline; gap: var(--space-sm); }
 .a-modal__subtitle { margin-bottom: var(--space-lg); font-size: var(--font-size-sm); }
 .a-drawer.offcanvas {
   width: min(760px, 100vw);
@@ -417,6 +438,8 @@ h1, h2, h3, h4,
   --tblr-btn-hover-color: var(--navy-900);
 }
 .a-confirm-hint code { color: var(--gold-400); }
+/* "Komt niet overeen", leeg tot er iets fout getypt is. */
+.a-confirm-mismatch { font-size: var(--font-size-xs); min-height: 1.2em; margin-top: 4px; }
 
 /* Sorteerbare kolomkoppen (ui.table). aria-sort is de bron van waarheid;
    het pijltje is puur decoratief. */
@@ -425,6 +448,13 @@ h1, h2, h3, h4,
 .a-sortable[aria-sort="ascending"]::after { content: "\2191"; opacity: 1; color: var(--gold-400); }
 .a-sortable[aria-sort="descending"]::after { content: "\2193"; opacity: 1; color: var(--gold-400); }
 .a-sortable:focus-visible { outline: 2px solid var(--gold-500); outline-offset: -2px; }
+
+/* Tablers eigen focusring op een selectievakje is goud op 25% dekking en
+   haalt 1,8:1; de vloer voor een niet-tekstuele grens is 3:1 (§7.1.2). */
+.form-check-input:focus-visible {
+  outline: 2px solid var(--gold-500);
+  outline-offset: 2px;
+}
 
 /* ==========================================================================
    Sectie Bewaartermijnen (§7.3.1) en de componenten die zij als eerste
@@ -449,6 +479,20 @@ h1, h2, h3, h4,
   color: var(--white);
   line-height: 1.15;
 }
+/* Een datum of "n.v.t." op de waardepositie van een KPI-tegel: wel de
+   tegelpositie, niet de cijfermaat van 32px. */
+.a-num--date { font-size: var(--font-size-lg); font-weight: 500; }
+/* Laadstaat van een KPI-waarde (§7.2g): een vlak blok op de plek van het
+   getal, geen spinner en geen 0 die daarna verspringt. --navy-600 omdat de
+   tegel zelf al op --navy-700 staat. */
+.a-num--loading {
+  display: inline-block;
+  width: 3ch;
+  height: 1em;
+  vertical-align: -0.1em;
+  background: var(--navy-600);
+  border-radius: var(--radius-sm);
+}
 
 /* Besluit 1 uit §7.6: categoriebreed goedkeuren wordt op een telefoon niet
    aangeboden. display:none haalt de knop ook uit de tabvolgorde, dus hij is
@@ -469,10 +513,15 @@ h1, h2, h3, h4,
 @media (max-width: 600px) {
   /* Plakt onderaan het scherm, zonder --fixed-stack-offset: dat token zet
      website/script.js en het paneel laadt dat bestand niet (§7.2a). */
+  /* fixed, niet sticky: sticky binnen een lange tabelkaart scrollt met de
+     kaart mee het beeld uit, en dan is de balk juist weg op het moment dat
+     je hem nodig hebt. De hoogte gaat als --a-bulkbar-h naar de toast. */
   .a-bulkbar {
-    position: sticky;
+    position: fixed;
+    left: 0;
+    right: 0;
     bottom: 0;
-    z-index: 20;
+    z-index: 1040;
     border-top: 1px solid var(--admin-hairline);
   }
   /* De toast schuift omhoog zolang de bulkbalk staat; de balk zet
@@ -486,7 +535,19 @@ h1, h2, h3, h4,
 }
 
 .a-col-check { width: 36px; }
-.a-col-actions { width: 104px; text-align: right; }
+.a-col-actions { width: 104px; text-align: right; white-space: nowrap; }
+/* Categoriekolom op één regel: een categorienaam van vier woorden maakte
+   de rij anders drie regels hoog. De volledige naam staat in title= en
+   in de kaartweergave onder 768px staat hij alsnog voluit. */
+.a-col-cat {
+  max-width: 12rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Scrollbox met echte regels in plaats van voorgevormde tekst. */
+.a-scrollbox--rows { max-height: 40vh; white-space: normal; padding: 0 10px; }
+.a-scrollbox--rows .a-listrow { padding: var(--space-sm) 0; font-size: var(--font-size-sm); }
 
 .a-clamp {
   display: -webkit-box;
@@ -532,13 +593,19 @@ h1, h2, h3, h4,
 @media (max-width: 767.98px) {
   .a-cardlist,
   .a-cardlist tbody,
-  .a-cardlist tr,
   .a-cardlist td {
     display: block;
     width: 100%;
   }
   .a-cardlist thead { display: none; }
+  /* Kaart: één <tr> is één kaart, en de cellen erin liggen als flexregels
+     (zie de kaartanatomie verderop in dit blok). */
   .a-cardlist tr {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    column-gap: var(--space-sm);
+    width: 100%;
     border: 1px solid var(--admin-hairline);
     border-radius: var(--radius);
     background: var(--navy-700);
@@ -558,10 +625,78 @@ h1, h2, h3, h4,
     font-size: var(--font-size-xs);
     color: var(--admin-muted);
   }
-  .a-cardlist td.a-col-actions,
-  .a-cardlist td.a-col-check {
-    width: auto;
+  .a-cardlist td.a-col-actions {
+    width: 100%;
     text-align: left;
+    white-space: normal;
+  }
+  .a-cardlist td.a-col-check { width: auto; text-align: left; }
+  /* Kaartanatomie (§7.3.1 390): bovenin de identiteit plus de statusbadge,
+     daaronder onderwerp, termijn en signaal in leesvolgorde, en onderin de
+     knoppen. Flex met order, zodat het dezelfde markup blijft. */
+  .a-cardlist td { order: 5; }
+  .a-cardlist td.a-col-check { order: 1; flex: 0 0 auto; padding-left: 0; padding-right: 0; }
+  .a-cardlist td.a-col-cat {
+    order: 2;
+    /* basis 0 en mag krimpen: de categorie neemt de ruimte die overblijft
+       naast het selectievakje en de statusbadge, en breekt af op twee
+       regels in plaats van de badge naar de volgende regel te duwen */
+    flex: 1 1 8rem;
+    min-width: 0;
+    width: auto;
+    max-width: none;
+    white-space: normal;
+    font-size: var(--font-size-base, 1rem);
+  }
+  .a-cardlist td.a-col-status { order: 3; flex: 0 0 auto; width: auto; margin-left: auto; text-align: right; }
+  .a-cardlist td.a-col-cat::before,
+  .a-cardlist td.a-col-status::before { display: none; }
+  .a-cardlist td.a-col-actions { order: 9; }
+  /* Regel twee van de kaart: onderwerp, verlopen termijn en handeling op
+     één regel in plaats van drie label-waardeparen onder elkaar. De
+     selector hangt aan data-label, hetzelfde haakje waar de kaartlijst
+     zijn labels al uit haalt; alleen de reviewtabel draagt deze drie. */
+  .a-cardlist td[data-label="Onderwerp"],
+  .a-cardlist td[data-label="Termijn verlopen"],
+  .a-cardlist td[data-label="Actie"] {
+    order: 4;
+    flex: 0 0 auto;
+    width: auto;
+    font-size: var(--font-size-sm);
+  }
+  .a-cardlist td[data-label="Onderwerp"]::before,
+  .a-cardlist td[data-label="Actie"]::before { display: none; }
+  .a-cardlist td[data-label="Termijn verlopen"]::before {
+    content: "·";
+    display: inline;
+    margin-right: 4px;
+    color: var(--admin-muted);
+    letter-spacing: 0;
+  }
+  .a-cardlist td[data-label="Ontbrekend signaal"] {
+    order: 6;
+    flex: 0 0 100%;
+    font-size: var(--font-size-sm);
+  }
+  .a-cardlist td[data-label="Ontbrekend signaal"]::before { display: none; }
+
+  /* Variant voor een tabel die alleen tellingen draagt (de categoriekaart):
+     label en waarde op één regel naast elkaar, anders wordt elke categorie
+     een kaart van vier regels en staat de lijst eronder van het scherm af. */
+  .a-cardlist--compact td {
+    display: inline-block;
+    width: auto;
+    order: 5;
+    margin-right: var(--space-md);
+  }
+  .a-cardlist--compact td[data-label]::before {
+    display: inline;
+    margin-right: 4px;
+  }
+  .a-cardlist--compact td.a-cell-name {
+    display: block;
+    width: 100%;
+    margin-right: 0;
   }
   .a-cardlist td.a-col-actions .btn {
     width: 100%;
