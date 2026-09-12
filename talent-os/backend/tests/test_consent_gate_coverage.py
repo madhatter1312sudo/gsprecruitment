@@ -121,16 +121,40 @@ _ALLOWLIST = {
         "f-string's own Constant parts. Verified at runtime instead by "
         "tests/integration/test_client_portal.py "
         "(test_withdrawn_consent_overrides_spec_presentation_consent).",
-    ("client.py", "SELECT pe.*, c.full_name, c.current_title, c.current_company,"):
-        "GET /api/v1/client/pipeline -- deliberately NOT gated on "
-        "consent_withdrawn_at in SQL: a pipeline entry is an ongoing "
-        "client engagement and must not disappear if the candidate "
-        "withdraws consent mid-process, but full_name must still stop "
-        "being shown -- that gate is applied in Python, right after this "
-        "query, using the same consent_spec_presentation_at/"
-        "consent_withdrawn_at columns this SELECT fetches for exactly "
-        "that purpose (see the comment immediately below this query in "
-        "routers/client.py).",
+    # WS5 (code-review F3): GET /api/v1/client/pipeline and
+    # GET /api/v1/admin/pipeline used to each carry a verbatim copy of the
+    # same SELECT and the same Python-side consent gate, and each needed
+    # an allowlist entry here. Both now read core/pipeline.py's
+    # PIPELINE_ROW_SQL and project_pipeline_rows() -- one SELECT list, one
+    # projection. This file's AST scan covers ROUTERS_DIR only, so that
+    # SQL text is no longer visible to it and there is nothing left for
+    # either route to allowlist. Do not add an entry back for them: an
+    # entry that matches nothing trips the staleness assert below.
+    #
+    # Neither route is gated on consent_withdrawn_at in SQL, deliberately:
+    # an ongoing engagement must not vanish from the list when a candidate
+    # withdraws consent. What happens to `full_name` afterwards is now a
+    # per-route decision, and both halves are covered at runtime:
+    #
+    #   - client route, gate ON -- the name is withheld without
+    #     presentation consent and taken away again on withdrawal.
+    #     tests/integration/test_ws5_backend_conditions_integration.py
+    #     (test_client_pipeline_still_withholds_the_name_without_consent).
+    #     Note that test_client_portal.py's
+    #     test_withdrawn_consent_overrides_spec_presentation_consent
+    #     covers the sibling /client/candidates search route, not this
+    #     one -- the pipeline route has its own test for a reason.
+    #   - admin route, gate OFF by product decision of the chief-of-staff
+    #     (see core/pipeline.py for the reasoning: it is a client-
+    #     disclosure control, and GET /admin/candidates already hands the
+    #     same admin the same name).
+    #     test_ws5_backend_conditions_integration.py
+    #     (test_bv1_admin_always_sees_the_name).
+    #
+    # That admin exposure needs no allowlist entry for a second reason
+    # too: it is not a new one. GET /api/v1/admin/candidates and
+    # GET /api/v1/admin/candidates/{kind}/{item_id} are allowlisted above
+    # for handing an admin JWT exactly this field on exactly these rows.
 }
 
 

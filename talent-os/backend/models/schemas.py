@@ -1,6 +1,6 @@
 """Talent OS — Pydantic schemas for request/response models."""
 from pydantic import BaseModel, EmailStr, Field, field_validator, model_validator
-from typing import Optional, List, Any, Literal
+from typing import Optional, List, Any, Literal, get_args
 from datetime import datetime, date
 from decimal import Decimal
 import re
@@ -559,6 +559,15 @@ class CandidatePortalProfile(BaseModel):
     consent_talentpool_until: Optional[datetime] = None
     consent_scope: Optional[str] = None
     consent_source: Optional[str] = None
+    # WS5 BV4 (§7.3.7): the job-alert switch has a third reason for being
+    # off -- consent was withdrawn (a STOP, or an unsubscribe with
+    # scope=all) -- and the portal could not tell that apart from "never
+    # given" without these two. Same `candidates`-row origin and the same
+    # None-when-no-row-yet rule as the four above; `lawful_basis` is the
+    # column the retention and outreach guards read, so the portal states
+    # the ground it is actually processing on rather than guessing.
+    consent_withdrawn_at: Optional[datetime] = None
+    lawful_basis: Optional[str] = None
     created_at: datetime
     updated_at: Optional[datetime] = None
 
@@ -816,10 +825,24 @@ class CandidateSearchParams(BaseModel):
     offset: int = 0
 
 
+# WS5 BV8 (SITE-DESIGN-SPEC.md §7.6 besluit 2): the canonical pipeline
+# stages, in the order the UI offers them. migrations/043 puts the same
+# seven behind a CHECK constraint on pipeline_entries.stage; this Literal
+# is the API-boundary half of that pair, so an unknown stage is a 422 that
+# names the allowed values rather than a 500 out of Postgres. Both the
+# admin panel's PATCH and the client portal's add/PATCH go through it --
+# the two write paths that exist.
+PipelineStage = Literal["sourced", "new", "screening", "interview", "offer", "placed", "rejected"]
+
+# Derived, never a second hand-written copy (code-review F4): two lists of
+# the same seven values is two places to forget when an eighth is added.
+PIPELINE_STAGES = get_args(PipelineStage)
+
+
 class PipelineAdd(BaseModel):
     candidate_id: int
     job_id: int
-    stage: str = "sourced"
+    stage: PipelineStage = "sourced"
     notes: Optional[str] = None
 
 
@@ -1208,7 +1231,7 @@ class ClientAdminUpdate(BaseModel):
 # ── WS-C.5: Pipeline Stage History ───────────────────────────────────────
 
 class PipelineStageUpdate(BaseModel):
-    stage: str = Field(..., min_length=1, max_length=50)
+    stage: PipelineStage
 
 
 class PipelineStageHistoryItem(BaseModel):

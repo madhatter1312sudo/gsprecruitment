@@ -6,6 +6,7 @@ pipeline, analytics, messages, team management.
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from core.database import fetch_one, fetch_all, execute, fetch_val
 from core.deps import require_verified_role
+from core.pipeline import PIPELINE_ROW_SQL, project_pipeline_rows
 from core import privacy
 from core.security import hash_password, hash_token
 from core.sources import source_family
@@ -631,41 +632,22 @@ async def get_pipeline(
 
     total = await fetch_val(f"SELECT COUNT(*) FROM pipeline_entries pe WHERE {where}", *params) or 0
     params_ext = params + [limit, offset]
+    # One shared SELECT list and one shared consent gate with the admin
+    # twin of this route (core/pipeline.py) -- only the WHERE differs.
     rows = await fetch_all(
-        f"""SELECT pe.*, c.full_name, c.current_title, c.current_company,
-                   c.location, c.skills, j.title AS job_title,
-                   c.consent_spec_presentation_at, c.consent_withdrawn_at
-            FROM pipeline_entries pe
-            JOIN candidates c ON c.id = pe.candidate_id
-            JOIN job_orders j ON j.id = pe.job_id
+        f"""{PIPELINE_ROW_SQL}
             WHERE {where}
             ORDER BY pe.created_at DESC
             LIMIT ${idx} OFFSET ${idx + 1}""",
         *params_ext,
     )
 
-    # FIX 1 (chief-of-staff, ai-pseudonimisering branch, ronde 5): same
-    # presentation-consent gate as _project_candidate_public -- a pipeline
-    # entry existing at all does not mean the candidate ever consented to
-    # be named to this client. Keep every pe.*/job_title field (this is
-    # the client's own pipeline, not a fresh anonymised listing); only
-    # full_name is conditional, and the two internal consent columns never
-    # leave this function.
-    items = []
-    for r in rows:
-        item = dict(r)
-        eligible = (
-            item.get("consent_spec_presentation_at")
-            and not item.get("consent_withdrawn_at")
-        )
-        item.pop("consent_spec_presentation_at", None)
-        item.pop("consent_withdrawn_at", None)
-        if not eligible:
-            item.pop("full_name", None)
-        item["skills"] = item.get("skills") or []
-        items.append(item)
-
-    return {"items": items, "total": total, "limit": limit, "offset": offset}
+    return {
+        # gate_name=True: the client may only see a name the candidate
+        # consented to being presented under (core/pipeline.py).
+        "items": project_pipeline_rows(rows, gate_name=True),
+        "total": total, "limit": limit, "offset": offset,
+    }
 
 
 @router.patch("/pipeline/{entry_id}/stage")
