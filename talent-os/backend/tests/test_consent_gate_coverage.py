@@ -121,24 +121,23 @@ _ALLOWLIST = {
         "f-string's own Constant parts. Verified at runtime instead by "
         "tests/integration/test_client_portal.py "
         "(test_withdrawn_consent_overrides_spec_presentation_consent).",
-    ("client.py", "SELECT pe.*, c.full_name, c.current_title, c.current_company,"):
-        "GET /api/v1/client/pipeline -- deliberately NOT gated on "
-        "consent_withdrawn_at in SQL: a pipeline entry is an ongoing "
-        "client engagement and must not disappear if the candidate "
-        "withdraws consent mid-process, but full_name must still stop "
-        "being shown -- that gate is applied in Python, right after this "
-        "query, using the same consent_spec_presentation_at/"
-        "consent_withdrawn_at columns this SELECT fetches for exactly "
-        "that purpose (see the comment immediately below this query in "
-        "routers/client.py).",
-    ("admin.py", "SELECT pe.*, c.full_name, c.current_title, c.current_company,"):
-        "GET /api/v1/admin/pipeline (WS5 BV1) -- the admin-side twin of "
-        "GET /api/v1/client/pipeline above, deliberately identical: same "
-        "reason for not gating in SQL (an ongoing engagement must not "
-        "vanish from the list when consent is withdrawn), and the same "
-        "consent_spec_presentation_at/consent_withdrawn_at gate on "
-        "full_name applied in Python right after the query, using the two "
-        "columns this SELECT fetches for exactly that purpose.",
+    # WS5 (code-review F3): GET /api/v1/client/pipeline and
+    # GET /api/v1/admin/pipeline used to each carry a verbatim copy of the
+    # same SELECT and the same Python-side consent gate, and each needed
+    # an allowlist entry here. Both now read core/pipeline.py's
+    # PIPELINE_ROW_SQL and project_pipeline_rows() -- one SELECT list, one
+    # gate, only the WHERE differs per route. This file's AST scan covers
+    # ROUTERS_DIR only, so the SQL text is no longer visible to it and
+    # there is nothing left to allowlist. The reasoning those two entries
+    # carried still holds and now lives in core/pipeline.py: the query is
+    # deliberately NOT gated on consent_withdrawn_at in SQL (an ongoing
+    # engagement must not vanish from the list when consent is withdrawn)
+    # while full_name must still stop being shown, so the gate runs in
+    # Python on the two columns the SELECT fetches for that purpose. It
+    # is verified at runtime by tests/integration/
+    # test_ws5_backend_conditions_integration.py (BV1's two consent tests)
+    # and tests/integration/test_client_portal.py
+    # (test_withdrawn_consent_overrides_spec_presentation_consent).
 }
 
 

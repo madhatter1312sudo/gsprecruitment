@@ -11,6 +11,7 @@ from core.config import settings
 from core.database import fetch_one, fetch_all, execute, fetch_val
 from core.deps import get_current_user, require_role
 from core.listing import resolve_order_by, sort_key_for
+from core.pipeline import PIPELINE_ROW_SQL, project_pipeline_rows
 from core.security import create_access_token, hash_token
 from core import privacy
 from core.sources import PORTAL_REGISTRATION
@@ -1452,6 +1453,7 @@ async def admin_list_pipeline(
     candidate_id: Optional[int] = Query(None),
     client_id: Optional[int] = Query(None),
     job_id: Optional[int] = Query(None),
+    stage: Optional[str] = Query(None, description="Exact stage match, same filter as GET /api/v1/client/pipeline."),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
     current_user: dict = Depends(require_role("admin")),
@@ -1462,18 +1464,24 @@ async def admin_list_pipeline(
     list route was GET /api/v1/client/pipeline, scoped to the client
     behind the JWT and therefore unusable with an admin token.
 
-    Same row shape as that client route plus `client_id`, and the same
-    presentation-consent gate on `full_name`: a pipeline entry existing
-    is not consent to be named, and this route deliberately does not hand
-    an admin panel more personal data than the client portal already
-    shows for the same row. An admin who needs the name has
+    Same row shape as that client route, literally: one shared SELECT
+    list and one shared consent gate in core/pipeline.py, so the two
+    cannot drift. `client_id` is part of that shape already (it comes out
+    of `pe.*`); what this route adds is that it can be filtered on,
+    alongside candidate_id, job_id and stage, instead of being pinned to
+    the caller's own client.
+
+    The gate on `full_name` is the client route's gate: a pipeline entry
+    existing is not consent to be named, and this route deliberately does
+    not hand an admin panel more personal data than the client portal
+    already shows for the same row. An admin who needs the name has
     GET /candidates and GET /candidates/{kind}/{id} for that, both of
     which are the routes where naming a candidate is the point.
     """
     conditions = []
     params: list = []
     for column, value in (("pe.candidate_id", candidate_id), ("pe.client_id", client_id),
-                          ("pe.job_id", job_id)):
+                          ("pe.job_id", job_id), ("pe.stage", stage)):
         if value is not None:
             params.append(value)
             conditions.append(f"{column} = ${len(params)}")
@@ -1482,34 +1490,17 @@ async def admin_list_pipeline(
     total = await fetch_val(f"SELECT COUNT(*) FROM pipeline_entries pe WHERE {where}", *params) or 0
     params_ext = params + [limit, offset]
     rows = await fetch_all(
-        f"""SELECT pe.*, c.full_name, c.current_title, c.current_company,
-                   c.location, c.skills, j.title AS job_title,
-                   c.consent_spec_presentation_at, c.consent_withdrawn_at
-            FROM pipeline_entries pe
-            JOIN candidates c ON c.id = pe.candidate_id
-            JOIN job_orders j ON j.id = pe.job_id
+        f"""{PIPELINE_ROW_SQL}
             WHERE {where}
             ORDER BY pe.created_at DESC, pe.id DESC
             LIMIT ${len(params) + 1} OFFSET ${len(params) + 2}""",
         *params_ext,
     )
 
-    items = []
-    for r in rows:
-        item = dict(r)
-        eligible = (
-            item.get("consent_spec_presentation_at")
-            and not item.get("consent_withdrawn_at")
-        )
-        item.pop("consent_spec_presentation_at", None)
-        item.pop("consent_withdrawn_at", None)
-        if not eligible:
-            item.pop("full_name", None)
-        # NULL array column coerced to [] on read, as everywhere else.
-        item["skills"] = item.get("skills") or []
-        items.append(item)
-
-    return {"items": items, "total": total, "limit": limit, "offset": offset}
+    return {
+        "items": project_pipeline_rows(rows),
+        "total": total, "limit": limit, "offset": offset,
+    }
 
 
 @router.patch("/pipeline/{entry_id}/stage")

@@ -476,11 +476,67 @@ def test_admin_pipeline_route_is_admin_only_and_returns_a_total():
     source = inspect.getsource(admin.admin_list_pipeline)
     assert 'require_role("admin")' in source
     assert '"total": total' in source
-    assert '"client_id"' not in source, "client_id comes from pe.* -- no separate projection needed"
-    # The same consent gate as the client route, applied in Python.
-    assert "consent_spec_presentation_at" in source
-    assert 'item.pop("full_name", None)' in source
-    assert 'item["skills"] = item.get("skills") or []' in source
+    assert "PIPELINE_ROW_SQL" in source and "project_pipeline_rows(rows)" in source
+
+
+def test_both_pipeline_routes_share_one_select_and_one_consent_gate():
+    """code-review F3: the two routes used to carry verbatim copies of the
+    same SELECT list and the same seven-line gate. Only the WHERE may
+    differ now, or the next tightening lands on one route and not the
+    other."""
+    import inspect
+
+    from routers import admin, client
+
+    for func in (admin.admin_list_pipeline, client.get_pipeline):
+        source = inspect.getsource(func)
+        assert "PIPELINE_ROW_SQL" in source, func.__name__
+        assert "project_pipeline_rows(rows)" in source, func.__name__
+        # No local copy of the gate left behind.
+        assert "consent_spec_presentation_at" not in source, func.__name__
+        assert 'item.pop("full_name"' not in source, func.__name__
+
+
+def test_shared_pipeline_projection_drops_the_consent_columns_either_way():
+    from core.pipeline import project_pipeline_rows
+
+    named = project_pipeline_rows([{
+        "id": 1, "full_name": "Wel Genoemd", "skills": None,
+        "consent_spec_presentation_at": "2026-01-01", "consent_withdrawn_at": None,
+    }])[0]
+    assert named["full_name"] == "Wel Genoemd"
+    assert named["skills"] == []
+    assert "consent_spec_presentation_at" not in named
+    assert "consent_withdrawn_at" not in named
+
+    for row in (
+        {"id": 2, "full_name": "Geen Toestemming", "consent_spec_presentation_at": None,
+         "consent_withdrawn_at": None},
+        {"id": 3, "full_name": "Ingetrokken", "consent_spec_presentation_at": "2026-01-01",
+         "consent_withdrawn_at": "2026-02-01"},
+    ):
+        projected = project_pipeline_rows([row])[0]
+        assert "full_name" not in projected, projected
+        assert "consent_spec_presentation_at" not in projected
+        assert "consent_withdrawn_at" not in projected
+
+
+def test_shared_pipeline_select_carries_the_columns_the_gate_needs():
+    from core.pipeline import PIPELINE_ROW_SQL
+
+    for column in ("c.consent_spec_presentation_at", "c.consent_withdrawn_at", "c.full_name",
+                   "c.skills", "j.title AS job_title", "pe.*"):
+        assert column in PIPELINE_ROW_SQL, column
+
+
+def test_admin_pipeline_takes_the_same_stage_filter_as_the_client_route():
+    import inspect
+
+    from routers import admin
+
+    signature = inspect.signature(admin.admin_list_pipeline)
+    assert "stage" in signature.parameters
+    assert "pe.stage" in inspect.getsource(admin.admin_list_pipeline)
 
 
 def test_suppression_list_returns_total_next_to_items():

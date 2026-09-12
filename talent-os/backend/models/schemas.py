@@ -1,6 +1,6 @@
 """Talent OS — Pydantic schemas for request/response models."""
 from pydantic import BaseModel, EmailStr, Field, field_validator, model_validator
-from typing import Optional, List, Any, Literal
+from typing import Optional, List, Any, Literal, get_args
 from datetime import datetime, date
 from decimal import Decimal
 import re
@@ -832,9 +832,11 @@ class CandidateSearchParams(BaseModel):
 # names the allowed values rather than a 500 out of Postgres. Both the
 # admin panel's PATCH and the client portal's add/PATCH go through it --
 # the two write paths that exist.
-PIPELINE_STAGES = ("sourced", "new", "screening", "interview", "offer", "placed", "rejected")
-
 PipelineStage = Literal["sourced", "new", "screening", "interview", "offer", "placed", "rejected"]
+
+# Derived, never a second hand-written copy (code-review F4): two lists of
+# the same seven values is two places to forget when an eighth is added.
+PIPELINE_STAGES = get_args(PipelineStage)
 
 
 class PipelineAdd(BaseModel):

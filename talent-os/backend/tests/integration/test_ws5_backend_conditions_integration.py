@@ -61,6 +61,23 @@ def make_pipeline_entry(db_run, make_client_user):
     return _make
 
 
+@pytest.fixture
+def make_placement(db_run, make_pipeline_entry):
+    """A placements row plus the candidate/job/client it references."""
+    from core.database import fetch_one
+
+    def _make(**overrides):
+        base = make_pipeline_entry()
+        row = db_run(
+            fetch_one,
+            """INSERT INTO placements (candidate_id, job_id, client_id, placement_type, start_date, status)
+               VALUES ($1, $2, $3, 'werving_selectie', CURRENT_DATE, 'concept') RETURNING id""",
+            base["candidate_id"], base["job_id"], base["client_id"],
+        )
+        return {**base, "placement_id": row["id"]}
+    return _make
+
+
 # ── BV1: GET /api/v1/admin/pipeline ──────────────────────────────────────
 
 def test_bv1_admin_can_list_pipeline_entries_with_a_total(client, make_admin, make_pipeline_entry):
@@ -105,6 +122,29 @@ def test_bv1_filters_are_independent_and_combine(client, make_admin, make_pipeli
         headers=admin["headers"],
     ).json()
     assert mismatched["items"] == [] and mismatched["total"] == 0
+
+
+def test_bv1_stage_filter_matches_the_client_route(client, make_admin, make_pipeline_entry):
+    """code-review F3: the client route has had a stage filter all along;
+    the admin twin now takes the same one."""
+    admin = make_admin()
+    screening = make_pipeline_entry(stage="screening")
+    make_pipeline_entry(stage="offer", client_id=screening["client_id"])
+
+    hit = client.get(
+        "/api/v1/admin/pipeline",
+        params={"client_id": screening["client_id"], "stage": "screening"},
+        headers=admin["headers"],
+    ).json()
+    assert [i["id"] for i in hit["items"]] == [screening["entry_id"]]
+    assert hit["total"] == 1
+
+    miss = client.get(
+        "/api/v1/admin/pipeline",
+        params={"client_id": screening["client_id"], "stage": "placed"},
+        headers=admin["headers"],
+    ).json()
+    assert miss["items"] == [] and miss["total"] == 0
 
 
 def test_bv1_unfiltered_call_pages_and_reports_the_full_total(client, make_admin, make_pipeline_entry):
@@ -542,6 +582,69 @@ def test_bv8_migration_043_runs_twice_and_tolerates_an_unknown_existing_value(
     assert db_run(fetch_val, "SELECT stage FROM pipeline_entries WHERE id = $1", deviating["entry_id"]) == "screening"
 
 
+# Every value migrations/043's mapping table claims to handle, and what it
+# must become. Seeded as real rows (code-review F5) so a mapping that is
+# dropped from the SQL fails here on its own line instead of disappearing
+# quietly into the catch-all and reading as 'sourced'.
+_MAPPED_STAGES = {
+    "  Screening ": "screening",
+    "INTERVIEW": "interview",
+    "": "sourced",
+    "applied": "new",
+    "contacted": "new",
+    "active": "new",
+    "suggested": "sourced",
+    "interviewing": "interview",
+    "offered": "offer",
+    "hired": "placed",
+    "declined": "rejected",
+    "afgewezen": "rejected",
+}
+
+
+def test_bv8_migration_043_maps_every_documented_value_to_its_own_target(db_run, make_pipeline_entry):
+    """One row per documented mapping. 'sourced' as an expected result is
+    only correct for the two values that genuinely mean "no progress
+    recorded"; for the rest it would mean the mapping was lost and the
+    catch-all swallowed it."""
+    from core.database import execute, fetch_val
+
+    mod = _load_043()
+    entries = {stored: make_pipeline_entry() for stored in _MAPPED_STAGES}
+
+    db_run(execute, "ALTER TABLE pipeline_entries DROP CONSTRAINT IF EXISTS pipeline_entries_stage_check")
+    for stored, made in entries.items():
+        db_run(execute, "UPDATE pipeline_entries SET stage = $1 WHERE id = $2", stored, made["entry_id"])
+    db_run(execute, "DELETE FROM schema_migrations WHERE version = $1", mod.VERSION)
+
+    db_run(mod.run_migration, mod.VERSION, mod.MIGRATION_SQL)
+
+    for stored, expected in _MAPPED_STAGES.items():
+        actual = db_run(
+            fetch_val, "SELECT stage FROM pipeline_entries WHERE id = $1", entries[stored]["entry_id"],
+        )
+        assert actual == expected, f"{stored!r} became {actual!r}, expected {expected!r}"
+
+
+def test_bv8_migration_043_leaves_a_null_stage_alone(db_run, make_pipeline_entry):
+    """NULL satisfies the CHECK, so there is nothing to normalise and
+    nothing that would make the row unwritable."""
+    from core.database import execute, fetch_val
+
+    mod = _load_043()
+    made = make_pipeline_entry()
+
+    db_run(execute, "ALTER TABLE pipeline_entries DROP CONSTRAINT IF EXISTS pipeline_entries_stage_check")
+    db_run(execute, "UPDATE pipeline_entries SET stage = NULL WHERE id = $1", made["entry_id"])
+    db_run(execute, "DELETE FROM schema_migrations WHERE version = $1", mod.VERSION)
+
+    db_run(mod.run_migration, mod.VERSION, mod.MIGRATION_SQL)
+
+    assert db_run(fetch_val, "SELECT stage FROM pipeline_entries WHERE id = $1", made["entry_id"]) is None
+    db_run(execute, "UPDATE pipeline_entries SET notes = NULL WHERE id = $1", made["entry_id"])
+    db_run(execute, "UPDATE pipeline_entries SET stage = 'sourced' WHERE id = $1", made["entry_id"])
+
+
 def test_bv8_migration_043_leaves_every_row_writable_for_erase_person(db_run, make_pipeline_entry):
     """security-audit HIGH. A NOT VALID CHECK skips only the initial scan;
     it still fires on every later write to a row, including one that does
@@ -792,15 +895,152 @@ def test_bv10_candidates_sort_applies_across_both_merge_branches(client, db_run,
     )
 
 
-def test_bv10_omitting_sort_keeps_the_historical_order(client, make_admin):
-    """Every existing caller passes neither parameter, so the default must
-    still be created_at DESC on the user list."""
+# (path, the field carrying the route's default sort, is the default DESC)
+# -- every one of these is called by the panel on load with no sort at
+# all, so the default ordering is the contract that matters most.
+_DEFAULT_ORDER_ROUTES = [
+    ("/api/v1/admin/users", "created_at", True),
+    ("/api/v1/admin/candidates", "created_at", True),
+    ("/api/v1/admin/jobs", "created_at", True),
+    # PlacementResponse does not expose created_at, so the check reads the
+    # route's own tiebreaker instead: ids are monotonic with insertion, so
+    # id DESC is created_at DESC for this table.
+    ("/api/v1/admin/placements", "id", True),
+    ("/api/v1/admin/retention/review", "term_expired_at", False),
+]
+
+
+@pytest.mark.parametrize("path,field,descending", _DEFAULT_ORDER_ROUTES)
+def test_bv10_omitting_sort_keeps_the_historical_order(
+    client, make_admin, make_placement, review_items, path, field, descending,
+):
+    """Every existing caller passes neither parameter, so each route must
+    still return its own historical ordering. Parametrised over all five
+    (code-review F1): the single-route version of this test let both
+    "drop the reverse() from the /candidates merge" and "flip the
+    /candidates default to ASC" through the whole suite."""
     admin = make_admin()
-    items = client.get(
-        "/api/v1/admin/users", params={"limit": 10}, headers=admin["headers"],
+    review_items(3)
+    for _ in range(2):
+        make_placement()
+
+    items = client.get(path, params={"limit": 10}, headers=admin["headers"]).json()["items"]
+    values = [r[field] for r in items if r.get(field) is not None]
+    assert len(values) >= 2, f"{path}: need at least two rows to detect an order"
+    assert values == sorted(values, reverse=descending), path
+
+
+def test_bv10_candidates_default_is_newest_first_and_order_desc_reverses_it(
+    client, db_run, make_admin, make_email,
+):
+    """The /candidates default in particular: it is the merged two-branch
+    route, its order is produced in Python, and the panel loads it with no
+    parameters. Both directions asserted, so a lost reverse() or a flipped
+    default cannot pass."""
+    from core.database import fetch_one
+
+    admin = make_admin()
+    suffix = uuid.uuid4().hex[:8]
+    for i in range(3):
+        db_run(
+            fetch_one,
+            """INSERT INTO candidates (full_name, email, source, lawful_basis)
+               VALUES ($1, $2, 'manual', 'gerechtvaardigd_belang') RETURNING id""",
+            f"Default Order {suffix} {i}", make_email(f"ws5-defaultorder-{suffix}-{i}"),
+        )
+
+    default = client.get(
+        "/api/v1/admin/candidates", params={"search": suffix, "limit": 10}, headers=admin["headers"],
     ).json()["items"]
-    created = [r["created_at"] for r in items]
-    assert created == sorted(created, reverse=True)
+    created = [r["created_at"] for r in default]
+    assert len(created) == 3
+    assert created == sorted(created, reverse=True), "the default is newest first"
+
+    ascending = client.get(
+        "/api/v1/admin/candidates",
+        params={"search": suffix, "limit": 10, "sort": "created_at", "order": "asc"},
+        headers=admin["headers"],
+    ).json()["items"]
+    assert [r["email"] for r in ascending] == [r["email"] for r in reversed(default)], (
+        "order=asc must be the exact reverse of the default page"
+    )
+
+    descending = client.get(
+        "/api/v1/admin/candidates",
+        params={"search": suffix, "limit": 10, "sort": "created_at", "order": "desc"},
+        headers=admin["headers"],
+    ).json()["items"]
+    assert [r["email"] for r in descending] == [r["email"] for r in default], (
+        "order=desc must reproduce the default page"
+    )
+
+
+def test_bv10_candidates_merge_matches_postgres_for_both_directions(
+    client, db_run, make_admin, make_email,
+):
+    """code-review F2: the merge is sorted in Python while each branch is
+    cut in SQL, and nothing until now compared the two. Seeds NULL and
+    non-NULL sort values across both branches and asserts the route's id
+    sequence equals what Postgres produces for the same ids."""
+    from core.database import execute, fetch_all, fetch_one
+
+    admin = make_admin()
+    suffix = uuid.uuid4().hex[:8]
+    candidate_ids = []
+    # Branch A: two with a title, one with NULL.
+    for i, title in enumerate((f"Zeta {suffix}", None, f"Alfa {suffix}")):
+        row = db_run(
+            fetch_one,
+            """INSERT INTO candidates (full_name, email, current_title, source, lawful_basis)
+               VALUES ($1, $2, $3, 'manual', 'gerechtvaardigd_belang') RETURNING id""",
+            f"Merge A {suffix} {i}", make_email(f"ws5-mergeA-{suffix}-{i}"), title,
+        )
+        candidate_ids.append(row["id"])
+    # Branch B: same mix, on candidate_profiles rows with no candidates row.
+    user_ids = []
+    for i, title in enumerate((f"Mu {suffix}", None, f"Beta {suffix}")):
+        user = db_run(
+            fetch_one,
+            """INSERT INTO users (email, password_hash, full_name, role, is_verified)
+               VALUES ($1, 'x', $2, 'candidate', TRUE) RETURNING id""",
+            make_email(f"ws5-mergeB-{suffix}-{i}"), f"Merge B {suffix} {i}",
+        )
+        db_run(
+            execute,
+            "INSERT INTO candidate_profiles (user_id, current_title) VALUES ($1, $2) "
+            "ON CONFLICT (user_id) DO UPDATE SET current_title = EXCLUDED.current_title",
+            user["id"], title,
+        )
+        user_ids.append(user["id"])
+
+    for direction, sql_direction in (("asc", "ASC"), ("desc", "DESC")):
+        route_ids = [
+            item["id"] for item in client.get(
+                "/api/v1/admin/candidates",
+                params={"search": suffix, "sort": "current_title", "order": direction, "limit": 50},
+                headers=admin["headers"],
+            ).json()["items"]
+        ]
+        assert len(route_ids) == 6, route_ids
+
+        # The same six rows, ordered by Postgres over one UNION ALL, on the
+        # same (current_title, created_at) pair the route orders on.
+        expected = db_run(
+            fetch_all,
+            f"""SELECT id FROM (
+                    SELECT c.id AS id, c.current_title AS current_title, c.created_at AS created_at
+                      FROM candidates c WHERE c.id = ANY($1::int[])
+                    UNION ALL
+                    SELECT u.id AS id, cp.current_title AS current_title, cp.created_at AS created_at
+                      FROM candidate_profiles cp JOIN users u ON u.id = cp.user_id
+                     WHERE u.id = ANY($2::int[])
+                ) merged
+                ORDER BY current_title {sql_direction}, created_at {sql_direction}""",
+            candidate_ids, user_ids,
+        )
+        assert route_ids == [r["id"] for r in expected], (
+            f"{direction}: the Python merge disagrees with Postgres over the same rows"
+        )
 
 
 def test_bv10_sorting_on_the_tiebreaker_column_itself_works(client, make_admin):

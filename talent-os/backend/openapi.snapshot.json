@@ -10535,7 +10535,7 @@
     },
     "/api/v1/admin/pipeline": {
       "get": {
-        "description": "WS5 BV1 (\u00a77.3.4): the admin panel's pipeline tab needs an entry_id\nbefore it can call PATCH .../{entry_id}/stage or GET .../history, and\nuntil now no admin route listed pipeline entries at all -- the only\nlist route was GET /api/v1/client/pipeline, scoped to the client\nbehind the JWT and therefore unusable with an admin token.\n\nSame row shape as that client route plus `client_id`, and the same\npresentation-consent gate on `full_name`: a pipeline entry existing\nis not consent to be named, and this route deliberately does not hand\nan admin panel more personal data than the client portal already\nshows for the same row. An admin who needs the name has\nGET /candidates and GET /candidates/{kind}/{id} for that, both of\nwhich are the routes where naming a candidate is the point.",
+        "description": "WS5 BV1 (\u00a77.3.4): the admin panel's pipeline tab needs an entry_id\nbefore it can call PATCH .../{entry_id}/stage or GET .../history, and\nuntil now no admin route listed pipeline entries at all -- the only\nlist route was GET /api/v1/client/pipeline, scoped to the client\nbehind the JWT and therefore unusable with an admin token.\n\nSame row shape as that client route, literally: one shared SELECT\nlist and one shared consent gate in core/pipeline.py, so the two\ncannot drift. `client_id` is part of that shape already (it comes out\nof `pe.*`); what this route adds is that it can be filtered on,\nalongside candidate_id, job_id and stage, instead of being pinned to\nthe caller's own client.\n\nThe gate on `full_name` is the client route's gate: a pipeline entry\nexisting is not consent to be named, and this route deliberately does\nnot hand an admin panel more personal data than the client portal\nalready shows for the same row. An admin who needs the name has\nGET /candidates and GET /candidates/{kind}/{id} for that, both of\nwhich are the routes where naming a candidate is the point.",
         "operationId": "admin_list_pipeline_api_v1_admin_pipeline_get",
         "parameters": [
           {
@@ -10584,6 +10584,24 @@
                 }
               ],
               "title": "Job Id"
+            }
+          },
+          {
+            "description": "Exact stage match, same filter as GET /api/v1/client/pipeline.",
+            "in": "query",
+            "name": "stage",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Exact stage match, same filter as GET /api/v1/client/pipeline.",
+              "title": "Stage"
             }
           },
           {
