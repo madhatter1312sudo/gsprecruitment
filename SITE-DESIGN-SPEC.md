@@ -289,6 +289,27 @@ There is no `superadmin` role; every admin account sits behind the MFA flow in `
 
 Empty/error states across the panel use the Dutch "Kon niet laden, probeer opnieuw" retry pattern and "Nog geen …" empty-state copy.
 
+### 7.1 Bouwlagen (WS5, september 2026)
+
+Tabler 1.4 blijft, geen herbouw. De schil is wel op de canonieke tokens gezet en de front-endcode is opgesplitst:
+
+| Laag | Bestand | Verantwoordelijkheid |
+|---|---|---|
+| Tokens | `website/theme.css` | §1.2/§1.3/§1.4, eerste stylesheet van het paneel |
+| Schil | `website/admin/admin.css` | `--tblr-*` op de merktokens, compatklassen, ~21 semantische utilityklassen (`.a-*`), gedocumenteerd bovenaan het bestand |
+| Kern | `website/admin/js/admin.js` | state, laad-/foutstaten, `badge()`, paginering, dashboard, sectieregistry, één gedelegeerde click-listener |
+| ui-laag | `website/admin/js/ui.js` | `ui.modal`, `ui.drawer`, `ui.tabs`, `ui.table`, `ui.confirm` op de Bootstrap 5-componenten van Tabler |
+| Labels | `website/admin/js/labels.js` | alle enum→labelvertalingen, Nederlands, sleutels uit de backend |
+| Secties | `website/admin/js/sections/<naam>.js` | één module per sectie, registreert zich via `Admin.registerSection({id, title, loader, skeletonHtml, filters, actions})` |
+| Navigatie | `website/admin/js/nav.js` | leest de registry voor titels, loaders en filterbinding |
+
+Twee bewuste afwijkingen van §1.2 in dit paneel:
+
+- De inline compat-shim die `--navy-*` op eigen waarden zette (`#142235`, `#0E1B2E`) en radius 8–20px gaf, is verwijderd. Het paneel draait nu op `--navy-800 #0A1628`, `--navy-700 #0F1D35` en radius 3px.
+- Gedempte tekst in het paneel is `--navy-200`, niet `--navy-300`. `--navy-300` haalt op `--navy-800` 3,3:1 en zakt onder de AA-ondergrens van 4,5:1; `--navy-200` haalt 6,6:1. `--navy-300` blijft in gebruik voor hairlines en iconen. `scripts/css_tokens_check.py` bewaakt de tokenpariteit van `admin.css` en faalt op elke hardcoded navy- of goudwaarde daarin.
+
+Bekend openstaand punt: de gevendorde `admin/vendor/tabler/js/tabler.min.js` van Tabler 1.4 bevat Bootstrap zelf niet, dus `window.bootstrap` bestaat niet in het paneel. `ui.js` gebruikt de Bootstrap Modal/Offcanvas als die er is en valt anders terug op dezelfde markup en klassen met eigen focustrap, Escape en backdrop. Het mobiele sidebarmenu (`data-bs-toggle="collapse"`) werkt daardoor niet.
+
 ---
 
 ## 8. Component Library

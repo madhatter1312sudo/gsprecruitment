@@ -39,11 +39,6 @@
     }
   },
 
-  erkendReferentLabel(value) {
-    const map = { ja: 'Ja', nee: 'Nee', onbekend: 'Onbekend' };
-    return map[value] || 'Onbekend';
-  },
-
   erkendReferentBadgeClass(value) {
     if (value === 'ja') return 'badge bg-green-lt';
     if (value === 'nee') return 'badge bg-red-lt';
@@ -63,11 +58,6 @@
         <td><span class="${this.erkendReferentBadgeClass(c.erkend_referent)}">${this.erkendReferentLabel(c.erkend_referent)}</span></td>
         <td class="text-end"><i class="fa-solid fa-chevron-right text-secondary"></i></td>
       </tr>`)}`);
-  },
-
-  roleLabel(role) {
-    const map = { hiring_manager: 'Hiring manager', finance: 'Financiën', tekenbevoegd: 'Tekenbevoegd', overig: 'Overig' };
-    return map[role] || '—';
   },
 
   openClientDrawer(clientId) {
@@ -332,11 +322,6 @@
      GET /v1/admin/activities?subject_type=client&subject_id=.. landed on
      main after this feature was first built (migrations/028_activities.py,
      routers/activities.py) -- read-only here, matching the task spec. */
-  activityTypeLabel(type) {
-    const map = { note: 'Notitie', call: 'Telefoongesprek', email: 'E-mail', meeting: 'Afspraak', task: 'Taak', status_change: 'Statuswijziging' };
-    return map[type] || type || '—';
-  },
-
   async loadClientActivityTab(clientId) {
     const el = document.getElementById('clientDrawerTabContent');
     if (!el) return;

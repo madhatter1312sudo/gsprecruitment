@@ -71,15 +71,6 @@ const Admin = {
     const colors = { green: 'bg-green-lt', blue: 'bg-blue-lt', gold: 'bg-yellow-lt', red: 'bg-red-lt', default: 'bg-secondary-lt' };
     return `badge ${colors[map[status?.toLowerCase()] || 'default']}`;
   },
-  // Dutch label for a candidate-pipeline status word (badge() above picks
-  // the color; this picks the text) — an unrecognised value still shows
-  // itself (escaped by html``, never hidden) rather than falling back to
-  // a silent "—".
-  statusLabel(status) {
-    const map = { sourced: 'Gesourced', new: 'Nieuw', contacted: 'Benaderd',
-      screening: 'Screening', active: 'Actief', placed: 'Geplaatst', inactive: 'Inactief' };
-    return map[status?.toLowerCase()] || status || 'Actief';
-  },
   // esc()/safeUrl() delegate to the shared GSP.esc/GSP.safeUrl (gsp-util.js,
   // loaded before this file) so the public site and admin panel share one
   // escaping implementation. Kept as Admin.esc/Admin.safeUrl for every
@@ -352,35 +343,25 @@ const Admin = {
   /* ============================================================
      MODAL
      ============================================================ */
-  // `bodyHtml` is always an html``/raw() RawHtml result from the caller —
-  // never renamed to `html`, which would shadow the module-level html``
-  // tag this method sits alongside.
-  // `opts.wide` widens the panel (760px vs the 520px default) for content
-  // that needs more room -- the client detail drawer's tabs (WS-B.5), which
-  // reuse this same modal overlay rather than a separate drawer component.
+  // De ad-hoc overlay die hier stond is vervangen door ui.modal (js/ui.js),
+  // dat op de Bootstrap 5 Modal van Tabler draait: focustrap, Escape,
+  // aria-modal/aria-labelledby en focus terug naar de opener zitten daar.
+  // Deze twee methodes blijven bestaan omdat elke sectie ze aanroept;
+  // `id` is historisch (een label, geen DOM-id) en wordt genegeerd: er is
+  // één overlay, #adminModalOverlay. `opts.wide` verbreedt het paneel naar
+  // 760px voor het opdrachtgeverspaneel met zijn tabbladen.
   openModal(id, bodyHtml, opts = {}) {
-    let overlay = document.getElementById('adminModalOverlay');
-    if (!overlay) {
-      overlay = document.createElement('div');
-      overlay.id = 'adminModalOverlay';
-      overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:999;display:flex;align-items:center;justify-content:center;padding:1rem;backdrop-filter:blur(4px);';
-      overlay.addEventListener('click', e => { if (e.target === overlay) this.closeModal(); });
-      document.body.appendChild(overlay);
-    }
-    const maxWidth = opts.wide ? '760px' : '520px';
-    mount(overlay, html`
-      <div style="background:var(--navy-900);border:1px solid rgba(74,111,159,0.2);border-radius:var(--radius-xl);padding:var(--space-2xl);max-width:${maxWidth};width:100%;max-height:80vh;overflow-y:auto;position:relative;">
-        <button data-action="close-modal" style="position:absolute;top:1rem;right:1rem;background:none;border:none;color:var(--navy-200);cursor:pointer;font-size:1.2rem;">
-          <i class="fa-solid fa-xmark"></i>
-        </button>
-        ${bodyHtml}
-      </div>`);
-    overlay.style.display = 'flex';
+    this._modal = ui.modal({
+      id: 'adminModalOverlay',
+      body: bodyHtml,
+      wide: !!opts.wide,
+      ariaLabel: opts.ariaLabel || 'Detailpaneel',
+    });
+    return this._modal;
   },
 
   closeModal() {
-    const overlay = document.getElementById('adminModalOverlay');
-    if (overlay) overlay.style.display = 'none';
+    if (this._modal) { this._modal.close(); this._modal = null; }
   },
 
   /* ============================================================

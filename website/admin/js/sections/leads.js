@@ -39,31 +39,12 @@
     }
   },
 
-  leadInterestLabel(type) {
-    const map = {
-      werving_selectie: 'Werving & selectie', detachering_internationaal: 'Detachering (internationaal)',
-      kandidaat: 'Kandidaat', overig: 'Overig',
-    };
-    return map[type] || '—';
-  },
-
   // Dienstlijn label for a job's raw `employment_type` value -- used by the
   // client drawer's Vacatures tab and the Rapportage breakdown so a raw
   // enum string (or an unrecognised one) never renders straight into the
   // UI. Unknown values fall back to the raw value itself (still escaped by
   // html``, never raw()) rather than a silent "—", so a value this map
   // hasn't caught up with is still visible instead of hidden.
-  dienstlijnLabel(type) {
-    const map = {
-      vast: 'Vast (werving en selectie)',
-      detachering: 'Detachering',
-      interim: 'Interim',
-      werving_selectie: 'Werving en selectie',
-      detachering_internationaal: 'Detachering (internationaal)',
-    };
-    return map[type] || type || 'onbekend';
-  },
-
   // source_page + referrer_host (WS2, migrations/038_leads_origin.py) as
   // one compact column — a lead with neither renders "—" rather than an
   // empty cell.
