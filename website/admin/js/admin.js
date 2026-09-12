@@ -12,13 +12,13 @@ const { html, raw, mount } = GSP;
 
 const Admin = {
   _data: {},
-  _currentPage: { users: 1, candidates: 1, audit: 1, outreach: 1, blog: 1, leads: 1, jobs: 1 },
+  _currentPage: { users: 1, candidates: 1, audit: 1, outreach: 1, blog: 1, leads: 1, jobs: 1, retention: 1 },
   // Filters passed to the load*() call that produced the currently-rendered
   // page, keyed the same as _currentPage — a data-page click re-derives the
   // page from here instead of needing a fresh closure per render.
   // `clients` isn't in _currentPage/goToPage's loaders map -- the roster
   // fetches a single limit=200 page (see loadClients()), no data-page UI.
-  _lastParams: { users: {}, candidates: {}, audit: {}, outreach: {}, blog: {}, leads: {}, jobs: {}, clients: {} },
+  _lastParams: { users: {}, candidates: {}, audit: {}, outreach: {}, blog: {}, leads: {}, jobs: {}, clients: {}, retention: {} },
   _pageSize: 20,
 
   /* ---- Init ---- */
@@ -77,6 +77,24 @@ const Admin = {
   // existing call site in this file — do not remove.
   esc(s) {
     return GSP.esc(s);
+  },
+  // Eén normalisatie van een 4xx/5xx-`detail` (SITE-DESIGN-SPEC.md §7.2f
+  // punt 4). Nieuwe endpoints geven `detail` als object met `code` en
+  // `message`; oudere geven een gewone string, en die wordt hier een
+  // `message` met een lege `code`. Elk aanroeppunt vertakt daarna op
+  // `code` en valt terug op `message` -- nooit op de tekst zelf om te
+  // vertakken. Neem het hele responsobject mee (of alleen de detail);
+  // beide werken. Extra velden van het detailobject (`allowed`,
+  // `candidate_id`) blijven onder `extra` beschikbaar.
+  // De retentiesectie is de eerste afnemer; de andere secties migreren
+  // hier later naartoe.
+  errorDetail(payload) {
+    const d = (payload && typeof payload === 'object' && 'detail' in payload) ? payload.detail : payload;
+    if (typeof d === 'string') return { code: '', message: d, extra: {} };
+    if (d && typeof d === 'object' && !Array.isArray(d)) {
+      return { code: d.code || '', message: d.message || '', extra: d };
+    }
+    return { code: '', message: '', extra: {} };
   },
   safeUrl(s) {
     return GSP.safeUrl(s);
@@ -332,7 +350,7 @@ const Admin = {
     const loaders = {
       users: 'loadUsers', candidates: 'loadCandidates',
       outreach: 'loadOutreach', blog: 'loadBlog', audit: 'loadAuditLog',
-      leads: 'loadLeads', jobs: 'loadJobs',
+      leads: 'loadLeads', jobs: 'loadJobs', retention: 'loadRetentionReview',
     };
     const fn = loaders[section];
     if (!fn || !Number.isFinite(page) || page < 1) return;

@@ -18,7 +18,11 @@
        primary/secondary/danger: { label, onClick, keepOpen } of weggelaten.
        confirmText: de gebruiker moet die tekst letterlijk overtypen
        voordat de primaire of destructieve knop actief wordt.
-       handle: { el, close(), setBody(html), selectTab(key) }
+       handle: { el, close(), setBody(html), selectTab(key),
+                 button(role), setBusy(on) }
+       button('primary'|'secondary'|'danger') geeft het knopelement, en
+       setBusy(true) zet alle knoppen op disabled met een spinner op de
+       handelende knop (§7.2c: laden houdt het paneel staan).
 
      ui.drawer({ id, title, subtitle, tabs, tabAction, activeTab, dataset,
                  body, onSelect, onClose }) -> handle
@@ -29,22 +33,37 @@
        Tabstrip met role="tablist" en aria-selected. tabs is
        [{ key, label }]. dataset zet extra data-attributen op elke knop.
 
-     ui.table({ tbody, thead, cols, load, render, page, sortable })
-       Dun laagje over het bestaande renderPagination-patroon. Sorteren
-       is client-side binnen de opgehaalde pagina (de adminendpoints
-       kennen geen sort-parameter) en zet aria-sort op de kolomkop. Per
-       kolom kan `type` op 'text' | 'number' | 'date'.
+     ui.table({ tbody, thead, cols, load, render, page, sortable,
+                serverSort, empty })
+       Dun laagje over het bestaande renderPagination-patroon. Zet
+       aria-sort op de kolomkop en tekent de laad-, lege- en foutstaat via
+       Admin.setLoading/setEmpty/setLoadError. Per kolom kan `type` op
+       'text' | 'number' | 'date'.
+       Standaard sorteert het client-side binnen de opgehaalde pagina.
+       serverSort: true laat het sorteren aan de route over (WS5 BV10:
+       elke lijstroute neemt `sort` en `order`): een klik op een kolomkop
+       zet state.sortKey/sortDir, springt terug naar pagina 1 en roept
+       load(state) opnieuw aan, zodat er over de hele verzameling
+       gesorteerd wordt en niet binnen één pagina.
+       empty: de tekst voor de lege staat (html`` of string).
 
      ui.confirm(text, opts) -> Promise<boolean>
+       opts: { title, confirmLabel, cancelLabel, confirmText, danger,
+               body, onConfirm }
+       body is extra inhoud onder de vraag (bijvoorbeeld een optioneel
+       notitieveld); onConfirm() draait bij het bevestigen terwijl het
+       paneel nog staat, zodat de aanroeper de waarde van dat veld nog
+       kan uitlezen voordat de DOM verdwijnt.
 
      ui.closeTop() sluit het bovenste open paneel.
 
-   ui.table en ui.confirm hebben nu nog geen afnemer in het paneel. Hun
-   eerste afnemers zijn de retentie- en AVG-secties uit componentspec §7,
-   die direct na deze refactor volgen: een sorteerbare tabel met
-   bewaartermijnen, en een getypte bevestiging voor het verwijderen van
-   persoonsgegevens. De acht bestaande native confirm()-aanroepen blijven
-   in deze refactor ongemoeid.
+   ui.table en ui.confirm zijn sinds js/sections/retention.js in gebruik
+   (§7.3.1, de goedkeuringslijst bewaartermijnen): een server-gesorteerde
+   lijst met bewaartermijnen, en een getypte bevestiging voor het
+   onomkeerbaar verwerken van persoonsgegevens. serverSort, `empty`, de
+   foutstaat, `button()`/`setBusy()` en de twee ui.confirm-opties
+   hierboven zijn met die eerste afnemer meegegroeid. De acht bestaande
+   native confirm()-aanroepen elders in het paneel blijven ongemoeid.
 
    Toegankelijkheid, in alle gevallen:
      - role="dialog" + aria-modal="true" + aria-labelledby (of aria-label)
@@ -271,7 +290,8 @@
           <p class="a-confirm-hint" id="${hintId}">Typ <code>${opts.confirmText}</code> om te bevestigen.</p>
           <div class="form-group mb-0">
             <label for="${confirmId}">Bevestiging</label>
-            <input type="text" id="${confirmId}" autocomplete="off" aria-describedby="${hintId}">
+            <input type="text" id="${confirmId}" autocomplete="off" aria-describedby="${hintId}"
+              inputmode="text" autocapitalize="off" spellcheck="false">
           </div>
         </div>`
       : '';
@@ -297,7 +317,9 @@
 
     mount(el, isDrawer
       ? html`<div class="offcanvas-body">${inner}</div>`
-      : html`<div class="modal-dialog modal-dialog-centered modal-dialog-scrollable">
+      // modal-fullscreen-sm-down: op een telefoon vult het paneel het scherm
+      // (§7.2c). Tabler levert die klasse; hij doet boven 576px niets.
+      : html`<div class="modal-dialog modal-dialog-centered modal-dialog-scrollable modal-fullscreen-sm-down">
                <div class="modal-content"><div class="modal-body">${inner}</div></div>
              </div>`);
 
@@ -338,9 +360,41 @@
     const onHidden = () => close();
     el.addEventListener(hiddenEvent, onHidden);
 
+    // Knoppen per rol, zodat een aanroeper met een asynchrone actie zijn
+    // eigen laadstaat kan zetten zonder een id te hoeven kennen.
+    const byRole = {};
+    buttons.forEach((b, i) => { byRole[b.role] = btnIds[i]; });
+
     const handle = {
       el,
       close,
+      button(role) {
+        return byRole[role] ? document.getElementById(byRole[role]) : null;
+      },
+      // §7.2c, staat "laden": de handelende knop krijgt een spinner en
+      // disabled, de rest gaat uit, en het paneel blijft staan.
+      setBusy(on) {
+        buttons.forEach((b, i) => {
+          const node = document.getElementById(btnIds[i]);
+          if (!node) return;
+          if (on) {
+            if (node.dataset.gspLabel === undefined) node.dataset.gspLabel = node.innerHTML;
+            node.disabled = true;
+            if (b.role !== 'secondary') {
+              mount(node, html`<i class="fa-solid fa-spinner fa-spin"></i> ${b.label}`);
+            }
+          } else {
+            if (node.dataset.gspLabel !== undefined) {
+              // raw(): dit is de eigen, al gerenderde knoptekst van hierboven,
+              // niet iets uit een respons.
+              mount(node, raw(node.dataset.gspLabel));
+              delete node.dataset.gspLabel;
+            }
+            node.disabled = !!(confirmId && gated(b) && confirmInput
+              && confirmInput.value.trim() !== opts.confirmText);
+          }
+        });
+      },
       setBody(newBody) { mount(document.getElementById(bodyId), newBody); },
       selectTab(key) {
         el.querySelectorAll('[role="tab"]').forEach(t => {
@@ -410,6 +464,7 @@
     const tbodyEl = () => document.querySelector(opts.tbody);
     const theadEl = () => (opts.thead ? document.querySelector(opts.thead) : null);
     const cols = opts.cols || [];
+    const serverSort = opts.serverSort === true;
 
     function markHeaders() {
       const head = theadEl();
@@ -436,7 +491,10 @@
     }
 
     function sorted(items) {
-      if (!state.sortKey) return items;
+      // Bij serverSort is de volgorde die de route teruggaf de volgorde:
+      // client-side hersorteren zou de eerste pagina van een verzameling
+      // anders rangschikken dan de verzameling zelf.
+      if (serverSort || !state.sortKey) return items;
       const col = cols.find(c => c.key === state.sortKey) || {};
       const value = col.value || ((row) => row[state.sortKey]);
       const dir = state.sortDir === 'desc' ? -1 : 1;
@@ -450,14 +508,23 @@
     }
 
     function paint() {
-      mount(tbodyEl(), html`${sorted(state.items).map(opts.render)}`);
+      if (!state.items.length && opts.empty !== undefined && typeof Admin !== 'undefined') {
+        Admin.setEmpty(opts.tbody, cols.length, opts.empty);
+      } else {
+        mount(tbodyEl(), html`${sorted(state.items).map(opts.render)}`);
+      }
       markHeaders();
     }
 
     function sortBy(key) {
       if (state.sortKey === key) state.sortDir = state.sortDir === 'asc' ? 'desc' : 'asc';
       else { state.sortKey = key; state.sortDir = 'asc'; }
-      paint();
+      if (!serverSort) { paint(); return; }
+      // Server-side sorteren geldt over de hele verzameling, dus de pager
+      // begint weer bij pagina 1 met dezelfde filters (§7.2a).
+      const page = opts.page || {};
+      if (page.section && typeof Admin !== 'undefined') Admin._currentPage[page.section] = 1;
+      reload();
     }
 
     function bindHeaders() {
@@ -483,7 +550,18 @@
       if (typeof Admin !== 'undefined' && cols.length) {
         Admin.setLoading(opts.tbody, cols.length);
       }
-      const data = (await opts.load(state)) || {};
+      let data;
+      try {
+        data = (await opts.load(state)) || {};
+      } catch (err) {
+        // Foutstaat op dezelfde plek als de laadstaat; de retry roept
+        // exact dezelfde loader met dezelfde filters aan (§7.2a).
+        if (typeof Admin !== 'undefined' && cols.length) {
+          Admin.setLoadError(opts.tbody, cols.length, reload);
+        }
+        if (typeof opts.onError === 'function') opts.onError(err);
+        return;
+      }
       state.items = data.items || [];
       state.total = data.total || state.items.length;
       paint();
@@ -501,11 +579,16 @@
     const o = opts || {};
     return new Promise((resolve) => {
       let answer = false;
-      const action = { label: o.confirmLabel || 'Bevestigen', onClick: () => { answer = true; } };
+      const action = {
+        label: o.confirmLabel || 'Bevestigen',
+        // onConfirm draait terwijl het paneel nog staat, zodat de
+        // aanroeper een veld uit `body` nog kan uitlezen.
+        onClick: () => { answer = true; if (typeof o.onConfirm === 'function') o.onConfirm(); },
+      };
       modal({
         id: 'adminConfirmModal',
         title: o.title || 'Bevestigen',
-        body: html`<p class="a-soft">${text}</p>`,
+        body: html`<p class="a-soft">${text}</p>${o.body || ''}`,
         confirmText: o.confirmText,
         secondary: { label: o.cancelLabel || 'Annuleren', onClick: () => { answer = false; } },
         danger: o.danger === false ? null : action,
