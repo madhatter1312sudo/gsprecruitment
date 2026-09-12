@@ -7,6 +7,10 @@ name: Seed vacatures (handmatig)
 # als droogloop, daarna met apply=true. Het script is idempotent op
 # (client_id, title, seniority); nogmaals draaien voegt niets dubbel toe.
 # Terugdraaien: zie de docstring van scripts/seed_pool_vacancies.py.
+#
+# Er wordt niets uitgecheckt: alles draait over SSH op de code die de laatste
+# deploy naar de VPS heeft gezet. De gekozen ref bij "Run workflow" maakt dus
+# niet uit; wat telt is wat er op main is gedeployd.
 
 on:
   workflow_dispatch:
@@ -16,8 +20,12 @@ on:
         type: boolean
         default: false
 
+# Eigen groep, niet deploy-production: GitHub houdt per groep maar één
+# wachtende run vast, dus een gedeelde groep zou een wachtende deploy kunnen
+# annuleren. De seed doet alleen `run --rm` en raakt de draaiende containers
+# niet, dus samenloop met een deploy is onschadelijk.
 concurrency:
-  group: deploy-production
+  group: seed-vacatures
   cancel-in-progress: false
 
 jobs:
@@ -40,7 +48,7 @@ jobs:
         run: |
           ssh "${VPS_USER}@${VPS_HOST}" "
             cd ${VPS_PATH} && \
-            docker compose run --rm -T --no-deps backend python scripts/seed_pool_vacancies.py
+            docker compose run --rm -T backend python scripts/seed_pool_vacancies.py
           "
 
       - name: Invoeren (alleen bij apply=true)
@@ -48,14 +56,15 @@ jobs:
         run: |
           ssh "${VPS_USER}@${VPS_HOST}" "
             cd ${VPS_PATH} && \
-            docker compose run --rm -T --no-deps backend python scripts/seed_pool_vacancies.py --apply
+            docker compose run --rm -T backend python scripts/seed_pool_vacancies.py --apply
           "
 
-      - name: Controle publieke vacaturelijst
+      - name: Controle publieke vacaturelijst (alleen bij apply=true)
+        if: ${{ inputs.apply }}
         run: |
-          count=$(curl -sS -H "User-Agent: gsp-ops" https://api.gsprecruitment.nl/api/public/jobs | python3 -c 'import json,sys; d=json.load(sys.stdin); print(len(d) if isinstance(d, list) else -1)')
-          echo "Publieke vacatures op productie: ${count}"
-          if [ "${{ inputs.apply }}" = "true" ] && [ "${count}" -lt 27 ]; then
+          count=$(curl -fsS --retry 3 --retry-all-errors -H "User-Agent: gsp-ops" https://api.gsprecruitment.nl/api/public/jobs | python3 -c 'import json,sys; d=json.load(sys.stdin); print(sum(1 for j in d if j.get("anonymous_client") is True) if isinstance(d, list) else -1)')
+          echo "Poolvacatures (anonieme opdrachtgever) op productie: ${count}"
+          if [ "${count}" -lt 27 ]; then
             echo "Verwacht minstens 27 na apply, gevonden ${count}" >&2
             exit 1
           fi
