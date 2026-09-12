@@ -160,10 +160,10 @@
     <!-- Archetype 4, compacte variant (dienstenladder, SITE-DESIGN-SPEC.md
      §8.x.1) -- literal CSS grid from §8.x.1: 48px/220px/1fr/140px per
      .step-row, vijf gelijke rijen (lost de oude 3+2-asymmetrie op).
-     Classificatietags zijn taalneutraal (VAST/TIJDELIJK/FLEX/ZZP); interim
-     en detacheren delen TIJDELIJK omdat beide oprechte vaste-duurvormen
-     zijn -- de leidende zin/verantwoordelijkheidsverdeling maakt het
-     onderscheid, niet de tag (zie cluster-B.md voor deze keuze). -->
+     Classificatietags zijn taalneutraal en per rij uniek: VAST, INTERIM,
+     FLEX, DETACHERING, ZZP. De tag noemt de contractvorm van de rij zelf,
+     zodat twee rijen met een verschillende verantwoordelijkheidsverdeling
+     nooit hetzelfde label dragen. -->
     <div class="step-rail">
       <div class="step-row">
         <div class="step-row__num" aria-hidden="true">01</div>
@@ -187,7 +187,7 @@
           <p class="step-row__split lang-nl">Wij vinden en screenen de specialist; jij bepaalt de opdracht en werkwijze.</p>
           <a href="contact.html" class="go-link"><span class="lang-en">Find an interim specialist →</span><span class="lang-nl">Vind een interim-specialist →</span></a>
         </div>
-        <div class="step-row__tag">TIJDELIJK</div>
+        <div class="step-row__tag">INTERIM</div>
       </div>
       <div class="step-row">
         <div class="step-row__num" aria-hidden="true">03</div>
@@ -211,7 +211,7 @@
           <p class="step-row__split lang-nl">Het werkgeverschap loopt via een backoffice-partner; jij stuurt de engineer inhoudelijk aan.</p>
           <a href="contact.html" class="go-link"><span class="lang-en">Ask about secondment →</span><span class="lang-nl">Vraag naar detacheren →</span></a>
         </div>
-        <div class="step-row__tag">TIJDELIJK</div>
+        <div class="step-row__tag">DETACHERING</div>
       </div>
       <div class="step-row">
         <div class="step-row__num" aria-hidden="true">05</div>

@@ -339,7 +339,7 @@ Op 9 september 2026 zijn drie richtingen voor één sitebreed kaartsysteem ontwo
 | Kleur | **achtergrond `--navy-800`** (reparatie 2 — niet meer gelijk aan de `--navy-900`-sectie); rand `--navy-600`; top-accent **2px** (reparatie 2, was 1px) `--gold-500` (kaart 1) / `--navy-300` (kaart 2); kop/body wit / `--navy-100`; link `--gold-500` |
 | Hover/focus-visible | rand → `--navy-400`, top-accent intensiveert (`--gold-400` / `--navy-200`), `translateY(-2px)`, 150ms ease. Focus-visible: identiek + 2px `--gold-500`-outline, offset 2px, geen `overflow:hidden` op de kaart. |
 | Leeg/laden/fout | n.v.t. (statische content) |
-| 390px | 1 kolom, kaart volledige breedte, padding `--space-lg`, geen verkleining van kop/body |
+| <=600px | 1 kolom, kaart volledige breedte, padding `--space-lg`, geen verkleining van kop/body |
 | Taalspans | kop, body, linktekst elk een `.lang-nl`/`.lang-en`-paar; kaarthoogte volgt de langere (Nederlandse) versie, geen vaste hoogte |
 
 ##### 2. Lichte inhoudskaart met rand
@@ -354,7 +354,7 @@ Op 9 september 2026 zijn drie richtingen voor één sitebreed kaartsysteem ontwo
 | Kleur | kaart wit, rand `--gray-100` (`#E2E8F0`), sectie/paginafond `--gray-50`/`--off-white` (nooit wit-op-wit, zie §8.x.0); kop `--navy-900`; body `--gray-500` (7,58:1, ruime marge boven de 4,5:1-vloer); link `--gold-ink` |
 | Hover/focus-visible | rand → `--gold-ink`, `translateY(-2px)`, 150ms. Focus-visible identiek. |
 | Leeg/laden/fout | n.v.t. voor expertise (statisch); blog: laden = vlakke `--gray-50`-blokken op kop/meta/excerpt-posities, structuur (kader) blijft staan; fout = "Kon artikelen niet laden, probeer opnieuw" met tekstlink-retry |
-| 390px | 1 kolom, geen verkleining van kaartpadding onder `--space-lg` |
+| <=600px | 1 kolom, geen verkleining van kaartpadding onder `--space-lg` |
 | Taalspans | kop/body/link eigen paar; API-gerenderde blogvelden (titel/excerpt) komen al in actieve taal via `GSP.esc()`, geen span nodig; alleen de statische UI-tekst (kicker, "Lees meer") krijgt het paar |
 
 ##### 3. Datakaart (vacature/job)
@@ -372,7 +372,7 @@ Op 9 september 2026 zijn drie richtingen voor één sitebreed kaartsysteem ontwo
 | Lege staat | eigen kaart, gecentreerd, `.mark`-cijfer "00", eyebrow "Vacatures", kop NL "Er staan nu geen vacatures open; nieuwe rollen zijn in voorbereiding" / EN "New roles are being opened right now" (`script.js:689`, herzien: de eerdere NL/EN-koppen spraken elkaar tegen), body "Meld je aan voor de talentpool, dan nemen wij contact op zodra een passende rol binnenkomt." CTA **"Meld je aan voor de talentpool →"** naar `kandidaten.html#talentpoolOptin` (wijziging t.o.v. vandaag: niet langer naar `contact.html`, maar naar het bestaande dubbele-opt-in-formulier op die pagina — een concretere en al bestaande actie dan een generiek contactverzoek). |
 | Laadstaat | skeleton: meta-balk en het lege kader blijven zichtbaar op hun plek, titel/beschrijving/footer worden vlakke `--gray-50`-blokken, geen shimmer |
 | Foutstaat | linker haarlijn-accent in `--error` (`#dc2626`, bestaande `.form-error`-kleur, alleen als randkleur, nooit als tekstkleur), kop "Kon vacatures niet laden", CTA "Opnieuw proberen →" |
-| 390px | kaart volledige breedte gestapeld, `overflow-wrap:anywhere` niet nodig (geen lang e-mailadres hier), beschrijving blijft 3 regels |
+| <=600px | kaart volledige breedte gestapeld, `overflow-wrap:anywhere` niet nodig (geen lang e-mailadres hier), beschrijving blijft 3 regels |
 | Homepage-vacatureband bij nul vacatures | **gedragswijziging t.o.v. vandaag.** Vandaag verbergt `initHomeVacancies()` (`script.js:791-793`) de hele sectie zowel bij een lege lijst als bij een fetch-fout — twee verschillende situaties met hetzelfde (niets tonende) gedrag. Nieuw: bij een **lege lijst** (API antwoordt, nul jobs) toont de sectie één compacte lege-staat-kaart (dezelfde component als hierboven, talentpool-CTA), zodat de homepage nooit stilzwijgend een conversiekans laat liggen. Bij een **fetch-fout** (netwerk/5xx) blijft het huidige gedrag: sectie verbergen — de homepage-band is aanvullend, niet de primaire vacaturelijst (dat is `vacatures.html`, waar de foutstaat wel zichtbaar moet zijn), dus een kapotte sectie op de homepage verbergen blijft de juiste, eerlijke keuze. |
 | Taalspans | API-velden (titel/beschrijving) komen al in actieve taal via `GSP.esc()`; lege/laad/foutstaat-tekst en CTA's krijgen het standaardpaar |
 
@@ -390,24 +390,24 @@ Op 9 september 2026 zijn drie richtingen voor één sitebreed kaartsysteem ontwo
 | Typescale | cijfer `--font-size-xl` Newsreader; kop `--font-size-lg`; classificatietag `--font-size-xs` mono; leidende zin `--font-size-sm`; verantwoordelijkheidsverdeling `--font-size-xs` |
 | Kleur | paneel wit op `--off-white`-sectie (of `--shadow-sm` als het paneel zelf op wit staat, zie §8.x.0); **cijfer `--navy-300`** (reparatie 3, was een grijstint onder AA); classificatietag `--gold-ink`; CTA `.go-link` |
 | Hover/focus-visible | alleen op de CTA-link, niet op de hele rij — voorkomt "welke rij is de link"-verwarring (overgenomen van B) |
-| 390px | cijfer + kop + tag in een header-regel, content eronder met `padding-left:48px` voor uitlijning met de rij erboven; geen vaste px-breedtes op kindelementen, dus geen horizontale scroll |
-| Taalspans | standaardpaar per kop/zin/CTA; classificatietag (VAST/TIJDELIJK/FLEX/ZZP) is taalneutraal |
+| <=767px | cijfer + kop + tag in een header-regel, content eronder met `padding-left:48px` voor uitlijning met de rij erboven; geen vaste px-breedtes op kindelementen, dus geen horizontale scroll. Deze rij schakelt op 767px en niet op 600px zoals de andere archetypen: het raster `48px 220px minmax(0,1fr) 140px` heeft plus gaps en padding circa 768px nodig voordat de bodykolom leesbaar wordt, en de bodykolom staat op `minmax(0, 1fr)` zodat hij wikkelt in plaats van de rij te verbreden. |
+| Taalspans | standaardpaar per kop/zin/CTA; classificatietag is taalneutraal en per rij uniek: VAST, INTERIM, FLEX, DETACHERING, ZZP (de vijf contractvormen op werkgevers.html, in die volgorde) |
 
 **Uitgeklapt — werkwijze:**
 
 | | |
 |---|---|
-| Anatomie | verticale rail: 1440 horizontaal met alle 6 stapnummers compact, 390 verticaal langs de linkerkant. Actieve/huidige stap krijgt een uitgeklapte `.ed-card` met volledige copy; overige stappen tonen alleen cijfer + mono-label. |
-| Spacing | rail-item `flex:1` (1440) / `padding-block:--space-sm` (390); rail→kaart `--space-2xl` (1440) / `--space-lg` (390); kaart-padding `--space-xl` (1440) / `--space-lg` (390) |
-| Typescale | railcijfers `--font-size-lg`; actieve kaartkop `--font-size-2xl`; labels `--font-size-xs` mono |
-| Kleur | inactief `--navy-300`; actief `--navy-900` + `--gold-500`-onderstreping (decoratief, geen tekst); kaart-topaccent `--gold-500` |
-| 390px | verticale rail voorkomt de bestaande botsing tussen stapnummer en icoonkader — er is geen icoonkader meer in dit systeem |
+| Anatomie | verticale rail: 1440 horizontaal met alle 6 stapnummers compact, onder 601px verticaal langs de linkerkant. De rail is een statisch overzicht, geen voortgangs- of navigatie-element: alle zes de stappen staan tegelijk uitgeklapt als `.step-card-expanded` met volledige copy. Er is dus geen actieve of inactieve staat. |
+| Spacing | rail-item `flex:1` (1440) / `padding-block:--space-sm` (<=600px); rail naar kaart `--space-2xl` (1440) / `--space-lg` (<=600px); kaart-padding `--space-xl` (1440) / `--space-lg` (<=600px) |
+| Typescale | railcijfers `--font-size-lg`; kaartkop `--font-size-2xl`; labels `--font-size-xs` mono |
+| Kleur | railcijfer en -label `--navy-900`; geen onderstreping en geen tweede staat, want er is geen stap om als actief aan te wijzen; kaart-topaccent `--gold-500` |
+| <=600px | verticale rail voorkomt de bestaande botsing tussen stapnummer en icoonkader; er is geen icoonkader meer in dit systeem |
 | Staten | statisch overzicht, geen leeg/laden/fout |
 | Taalspans | standaardpaar per stap-label en kaart-copy |
 
 ##### 5. Chip/badge
 
-*Gebruikt op*: discipline-/classificatiecodes (`.mark.code`: C++/MT/OT/QA), contractvorm-tags (VAST/TIJDELIJK/FLEX/ZZP/DETACHERING), trust-badges (KvK, AVG, no cure no pay, garantietermijn, Brainport, reactietijd).
+*Gebruikt op*: discipline-/classificatiecodes (`.mark.code`: C++/MT/OT/QA), contractvorm-tags (VAST/INTERIM/FLEX/DETACHERING/ZZP), trust-badges (KvK, AVG, no cure no pay, garantietermijn, Brainport, reactietijd).
 
 | | |
 |---|---|
@@ -417,7 +417,7 @@ Op 9 september 2026 zijn drie richtingen voor één sitebreed kaartsysteem ontwo
 | Kleur | **op licht**: altijd `--gold-ink` als tekstkleur op wit/rand, **nooit** `--gold-600`/`--gold-700` als tekst (breekt de bevochten 5,17:1-vloer) en **nooit** een gevulde `--gold-300`-achtergrond (herintroduceert het "gele pil"-patroon dat deze migratie juist opheft). Neutrale chips (niveau/locatie): rand `--gray-100`, tekst `--gray-500`. **Op donker** (trust-strip in de navy-hero-context): rand `--navy-500`, tekst `--navy-100`. |
 | Radius | `--radius-full` toegestaan hier — dit is de bewuste uitzondering op de sitebrede 3px-regel |
 | Staten | statisch, geen interactie (chips zijn label, geen link) |
-| 390px | trust-badges: `display:grid; grid-template-columns:1fr 1fr` — twee gelijke kolommen in plaats van de huidige links-uitgelijnde, ongelijk brede pillen-wrap |
+| <=600px | trust-badges: `display:grid; grid-template-columns:1fr 1fr`, twee gelijke kolommen in plaats van een links-uitgelijnde, ongelijk brede pillen-wrap. Het media-blok staat in `styles.css` achter de ongeconditioneerde `.trust-badges`-regel, anders wint `display:flex` daarvan op gelijke specificiteit en doet het niets. |
 | Taalspans | standaardpaar behalve taalneutrale waarden ("KVK 75545586", disciplinecodes) |
 
 ##### 6. Contactmethode
@@ -432,7 +432,7 @@ Op 9 september 2026 zijn drie richtingen voor één sitebreed kaartsysteem ontwo
 | Kleur | label `--gold-ink`; waarde `--navy-900`; haarlijn `--gray-100` |
 | Overflow-fix | `overflow-wrap: anywhere` op de waarde-kolom (lost het bestaande "e-mailadres loopt tot de kaartrand"-probleem op 1440 op, waar `info@gsprecruitment.nl` nu tegen de rand kan lopen) |
 | Hover/focus-visible | hele rij onderstreept de waarde in `--gold-ink`, identiek op focus-visible |
-| 390px | rijen volledige breedte gestapeld — geen vaste px-veldbreedte meer, dus geen horizontale scroll |
+| <=600px | rijen volledige breedte gestapeld, geen vaste px-veldbreedte meer, dus geen horizontale scroll |
 | Taalspans | labels taalneutraal; reactietijd-tekst krijgt het standaardpaar |
 
 ---

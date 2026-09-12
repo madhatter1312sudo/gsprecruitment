@@ -22,7 +22,7 @@
   --gold-300: #FCE488;
   --gold-600: #D4A800;
   --gold-700: #AD8800;
-  --gold-glow: rgba(250, 200, 0, 0.35);
+  --gold-glow: rgba(250, 200, 0, 0.28);   /* gelijk aan styles.css en SITE-DESIGN-SPEC.md §1 */
   --gold-gradient: linear-gradient(135deg, #FBD74A 0%, #FAC800 45%, #D4A800 100%);
 
   /* ── Neutrals ───────────────────────────────────────────── */
@@ -69,6 +69,13 @@
   --header-height: 64px;
 
   /* ── Elevation ──────────────────────────────────────────── */
+  /* Deze drie wijken bewust af van styles.css en staan daarom op de
+     allowlist van scripts/css_tokens_check.py. De publieke site zet
+     schaduwen op wit (rgba(10,22,40,0.06) tot 0.10); dezelfde waarden op de
+     navy portalen zijn onzichtbaar, want een schaduw op een donker vlak
+     moet dieper en donkerder zijn om nog als elevatie te lezen. Het is dus
+     hetzelfde elevatie-idee met een oppervlakspecifieke waarde, niet twee
+     verschillende ontwerpen. */
   --shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
   --shadow-md: 0 8px 24px rgba(3, 8, 18, 0.35);
   --shadow-lg: 0 20px 50px rgba(3, 8, 18, 0.5);
@@ -76,7 +83,7 @@
   /* ── Motion ─────────────────────────────────────────────── */
   --transition-fast: 0.15s ease;
   --transition-base: 0.25s ease;
-  --transition: 0.25s ease;
+  --transition: 0.3s cubic-bezier(0.4, 0, 0.2, 1);   /* gelijk aan styles.css */
 }
 
 /* ── Portal base ──────────────────────────────────────────────

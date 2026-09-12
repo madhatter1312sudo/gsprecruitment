@@ -234,7 +234,16 @@
    without a mouse-only gap (§8.x.0 hover=focus-visible rule). */
 .card-dark:hover .go-link, .card-dark:focus-within .go-link,
 .choice-card:hover .choice-go, .choice-card:focus-within .choice-go { gap: 12px; }
-@media (max-width: 390px) {
+/* 600px, niet 390px. De zes mobiele blokken in dit onderdeel (archetype 1
+   t/m 6) stonden op max-width:390px, en dat is de breedte waarop getest
+   werd, geen breakpoint. Alles tussen 391px en 600px viel er dus buiten:
+   op werkgevers.html hield .step-row daar het 1440-raster
+   48px 220px 1fr 140px en liep de pagina horizontaal over (gemeten
+   scrollWidth boven de viewport: 263px op 391px, 242px op 412px, 174px op
+   480px, 22px op 640px; op origin/main 0px). 600px is de breakpoint die de
+   contactrail en de vaste stapel al gebruiken, dus de site heeft er nu één
+   in plaats van twee. Geldt voor alle zes de blokken hieronder. */
+@media (max-width: 600px) {
   .card-dark, .choice-card { padding: var(--space-lg); }
 }
 
@@ -323,7 +332,7 @@ body:not(.portal) .card > .mark:first-child, .service-card > .mark:first-child,
 .card--loading h3, .card--loading p { color: transparent; background: var(--gray-50); border-radius: var(--radius); }
 .card--error { border-left: 3px solid #dc2626; } /* matches existing .form-error color; border only, never text */
 .card--error .go-link { color: var(--gold-ink); }
-@media (max-width: 390px) {
+@media (max-width: 600px) {
   body:not(.portal) .card, .service-card, .path-card, .story-card { padding: var(--space-lg); }
 }
 
@@ -393,7 +402,13 @@ body:not(.portal) .card > .mark:first-child, .service-card > .mark:first-child,
 .step-row {
   box-sizing: border-box;
   display: grid;
-  grid-template-columns: 48px 220px 1fr 140px;
+  /* minmax(0, 1fr) op de bodykolom: een 1fr-track krimpt standaard niet
+     onder zijn min-content, dus tussen 601px (waar dit viervoudige raster
+     begint) en circa 680px duwden 48 + 220 + 140 vaste pixels plus de
+     min-content van de body de rij buiten de viewport (gemeten hScroll 61px
+     op 601px, 42px op 620px, 22px op 640px). Met minmax(0, 1fr) wikkelt de
+     body in plaats van de rij te verbreden; boven 680px verandert er niets. */
+  grid-template-columns: 48px 220px minmax(0, 1fr) 140px;
   gap: var(--space-lg);
   padding: var(--space-md) var(--space-lg);
   border-bottom: 1px solid var(--gray-100);
@@ -407,7 +422,13 @@ body:not(.portal) .card > .mark:first-child, .service-card > .mark:first-child,
 .step-row__split { font-size: var(--font-size-xs); color: var(--gray-500); margin-top: var(--space-xs); }
 .step-row .go-link { display: inline-flex; align-items: center; min-height: 44px; } /* §8.x.0 touch target */
 .step-row .go-link:hover, .step-row .go-link:focus-visible { color: var(--gold-ink); }
-@media (max-width: 390px) {
+/* 767px, waar de andere vijf archetype-blokken op 600px staan. Het
+   viervoudige raster hierboven heeft 48 + 220 + 140 vaste pixels nodig plus
+   gaps, padding en een leesbare bodykolom, en dat past pas vanaf circa
+   768px. Op 601px bleef de bodykolom met minmax(0, 1fr) op 25px staan: geen
+   horizontale overloop meer, maar ook niet te lezen. Tot 767px houdt de rij
+   daarom de gestapelde indeling. */
+@media (max-width: 767px) {
   /* cluster-B.md flagged the plain 1-column collapse: in DOM order the
      four children (num, title, body, tag) stacked one per row put the
      classification tag dead last, reading as the label of the NEXT row.
@@ -429,15 +450,20 @@ body:not(.portal) .card > .mark:first-child, .service-card > .mark:first-child,
 /* ── Archetype 4: genummerde stap — uitgeklapt (werkwijze, nieuw) ──
    Zie dezelfde toelichting als hierboven; .step-card (huidige werkwijze-
    markup) krijgt hieronder alleen een tokenmigratie, geen alias. */
+/* De rail op werkwijze.html is een statisch overzicht, geen voortgangs- of
+   navigatie-element: alle zes de kaarten eronder staan tegelijk uitgeklapt,
+   dus er is geen huidige stap om te markeren. Eén item markeren zou een
+   selectie suggereren die er niet is, en alle zes markeren maakt de
+   markering betekenisloos. Daarom geen actieve staat en geen gouden
+   onderstreping, en staat de leeskleur meteen op --navy-900; de eerdere
+   --navy-300 was de inactieve staat van een onderscheid dat niet bestaat. */
 .step-rail--vertical { display: flex; }
-.step-rail__item { flex: 1; padding-block: var(--space-sm); text-align: center; color: var(--navy-300); }
+.step-rail__item { flex: 1; padding-block: var(--space-sm); text-align: center; color: var(--navy-900); }
 .step-rail__num { font-family: var(--font-display); font-size: var(--font-size-lg); }
 .step-rail__label { font-family: var(--font-mono); font-size: var(--font-size-xs); text-transform: uppercase; letter-spacing: 0.13em; }
-.step-rail__item--active { color: var(--navy-900); }
-.step-rail__item--active .step-rail__num { text-decoration: underline solid var(--gold-500) 2px; text-underline-offset: 6px; }
 .step-card-expanded { margin-top: var(--space-2xl); padding: var(--space-xl); border-top: 2px solid var(--gold-500); background: var(--bg-card); }
 .step-card-expanded h3 { font-size: var(--font-size-2xl); }
-@media (max-width: 390px) {
+@media (max-width: 600px) {
   .step-rail--vertical { flex-direction: column; }
   .step-card-expanded { margin-top: var(--space-lg); padding: var(--space-lg); }
 }
@@ -467,10 +493,6 @@ body:not(.portal) .card > .mark:first-child, .service-card > .mark:first-child,
 .page-hero .trust-badge { border-color: var(--navy-500); }
 .trust-strip .ts-item { color: var(--navy-100); }
 .trust-strip--light .ts-item { color: var(--gray-500); }
-@media (max-width: 390px) {
-  .trust-badges { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-sm); }
-  .trust-badge { justify-content: center; }
-}
 
 /* ── Archetype 6: contactmethode (contact.html) ─────────────
    .contact-method/.cm-label/.cm-value alias retired — contact.html now
@@ -516,7 +538,7 @@ body:not(.portal) .card > .mark:first-child, .service-card > .mark:first-child,
    enige onderscheidende kenmerk is (WCAG 1.4.1). */
 .contact-detail a { color: inherit; text-decoration: underline; }
 .contact-detail a:hover, .contact-detail a:focus-visible { color: var(--gold-ink); }
-@media (max-width: 390px) {
+@media (max-width: 600px) {
   .contact-row__label { flex-basis: 84px; }
 }
 
@@ -1267,6 +1289,17 @@ section { padding: 100px 0; }
 .trust-badges { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 28px; position: relative; z-index: 1; }
 .trust-badge { font-weight: 600; background: var(--bg-card); }
 .page-hero .trust-badge { background: transparent; }
+/* Twee gelijke kolommen op smalle schermen (§8.x.1 archetype 5). Dit blok
+   stond eerder bij archetype 5 bovenin dit bestand, maar deed daar niets:
+   de ongeconditioneerde .trust-badges-regel hierboven heeft dezelfde
+   specificiteit en staat later in het bestand, dus display:flex won altijd
+   van display:grid. Nu staat het erachter en wint het wel. De badges gaan
+   daarmee van een wrappende rij met rafelige kolomstart naar twee kolommen
+   die op dezelfde x beginnen. */
+@media (max-width: 600px) {
+  .trust-badges { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-sm); }
+  .trust-badge { justify-content: center; }
+}
 
 /* ── Line-icon (kandidaten.html/vacatures.html props) ───────────────
    .step-icon/.service-icon-svg/.steps-list/.step-card/.step-num removed —

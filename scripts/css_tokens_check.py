@@ -57,6 +57,18 @@ CLASSES_MD = ROOT / "scratchpad" / "ws1-css-requests" / "classes.md"
 
 ALLOW_COMMENT = "css-tokens-check: safe on dark"
 
+# Tokens waarvan styles.css en theme.css bewust uiteenlopen, met de reden.
+# styles.css kleedt de publieke site aan (wit), theme.css de portalen
+# (navy). Een schaduw is geen kleurtoken maar een elevatiesignaal: dezelfde
+# rgba-waarde die op wit leest, is op navy onzichtbaar. Deze drie dus per
+# oppervlak, en gerapporteerd als waarschuwing in plaats van als fout.
+# Alles wat hier niet in staat, laat de check falen zoals voorheen.
+SURFACE_SPECIFIC = {
+    "--shadow": "elevatie op wit versus op navy",
+    "--shadow-md": "elevatie op wit versus op navy",
+    "--shadow-lg": "elevatie op wit versus op navy",
+}
+
 GRAY_TEXT_BANNED = ("gray-100", "gray-200", "gray-300")
 GOLD_UNCONDITIONAL_BANNED = ("gold-600", "gold-700")
 GOLD_DARK_ONLY = ("gold-400", "gold-500")
@@ -204,13 +216,17 @@ def check_theme_parity(allowlist):
     styles_tokens = parse_root_tokens(STYLESHEET)
     theme_tokens = parse_root_tokens(THEME)
     findings = []
+    allowed = []
     for name, sval in styles_tokens.items():
         if name in allowlist:
             continue
         tval = theme_tokens.get(name)
         if tval is not None and tval != sval:
-            findings.append((name, sval, tval))
-    return findings
+            if name in SURFACE_SPECIFIC:
+                allowed.append((name, sval, tval, SURFACE_SPECIFIC[name]))
+            else:
+                findings.append((name, sval, tval))
+    return findings, allowed
 
 
 def main():
@@ -242,7 +258,7 @@ def main():
 
     text_findings = check_gray_gold_text(clean_text, raw_lines)
     radius_findings = check_card_radius(raw_lines, card_classes)
-    parity_findings = check_theme_parity(allowlist)
+    parity_findings, parity_allowed = check_theme_parity(allowlist)
 
     total = len(text_findings) + len(radius_findings) + len(parity_findings)
 
@@ -266,6 +282,9 @@ def main():
             print(f"  {name}: styles.css={sval!r}  theme.css={tval!r}")
     else:
         print("[3/3] styles.css/theme.css token parity: clean.")
+    for name, sval, tval, reason in parity_allowed:
+        print(f"  warning: {name} divergeert bewust ({reason})")
+        print(f"    styles.css={sval!r}  theme.css={tval!r}")
 
     if total:
         print(f"\ncss_tokens_check: {total} violation(s) found.")
