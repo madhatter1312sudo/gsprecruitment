@@ -200,13 +200,42 @@ h1, h2, h3, h4,
    .toast-visible en niet Bootstraps .show, dus de zichtbaarheid komt van
    deze regel, met gelijke specificiteit en later in de cascade. */
 .toast-container .toast { display: flex; }
-.toast { display: flex; align-items: center; gap: 10px; padding: 14px 20px; border-radius: var(--radius-sm); font-size: .88rem; font-weight: 500; box-shadow: var(--shadow-lg); max-width: 360px; opacity: 0; transform: translateY(16px); transition: opacity var(--transition-base), transform var(--transition-base); }
+/* §7.2f: één vlak voor alle vier de varianten (--navy-900), een 1px rand
+   en een 3px linkerrand in de inktkleur van de variant. De volvlakke
+   #065f46/#991b1b/#78350f die hier stonden trokken meer aandacht dan de
+   mededeling waard is en botsten met de navy schil; ze stonden bovendien
+   buiten de tokenlaag. Radius --radius (3px), niet --radius-sm uit de oude
+   shim. */
+.toast {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 20px;
+  border-radius: var(--radius);
+  font-size: .88rem;
+  font-weight: 500;
+  box-shadow: var(--shadow-lg);
+  max-width: 360px;
+  opacity: 0;
+  transform: translateY(16px);
+  transition: opacity var(--transition-base), transform var(--transition-base);
+  background: var(--navy-900);
+  color: var(--white);
+  border: 1px solid var(--navy-500);
+  border-left: 3px solid var(--navy-500);
+}
 .toast-visible { opacity: 1; transform: translateY(0); }
 .toast-removing { opacity: 0; transform: translateX(40px); }
-.toast-success { background: #065f46; color: var(--white); }
-.toast-error { background: #991b1b; color: var(--white); }
-.toast-warning { background: #78350f; color: var(--white); }
-.toast-info { background: var(--navy-600); color: var(--white); }
+.toast-success { border-left-color: var(--ink-success); }
+.toast-error { border-left-color: var(--ink-error); }
+.toast-warning { border-left-color: var(--ink-warning); }
+.toast-info { border-left-color: var(--ink-info); }
+/* Het pictogram draagt de kleur van de variant; de tekst blijft --white,
+   want die moet op elke variant even goed leesbaar zijn. */
+.toast-success .toast-icon { color: var(--ink-success); }
+.toast-error .toast-icon { color: var(--ink-error); }
+.toast-warning .toast-icon { color: var(--ink-warning); }
+.toast-info .toast-icon { color: var(--ink-info); }
 .toast-icon { font-size: 1.1rem; line-height: 1; }
 
 /* ==== Compatibiliteitsklassen voor door JS gegenereerde markup ==== */
