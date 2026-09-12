@@ -476,14 +476,14 @@ def test_admin_pipeline_route_is_admin_only_and_returns_a_total():
     source = inspect.getsource(admin.admin_list_pipeline)
     assert 'require_role("admin")' in source
     assert '"total": total' in source
-    assert "PIPELINE_ROW_SQL" in source and "project_pipeline_rows(rows)" in source
+    assert "PIPELINE_ROW_SQL" in source and "project_pipeline_rows(rows" in source
 
 
-def test_both_pipeline_routes_share_one_select_and_one_consent_gate():
+def test_both_pipeline_routes_share_one_select_and_one_projection():
     """code-review F3: the two routes used to carry verbatim copies of the
-    same SELECT list and the same seven-line gate. Only the WHERE may
-    differ now, or the next tightening lands on one route and not the
-    other."""
+    same SELECT list and the same seven-line projection. Only the WHERE
+    and the explicit gate_name argument may differ now, or the next
+    change lands on one route and not the other."""
     import inspect
 
     from routers import admin, client
@@ -491,23 +491,56 @@ def test_both_pipeline_routes_share_one_select_and_one_consent_gate():
     for func in (admin.admin_list_pipeline, client.get_pipeline):
         source = inspect.getsource(func)
         assert "PIPELINE_ROW_SQL" in source, func.__name__
-        assert "project_pipeline_rows(rows)" in source, func.__name__
-        # No local copy of the gate left behind.
+        assert "project_pipeline_rows(rows" in source, func.__name__
+        # No local copy of the projection left behind.
         assert "consent_spec_presentation_at" not in source, func.__name__
         assert 'item.pop("full_name"' not in source, func.__name__
 
 
-def test_shared_pipeline_projection_drops_the_consent_columns_either_way():
+def test_each_pipeline_route_states_its_own_gate_choice():
+    """The gate differs per route by decision, so each call site has to
+    say which it is -- an unstated one would be the drift this module
+    exists to prevent."""
+    import inspect
+
+    from routers import admin, client
+
+    assert "project_pipeline_rows(rows, gate_name=True)" in inspect.getsource(client.get_pipeline)
+    assert "project_pipeline_rows(rows, gate_name=False)" in inspect.getsource(admin.admin_list_pipeline)
+
+
+def test_gate_name_is_keyword_only_and_has_no_default():
+    """A third caller must choose, not inherit."""
+    import inspect
+
     from core.pipeline import project_pipeline_rows
 
-    named = project_pipeline_rows([{
+    parameter = inspect.signature(project_pipeline_rows).parameters["gate_name"]
+    assert parameter.kind is inspect.Parameter.KEYWORD_ONLY
+    assert parameter.default is inspect.Parameter.empty
+    with pytest.raises(TypeError):
+        project_pipeline_rows([])
+
+
+def test_shared_pipeline_projection_drops_the_consent_columns_either_way():
+    """Whatever the gate does with the name, the two consent columns are
+    internal and never reach a caller."""
+    from core.pipeline import project_pipeline_rows
+
+    row = {
         "id": 1, "full_name": "Wel Genoemd", "skills": None,
         "consent_spec_presentation_at": "2026-01-01", "consent_withdrawn_at": None,
-    }])[0]
-    assert named["full_name"] == "Wel Genoemd"
-    assert named["skills"] == []
-    assert "consent_spec_presentation_at" not in named
-    assert "consent_withdrawn_at" not in named
+    }
+    for gate in (True, False):
+        projected = project_pipeline_rows([dict(row)], gate_name=gate)[0]
+        assert projected["full_name"] == "Wel Genoemd"
+        assert projected["skills"] == []
+        assert "consent_spec_presentation_at" not in projected
+        assert "consent_withdrawn_at" not in projected
+
+
+def test_gated_projection_withholds_a_name_without_live_consent():
+    from core.pipeline import project_pipeline_rows
 
     for row in (
         {"id": 2, "full_name": "Geen Toestemming", "consent_spec_presentation_at": None,
@@ -515,8 +548,25 @@ def test_shared_pipeline_projection_drops_the_consent_columns_either_way():
         {"id": 3, "full_name": "Ingetrokken", "consent_spec_presentation_at": "2026-01-01",
          "consent_withdrawn_at": "2026-02-01"},
     ):
-        projected = project_pipeline_rows([row])[0]
+        projected = project_pipeline_rows([row], gate_name=True)[0]
         assert "full_name" not in projected, projected
+        assert "consent_spec_presentation_at" not in projected
+        assert "consent_withdrawn_at" not in projected
+
+
+def test_ungated_projection_keeps_the_name_in_the_same_two_cases():
+    """The admin side of the chief-of-staff decision: no presentation
+    consent, and withdrawn consent, both still return the name."""
+    from core.pipeline import project_pipeline_rows
+
+    for row in (
+        {"id": 2, "full_name": "Geen Toestemming", "consent_spec_presentation_at": None,
+         "consent_withdrawn_at": None},
+        {"id": 3, "full_name": "Ingetrokken", "consent_spec_presentation_at": "2026-01-01",
+         "consent_withdrawn_at": "2026-02-01"},
+    ):
+        projected = project_pipeline_rows([row], gate_name=False)[0]
+        assert projected["full_name"] == row["full_name"]
         assert "consent_spec_presentation_at" not in projected
         assert "consent_withdrawn_at" not in projected
 

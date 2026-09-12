@@ -1465,18 +1465,24 @@ async def admin_list_pipeline(
     behind the JWT and therefore unusable with an admin token.
 
     Same row shape as that client route, literally: one shared SELECT
-    list and one shared consent gate in core/pipeline.py, so the two
-    cannot drift. `client_id` is part of that shape already (it comes out
-    of `pe.*`); what this route adds is that it can be filtered on,
+    list and one shared projection in core/pipeline.py, so the two cannot
+    drift. `client_id` is part of that shape already (it comes out of
+    `pe.*`); what this route adds is that it can be filtered on,
     alongside candidate_id, job_id and stage, instead of being pinned to
     the caller's own client.
 
-    The gate on `full_name` is the client route's gate: a pipeline entry
-    existing is not consent to be named, and this route deliberately does
-    not hand an admin panel more personal data than the client portal
-    already shows for the same row. An admin who needs the name has
-    GET /candidates and GET /candidates/{kind}/{id} for that, both of
-    which are the routes where naming a candidate is the point.
+    `full_name` is returned unconditionally here (gate_name=False), which
+    is a deliberate difference from the client route and a product
+    decision of the chief-of-staff. The presentation-consent gate is a
+    disclosure control aimed at an employer: it decides whether a
+    candidate may be NAMED TO A CLIENT for a role they agreed to. It is
+    not an internal access control, and applying it here withheld nothing
+    -- the same admin token reads full_name unconditionally from
+    GET /candidates and GET /candidates/{kind}/{id} -- while leaving the
+    panel's pipeline tab showing a blank where a name belongs. No new
+    category of personal data reaches an admin through this route that
+    VERWERKINGSREGISTER.md's admin-access rows do not already cover; the
+    client route keeps the gate, unchanged.
     """
     conditions = []
     params: list = []
@@ -1498,7 +1504,8 @@ async def admin_list_pipeline(
     )
 
     return {
-        "items": project_pipeline_rows(rows),
+        # gate_name=False: see the docstring above and core/pipeline.py.
+        "items": project_pipeline_rows(rows, gate_name=False),
         "total": total, "limit": limit, "offset": offset,
     }
 

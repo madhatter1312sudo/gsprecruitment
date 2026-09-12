@@ -643,7 +643,9 @@ async def get_pipeline(
     )
 
     return {
-        "items": project_pipeline_rows(rows),
+        # gate_name=True: the client may only see a name the candidate
+        # consented to being presented under (core/pipeline.py).
+        "items": project_pipeline_rows(rows, gate_name=True),
         "total": total, "limit": limit, "offset": offset,
     }
 

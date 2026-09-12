@@ -157,38 +157,66 @@ def test_bv1_unfiltered_call_pages_and_reports_the_full_total(client, make_admin
     assert page["total"] >= 3, "total must count the whole set, not the page"
 
 
-def test_bv1_name_is_withheld_without_presentation_consent(client, make_admin, make_pipeline_entry):
-    """Same gate as GET /api/v1/client/pipeline: no more personal data on
-    the admin side than the client side already shows for the same row."""
-    admin = make_admin()
-    made = make_pipeline_entry(consented=False)
-
-    item = client.get(
-        "/api/v1/admin/pipeline", params={"candidate_id": made["candidate_id"]},
-        headers=admin["headers"],
-    ).json()["items"][0]
-    assert "full_name" not in item
-    # The internal consent columns never leave the endpoint either.
-    assert "consent_spec_presentation_at" not in item
-    assert "consent_withdrawn_at" not in item
-
-
-def test_bv1_name_is_shown_once_presentation_consent_is_recorded(client, db_run, make_admin, make_pipeline_entry):
+def test_bv1_admin_always_sees_the_name(client, db_run, make_admin, make_pipeline_entry):
+    """Chief-of-staff product decision on BV1: the presentation-consent
+    gate is a disclosure control aimed at the client, not an internal
+    access control, so the admin pipeline list returns `full_name` in all
+    three consent states. The same admin token already reads the name
+    unconditionally from GET /api/v1/admin/candidates."""
     from core.database import execute
 
     admin = make_admin()
-    made = make_pipeline_entry()
+
+    no_consent = make_pipeline_entry(consented=False)
+    consented = make_pipeline_entry(consented=True)
+    withdrawn = make_pipeline_entry(consented=True)
     db_run(
-        execute,
-        "UPDATE candidates SET consent_spec_presentation_at = NOW() WHERE id = $1",
-        made["candidate_id"],
+        execute, "UPDATE candidates SET consent_withdrawn_at = NOW() WHERE id = $1",
+        withdrawn["candidate_id"],
     )
 
-    item = client.get(
-        "/api/v1/admin/pipeline", params={"candidate_id": made["candidate_id"]},
-        headers=admin["headers"],
-    ).json()["items"][0]
-    assert item["full_name"] == made["full_name"]
+    for made in (no_consent, consented, withdrawn):
+        item = client.get(
+            "/api/v1/admin/pipeline", params={"candidate_id": made["candidate_id"]},
+            headers=admin["headers"],
+        ).json()["items"][0]
+        assert item["full_name"] == made["full_name"], made
+        # The internal consent columns still never leave the endpoint.
+        assert "consent_spec_presentation_at" not in item
+        assert "consent_withdrawn_at" not in item
+
+
+def test_client_pipeline_still_withholds_the_name_without_consent(
+    client, db_run, make_client_user, make_pipeline_entry,
+):
+    """The other half of the same decision: the gate stays ON for the
+    client portal, and this route is the one it was always for. Sits next
+    to the admin test above so a future change cannot relax one without
+    the other going red."""
+    from core.database import execute
+
+    client_user = make_client_user(approved=True)
+    made = make_pipeline_entry(consented=False, client_id=client_user["client_id"])
+
+    item = client.get("/api/v1/client/pipeline", headers=client_user["headers"]).json()["items"][0]
+    assert "full_name" not in item, item
+    assert "consent_spec_presentation_at" not in item
+    assert "consent_withdrawn_at" not in item
+
+    db_run(
+        execute, "UPDATE candidates SET consent_spec_presentation_at = NOW() WHERE id = $1",
+        made["candidate_id"],
+    )
+    named = client.get("/api/v1/client/pipeline", headers=client_user["headers"]).json()["items"][0]
+    assert named["full_name"] == made["full_name"]
+
+    # And a later withdrawal takes it away again.
+    db_run(
+        execute, "UPDATE candidates SET consent_withdrawn_at = NOW() WHERE id = $1",
+        made["candidate_id"],
+    )
+    withdrawn = client.get("/api/v1/client/pipeline", headers=client_user["headers"]).json()["items"][0]
+    assert "full_name" not in withdrawn, withdrawn
 
 
 def test_bv1_a_client_jwt_is_refused(client, make_client_user, make_pipeline_entry):
