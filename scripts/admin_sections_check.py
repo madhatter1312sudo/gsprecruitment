@@ -854,6 +854,35 @@ def fill_or_fail(page, failures, selector, value, what, timeout=6000):
     return True
 
 
+def select_or_fail(page, failures, selector, value, what, timeout=6000):
+    """code-reviewer op 2e47403: een kale page.select_option hangt de volle
+    30s als een mutant de modal voortijdig sluit, en de FAIL-regel die
+    zou zeggen welke stap dat was verdwijnt dan in een traceback in
+    plaats van in de failure-lijst te staan."""
+    if page.query_selector(selector) is None:
+        failures.append(f"{what} niet gevonden ({selector})")
+        return False
+    try:
+        page.select_option(selector, value, timeout=timeout)
+    except Exception as exc:
+        failures.append(f"{what}: selecteren in {selector} lukte niet binnen {timeout}ms ({exc})")
+        return False
+    return True
+
+
+def check_or_fail(page, failures, selector, what, timeout=6000):
+    """Zelfde reden als select_or_fail hierboven, voor page.check()."""
+    if page.query_selector(selector) is None:
+        failures.append(f"{what} niet gevonden ({selector})")
+        return False
+    try:
+        page.check(selector, timeout=timeout)
+    except Exception as exc:
+        failures.append(f"{what}: aanvinken van {selector} lukte niet binnen {timeout}ms ({exc})")
+        return False
+    return True
+
+
 def check_retention_category_labels():
     """D3: elke categorie uit core/retention.RETENTION_TABLE heeft een
     Nederlands label in js/labels.js. Zonder dat toont de droogloop of de
@@ -1500,7 +1529,8 @@ def main():
         # b9d5b21: eerst de assertie op talentpool_calls, dan pas verder
         # -- zo faalt een mutant die de omvangcontrole doorlaat meteen op
         # deze regel in plaats van pas via een timeout verderop.
-        page.fill('#tpEvidence', 'Ondertekend formulier van 2 september.')
+        fill_or_fail(page, failures, '#tpEvidence', 'Ondertekend formulier van 2 september.',
+                     "candidates: bewijsveld (talentpool, zonder omvang)")
         click_or_fail(page, failures, '#candidateTalentpoolModal .btn-primary', "candidates: Opslaan (talentpool, zonder omvang)")
         if not wait_until(page, lambda: text_of(page, '#tpScopeError').strip() != ''):
             failures.append("candidates: het ontbreken van een omvang gaf geen inline fout")
@@ -1508,7 +1538,7 @@ def main():
             failures.append("candidates: een talentpoolaanroep ging uit zonder omvang")
 
         # Vastleggen met omvang: één aanroep, consent=True plus scope.
-        page.select_option('#tpScope', 'matching_and_contact')
+        select_or_fail(page, failures, '#tpScope', 'matching_and_contact', "candidates: omvang kiezen (talentpool, vastleggen)")
         click_or_fail(page, failures, '#candidateTalentpoolModal .btn-primary', "candidates: Opslaan (talentpool, vastleggen)")
         if not wait_for_calls(page, CANDIDATE_STATE["talentpool_calls"], 1):
             failures.append("candidates: het vastleggen van talentpooltoestemming stuurde geen aanroep")
@@ -1524,8 +1554,9 @@ def main():
         click_or_fail(page, failures, '[data-action="candidate-presentation-edit"]', "candidates: Vastleggen (presentatie)")
         if not wait_until(page, lambda: page.query_selector('#spJob') is not None and not is_disabled(page, '#spJob')):
             failures.append("candidates: de vacaturekiezer laadde niet, of bleef disabled, in de presentatiemodal")
-        page.select_option('#spJob', '201')
-        page.fill('#spEvidence', 'E-mail in het dossier van 5 september.')
+        select_or_fail(page, failures, '#spJob', '201', "candidates: vacature kiezen (presentatie, vastleggen)")
+        fill_or_fail(page, failures, '#spEvidence', 'E-mail in het dossier van 5 september.',
+                     "candidates: bewijsveld (presentatie, vastleggen)")
         click_or_fail(page, failures, '#candidatePresentationModal .btn-primary', "candidates: Opslaan (presentatie, vastleggen)")
         if not wait_for_calls(page, CANDIDATE_STATE["presentation_calls"], 1):
             failures.append("candidates: het vastleggen van presentatietoestemming stuurde geen aanroep")
@@ -1535,8 +1566,9 @@ def main():
 
         click_or_fail(page, failures, '[data-action="candidate-presentation-edit"]', "candidates: Vastleggen (presentatie, intrekken)")
         wait_until(page, lambda: page.query_selector('#spConsentWithdraw') is not None)
-        page.check('#spConsentWithdraw')
-        page.fill('#spEvidence', 'Telefonisch ingetrokken op 6 september.')
+        check_or_fail(page, failures, '#spConsentWithdraw', "candidates: Intrekken kiezen (presentatie)")
+        fill_or_fail(page, failures, '#spEvidence', 'Telefonisch ingetrokken op 6 september.',
+                     "candidates: bewijsveld (presentatie, intrekken)")
         click_or_fail(page, failures, '#candidatePresentationModal .btn-primary', "candidates: Opslaan (presentatie, intrekken)")
         if not wait_for_calls(page, CANDIDATE_STATE["presentation_calls"], 2):
             failures.append("candidates: het intrekken van presentatietoestemming stuurde geen aanroep")
@@ -1560,6 +1592,14 @@ def main():
                 failures.append(f"candidates (390): knop {label} is {h}px hoog, verwacht minstens {minimum}px")
         click_or_fail(page, failures, '[data-action="candidate-talentpool-edit"]', "candidates (390): Wijzigen (talentpool)")
         wait_until(page, lambda: page.query_selector('#tpEvidence') is not None)
+        # design-reviewer op 2e47403, restpunt 1: de ellips-bug verborg dat
+        # de radiolabel zelf (.form-check-label, "Vastleggen"/"Intrekken")
+        # geen 44px-tikdoel had. Het tikdoel zit op de hele .form-check-rij
+        # (label plus radio), niet op de tekst alleen.
+        form_check_h = page.eval_on_selector(
+            '#tpConsentGrant', "el => el.closest('.form-check').getBoundingClientRect().height")
+        if form_check_h is None or form_check_h < 44:
+            failures.append(f"candidates (390): .form-check-rij (talentpool, Vastleggen) is {form_check_h}px hoog, verwacht minstens 44px")
         for sel, label in (
             ('#candidateTalentpoolModal .btn-primary', "Opslaan (talentpoolmodal)"),
         ):
@@ -1587,8 +1627,9 @@ def main():
         # voor de MEDIUM-2-test en de LOW-4-assertie hieronder.
         click_or_fail(page, failures, '[data-action="candidate-talentpool-edit"]', "candidates: Wijzigen (talentpool, intrekken)")
         wait_until(page, lambda: page.query_selector('#tpConsentWithdraw') is not None)
-        page.check('#tpConsentWithdraw')
-        page.fill('#tpEvidence', 'Telefonisch ingetrokken op 4 september.')
+        check_or_fail(page, failures, '#tpConsentWithdraw', "candidates: Intrekken kiezen (talentpool)")
+        fill_or_fail(page, failures, '#tpEvidence', 'Telefonisch ingetrokken op 4 september.',
+                     "candidates: bewijsveld (talentpool, intrekken)")
         click_or_fail(page, failures, '#candidateTalentpoolModal .btn-primary', "candidates: Opslaan (talentpool, intrekken)")
         if not wait_for_calls(page, CANDIDATE_STATE["talentpool_calls"], 2):
             failures.append("candidates: het intrekken van talentpooltoestemming stuurde geen aanroep")
@@ -1618,9 +1659,10 @@ def main():
         # hergebruiken.
         click_or_fail(page, failures, '[data-action="candidate-talentpool-edit"]', "candidates: Wijzigen (talentpool, opnieuw vastleggen)")
         wait_until(page, lambda: page.query_selector('#tpConsentGrant') is not None)
-        page.check('#tpConsentGrant')
-        page.select_option('#tpScope', 'matching_and_contact')
-        page.fill('#tpEvidence', 'Opnieuw ondertekend op 5 september.')
+        check_or_fail(page, failures, '#tpConsentGrant', "candidates: Vastleggen kiezen (talentpool, opnieuw)")
+        select_or_fail(page, failures, '#tpScope', 'matching_and_contact', "candidates: omvang kiezen (talentpool, opnieuw vastleggen)")
+        fill_or_fail(page, failures, '#tpEvidence', 'Opnieuw ondertekend op 5 september.',
+                     "candidates: bewijsveld (talentpool, opnieuw vastleggen)")
         click_or_fail(page, failures, '#candidateTalentpoolModal .btn-primary', "candidates: Opslaan (talentpool, opnieuw vastleggen)")
         if not wait_for_calls(page, CANDIDATE_STATE["talentpool_calls"], 3):
             failures.append("candidates: het opnieuw vastleggen van talentpooltoestemming stuurde geen aanroep")
@@ -1652,17 +1694,23 @@ def main():
         click_or_fail(page, failures, '[data-action="open-referral-modal"]', "candidates: de knop Referral vastleggen")
         if not wait_until(page, lambda: page.query_selector('#refFullName') is not None):
             failures.append("candidates: de referralmodal ging niet open")
-        page.fill('#refFullName', 'Voorbeeld Referral')
-        page.fill('#refEmail', 'referral@example.invalid')
+        fill_or_fail(page, failures, '#refFullName', 'Voorbeeld Referral', "candidates: volledige naam (referral, suppressed)")
+        fill_or_fail(page, failures, '#refEmail', 'referral@example.invalid', "candidates: e-mailadres (referral, suppressed)")
         # code-reviewer op b9d5b21, punt 3: infoName wordt bijgewerkt via
         # textContent, niet innerHTML -- "<b>" moet dus als platte tekst
-        # verschijnen, nooit als een echt <b>-element.
-        page.fill('#refReferredBy', 'Jan <b>Voorbeeld</b>')
-        if page.query_selector('#referralInfoName b') is not None:
-            failures.append("candidates: het informatieblok interpreteert <b> als markup (innerHTML in plaats van textContent)")
-        if '<b>' not in text_of(page, '#referralInfoName'):
+        # verschijnen, nooit als een echt <b>-element. design-reviewer op
+        # 2e47403: een losse run zag deze twee asserties falen op een
+        # kennelijke race (de input-listener van #refReferredBy is
+        # synchroon, maar onder belasting bleek een directe lezing één
+        # keer te vroeg); een conditiewacht in plaats van een directe
+        # lezing lost dat op zonder een vaste sleep.
+        fill_or_fail(page, failures, '#refReferredBy', 'Jan <b>Voorbeeld</b>', "candidates: aangedragen door (referral, suppressed)")
+        if not wait_until(page, lambda: text_of(page, '#referralInfoName') == 'Jan <b>Voorbeeld</b>'):
             failures.append(f"candidates: het informatieblok toont de naam niet live/letterlijk -- kreeg {text_of(page, '#referralInfoName')!r}")
-        page.fill('#refEvidence', 'Mondeling bevestigd door Jan op 3 september.')
+        elif page.query_selector('#referralInfoName b') is not None:
+            failures.append("candidates: het informatieblok interpreteert <b> als markup (innerHTML in plaats van textContent)")
+        fill_or_fail(page, failures, '#refEvidence', 'Mondeling bevestigd door Jan op 3 september.',
+                     "candidates: bewijsveld (referral, suppressed)")
         click_or_fail(page, failures, '#candidateReferralModal .btn-primary', "candidates: Vastleggen (referral, suppressed)")
         if not wait_for_calls(page, CANDIDATE_STATE["referral_calls"], 1):
             failures.append("candidates: de referral-aanroep (suppressed) ging niet uit")
@@ -1694,10 +1742,11 @@ def main():
         wait_until(page, lambda: page.query_selector('#candidateDrawer.show') is None)
         click_or_fail(page, failures, '[data-action="open-referral-modal"]', "candidates: Referral vastleggen (opnieuw)")
         wait_until(page, lambda: page.query_selector('#refFullName') is not None)
-        page.fill('#refFullName', 'Voorbeeld Referral Twee')
-        page.fill('#refEmail', 'referral2@example.invalid')
-        page.fill('#refReferredBy', 'Piet Voorbeeld')
-        page.fill('#refEvidence', 'Mondeling bevestigd door Piet op 4 september.')
+        fill_or_fail(page, failures, '#refFullName', 'Voorbeeld Referral Twee', "candidates: volledige naam (referral, onbekende code)")
+        fill_or_fail(page, failures, '#refEmail', 'referral2@example.invalid', "candidates: e-mailadres (referral, onbekende code)")
+        fill_or_fail(page, failures, '#refReferredBy', 'Piet Voorbeeld', "candidates: aangedragen door (referral, onbekende code)")
+        fill_or_fail(page, failures, '#refEvidence', 'Mondeling bevestigd door Piet op 4 september.',
+                     "candidates: bewijsveld (referral, onbekende code)")
         click_or_fail(page, failures, '#candidateReferralModal .btn-primary', "candidates: Vastleggen (referral, onbekende code)")
         if not wait_for_calls(page, CANDIDATE_STATE["referral_calls"], 3):
             failures.append("candidates: de referral-aanroep (onbekende code) ging niet uit")

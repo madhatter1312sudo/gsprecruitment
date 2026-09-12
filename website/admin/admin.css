@@ -793,6 +793,17 @@ h1, h2, h3, h4,
     min-height: 44px;
     min-width: 44px;
   }
+  /* design-reviewer op 2e47403: de radiolabel zelf (.form-check-label,
+     "Vastleggen"/"Intrekken" in de drie modals van §7.3.2) is een korte
+     tekstregel, geen 44px hoog. De ellips-bug verborg dit eerder, want
+     toen was de hele rij toch al 390px breed. flex + min-height zet het
+     tikdoel op de hele rij (label plus radio), niet alleen op de tekst. */
+  .modal .form-check,
+  .offcanvas .form-check {
+    min-height: 44px;
+    display: flex;
+    align-items: center;
+  }
   .a-tap {
     display: inline-flex;
     align-items: center;
