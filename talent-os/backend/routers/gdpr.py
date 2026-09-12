@@ -606,6 +606,22 @@ async def erase_person(
     # pipeline_entries.notes is free text a client wrote about a specific
     # candidate (routers/client.py) -- keyed by candidate_id, not e-mail,
     # so it isn't reached by any of the LOWER(email)=... updates above.
+    #
+    # security-audit (WS5 BV8, HIGH): this statement is the reason
+    # migrations/043's normalisation has a catch-all. It writes to a
+    # pipeline_entries row without touching `stage`, and a NOT VALID CHECK
+    # still applies to such a write -- so a row left outside the seven
+    # would abort the erasure exactly here, with users and candidates
+    # already anonymised and everything below this line not yet.
+    #
+    # That mid-way failure mode is broader than one constraint: this whole
+    # routine is a sequence of separate statements on separate pooled
+    # connections, so anything that raises leaves a half-erased person
+    # behind. Putting it in one transaction is the real fix and is not a
+    # small change -- every helper would have to take a connection, and
+    # _delete_cv_files() does R2 network calls that cannot be rolled back
+    # and must not sit inside a database transaction. Tracked as a
+    # follow-up rather than done here.
     for cid in candidate_ids:
         await execute("UPDATE pipeline_entries SET notes = NULL WHERE candidate_id = $1", cid)
 
@@ -777,9 +793,18 @@ class AdminEraseRequest(BaseModel):
     that would put two e-mail addresses into every 422 body and into
     whatever logs or error trackers see it. The endpoint refuses with a
     structured detail that names neither.
+
+    `confirm` carries an empty-string default rather than being required
+    for the same reason (security-audit, MEDIUM): a missing required
+    field never reaches the route at all, and FastAPI's own 422 for it
+    echoes the whole request body back -- including `email`. Defaulting
+    it to "" hands every case to the route's check below, which refuses
+    an empty confirmation just as firmly and names no address. It is a
+    default that can never be a valid confirmation: no e-mail address is
+    the empty string.
     """
     email: EmailStr
-    confirm: str
+    confirm: str = ""
     confirm_admin_or_self: bool = False
 
 

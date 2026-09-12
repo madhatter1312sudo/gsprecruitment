@@ -12,17 +12,34 @@ waarde jarenlang onzichtbaar kan hebben meegedraaid.
 
 Volgorde, en waarom die niet omkeerbaar is:
 
-  1. Normaliseren. Elke UPDATE hieronder is idempotent (hij selecteert op
-     precies de waarde die hij wegschrijft, dus een tweede run raakt nul
-     rijen) en verandert nooit een rij die al een van de zeven draagt.
-  2. Pas daarna de CHECK-constraint, en dan als NOT VALID. NOT VALID zet
-     de regel voor alles wat er vanaf nu in gaat, maar laat de bestaande
-     rijen ongemoeid en scant de tabel niet. Een onbekende waarde die
-     productie wel heeft en dit bestand niet kent, kan de deploy dus niet
-     breken -- dat is het hele punt van deze vorm.
-  3. VALIDATE CONSTRAINT is een aparte, latere eigenaarsstap. Het
-     draaiboek staat onderaan dit bestand, inclusief de SQL-regel om de
-     afwijkers vooraf te tellen.
+  1. Normaliseren, en wel volledig: eerst de mappings hieronder, die
+     bekende afwijkers naar de juiste fase brengen, en daarna een
+     vangnet-UPDATE die alles wat dan nog buiten de zeven valt op
+     'sourced' zet. Elke UPDATE is idempotent (hij selecteert op precies
+     wat hij wegschrijft, dus een tweede run raakt nul rijen) en geen
+     enkele raakt een rij die al een van de zeven draagt.
+  2. Pas daarna de CHECK-constraint, en dan als NOT VALID. NOT VALID
+     slaat alleen de tabelscan bij het toevoegen over, zodat de deploy
+     geen ACCESS EXCLUSIVE-lock op een volle tabel hoeft te houden.
+
+     Let op wat NOT VALID NIET doet, want daar zat de eerste versie van
+     deze migratie fout (security-audit, HIGH): de constraint geldt wel
+     degelijk voor elke INSERT en elke UPDATE op een bestaande rij, ook
+     als die UPDATE de kolom `stage` helemaal niet aanraakt. Een rij die
+     na deze migratie nog een onbekende waarde draagt, is daarmee niet
+     "ongemoeid" maar onschrijfbaar. Concreet: `routers/gdpr.py`'s
+     `erase_person()` doet halverwege een niet-transactionele wissing
+     `UPDATE pipeline_entries SET notes = NULL WHERE candidate_id = $1`;
+     die zou op zo'n rij afketsen terwijl `users` en `candidates` al
+     geanonimiseerd zijn en de rest nog niet, met een art. 17-termijn die
+     loopt. Vandaar het vangnet in stap 1: schrijfbaarheid van elke rij
+     weegt zwaarder dan de wens om niet te gokken bij een waarde die we
+     niet herkennen.
+  3. VALIDATE CONSTRAINT is een aparte, latere eigenaarsstap -- niet
+     omdat er iets te repareren valt (na stap 1 voldoet elke rij), maar
+     omdat de scan een eigen lock neemt die niet in een deployvenster
+     hoeft. Het draaiboek staat onderaan dit bestand, inclusief de
+     SQL-regel om vooraf te tellen; die hoort 0 rijen te geven.
 
 De mappingtabel, met per regel waar de waarde vandaan komt. De regel die
 elke semantische mapping volgt: nooit meer voortgang claimen dan de
@@ -51,14 +68,30 @@ bronwaarde bewijst, en nooit vastgelegde voortgang terugdraaien.
   | 'offered'              | offer      | career.tsx regel 12, zelfde fase.     |
   | 'hired'                | placed     | Zelfde eindfase onder een andere naam.|
   | 'declined', 'afgewezen'| rejected   | Zelfde eindfase onder een andere naam.|
+  | 'inactive', en elke     | sourced    | Het vangnet. Zie hieronder.          |
+  |   andere onbekende      |            |                                      |
+  |   waarde                |            |                                      |
 
-Twee waarden worden bewust NIET gemapt. 'inactive' (admin.js regel 75)
-heeft geen verdedigbaar doel: het is niet 'rejected' (dat is een besluit
-dat iemand genomen heeft) en niet 'new' (dat zou een dode rij terugzetten
-in een actieve kolom). En elke waarde die dit bestand niet kent, blijft
-per definitie staan. Beide gevallen zijn precies waarvoor NOT VALID er
-is; de telregel in het draaiboek maakt ze zichtbaar voordat iemand
-VALIDATE draait.
+Over dat vangnet, want het is de enige regel die iets wegschrijft dat we
+niet zeker weten. 'inactive' (website/admin/js/admin.js regel 75) heeft
+geen goed doel: het is niet 'rejected' (dat is een besluit dat iemand
+genomen heeft) en niet 'new' (dat zou een dode rij terugzetten in een
+actieve kolom). De eerste versie van deze migratie liet zulke waarden
+daarom staan. Dat kan niet, om de reden in stap 2 hierboven: een rij die
+de constraint niet haalt, is niet ongemoeid maar onschrijfbaar, en de
+eerste die daar tegenaan loopt is de wisroutine van artikel 17.
+
+Van de twee kwaden is 'sourced' de kleinste. Het is de kolomdefault, het
+is de laagste fase, en het claimt dus geen enkele voortgang -- wie een
+zo'n rij later terugziet, ziet "gevonden, verder niets", en dat is
+precies wat er over die rij bekend is. De negen specifieke mappings
+hierboven blijven daarom van waarde: zij houden echte voortgang overeind
+die het vangnet zou platslaan.
+
+De telregel in het draaiboek laat na afloop zien dat er niets overbleef;
+`SELECT DISTINCT stage FROM pipeline_entries` op productie draaien vóór
+de deploy (§7.3.4, invoeringsvolgorde stap 1) blijft de manier om te
+zien wat er stond, want daarna is het weg.
 
 `pipeline_stage_history.from_stage`/`to_stage` blijven ongemoeid. Dat is
 een append-only logboek van wat er destijds gebeurd is; een historische
@@ -111,6 +144,10 @@ UPDATE pipeline_entries SET stage = 'offer' WHERE stage = 'offered';
 UPDATE pipeline_entries SET stage = 'placed' WHERE stage = 'hired';
 
 UPDATE pipeline_entries SET stage = 'rejected' WHERE stage IN ('declined', 'afgewezen');
+
+UPDATE pipeline_entries SET stage = 'sourced'
+ WHERE stage IS NOT NULL
+   AND stage NOT IN ('sourced', 'new', 'screening', 'interview', 'offer', 'placed', 'rejected');
 
 ALTER TABLE pipeline_entries DROP CONSTRAINT IF EXISTS pipeline_entries_stage_check;
 

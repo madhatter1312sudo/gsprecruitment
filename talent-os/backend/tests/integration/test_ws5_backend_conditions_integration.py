@@ -498,8 +498,10 @@ def test_bv8_migration_043_runs_twice_and_tolerates_an_unknown_existing_value(
     """Re-runs the real migration through the real runner, on a table that
     already carries (a) a value differing only in case and spacing, (b) a
     value from a vocabulary the mapping table knows, and (c) a value the
-    migration has never heard of. The third one is the whole reason the
-    constraint is added NOT VALID: it must not break the deploy."""
+    migration has never heard of. All three must land inside the seven --
+    the third one via the catch-all, because a row the CHECK rejects is
+    not an untouched row but an unwritable one (see the erase_person test
+    below)."""
     from core.database import execute, fetch_val
 
     mod = _load_043()
@@ -520,8 +522,8 @@ def test_bv8_migration_043_runs_twice_and_tolerates_an_unknown_existing_value(
 
     assert db_run(fetch_val, "SELECT stage FROM pipeline_entries WHERE id = $1", deviating["entry_id"]) == "screening"
     assert db_run(fetch_val, "SELECT stage FROM pipeline_entries WHERE id = $1", known_alias["entry_id"]) == "interview"
-    assert db_run(fetch_val, "SELECT stage FROM pipeline_entries WHERE id = $1", unknown["entry_id"]) == "op-de-koffie", (
-        "an unmapped value must survive untouched -- NOT VALID is what makes that safe"
+    assert db_run(fetch_val, "SELECT stage FROM pipeline_entries WHERE id = $1", unknown["entry_id"]) == "sourced", (
+        "an unmapped value goes to the column default: the lowest stage, claiming no progress"
     )
 
     constraint = db_run(
@@ -532,16 +534,60 @@ def test_bv8_migration_043_runs_twice_and_tolerates_an_unknown_existing_value(
 
     # Second run: the runner sees its own version row and does nothing.
     db_run(mod.run_migration, mod.VERSION, mod.MIGRATION_SQL)
-    assert db_run(fetch_val, "SELECT stage FROM pipeline_entries WHERE id = $1", unknown["entry_id"]) == "op-de-koffie"
+    assert db_run(fetch_val, "SELECT stage FROM pipeline_entries WHERE id = $1", known_alias["entry_id"]) == "interview"
 
     # And the SQL itself is re-runnable even without the version guard.
     db_run(execute, "DELETE FROM schema_migrations WHERE version = $1", mod.VERSION)
     db_run(mod.run_migration, mod.VERSION, mod.MIGRATION_SQL)
     assert db_run(fetch_val, "SELECT stage FROM pipeline_entries WHERE id = $1", deviating["entry_id"]) == "screening"
 
-    # Leave the table in a state the rest of the suite can write to.
+
+def test_bv8_migration_043_leaves_every_row_writable_for_erase_person(db_run, make_pipeline_entry):
+    """security-audit HIGH. A NOT VALID CHECK skips only the initial scan;
+    it still fires on every later write to a row, including one that does
+    not touch `stage`. routers/gdpr.py's erase_person() does exactly that
+    (`UPDATE pipeline_entries SET notes = NULL WHERE candidate_id = $1`),
+    halfway through a non-transactional erasure with users and candidates
+    already anonymised. So after this migration no row may be left
+    outside the seven, and VALIDATE CONSTRAINT must succeed immediately.
+    """
+    from core.database import execute, fetch_val
+
+    mod = _load_043()
+    stranded = make_pipeline_entry()
+
     db_run(execute, "ALTER TABLE pipeline_entries DROP CONSTRAINT IF EXISTS pipeline_entries_stage_check")
-    db_run(execute, "UPDATE pipeline_entries SET stage = 'sourced' WHERE id = $1", unknown["entry_id"])
+    db_run(execute, "UPDATE pipeline_entries SET stage = 'inactive' WHERE id = $1", stranded["entry_id"])
+    db_run(execute, "DELETE FROM schema_migrations WHERE version = $1", mod.VERSION)
+
+    db_run(mod.run_migration, mod.VERSION, mod.MIGRATION_SQL)
+
+    assert db_run(fetch_val, "SELECT stage FROM pipeline_entries WHERE id = $1", stranded["entry_id"]) == "sourced"
+
+    # The exact statement erase_person() runs, on the row that used to be
+    # stranded. Before the catch-all this raised CheckViolationError.
+    db_run(
+        execute, "UPDATE pipeline_entries SET notes = NULL WHERE candidate_id = $1",
+        stranded["candidate_id"],
+    )
+
+    # And nothing anywhere in the table is left outside the seven.
+    leftover = db_run(
+        fetch_val,
+        """SELECT COUNT(*) FROM pipeline_entries
+            WHERE stage IS NOT NULL
+              AND stage NOT IN ('sourced','new','screening','interview','offer','placed','rejected')""",
+    )
+    assert leftover == 0
+
+    db_run(execute, "ALTER TABLE pipeline_entries VALIDATE CONSTRAINT pipeline_entries_stage_check")
+    assert db_run(
+        fetch_val, "SELECT convalidated FROM pg_constraint WHERE conname = 'pipeline_entries_stage_check'",
+    ) is True
+
+    # Put the constraint back the way a fresh deploy leaves it, so the
+    # NOT VALID assertion in the test above holds whatever the order.
+    db_run(execute, "ALTER TABLE pipeline_entries DROP CONSTRAINT IF EXISTS pipeline_entries_stage_check")
     db_run(
         execute,
         "ALTER TABLE pipeline_entries ADD CONSTRAINT pipeline_entries_stage_check "
@@ -564,11 +610,38 @@ def test_bv9_erase_refuses_a_confirmation_that_is_not_the_address(client, make_a
 
 def test_bv9_erase_refuses_a_missing_confirmation(client, make_admin, make_email):
     admin = make_admin()
+    email = make_email("ws5-erase-none")
     res = client.post(
-        "/api/v1/admin/gdpr/erase", json={"email": make_email("ws5-erase-none")},
+        "/api/v1/admin/gdpr/erase", json={"email": email}, headers=admin["headers"],
+    )
+    assert res.status_code == 422, res.text
+    assert res.json()["detail"]["code"] == "erase_confirm_must_match_email"
+    # security-audit MEDIUM: a required `confirm` would have made this
+    # FastAPI's own validation error, which echoes the whole request body.
+    assert email not in res.text, res.text
+
+
+def test_bv9_erase_refusal_never_echoes_the_address_over_http(client, make_admin, make_email):
+    admin = make_admin()
+    email = make_email("ws5-erase-echo")
+    other = make_email("ws5-erase-echo-other")
+    res = client.post(
+        "/api/v1/admin/gdpr/erase", json={"email": email, "confirm": other},
         headers=admin["headers"],
     )
     assert res.status_code == 422, res.text
+    assert email not in res.text and other not in res.text, res.text
+
+
+def test_bv9_erase_refuses_an_empty_confirmation(client, make_admin, make_email):
+    admin = make_admin()
+    email = make_email("ws5-erase-empty")
+    res = client.post(
+        "/api/v1/admin/gdpr/erase", json={"email": email, "confirm": ""},
+        headers=admin["headers"],
+    )
+    assert res.status_code == 422, res.text
+    assert email not in res.text, res.text
 
 
 def test_bv9_erase_proceeds_when_the_address_is_repeated(client, db_run, make_admin, make_email):
@@ -728,3 +801,65 @@ def test_bv10_omitting_sort_keeps_the_historical_order(client, make_admin):
     ).json()["items"]
     created = [r["created_at"] for r in items]
     assert created == sorted(created, reverse=True)
+
+
+def test_bv10_sorting_on_the_tiebreaker_column_itself_works(client, make_admin):
+    """security-audit LOW #3: the route must not emit "id ASC, id DESC"."""
+    admin = make_admin()
+    for path in ("/api/v1/admin/users", "/api/v1/admin/jobs", "/api/v1/admin/placements"):
+        res = client.get(path, params={"sort": "id", "order": "asc"}, headers=admin["headers"])
+        assert res.status_code == 200, (path, res.text)
+        ids = [r["id"] for r in res.json()["items"]]
+        assert ids == sorted(ids), path
+
+
+def test_bv10_candidates_page_boundary_holds_with_duplicate_sort_values(
+    client, db_run, make_admin, make_email,
+):
+    """security-audit LOW #4: rows sharing a sort value, spread over both
+    merge branches and across a page boundary, must appear exactly once
+    over the two pages -- no row lost between the branches' own cuts."""
+    from core.database import execute, fetch_one
+
+    admin = make_admin()
+    suffix = uuid.uuid4().hex[:8]
+    shared_title = f"Duplicate Title {suffix}"
+
+    # Three in the candidates branch, three in the profiles-only branch,
+    # all with the identical sort value.
+    for i in range(3):
+        db_run(
+            fetch_one,
+            """INSERT INTO candidates (full_name, email, current_title, source, lawful_basis)
+               VALUES ($1, $2, $3, 'manual', 'gerechtvaardigd_belang') RETURNING id""",
+            f"Dup Sourced {suffix} {i}", make_email(f"ws5-dupA-{suffix}-{i}"), shared_title,
+        )
+    for i in range(3):
+        user = db_run(
+            fetch_one,
+            """INSERT INTO users (email, password_hash, full_name, role, is_verified)
+               VALUES ($1, 'x', $2, 'candidate', TRUE) RETURNING id""",
+            make_email(f"ws5-dupB-{suffix}-{i}"), f"Dup Self {suffix} {i}",
+        )
+        db_run(
+            execute,
+            "INSERT INTO candidate_profiles (user_id, current_title) VALUES ($1, $2) "
+            "ON CONFLICT (user_id) DO UPDATE SET current_title = EXCLUDED.current_title",
+            user["id"], shared_title,
+        )
+
+    params = {"search": suffix, "sort": "current_title", "order": "asc"}
+    first = client.get(
+        "/api/v1/admin/candidates", params={**params, "limit": 3, "offset": 0},
+        headers=admin["headers"],
+    ).json()
+    second = client.get(
+        "/api/v1/admin/candidates", params={**params, "limit": 3, "offset": 3},
+        headers=admin["headers"],
+    ).json()
+
+    assert first["total"] == 6, first
+    seen = [(i["kind"], i["email"]) for i in first["items"]] + [(i["kind"], i["email"]) for i in second["items"]]
+    assert len(seen) == 6, seen
+    assert len(set(seen)) == 6, f"a row appears twice across the page boundary: {seen}"
+    assert {kind for kind, _ in seen} == {"sourced", "self-registered"}, seen

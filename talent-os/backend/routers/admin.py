@@ -584,14 +584,38 @@ _CANDIDATE_SORT_COLUMNS = {
 }
 
 
-def _merge_sort_key(row: dict, key: str):
+# The tiebreaker for the two-branch merge below. It has to be a column
+# BOTH branch SELECTs produce, which rules out candidate_id (branch B
+# hardcodes it to NULL) and user_id (branch A leaves it NULL for a
+# candidate with no portal account), and leaves created_at.
+_CANDIDATE_TIEBREAKER = "created_at"
+
+
+def _merge_sort_key(row: dict, keys: tuple):
     """Sort key for the Python-side merge of branch A and branch B, with
     NULLs pushed to the end in both directions (asyncpg gives None for a
     NULL column and None is not orderable against a str/date in Python).
-    Returns (is_null, value) so a NULL always compares last on asc; the
-    caller flips only the value half for desc by reversing the list."""
-    value = row.get(key)
-    return (value is None, value if value is not None else "")
+    Each key becomes (is_null, value) so a NULL always compares last on
+    asc; the caller flips both halves for desc by reversing the list.
+
+    `keys` mirrors the branch queries' own ORDER BY, tiebreaker included
+    (security-audit LOW #4): without one, a sort column with duplicates
+    let each branch cut its own top offset+limit on a tie order Postgres
+    picked arbitrarily, and a row could fall out of the page between the
+    two cuts. Sorting on the same pair in both places closes that.
+
+    What it does not close: Postgres orders text by the database
+    collation and Python by codepoint, so on an ICU collation the two can
+    still disagree about which rows belong in the fetch window at all.
+    Fixing that properly means ordering the whole thing in SQL (one UNION
+    ALL instead of two queries merged here), which is a rewrite of this
+    route rather than a guard on it -- noted for the PR, not done here.
+    """
+    parts = []
+    for key in keys:
+        value = row.get(key)
+        parts.append((value is None, value if value is not None else ""))
+    return tuple(parts)
 
 
 @router.get("/candidates")
@@ -625,6 +649,10 @@ async def list_all_candidates(
     )
     sort_key = sort_key_for(sort, allowed=_CANDIDATE_SORT_COLUMNS, default_key="created_at")
     descending = branch_order_by.endswith("DESC")
+    merge_keys = (sort_key,)
+    if sort_key != _CANDIDATE_TIEBREAKER:
+        branch_order_by = f"{branch_order_by}, {_CANDIDATE_TIEBREAKER} {'DESC' if descending else 'ASC'}"
+        merge_keys = (sort_key, _CANDIDATE_TIEBREAKER)
 
     # ── Branch A: candidates table (sourced, plus already-linked self-registered) ──
     a_conditions = ["c.deleted_at IS NULL"]
@@ -754,7 +782,7 @@ async def list_all_candidates(
     # Ascending first, then reversed for desc: that reproduces Postgres's
     # own NULLS LAST on ASC / NULLS FIRST on DESC defaults, so the merged
     # page orders NULLs the same way each branch query already did.
-    combined = sorted(list(a_rows) + list(b_rows), key=lambda r: _merge_sort_key(r, sort_key))
+    combined = sorted(list(a_rows) + list(b_rows), key=lambda r: _merge_sort_key(r, merge_keys))
     if descending:
         combined.reverse()
     page = combined[offset:offset + limit]

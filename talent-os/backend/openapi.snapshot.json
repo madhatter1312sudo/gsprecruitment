@@ -196,9 +196,10 @@
         "type": "object"
       },
       "AdminEraseRequest": {
-        "description": "WS5 BV9 (SITE-DESIGN-SPEC.md \u00a77.6 besluit 3, \u00a77.7 BV9).\n\n`confirm` used to be a boolean that defaulted to False and only ever\nmattered for the admin/self guard below -- which meant the plain case\n(erase a sourced person) needed no confirmation of any kind: one\nfield, one call, irreversible. The typed-address threshold the admin\npanel applies is a UI measure, and a UI measure binds only that UI,\nnot a routine or a second client hitting the same endpoint. So the\nfield now carries the address itself, and the endpoint refuses when\nit does not match `email` after strip()/lower(). Every caller is now\nheld to the same threshold and the panel repeats the rule instead of\ncarrying it alone.\n\nThe admin/self question is a genuinely different one -- \"this address\nalso owns platform access, are you sure\" -- so it keeps its own\nfield, `confirm_admin_or_self`, rather than being folded into the\nsame yes. Two questions, two answers.\n\nThe match itself is checked in the endpoint below, not in a pydantic\nvalidator: a validator's ValidationError carries the offending input\nback to the caller (pydantic puts the whole payload in `input`), and\nthat would put two e-mail addresses into every 422 body and into\nwhatever logs or error trackers see it. The endpoint refuses with a\nstructured detail that names neither.",
+        "description": "WS5 BV9 (SITE-DESIGN-SPEC.md \u00a77.6 besluit 3, \u00a77.7 BV9).\n\n`confirm` used to be a boolean that defaulted to False and only ever\nmattered for the admin/self guard below -- which meant the plain case\n(erase a sourced person) needed no confirmation of any kind: one\nfield, one call, irreversible. The typed-address threshold the admin\npanel applies is a UI measure, and a UI measure binds only that UI,\nnot a routine or a second client hitting the same endpoint. So the\nfield now carries the address itself, and the endpoint refuses when\nit does not match `email` after strip()/lower(). Every caller is now\nheld to the same threshold and the panel repeats the rule instead of\ncarrying it alone.\n\nThe admin/self question is a genuinely different one -- \"this address\nalso owns platform access, are you sure\" -- so it keeps its own\nfield, `confirm_admin_or_self`, rather than being folded into the\nsame yes. Two questions, two answers.\n\nThe match itself is checked in the endpoint below, not in a pydantic\nvalidator: a validator's ValidationError carries the offending input\nback to the caller (pydantic puts the whole payload in `input`), and\nthat would put two e-mail addresses into every 422 body and into\nwhatever logs or error trackers see it. The endpoint refuses with a\nstructured detail that names neither.\n\n`confirm` carries an empty-string default rather than being required\nfor the same reason (security-audit, MEDIUM): a missing required\nfield never reaches the route at all, and FastAPI's own 422 for it\nechoes the whole request body back -- including `email`. Defaulting\nit to \"\" hands every case to the route's check below, which refuses\nan empty confirmation just as firmly and names no address. It is a\ndefault that can never be a valid confirmation: no e-mail address is\nthe empty string.",
         "properties": {
           "confirm": {
+            "default": "",
             "title": "Confirm",
             "type": "string"
           },
@@ -214,8 +215,7 @@
           }
         },
         "required": [
-          "email",
-          "confirm"
+          "email"
         ],
         "title": "AdminEraseRequest",
         "type": "object"

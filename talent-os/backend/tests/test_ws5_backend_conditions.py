@@ -84,6 +84,33 @@ def test_tiebreaker_is_appended_after_an_explicit_sort_only():
     ) == "created_at DESC"
 
 
+def test_tiebreaker_is_skipped_when_it_is_the_sort_column_itself():
+    """security-audit LOW #3: "id ASC, id DESC" is a contradiction the
+    second key can never be reached through -- it must not be emitted."""
+    allowed = {"id": "id", "full_name": "u.full_name"}
+    assert resolve_order_by("id", "asc", allowed=allowed, default="x", tiebreaker="id DESC") == "id ASC"
+    assert resolve_order_by("id", "desc", allowed=allowed, default="x", tiebreaker="id DESC") == "id DESC"
+    # a different column still gets it
+    assert resolve_order_by(
+        "full_name", "asc", allowed=allowed, default="x", tiebreaker="id DESC",
+    ) == "u.full_name ASC, id DESC"
+
+
+def test_route_tiebreakers_are_never_emitted_twice():
+    """Every route allowlist that contains its own tiebreaker column must
+    survive being sorted on exactly that column."""
+    from routers.admin import _JOB_SORT_COLUMNS, _USER_SORT_COLUMNS
+    from routers.placements import _PLACEMENT_SORT_COLUMNS
+
+    for allowed, default, tiebreaker in (
+        (_USER_SORT_COLUMNS, "created_at DESC", "id DESC"),
+        (_JOB_SORT_COLUMNS, "j.created_at DESC", "j.id DESC"),
+        (_PLACEMENT_SORT_COLUMNS, "created_at DESC", "id DESC"),
+    ):
+        clause = resolve_order_by("id", "asc", allowed=allowed, default=default, tiebreaker=tiebreaker)
+        assert clause.count("id") == 1, clause
+
+
 def test_column_outside_the_allowlist_is_422_and_never_reaches_sql():
     with pytest.raises(HTTPException) as exc:
         resolve_order_by("password_hash", None, allowed=_ALLOWED, default="x")
@@ -145,6 +172,46 @@ def test_candidate_sort_columns_exist_in_both_merge_branches():
     for column in admin._CANDIDATE_SORT_COLUMNS:
         assert column in branch_a, f"{column} is not selected by branch A"
         assert column in branch_b, f"{column} is not selected by branch B"
+
+
+def test_candidates_merge_uses_a_tiebreaker_both_branches_produce():
+    """security-audit LOW #4: without one, two branches each cut their own
+    offset+limit on an arbitrary tie order and a row can fall out of the
+    page. The tiebreaker has to exist in both SELECTs."""
+    import inspect
+
+    from routers import admin
+
+    assert admin._CANDIDATE_TIEBREAKER in admin._CANDIDATE_SORT_COLUMNS
+    source = inspect.getsource(admin.list_all_candidates)
+    branch_a, branch_b = source.split("Branch B", 1)
+    assert admin._CANDIDATE_TIEBREAKER in branch_a
+    assert admin._CANDIDATE_TIEBREAKER in branch_b
+
+
+def test_merge_sort_key_orders_on_the_tiebreaker_within_a_tie():
+    from routers.admin import _merge_sort_key
+
+    rows = [
+        {"full_name": "Same", "created_at": "2026-01-02"},
+        {"full_name": "Same", "created_at": "2026-01-01"},
+        {"full_name": "Other", "created_at": "2026-01-03"},
+    ]
+    ordered = sorted(rows, key=lambda r: _merge_sort_key(r, ("full_name", "created_at")))
+    assert [r["created_at"] for r in ordered] == ["2026-01-03", "2026-01-01", "2026-01-02"]
+
+
+def test_merge_sort_key_keeps_nulls_last_on_every_key():
+    from routers.admin import _merge_sort_key
+
+    rows = [
+        {"full_name": None, "created_at": "2026-01-01"},
+        {"full_name": "A", "created_at": None},
+        {"full_name": "A", "created_at": "2026-01-01"},
+    ]
+    ordered = sorted(rows, key=lambda r: _merge_sort_key(r, ("full_name", "created_at")))
+    assert ordered[0]["full_name"] == "A" and ordered[0]["created_at"] == "2026-01-01"
+    assert ordered[-1]["full_name"] is None
 
 
 # ── BV2: lockout columns on the user routes ──────────────────────────────
@@ -259,6 +326,36 @@ def test_043_constrains_exactly_the_seven_canonical_stages():
     assert check.count("'") == 2 * len(PIPELINE_STAGES)
 
 
+def test_043_leaves_no_row_the_constraint_would_make_unwritable():
+    """security-audit HIGH: a NOT VALID CHECK skips only the initial scan
+    -- it still applies to every later INSERT and UPDATE, including one
+    that does not touch `stage` at all (erase_person()'s
+    `UPDATE pipeline_entries SET notes = NULL`). So the normalisation
+    must leave nothing outside the seven."""
+    mod = _load_migration("043_pipeline_stage_check.py")
+    statements = [s.strip() for s in mod.MIGRATION_SQL.split(";") if s.strip()]
+    catch_all = [s for s in statements if "SET stage = 'sourced'" in s and "NOT IN" in s]
+    assert len(catch_all) == 1, "expected exactly one catch-all normalisation"
+    for stage in PIPELINE_STAGES:
+        assert f"'{stage}'" in catch_all[0], "the catch-all must spare every canonical value"
+    assert "stage IS NOT NULL" in catch_all[0], "NULL satisfies the CHECK and must stay NULL"
+
+    catch_all_idx = statements.index(catch_all[0])
+    add_idx = next(i for i, s in enumerate(statements) if "ADD CONSTRAINT" in s)
+    assert catch_all_idx < add_idx, "the catch-all must run before the constraint"
+    specific = [i for i, s in enumerate(statements)
+                if s.startswith("UPDATE") and "NOT IN" not in s and "TRIM(LOWER" not in s]
+    assert specific and max(specific) < catch_all_idx, (
+        "the specific mappings must run first, otherwise the catch-all flattens the progress they preserve"
+    )
+
+
+def test_043_explains_why_the_catch_all_writes_sourced():
+    mod = _load_migration("043_pipeline_stage_check.py")
+    assert "erase_person" in mod.__doc__, "the failure mode that forced the catch-all belongs in the file"
+    assert "onschrijfbaar" in mod.__doc__
+
+
 def test_043_documents_every_mapping_it_performs():
     """Each semantic UPDATE must name its source value in the docstring's
     mapping table -- the migration is the only place that rewrite is
@@ -279,6 +376,10 @@ def test_043_never_maps_a_canonical_stage_onto_another_one():
     for statement in mod.MIGRATION_SQL.split(";"):
         if not statement.strip().startswith("UPDATE") or "TRIM(LOWER" in statement:
             continue
+        if "NOT IN" in statement:
+            # The catch-all names all seven precisely to exclude them --
+            # covered by its own test above.
+            continue
         where = statement.split("WHERE", 1)[1]
         for stage in PIPELINE_STAGES:
             assert f"'{stage}'" not in where, f"{stage} is a canonical value and must never be rewritten"
@@ -286,13 +387,26 @@ def test_043_never_maps_a_canonical_stage_onto_another_one():
 
 # ── BV9: the erase confirmation is the address ───────────────────────────
 
-def test_erase_request_has_no_default_confirm_value():
-    """A missing confirm must be a 422, not a silent pass -- the whole
-    point of BV9 is that no caller reaches erase_person() by accident."""
+def test_erase_confirm_defaults_to_a_value_that_can_never_confirm():
+    """security-audit MEDIUM: `confirm` must not be a required field --
+    FastAPI's own 422 for a missing one echoes the whole request body,
+    e-mail address included. The default has to be something no address
+    can equal, so the route's own check still refuses it."""
     import routers.gdpr as gdpr
 
-    with pytest.raises(ValidationError):
-        gdpr.AdminEraseRequest(email="target@example.com")
+    assert gdpr.AdminEraseRequest.model_fields["confirm"].default == ""
+
+
+def test_erase_refuses_an_omitted_confirmation(patch_erase_lookup):
+    gdpr, calls = patch_erase_lookup([])
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(gdpr.admin_erase_person(
+            gdpr.AdminEraseRequest(email="target@example.com"),
+            current_user={"id": 1, "role": "admin"},
+        ))
+    assert exc.value.status_code == 422
+    assert exc.value.detail["code"] == "erase_confirm_must_match_email"
+    assert calls == []
 
 
 def test_erase_refuses_a_confirm_that_is_not_the_address(patch_erase_lookup):

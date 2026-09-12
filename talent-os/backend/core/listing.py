@@ -84,7 +84,13 @@ def resolve_order_by(
 
     direction = "DESC" if (order_norm or "asc") == "desc" else "ASC"
     clause = f"{column} {direction}"
-    if tiebreaker:
+    # Sorting on the tiebreaker column itself would produce a
+    # contradictory "id ASC, id DESC" -- harmless to Postgres (the second
+    # key can never be reached) but a lie about what the query does, and
+    # the kind of thing that reads as a bug in a slow-query log. The
+    # tiebreaker exists to make a non-unique sort deterministic; when the
+    # sort key IS the tiebreaker column, it is already deterministic.
+    if tiebreaker and tiebreaker.split()[0] != column:
         clause = f"{clause}, {tiebreaker}"
     return clause
 
