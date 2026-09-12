@@ -1416,9 +1416,9 @@ const GSP_WHATSAPP = '31617913965';
     const banner = document.createElement('div');
     banner.id = 'cookieConsentBanner';
     // Compact corner card (not a full-width bar) so it never sits over a
-    // page's primary content at first paint, bijvoorbeeld de vacatures
-    // filter bar of de contact form heading, die op een eerste weergave
-    // van 1440x900 allebei dicht bij de vouw staan. The text itself is one ellipsized
+    // page's primary content at first paint, for example the vacatures
+    // filter bar or the contact form heading, which both sit close to the
+    // fold on a 1440x900 first view. The text itself is one ellipsized
     // line (full copy in the title attribute), but the card is not one
     // row: at 390px the flex row wraps into three (text, privacy link,
     // accept button) and the card measures 358x144. That height is what

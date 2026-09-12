@@ -510,6 +510,12 @@ body:not(.portal) .card > .mark:first-child, .service-card > .mark:first-child,
   color: var(--gray-500);
 }
 .contact-detail i { width: 20px; color: var(--gold-ink); font-size: 1rem; }
+/* De rij is als geheel niet klikbaar, maar het e-mailadres erin wel
+   (over-ons.html, Bedrijfsgegevens). Zelfde patroon als .footer-bottom a:
+   kleur van de regel eromheen plus onderstreping, zodat kleur niet het
+   enige onderscheidende kenmerk is (WCAG 1.4.1). */
+.contact-detail a { color: inherit; text-decoration: underline; }
+.contact-detail a:hover, .contact-detail a:focus-visible { color: var(--gold-ink); }
 @media (max-width: 390px) {
   .contact-row__label { flex-basis: 84px; }
 }
@@ -564,11 +570,15 @@ body:not(.portal) .card > .mark:first-child, .service-card > .mark:first-child,
    (48x48) rechtsonder; het e-mailitem verdwijnt. Een pil van 96px breed
    dekt op 390px lopende tekst af in vrijwel elke scrollpositie: gemeten
    over de hele scrollrange (acht pagina's, 390x844 en 390x664, NL en EN,
-   stappen van viewport/3) raakte de tweedelige pil in 29 van de 32
-   combinaties tekst, tot 3786px2 per frame. Dat geldt in beide hoeken:
+   stappen van viewport/3) raakte de tweedelige pil in 31 van de 32
+   combinaties tekst, tot 4925px2 per frame. Dat geldt in beide hoeken:
    alleen de laatste regel van een alinea eindigt rafelig, binnenregels
    lopen tot de marge. Eén item van 48x48 halveert de breedte en zet hem
    in de hoek waar de laatste regels het vaakst kort zijn.
+   Inset 16px in plaats van var(--space-lg) (24px): dichter in de hoek
+   betekent meetbaar minder tekst onder de pil (over vier pagina's 52379px2
+   op 24px tegen 38619px2 op 16px, oftewel 26% minder), en 16px is de inset
+   die .whatsapp-float in productie al gebruikt.
    E-mail blijft op mobiel bereikbaar via de mailto-link in de footer van
    elke publieke pagina, en via contact.html. Het verbergen gebeurt op de
    rail zelf, niet via .lang-nl/.lang-en (die klassen sturen uitsluitend
@@ -581,8 +591,8 @@ body:not(.portal) .card > .mark:first-child, .service-card > .mark:first-child,
 @media (max-width: 600px) {
   .contact-rail {
     flex-direction: row;
-    left: auto; right: var(--space-lg);
-    bottom: calc(var(--space-lg) + var(--fixed-stack-offset, 0px));
+    left: auto; right: 16px;
+    bottom: calc(16px + var(--fixed-stack-offset, 0px));
   }
   .contact-rail__item--mail { display: none; }
   .contact-rail__item + .contact-rail__item { border-top: none; border-left: 1px solid var(--navy-600); }
@@ -1322,9 +1332,14 @@ section { padding: 100px 0; }
 /* Het e-mailadres in de onderste footerregel is een echte mailto-link op
    elke publieke pagina. Op <=600px is dit het enige e-mailkanaal buiten
    contact.html: de contactrail toont daar alleen WhatsApp (§8.x.4).
-   Kleur volgt de regel eromheen (geen eigen kleur die op navy onder 4,5:1
-   zakt); de onderstreping maakt hem als link herkenbaar zonder alleen op
-   kleur te leunen, hover/focus gaat naar goud zoals .footer-links a. */
+   Kleur erft van .footer-bottom in plaats van een eigen kleur te krijgen.
+   Niet omdat een eigen kleur te weinig contrast zou halen: de kleur van
+   .footer-links a, rgba(255,255,255,0.5), haalt op deze navy 5,32:1. Maar
+   de link staat hier midden in een regel lopende tekst, niet in een lijst
+   met alleen links, en een kleurverschil van 0,50 tegen 0,55 wit is geen
+   bruikbaar onderscheid. De onderstreping draagt dus de linkherkenning,
+   zodat kleur niet het enige onderscheidende kenmerk is (WCAG 1.4.1);
+   hover/focus gaat naar goud, net als .footer-links a. */
 .footer-bottom a { color: inherit; text-decoration: underline; }
 .footer-bottom a:hover, .footer-bottom a:focus-visible { color: var(--gold); }
 
@@ -1799,7 +1814,29 @@ html[data-lang="en"] .lang-nl { display: none; }
   margin-top: auto; padding-top: 24px; border-top: 1px solid var(--navy-700, #0F1D35);
   font-family: var(--font-mono); font-size: 0.8rem; color: var(--navy-300, #4A6F9F);
 }
-.signup-panel { padding: 72px 48px; display: flex; align-items: center; justify-content: center; background: var(--bg); }
+/* Boven 600px staat de contactrail linksonder en loopt hij van 24px tot
+   74px vanaf de linkerrand. Dit is de enige plek op de site waar lopende
+   tekst zo ver naar links begint dat de rail hem raakt: de regel "Reactie
+   binnen 24 uur" werd bij de juiste scrollpositie over 270px2 afgedekt
+   (gemeten op 1024, 1280, 1440 en 1600px). De regel schuift daarom naar
+   rechts tot voorbij de rail, met 12px lucht. Twee waarden omdat
+   .signup-value zelf van padding wisselt: 24px onder 1024px, 56px erboven.
+   Onder 601px staat de rail rechtsonder en is de verschuiving niet nodig. */
+@media (min-width: 601px) { .signup-foot { padding-left: 62px; } }
+@media (min-width: 1024px) { .signup-foot { padding-left: 30px; } }
+/* Kolom, niet rij. .signup-panel bevat twee blokken onder elkaar: de
+   .signup-card en de .talentpool-optin die daaronder hoort (zijn
+   margin-top en border-top gaan daarvan uit). Als flex-rij zetten die
+   zich naast elkaar, en omdat beide max-width:480px hebben past dat pas
+   vanaf circa 1150px: op 1024px liep de opt-in met de checkbox en de
+   knop "Aanmelden" volledig buiten beeld (gemeten scrollWidth 1122 bij
+   viewport 1024) en op 1280-1600px zweefde hij naast de kaart met een
+   losse border-top erboven. align-items:center houdt beide blokken
+   gecentreerd nu de hoofdas verticaal is. */
+.signup-panel {
+  padding: 72px 48px; background: var(--bg);
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+}
 /* Archetype 2's card container (bg/border/radius) is reused here per
    §8.x.2 — the form structure inside stays its own, not migrated to the
    mark→h3→body→go-link anatomy. .signup-panel above is --bg (white), same
@@ -1848,13 +1885,11 @@ html[data-lang="en"] .lang-nl { display: none; }
    zich naar de viewport te voegen. Op 390px leverde `1fr` een track van
    661px op; de hero van kandidaten.html werd daardoor midden in woorden
    afgekapt en was door body{overflow-x:hidden} ook niet weg te scrollen.
-   .signup-panel is een flex-rij; op mobiel moeten de kaart en de
-   talentpool-opt-in onder elkaar staan, niet naast elkaar (de opt-in heeft
-   daar zijn margin-top/border-top ook voor). */
+   De kolomrichting van .signup-panel staat nu in de basisregel hierboven
+   en niet meer alleen hier, want het probleem was niet mobiel-specifiek. */
 @media (max-width: 1023px) {
   .signup-split { grid-template-columns: minmax(0, 1fr); }
   .signup-value, .signup-panel { padding: 48px 24px; }
-  .signup-panel { flex-direction: column; }
   .signup-card { padding: 32px 24px; }
 }
 
