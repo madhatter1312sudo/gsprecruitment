@@ -11,13 +11,23 @@
    §7.3.2, wat dit bestand doet en wat het bewust niet doet:
      - De tab Toestemmingen en de twee wijzigmodals werken op
        `candidates.id` (candidateId hieronder), niet op de kind/itemId-
-       sleutel waarmee de lijst en de drawer een kandidaat aanspreken: een
-       self-registered kandidaat zonder gekoppelde candidates-rij heeft
-       geen grondslag om toestemming op vast te leggen. candidateRecordId()
-       lost dat op uit de al opgehaalde detailrespons (`.id` voor kind
-       'sourced', `.candidate_id` voor 'self-registered'); ontbreekt hij,
-       dan toont de tab één zin in plaats van drie kaarten (as-built
-       afwijking 1, SITE-DESIGN-SPEC.md §7.3.2).
+       sleutel waarmee de lijst en de drawer een kandidaat aanspreken.
+       GET /candidates/self-registered/{id} (routers/admin.py) geeft geen
+       enkele consentkolom terug, ook al staat er een gekoppelde
+       candidates-rij achter: alleen GET /candidates/sourced/{id} doet dat
+       (`SELECT c.*`). resolveConsentDetail() haalt daarom bij kind
+       'self-registered' een TWEEDE keer op, via kind 'sourced' met het
+       candidate_id uit de eerste respons, en cachet dat resultaat apart
+       onder de sleutel `sourced:<candidateId>` (nooit gemengd met de
+       cache van de eerste, kind-eigen respons: die twee objecten hebben
+       verschillende `id`-betekenissen, en een PATCH-respons die per
+       ongeluk in de verkeerde sleutel belandt zou `id` van een
+       gebruikersaccount stilzwijgend vervangen door een candidates.id).
+       Voor kind 'sourced' zijn beide ophalingen dezelfde aanroep, dus
+       daar kost dit niets extra. Ontbreekt candidate_id/id helemaal (geen
+       gekoppelde candidates-rij), dan toont de tab één zin in plaats van
+       drie kaarten. Beide gevallen samen zijn as-built afwijking 1,
+       SITE-DESIGN-SPEC.md §7.3.2.
      - Matches en Activiteit zijn bestaande, gedeelde routes
        (GET /admin/pipeline?candidate_id=, GET /admin/activities?
        subject_type=candidate&subject_id=) hergebruikt achter deze twee
@@ -151,6 +161,13 @@
 
   openCandidateDrawer(kind, itemId) {
     const row = this._findCandidateRosterRow(kind, itemId);
+    // LOW 5 (security-auditor, review op b9d5b21): de detailcache leeft
+    // langer dan één drawersessie. Zonder deze reset toont heropenen van
+    // dezelfde kandidaat binnen dezelfde paginasessie de toestemmingen van
+    // de vorige keer totdat er een PATCH doorheen gaat. Wissen bij elke
+    // opening is eenvoudiger en veiliger dan per kandidaat bijhouden welke
+    // sleutels stale zijn.
+    this._data.candidateDetail = {};
     this._candidateDrawer = ui.drawer({
       id: 'candidateDrawer',
       title: row?.full_name || 'Kandidaat',
@@ -165,21 +182,24 @@
     this.switchCandidateTab(kind, itemId, 'profiel');
   },
 
-  switchCandidateTab(kind, itemId, tab) {
+  // opts (alleen doorgegeven aan de tab Toestemmingen) laat een geslaagde
+  // PATCH een verse ophaling afdwingen (§7.3.2 as-built, HIGH/MEDIUM):
+  // switchCandidateTab(kind, itemId, 'toestemmingen', { force: true }).
+  switchCandidateTab(kind, itemId, tab, opts = {}) {
     if (this._candidateDrawer) this._candidateDrawer.selectTab(tab);
     const loaders = {
       profiel: () => this.loadCandidateProfileTab(kind, itemId),
       matches: () => this.loadCandidateMatchesTab(kind, itemId),
       activiteit: () => this.loadCandidateActivityTab(kind, itemId),
-      toestemmingen: () => this.loadCandidateConsentTab(kind, itemId),
+      toestemmingen: () => this.loadCandidateConsentTab(kind, itemId, opts),
     };
     (loaders[tab] || loaders.profiel)();
   },
 
-  // Eén cache per kind/id-paar, gedeeld door alle vier de tabs: de tab
-  // Toestemmingen en de twee wijzigmodals lezen candidateId eruit, en een
-  // geslaagde PATCH wordt via mergeCandidateDetail() teruggeschreven in
-  // plaats van de hele drawer opnieuw op te halen.
+  // Eén cache per kind/id-paar (de vorm die GET /candidates/{kind}/{id}
+  // voor dát kind teruggeeft), gedeeld door de tabs Profiel/Matches/
+  // Activiteit. De tab Toestemmingen en de twee wijzigmodals lezen NOOIT
+  // rechtstreeks uit deze cache: zie resolveConsentDetail() hieronder.
   async ensureCandidateDetail(kind, itemId, { force = false } = {}) {
     const key = `${kind}:${itemId}`;
     this._data.candidateDetail = this._data.candidateDetail || {};
@@ -192,12 +212,6 @@
     return data;
   },
 
-  mergeCandidateDetail(kind, itemId, patch) {
-    const key = `${kind}:${itemId}`;
-    this._data.candidateDetail = this._data.candidateDetail || {};
-    this._data.candidateDetail[key] = { ...(this._data.candidateDetail[key] || {}), ...(patch || {}) };
-  },
-
   // kind='sourced': item_id IS candidates.id. kind='self-registered': de
   // gekoppelde candidates-rij (indien aanwezig) staat op .candidate_id,
   // zie GET /v1/admin/candidates/{kind}/{id} in routers/admin.py.
@@ -207,6 +221,25 @@
     return detail.candidate_id ?? null;
   },
 
+  // De ene plek die de tab Toestemmingen en de twee wijzigmodals gebruiken
+  // om aan een candidateId EN aan de consentvelden te komen. Voor kind
+  // 'sourced' is dat de gewone detailrespons (dezelfde aanroep als de tab
+  // Profiel, dus geen extra netwerkverkeer). Voor kind 'self-registered'
+  // levert die eerste respons alleen `candidate_id`; de consentvelden
+  // zelf komen pas uit een tweede, expliciete aanroep op kind 'sourced'
+  // met dat id, gecachet onder `sourced:<candidateId>`. force geldt voor
+  // allebei de aanroepen: na een PATCH is zowel het candidate_id-argument
+  // als het consentresultaat opnieuw op te halen waard, ook al verandert
+  // het eerste in de praktijk nooit.
+  async resolveConsentDetail(kind, itemId, { force = false } = {}) {
+    const base = await this.ensureCandidateDetail(kind, itemId, { force });
+    const candidateId = this.candidateRecordId(base, kind);
+    if (!candidateId) return { candidateId: null, detail: null };
+    if (kind === 'sourced') return { candidateId, detail: base };
+    const detail = await this.ensureCandidateDetail('sourced', candidateId, { force });
+    return { candidateId, detail };
+  },
+
   /* ---- Tab: Profiel ---- */
   async loadCandidateProfileTab(kind, itemId) {
     const el = document.getElementById('candidateDrawerTabContent');
@@ -214,10 +247,30 @@
     mount(el, html`<div class="a-state-block"><i class="fa-solid fa-spinner fa-spin"></i> Laden…</div>`);
     try {
       const detail = await this.ensureCandidateDetail(kind, itemId);
+      // code-reviewer op b9d5b21: de drawerkop kwam alleen uit de al
+      // geladen rosterrij en bleef "Kandidaat" / een streepje wanneer de
+      // drawer buiten die lijst om opende (dashboardwidget, "Kandidaat
+      // openen" vanuit de referral-409). Bijwerken zodra het echte detail
+      // er is, corrigeert dat zonder een setTitle-API op ui.drawer nodig
+      // te hebben.
+      const flat = this._flattenDetail(detail);
+      this.updateCandidateDrawerHeader(this._pick(flat, 'full_name', 'name'), this._pick(flat, 'email'));
       this.renderCandidateProfileTab(kind, itemId, detail);
     } catch {
       this.setContainerLoadError(el, () => this.loadCandidateProfileTab(kind, itemId));
     }
+  },
+
+  // ui.drawer() heeft geen setTitle: de kop hoort bij het element dat
+  // panel() bij openen rendert (§7.2b), dus deze functie leest en
+  // overschrijft die twee tekstknopen rechtstreeks in plaats van de hele
+  // drawer opnieuw te vullen (dat zou de actieve tab en scrollpositie
+  // resetten).
+  updateCandidateDrawerHeader(fullName, email) {
+    const titleEl = document.querySelector('#candidateDrawer__title span');
+    if (titleEl) titleEl.textContent = fullName || 'Kandidaat';
+    const subtitleEl = document.querySelector('#candidateDrawer .a-modal__subtitle');
+    if (subtitleEl) subtitleEl.textContent = email || '—';
   },
 
   // The detail endpoint's exact response shape depends on kind (a user +
@@ -249,6 +302,7 @@
     const d = this._flattenDetail(detail);
     const p = this._pick.bind(this, d);
 
+    const fullName = p('full_name', 'name') || 'Onbekend';
     const email = p('email');
     const phone = p('phone', 'phone_number');
     const linkedin = p('linkedin_url', 'linkedin');
@@ -298,7 +352,8 @@
     const hasContactLinks = !!(email || safeLinkedin || safeGithub || safePortfolio);
 
     mount(el, html`
-      <div class="d-flex justify-content-end mb-2">
+      <div class="d-flex align-items-start justify-content-between gap-3 mb-2">
+        <h3 class="a-cell-strong m-0">${fullName}</h3>
         <span class="${kb.cls}">${kb.label}</span>
       </div>
       ${hasContactLinks ? html`<div class="d-flex flex-wrap gap-2 mb-4">${contactLinks}</div>` : ''}
@@ -426,13 +481,19 @@
   /* ============================================================
      TAB: TOESTEMMINGEN (§7.3.2)
      ============================================================ */
-  async loadCandidateConsentTab(kind, itemId) {
+  async loadCandidateConsentTab(kind, itemId, opts = {}) {
     const el = document.getElementById('candidateDrawerTabContent');
     if (!el) return;
     // §7.2b laadstaat: drie vlakke blokken, geen shimmer.
     mount(el, html`${[0, 1, 2].map(() => html`<div class="a-skel-block"></div>`)}`);
     try {
-      const detail = await this.ensureCandidateDetail(kind, itemId);
+      const { candidateId, detail } = await this.resolveConsentDetail(kind, itemId, opts);
+      if (!candidateId) {
+        // As-built afwijking 1: geen gekoppelde candidates-rij, dus geen
+        // grondslag om een van de drie toestemmingen op vast te leggen.
+        mount(el, html`<div class="a-state-block">Deze kandidaat heeft nog geen kandidaatrecord; toestemmingen zijn hier niet beschikbaar.</div>`);
+        return;
+      }
       // As-built afwijking 3: er is geen admin-route voor één losse
       // vacature. Alleen wanneer er een actieve presentatietoestemming is
       // (dus een titel te tonen valt) halen we eenmalig, ongefilterd, de
@@ -446,9 +507,9 @@
           }
         } catch { /* best effort: valt terug op "Vacature #<id>" */ }
       }
-      this.renderCandidateConsentTab(kind, itemId, detail);
+      this.renderCandidateConsentTab(kind, itemId, candidateId, detail);
     } catch {
-      this.setContainerLoadError(el, () => this.loadCandidateConsentTab(kind, itemId));
+      this.setContainerLoadError(el, () => this.loadCandidateConsentTab(kind, itemId, opts));
     }
   },
 
@@ -475,6 +536,11 @@
           <button type="button" class="btn btn-sm btn-outline-secondary ms-3" data-action="${opts.action}"
             data-candidate-id="${opts.candidateId ?? ''}">${opts.actionLabel || 'Opnieuw proberen'}</button>` : ''}
       </div>`);
+    // design-reviewer op b9d5b21: op 390 staat de body van een modal die
+    // al gescrolld is (bijvoorbeeld doordat het formulier erboven de
+    // ruimte vult), en dan verschijnt deze melding buiten beeld. De
+    // gebruiker ziet dan na "Vastleggen" niets veranderen.
+    el.scrollIntoView({ block: 'start' });
   },
 
   // core/retention.py JOB_ALERT_ELIGIBILITY_SQL, letterlijk overgenomen als
@@ -497,25 +563,25 @@
     return { eligible: true, reason: '' };
   },
 
-  renderCandidateConsentTab(kind, itemId, detail) {
+  renderCandidateConsentTab(kind, itemId, candidateId, detail) {
     const el = document.getElementById('candidateDrawerTabContent');
     if (!el) return;
-    const candidateId = this.candidateRecordId(detail, kind);
-    if (!candidateId) {
-      // As-built afwijking 1: "leeg bestaat niet" geldt voor een bestaand
-      // kandidaatrecord: zonder candidates.id is er geen grondslag om een
-      // van de drie toestemmingen op vast te leggen.
-      mount(el, html`<div class="a-state-block">Deze kandidaat heeft nog geen kandidaatrecord; toestemmingen zijn hier niet beschikbaar.</div>`);
-      return;
-    }
 
     const tpActive = !!detail.consent_talentpool_at;
     const spActive = !!detail.consent_spec_presentation_at;
+    const withdrawn = !!detail.consent_withdrawn_at;
     const jobId = detail.consent_spec_presentation_job_id;
     const jobsAll = this._data.jobsAll || [];
     const job = jobId != null ? jobsAll.find(j => j.id === jobId) : null;
     const alertsEnabled = detail.job_alert_optin_at != null && detail.job_alert_unsubscribed_at == null;
     const { eligible, reason } = this.candidateJobAlertEligibility(detail);
+    // security-auditor LOW 4 op b9d5b21: de backend geeft hier gegarandeerd
+    // een 409 met een Engelse zin (admin.py:1171-1176) zodra
+    // consent_withdrawn_at staat; de knop meldt dat vooraf, in het
+    // Nederlands, in plaats van de aanroep te laten mislukken.
+    const presentationDisabledReason = withdrawn
+      ? 'Toestemming is ingetrokken; presentatie kan pas na een nieuwe talentpooltoestemming worden vastgelegd.'
+      : '';
 
     mount(el, html`
       <div class="a-panel mb-3">
@@ -540,7 +606,8 @@
           <div class="a-meta mt-1 mb-1">Voor: ${job ? html`${job.title}, Vacature #${job.id}` : html`Vacature #${jobId}`} · vastgelegd ${this.retentionDate(detail.consent_spec_presentation_at)}</div>
         ` : ''}
         <div class="a-actions mt-2">
-          <button type="button" class="btn btn-sm btn-primary" data-action="candidate-presentation-edit" data-kind="${kind}" data-id="${itemId}">Vastleggen</button>
+          <button type="button" class="btn btn-sm btn-primary" data-action="candidate-presentation-edit" data-kind="${kind}" data-id="${itemId}"
+            ${raw(presentationDisabledReason ? `disabled title="${GSP.esc(presentationDisabledReason)}"` : '')}>Vastleggen</button>
         </div>
       </div>
 
@@ -549,6 +616,7 @@
         <div class="a-metric-row"><span class="a-soft">Aangezet</span><span>${alertsEnabled ? 'Ja' : 'Nee'}</span></div>
         <div class="a-metric-row"><span class="a-soft">Komt in aanmerking</span><span>${eligible ? 'Ja' : 'Nee'}</span></div>
         ${!eligible ? html`<div class="a-meta mt-2">Reden: ${reason}</div>` : ''}
+        <div class="fs-xs a-soft mt-2">De suppressielijst wordt bij verzending apart gecontroleerd.</div>
       </div>
     `);
   },
@@ -573,6 +641,28 @@
     el.classList.toggle('is-invalid', !!msg);
     if (msg) el.setAttribute('aria-invalid', 'true'); else el.removeAttribute('aria-invalid');
     return !msg;
+  },
+
+  // §7.3.2: "boven 2000 tekens een teller in .text-danger-ink." Geen
+  // maxlength meer op het veld zelf (dat zou dit onbereikbaar maken: een
+  // browser laat een gebruiker dan nooit voorbij de grens typen), dus de
+  // teller is de enige zichtbare waarschuwing terwijl _validateEvidence
+  // hierboven (bij blur en submit) de daadwerkelijke blokkade blijft.
+  _wireEvidenceCounter(el, counterId) {
+    const counterEl = document.getElementById(counterId);
+    if (!el || !counterEl) return;
+    const update = () => {
+      const len = (el.value || '').length;
+      if (len > 2000) {
+        counterEl.textContent = `${len} / 2000 tekens`;
+        counterEl.classList.add('text-danger-ink');
+      } else {
+        counterEl.textContent = '';
+        counterEl.classList.remove('text-danger-ink');
+      }
+    };
+    el.addEventListener('input', update);
+    update();
   },
 
   _validateRequired(el, errId, { max } = {}) {
@@ -601,12 +691,13 @@
   },
 
   /* ---- Modal: Talentpool wijzigen ---- */
-  openTalentpoolConsentModal(kind, itemId) {
-    const key = `${kind}:${itemId}`;
-    const detail = (this._data.candidateDetail || {})[key];
-    if (!detail) return;
-    const candidateId = this.candidateRecordId(detail, kind);
-    if (!candidateId) return;
+  async openTalentpoolConsentModal(kind, itemId) {
+    // security-auditor HIGH 1 op b9d5b21: candidateId en de consentvelden
+    // komen altijd via resolveConsentDetail(), nooit rechtstreeks uit de
+    // kind-eigen cache (die voor 'self-registered' geen consentkolommen
+    // draagt).
+    const { candidateId, detail } = await this.resolveConsentDetail(kind, itemId);
+    if (!candidateId || !detail) return;
     const handle = ui.modal({
       id: 'candidateTalentpoolModal',
       title: 'Talentpool wijzigen',
@@ -648,8 +739,9 @@
       <div class="form-group mb-0">
         <div class="form-hint fs-xs a-soft" id="tpEvidenceHint">Waar blijkt de toestemming uit? Bijvoorbeeld: ondertekend formulier van 2 september, of e-mail in het dossier.</div>
         <label class="form-label" for="tpEvidence">Bewijs van toestemming *</label>
-        <textarea class="a-textarea" id="tpEvidence" rows="3" maxlength="2000" aria-describedby="tpEvidenceHint tpEvidenceError"></textarea>
+        <textarea class="a-textarea" id="tpEvidence" rows="3" aria-describedby="tpEvidenceHint tpEvidenceError"></textarea>
         <div class="invalid-feedback" id="tpEvidenceError"></div>
+        <div class="fs-xs" id="tpEvidenceCount" aria-live="polite"></div>
       </div>
       <p class="fs-xs a-soft mt-3 mb-0">Bij het vastleggen geldt een termijn van 12 maanden. Deze notitie komt in het auditlog; e-mailadressen erin worden automatisch onleesbaar gemaakt.</p>
     `;
@@ -673,6 +765,7 @@
     withdraw.addEventListener('change', toggleScope);
     toggleScope();
     this._wireBlurValidate(evidenceEl, () => this._validateEvidence(evidenceEl, 'tpEvidenceError'));
+    this._wireEvidenceCounter(evidenceEl, 'tpEvidenceCount');
   },
 
   async submitTalentpoolConsent(handle, kind, itemId, candidateId) {
@@ -711,8 +804,13 @@
       if (res && res.ok) {
         handle.close();
         Auth.toast('Toestemming bijgewerkt', 'success');
-        this.mergeCandidateDetail(kind, itemId, data);
-        this.switchCandidateTab(kind, itemId, 'toestemmingen');
+        // security-auditor MEDIUM 2 op b9d5b21: de PATCH-RETURNING draagt
+        // consent_withdrawn_at nooit mee (dat stempelt de intrek-tak wel),
+        // dus een merge van deze respons kan een ingetrokken status
+        // stilzwijgend verbergen. force:true dwingt een verse GET af,
+        // zodat de kaart nooit méér toestemming toont dan de backend nu
+        // echt vastheeft.
+        this.switchCandidateTab(kind, itemId, 'toestemmingen', { force: true });
         return;
       }
       this.candidateModalAlert('candidateTalentpoolAlert', this.candidateConsentErrorText(data, res && res.status));
@@ -725,12 +823,10 @@
   },
 
   /* ---- Modal: Presentatie vastleggen ---- */
-  openPresentationConsentModal(kind, itemId) {
-    const key = `${kind}:${itemId}`;
-    const detail = (this._data.candidateDetail || {})[key];
-    if (!detail) return;
-    const candidateId = this.candidateRecordId(detail, kind);
-    if (!candidateId) return;
+  async openPresentationConsentModal(kind, itemId) {
+    // security-auditor HIGH 1 op b9d5b21: zie openTalentpoolConsentModal.
+    const { candidateId, detail } = await this.resolveConsentDetail(kind, itemId);
+    if (!candidateId || !detail) return;
     const handle = ui.modal({
       id: 'candidatePresentationModal',
       title: 'Presentatie vastleggen',
@@ -746,6 +842,11 @@
   },
 
   async fillPresentationConsentModal(handle, detail) {
+    // code-reviewer LOW 5 op b9d5b21: zolang de vacaturelijst nog niet
+    // binnen is, bestaat #spEvidence niet. Zonder deze knop-vergrendeling
+    // gooit een klik op "Opslaan" in dat venster een TypeError in
+    // submitPresentationConsent (_validateEvidence op een null-element).
+    handle.setBusy(true);
     let jobs = [];
     try {
       const res = await Auth.fetch('/v1/admin/jobs?status=open&limit=200');
@@ -756,6 +857,7 @@
     } catch { /* lege lijst: het formulier meldt dat er niets te kiezen valt */ }
     handle.setBody(this.presentationConsentForm(detail, jobs));
     this.wirePresentationConsentForm();
+    handle.setBusy(false);
   },
 
   presentationConsentForm(detail, jobs) {
@@ -787,8 +889,9 @@
       <div class="form-group mb-0">
         <div class="form-hint fs-xs a-soft" id="spEvidenceHint">Waar blijkt de toestemming uit? Bijvoorbeeld: ondertekend formulier van 2 september, of e-mail in het dossier.</div>
         <label class="form-label" for="spEvidence">Bewijs van toestemming *</label>
-        <textarea class="a-textarea" id="spEvidence" rows="3" maxlength="2000" aria-describedby="spEvidenceHint spEvidenceError"></textarea>
+        <textarea class="a-textarea" id="spEvidence" rows="3" aria-describedby="spEvidenceHint spEvidenceError"></textarea>
         <div class="invalid-feedback" id="spEvidenceError"></div>
+        <div class="fs-xs" id="spEvidenceCount" aria-live="polite"></div>
       </div>
     `;
   },
@@ -812,6 +915,7 @@
     withdraw.addEventListener('change', toggleJob);
     toggleJob();
     this._wireBlurValidate(evidenceEl, () => this._validateEvidence(evidenceEl, 'spEvidenceError'));
+    this._wireEvidenceCounter(evidenceEl, 'spEvidenceCount');
   },
 
   async submitPresentationConsent(handle, kind, itemId, candidateId) {
@@ -848,8 +952,8 @@
       if (res && res.ok) {
         handle.close();
         Auth.toast('Toestemming bijgewerkt', 'success');
-        this.mergeCandidateDetail(kind, itemId, data);
-        this.switchCandidateTab(kind, itemId, 'toestemmingen');
+        // security-auditor MEDIUM 2 op b9d5b21: zie submitTalentpoolConsent.
+        this.switchCandidateTab(kind, itemId, 'toestemmingen', { force: true });
         return;
       }
       this.candidateModalAlert('candidatePresentationAlert', this.candidateConsentErrorText(data, res && res.status));
@@ -902,8 +1006,9 @@
       <div class="form-group">
         <div class="form-hint fs-xs a-soft" id="refEvidenceHint">Wat heeft de aandrager verteld, en wanneer? Bijvoorbeeld: mondeling bevestigd door X op 3 september, hij heeft haar gevraagd.</div>
         <label class="form-label" for="refEvidence">Bewijs van toestemming *</label>
-        <textarea class="a-textarea" id="refEvidence" rows="3" maxlength="2000" aria-describedby="refEvidenceHint refEvidenceError"></textarea>
+        <textarea class="a-textarea" id="refEvidence" rows="3" aria-describedby="refEvidenceHint refEvidenceError"></textarea>
         <div class="invalid-feedback" id="refEvidenceError"></div>
+        <div class="fs-xs" id="refEvidenceCount" aria-live="polite"></div>
       </div>
       <div class="form-group">
         <label class="form-label" for="refNote">Interne notitie</label>
@@ -934,6 +1039,7 @@
     this._wireBlurValidate(emailEl, () => this._validateEmail(emailEl, 'refEmailError'));
     this._wireBlurValidate(referredByEl, () => this._validateRequired(referredByEl, 'refReferredByError', { max: 200 }));
     this._wireBlurValidate(evidenceEl, () => this._validateEvidence(evidenceEl, 'refEvidenceError'));
+    this._wireEvidenceCounter(evidenceEl, 'refEvidenceCount');
   },
 
   async submitReferral(handle) {
