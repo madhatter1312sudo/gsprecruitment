@@ -117,7 +117,7 @@ const Admin = {
     if (!el) return;
     const id = '_retry_' + Math.random().toString(36).slice(2, 9);
     mount(el, html`<tr><td colspan="${cols}" class="a-state-cell">
-      <i class="fa-solid fa-triangle-exclamation"></i> Kon niet laden — <a href="#" id="${id}">probeer opnieuw</a>
+      <i class="fa-solid fa-triangle-exclamation"></i> Kon niet laden, <a href="#" id="${id}">probeer opnieuw</a>
     </td></tr>`);
     document.getElementById(id)?.addEventListener('click', (e) => { e.preventDefault(); if (typeof retryFn === 'function') retryFn(); });
   },
@@ -126,7 +126,7 @@ const Admin = {
     if (!el) return;
     const id = '_retry_' + Math.random().toString(36).slice(2, 9);
     mount(el, html`<div class="a-state-block">
-      <i class="fa-solid fa-triangle-exclamation"></i> Kon niet laden — <a href="#" id="${id}">probeer opnieuw</a>
+      <i class="fa-solid fa-triangle-exclamation"></i> Kon niet laden, <a href="#" id="${id}">probeer opnieuw</a>
     </div>`);
     document.getElementById(id)?.addEventListener('click', (e) => { e.preventDefault(); if (typeof retryFn === 'function') retryFn(); });
   },

@@ -19,7 +19,7 @@
        confirmText: de gebruiker moet die tekst letterlijk overtypen
        voordat de primaire of destructieve knop actief wordt.
        handle: { el, close(), setBody(html), selectTab(key),
-                 button(role), setBusy(on) }
+                 button(role), setBusy(on), syncGate() }
        button('primary'|'secondary'|'danger') geeft het knopelement, en
        setBusy(true) zet alle knoppen op disabled met een spinner op de
        handelende knop (§7.2c: laden houdt het paneel staan).
@@ -45,7 +45,8 @@
        zet state.sortKey/sortDir, springt terug naar pagina 1 en roept
        load(state) opnieuw aan, zodat er over de hele verzameling
        gesorteerd wordt en niet binnen één pagina.
-       empty: de tekst voor de lege staat (html`` of string).
+       empty: de tekst voor de lege staat (html``, string, of een
+       functie die er een teruggeeft wanneer die van het filter afhangt).
 
      ui.confirm(text, opts) -> Promise<boolean>
        opts: { title, confirmLabel, cancelLabel, confirmText, danger,
@@ -270,6 +271,7 @@
 
     const confirmId = opts.confirmText ? uid('confirm') : null;
     const hintId = confirmId ? confirmId + '_hint' : null;
+    const mismatchId = confirmId ? confirmId + '_mismatch' : null;
     const buttons = [];
     if (opts.secondary) buttons.push({ ...opts.secondary, cls: 'btn btn-ghost-secondary', role: 'secondary' });
     if (opts.danger) buttons.push({ ...opts.danger, cls: 'btn btn-outline-danger', role: 'danger' });
@@ -277,8 +279,15 @@
     const gated = (b) => confirmId && (b.role === 'primary' || b.role === 'danger');
     const btnIds = buttons.map(() => uid('btn'));
 
+    // De destructieve variant (§7.2c) is precies de modal met een
+    // destructieve knop: die krijgt een waarschuwingsicoon in --ink-error
+    // voor de kop, die het gevolg noemt en niet de handeling.
+    const isDestructive = !!opts.danger;
+    const dangerIcon = isDestructive
+      ? raw('<i class="fa-solid fa-triangle-exclamation text-danger-ink" aria-hidden="true"></i>')
+      : '';
     const titleHtml = opts.title
-      ? html`<h3 class="a-modal__title" id="${titleId}">${opts.title}</h3>`
+      ? html`<h3 class="a-modal__title${raw(isDestructive ? ' a-modal__title--danger' : '')}" id="${titleId}">${dangerIcon}<span>${opts.title}</span></h3>`
       : '';
     // Onderschrift hoort bij de kop en gaat dus vóór de tabstrip staan.
     const subtitleHtml = opts.subtitle
@@ -290,8 +299,9 @@
           <p class="a-confirm-hint" id="${hintId}">Typ <code>${opts.confirmText}</code> om te bevestigen.</p>
           <div class="form-group mb-0">
             <label for="${confirmId}">Bevestiging</label>
-            <input type="text" id="${confirmId}" autocomplete="off" aria-describedby="${hintId}"
+            <input type="text" id="${confirmId}" autocomplete="off" aria-describedby="${hintId} ${mismatchId}"
               inputmode="text" autocapitalize="off" spellcheck="false">
+            <div class="a-confirm-mismatch text-danger-ink" id="${mismatchId}" aria-live="polite"></div>
           </div>
         </div>`
       : '';
@@ -390,9 +400,21 @@
               mount(node, raw(node.dataset.gspLabel));
               delete node.dataset.gspLabel;
             }
-            node.disabled = !!(confirmId && gated(b) && confirmInput
-              && confirmInput.value.trim() !== opts.confirmText);
+            node.disabled = node.dataset.gspLock === '1'
+              || !!(confirmId && gated(b) && confirmInput
+                && confirmInput.value.trim() !== opts.confirmText);
           }
+        });
+      },
+      // Zet de knoppen terug op wat de getypte bevestiging en het slot nu
+      // toestaan. Nodig nadat een aanroeper een knop bewust heeft
+      // vergrendeld of ontgrendeld zonder dat er in het veld getypt is.
+      syncGate() {
+        buttons.forEach((b, i) => {
+          const node = document.getElementById(btnIds[i]);
+          if (!node || !gated(b)) return;
+          node.disabled = node.dataset.gspLock === '1'
+            || !!(confirmInput && confirmInput.value.trim() !== opts.confirmText);
         });
       },
       setBody(newBody) { mount(document.getElementById(bodyId), newBody); },
@@ -416,7 +438,10 @@
       fallbackShow(el, isDrawer ? 'offcanvas-backdrop' : 'modal-backdrop');
     }
     releaseTrap = attachFocusTrap(el);
-    firstFocus(el);
+    // Bij een getypte bevestiging is dat veld het eerste interactieve
+    // element van de handeling (§7.2c), niet de sluitknop.
+    const confirmNode = confirmId ? document.getElementById(confirmId) : null;
+    if (confirmNode) confirmNode.focus(); else firstFocus(el);
 
     // Knoppen en de getypte bevestiging.
     const confirmInput = confirmId ? document.getElementById(confirmId) : null;
@@ -426,7 +451,24 @@
     if (confirmInput) {
       confirmInput.addEventListener('input', () => {
         const ok = confirmInput.value.trim() === opts.confirmText;
-        gatedButtons.forEach(({ node }) => { node.disabled = !ok; });
+        // data-gsp-lock: een knop die de aanroeper bewust heeft
+        // uitgeschakeld (een cap die overschreden is, een bulk die al
+        // verwerkt is, een lijst die niet geladen kon worden) mag door de
+        // getypte bevestiging niet weer aangaan.
+        gatedButtons.forEach(({ node }) => {
+          if (node.dataset.gspLock === '1') return;
+          node.disabled = !ok;
+        });
+        const hint = document.getElementById(mismatchId);
+        if (hint) hint.textContent = (!ok && confirmInput.value.trim()) ? 'Komt niet overeen' : '';
+      });
+      // Enter in het bevestigingsveld voert de handeling uit, maar alleen
+      // als de knop op dat moment ook echt aan staat (§7.2c).
+      confirmInput.addEventListener('keydown', (e) => {
+        if (e.key !== 'Enter') return;
+        e.preventDefault();
+        const target = gatedButtons.map(({ node }) => node).find(n => n && !n.disabled);
+        if (target) target.click();
       });
     }
     buttons.forEach((b, i) => {
@@ -509,7 +551,10 @@
 
     function paint() {
       if (!state.items.length && opts.empty !== undefined && typeof Admin !== 'undefined') {
-        Admin.setEmpty(opts.tbody, cols.length, opts.empty);
+        // Een functie mag: de lege staat hangt soms van het actieve filter
+        // af en moet dan per lading opnieuw bepaald worden.
+        Admin.setEmpty(opts.tbody, cols.length,
+          typeof opts.empty === 'function' ? opts.empty() : opts.empty);
       } else {
         mount(tbodyEl(), html`${sorted(state.items).map(opts.render)}`);
       }
