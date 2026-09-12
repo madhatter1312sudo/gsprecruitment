@@ -27,6 +27,10 @@ Daarnaast eenmalig:
   - Integratie op het paneel zelf: de leaddetailmodal opent vanuit een
     rijklik en Escape brengt de focus terug naar die rij; het
     Opdrachtgevers-detailpaneel opent als Offcanvas met een tablist.
+  - De computed tekstkleur van een tabelcel met .a-cell-name (wit) en met
+    .a-soft/.a-meta (--navy-200). Tablers eigen celregel is specifieker dan
+    een losse klasse en overschreef die twee stil; admin.css zet daarom ook
+    --tblr-table-color. Deze twee asserties bewaken dat.
 
 Waarom Python en geen scripts/test_admin_ui.mjs: in deze repo staat
 Playwright alleen als Python-pakket (node heeft geen jsdom en geen
@@ -370,6 +374,50 @@ def main():
             failures.append("integratie: Escape sloot de leaddetailmodal niet")
         if page.evaluate("() => document.activeElement && document.activeElement.id") != "uiTestLeadRow":
             failures.append("integratie: focus keerde niet terug naar de aangeklikte rij")
+
+        # Tabelcelkleuren. Tablers `.table > :not(caption) > * > *` (0,1,1)
+        # wint van een losse klasse (0,1,0) en zette deze cellen terug op
+        # --tblr-table-color (navy-100). Gemeten op de echte tabel, niet op
+        # een losse div, want de specificiteit is nu juist het punt.
+        rgb = lambda hexv: "rgb(%d, %d, %d)" % tuple(int(hexv[i:i + 2], 16) for i in (1, 3, 5))
+        # De gedeelde route-stub geeft voor users en jobs een lege lijst, dus
+        # de rijen komen hier uit de echte renderers met een vaste fixture.
+        # Dat is precies dezelfde markup als in productie. De fixture gaat er
+        # ná het navigeren in, want het eerste bezoek aan een sectie start de
+        # loader die de tabel anders weer leegmaakt.
+        FIXTURES = {
+            "users": """() => Admin.renderUsers({ items: [{ id: 1,
+                full_name: 'Celkleur Fixture', email: 'cel@example.invalid',
+                role: 'admin', is_verified: true,
+                created_at: '2026-01-01T00:00:00Z' }] })""",
+            "jobs": """() => Admin.renderJobs({ items: [{ id: 1,
+                title: 'Celkleur Fixture', company_name: 'Example Engineering B.V.',
+                application_count: 0, status: 'open' }] })""",
+        }
+        for section, sel, expect_token, label in [
+            ("users", "#section-users table tbody tr td.a-cell-name", "--white", "naamkolom"),
+            ("users", "#section-users table tbody tr td.a-meta", "--navy-200", "tijdstempelkolom"),
+            ("jobs", "#section-jobs table tbody tr td.a-cell-name", "--white", "titelkolom"),
+            ("jobs", "#section-jobs table tbody tr td.a-soft", "--navy-200", "klantkolom"),
+        ]:
+            page.evaluate("(s) => navigateTo(s)", section)
+            page.wait_for_timeout(700)
+            page.evaluate(FIXTURES[section])
+            page.wait_for_timeout(150)
+            node = page.query_selector(sel)
+            if node is None:
+                failures.append(f"celkleur: geen {label} gevonden in #{section} ({sel})")
+                continue
+            got = page.eval_on_selector(sel, "el => getComputedStyle(el).color")
+            want_hex = page.evaluate(
+                "(tok) => getComputedStyle(document.documentElement).getPropertyValue(tok).trim()",
+                expect_token)
+            want = rgb(want_hex)
+            if got != want:
+                failures.append(
+                    f"celkleur: {label} in #{section} is {got}, verwacht {want} ({expect_token}). "
+                    "Waarschijnlijk wint Tablers celregel weer van de klasse; zet "
+                    "--tblr-table-color mee in admin.css.")
 
         # Integratie: het Opdrachtgevers-detailpaneel is een Offcanvas met tablist.
         page.click('.nav-link[data-section="clients"]')

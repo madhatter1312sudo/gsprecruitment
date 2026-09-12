@@ -214,16 +214,22 @@ h1, h2, h3, h4,
    Utilityklassen (zie de tabel bovenaan dit bestand)
    ========================================================================== */
 
-.a-cell-name { font-weight: 600; color: var(--white); }
-.a-cell-strong { color: var(--white); }
-.a-soft { color: var(--admin-muted); }
-.a-meta { font-size: var(--font-size-xs); color: var(--admin-muted); }
+/* Op een <td> wint Tablers `.table > :not(caption) > * > *` (0,1,1) van een
+   losse klasse (0,1,0), en dat zet de cel terug op --tblr-table-color. Naast
+   `color` zetten deze vier daarom ook die custom property op de cel zelf, dan
+   lost Tablers eigen regel de goede kleur op. Zonder dat viel de nadruk in
+   twaalf naamkolommen en de demping in eenendertig metakolommen weg.
+   scripts/admin_ui_check.py meet de computed kleur, zodat dit niet terugkomt. */
+.a-cell-name { font-weight: 600; color: var(--white); --tblr-table-color: var(--white); }
+.a-cell-strong { color: var(--white); --tblr-table-color: var(--white); }
+.a-soft { color: var(--admin-muted); --tblr-table-color: var(--admin-muted); }
+.a-meta { font-size: var(--font-size-xs); color: var(--admin-muted); --tblr-table-color: var(--admin-muted); }
 .a-inline-list { margin: 0; padding-left: 1.1em; }
 .a-truncate-col { flex: 1; min-width: 0; }
 
 .a-field-label { font-size: var(--font-size-xs); color: var(--admin-muted); margin-bottom: 4px; }
 
-.a-state-cell { text-align: center; padding: var(--space-xl) var(--space-md); color: var(--admin-muted); }
+.a-state-cell { text-align: center; padding: var(--space-xl) var(--space-md); color: var(--admin-muted); --tblr-table-color: var(--admin-muted); }
 .a-state-block { color: var(--admin-muted); font-size: var(--font-size-sm); padding: var(--space-md) 0; }
 
 .a-actions { display: flex; flex-wrap: wrap; gap: var(--space-md); margin-top: var(--space-lg); }

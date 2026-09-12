@@ -301,7 +301,7 @@ Deze vijf zijn getest of in gebruik en worden niet vervangen, alleen uitgebreid:
 Vast:
 
 1. **Laadvolgorde, precies.** De Tabler- en Font-Awesome-stylesheets zijn geen statische `<link>`-elementen: `js/vendor-fallback-css.js` (`index.html:18`) injecteert ze met `document.head.appendChild()` op het moment dat dat script draait, dus ze landen in de cascade direct ná dat `<script>`-element. `<link rel="stylesheet" href="../theme.css">` komt daarom **direct onder regel 18**, dus ná de injectie, zodat de basisregels van `theme.css` (`body`-achtergrond en -kleur, scrollbar, `::selection`) van Tabler winnen bij gelijke specificiteit. De `--tblr-*`-koppeling (§7.1.2) en de utilityklassen (§7.1.3) komen daarna en winnen van allebei. *Gebouwd als:* die twee staan niet in een `<style>`-blok maar in `website/admin/admin.css`, als tweede `<link>` direct onder `theme.css`. Zelfde cascadepositie, één bestand minder inline, en de tokencheck kan het bestand lezen.
-2. **`theme.css` is de tokenbron, maar niet compleet.** Het draagt de navy- en goudschaal uit §1.2 en de 3px-radiustokens, maar mist `--space-4xl`, `--space-5xl`, `--font-size-base`, `--font-size-6xl` en `--gold-ink`. Die vijf worden in `theme.css` toegevoegd met exact de waarden uit §1.3 en §8.x.2, in dezelfde PR, zodat er precies één tokenbron voor de drie surfaces is en het paneel geen eigen aanvulling nodig heeft.
+2. **`theme.css` is de tokenbron, maar niet compleet.** Het draagt de navy- en goudschaal uit §1.2 en de 3px-radiustokens, maar mist `--space-4xl`, `--space-5xl`, `--font-size-base`, `--font-size-6xl` en `--gold-ink`. Die vijf worden in `theme.css` toegevoegd met exact de waarden uit §1.3 en §8.x.2, zodat er precies één tokenbron voor de drie surfaces is en het paneel geen eigen aanvulling nodig heeft. *Nog niet gebouwd:* de schilpass had ze niet nodig omdat geen enkele regel in `admin.css` ernaar verwijst. Ze komen in de eerste §7.2-pass die ze wel gebruikt.
 3. Het hele `:root, [data-bs-theme=dark]`-blok met navy-, radius-, spacing- en font-size-herdefinities in `index.html` gaat weg. Wat overblijft is uitsluitend de Tabler-koppeling uit §7.1.2 en de componentregels uit §7.1.3. *Gebouwd:* het blok is weg, de rest staat in `admin.css`.
 4. `--gold-gradient` blijft alleen bestaan zolang de fallback-staafgrafiek in `admin.js` hem gebruikt; die fallback krijgt in dezelfde PR een vlakke `--gold-500`-vulling en daarna verdwijnt het token uit het paneel. Decoratieve gradients zijn sitebreed verboden (§8.x.6) en een grafiekbalk is decoratie, geen data. *Gebouwd:* `.a-barchart__bar` vult vlak met `--gold-500`; het paneel noemt `--gold-gradient` nergens meer.
 
@@ -316,7 +316,7 @@ Eén blok, na het laden van `theme.css` en Tabler. *Gebouwd in* `website/admin/a
   --tblr-bg-surface-secondary: var(--navy-800);
   --tblr-bg-surface-tertiary:  var(--navy-600);   /* #152B4A, hover-rij, inputvulling */
   --tblr-bg-surface-dark:      var(--navy-900);   /* #060D1A, sidebar, drawer-achtergrond */
-  --tblr-border-color:         var(--navy-600);   /* gebouwd als --navy-500, zie noot */
+  --tblr-border-color:         var(--navy-500);   /* dragende rand, zie de noot hieronder */
   --tblr-body-color:           var(--navy-100);   /* 12,25:1 op navy-800 */
   --tblr-secondary:            var(--navy-200);   /*  6,71:1, de gedempte tekstvloer */
   --tblr-primary:              var(--gold-500);
@@ -342,7 +342,7 @@ Eén blok, na het laden van `theme.css` en Tabler. *Gebouwd in* `website/admin/a
 
 `--tblr-border-color-active` bestaat niet in Tabler 1.4 (nul treffers in `vendor/tabler/css/tabler.min.css`) en staat daarom niet in dit blok; een actieve rand wordt per component gezet.
 
-**Noot bij `--tblr-border-color`.** Gebouwd op `--navy-500`, niet op `--navy-600`. Het codeblok hierboven en de contrastvloertabel hieronder spraken elkaar tegen: die tabel zegt dat een dragende rand op `--navy-700` minstens `--navy-500` moet zijn, en de kaartrand is dragend, want op navy dragen de schaduwen nauwelijks. `--navy-600` op `--navy-700` haalt circa 1,3:1 en leest niet als rand. Ook `--tblr-card-border-color` en `--tblr-border-color-translucent` staan daarom op `--navy-500`.
+**Noot bij `--tblr-border-color`.** Dit stond eerst op `--navy-600` en spreekt dan de contrastvloertabel hieronder tegen: die zegt dat een dragende rand op `--navy-700` minstens `--navy-500` moet zijn. De kaartrand is dragend, want op navy dragen de schaduwen nauwelijks en is de rand het enige dat een kaart van de achtergrond scheidt. `--navy-600` op `--navy-700` haalt circa 1,3:1 en leest niet als rand. Het codeblok hierboven staat daarom op `--navy-500`, net als `--tblr-card-border-color` en `--tblr-border-color-translucent`, en zo is het gebouwd.
 
 **Contrastvloeren op donker, harde eis.** Berekend volgens WCAG 2.1 (sRGB-linearisatie, `(L1+0,05)/(L2+0,05)`) tegen de twee vlakken waar tekst in dit paneel op staat: `--navy-800` (#0A1628, paginafond) en `--navy-700` (#0F1D35, kaart- en tabelvlak). Deze tabel is de reden dat er hierboven geen `--navy-300` als tekstkleur staat:
 
@@ -356,7 +356,7 @@ Eén blok, na het laden van `theme.css` en Tabler. *Gebouwd in* `website/admin/a
 | `--gold-500` | `#FAC800` | 11,51:1 | 10,68:1 | accenttekst, actieve nav, primaire knopvulling met `--navy-900` erop |
 | `--gold-ink` | `#8A6800` | 3,51:1 | 3,26:1 | **verboden als tekst op donker.** Het is de goudtekstkleur voor lichte vlakken (§8.x.2) en haalt op navy de 4,5:1-vloer niet |
 
-`admin.js` zet vandaag 63 keer `color:var(--navy-300)` op tekst. Dat is de grootste toegankelijkheidsschuld in het paneel en die wordt in dezelfde PR ingelost: elk van die 63 gevallen wordt `.text-muted-navy` (§7.1.3), dat op `--navy-200` uitkomt.
+`admin.js` zet vandaag 63 keer `color:var(--navy-300)` op tekst. Dat is de grootste toegankelijkheidsschuld in het paneel en die wordt in dezelfde PR ingelost: elk van die 63 gevallen wordt `.a-soft` (§7.1.3), dat op `--navy-200` uitkomt.
 
 **Semantische inkt op donker.** De semantische tokens uit §1.2 (`--success`, `--warning`, `--error`, `--info` en hun `-bg`-varianten) zijn voor lichte vlakken gekozen en staan bovendien in geen enkele stylesheet: nul treffers in `website/styles.css` en `website/theme.css`. Ze zijn dus geen bestaande laag om op voort te bouwen. Het paneel krijgt daarom vier eigen inkttokens, waarvan er twee al feitelijk in `admin.js` staan als losse hexwaarde en hier alleen een naam krijgen. De vlakken eronder zijn geen aparte tokens maar `color-mix` op dezelfde inkt, zodat er geen tweede kleurenrij ontstaat die kan gaan afwijken:
 
@@ -369,11 +369,11 @@ Eén blok, na het laden van `theme.css` en Tabler. *Gebouwd in* `website/admin/a
 
 Alle vier zijn op beide vlakken boven de 4,5:1-vloer gerekend; de neutrale familie gebruikt `--navy-200` (6,71 respectievelijk 6,23:1). Dat is wat "getest" hier betekent: berekend contrast op de twee achtergronden die daadwerkelijk voorkomen, niet een steekproef op één.
 
-#### 7.1.3 Vijftien utilityklassen die de 202 inline `style=`-attributen vervangen
+#### 7.1.3 De utilityklassen die de 202 inline `style=`-attributen vervangen
 
-> **Status.** De opruiming is gedaan: van de 202 inline `style=`-attributen staan er nog drie (een staafhoogte als custom property, één kolombreedte, en de `display:none` die JS op een actiemenu zet). Ze zijn vervangen door een kleinere, anders benoemde set van 21 klassen met prefix `.a-`, plus Bootstrap-utilities voor pure geometrie; die set staat gedocumenteerd bovenaan `website/admin/admin.css` en samengevat in §7.9. De vier `.text-*-ink`-klassen hieronder bestaan wél met precies deze namen, aangevuld met `.text-warning-ink` en `.text-info-ink` voor de andere twee inkttokens. De `gsp-`-set hieronder en de zes stukken eigen CSS eronder zijn nog niet gebouwd en horen bij de componentpassen van §7.2. De census-getallen hieronder zijn de meting op main van vóór de opruiming.
+> **Status.** De opruiming is gedaan: van de 202 inline `style=`-attributen staan er nog drie (een staafhoogte als custom property, één kolombreedte, en de `display:none` die JS op een actiemenu zet). De census-getallen hieronder zijn de meting op main van vóór die opruiming en blijven staan als vertrekpunt; het CSS-blok verderop is bijgewerkt naar de klassen zoals ze nu in `website/admin/admin.css` staan, met daarachter een tabel van wat er niet gebouwd is en waarom. De zes stukken eigen CSS onderaan deze subsectie zijn nog niet gebouwd en horen bij de componentpassen van §7.2.
 
-`admin.js` draagt 202 inline `style="…"`-attributen. Die mogen blijven staan (de CSP blokkeert alleen inline *scripts*, niet inline stijl), maar ze worden uitgefaseerd omdat ze de tokenlaag omzeilen en elke kleurcorrectie in 63 losse strings moeten laten landen. De vervanging is grotendeels **Bootstrap 5, dat al in de Tabler-bundel geladen is**; alleen waar Tabler niets passends heeft komt een nieuwe klasse. Alle nieuwe klassen krijgen het prefix `gsp-` of zijn een expliciete tekstkleur en staan in één blok in `index.html`.
+`admin.js` draagt 202 inline `style="…"`-attributen. Die mogen blijven staan (de CSP blokkeert alleen inline *scripts*, niet inline stijl), maar ze worden uitgefaseerd omdat ze de tokenlaag omzeilen en elke kleurcorrectie in 63 losse strings moeten laten landen. De vervanging is grotendeels **Bootstrap 5, dat al in de Tabler-bundel geladen is**; alleen waar Tabler niets passends heeft komt een nieuwe klasse. Alle nieuwe klassen krijgen een eigen prefix of zijn een expliciete tekstkleur en staan in één blok. *Gebouwd als:* prefix `.a-`, in `website/admin/admin.css`.
 
 De census is reproduceerbaar, niet geschat. De getallen hieronder komen uit:
 
@@ -404,58 +404,97 @@ Bestaande utilityklassen uit de bundel die de meerderheid opruimen, één op é�
 | `font-family:var(--font-primary)` (9), `box-sizing:border-box` (8), `border-radius:var(--radius-md)` (13) | **vervallen zonder vervanging**: font erft van `body`, `box-sizing` staat in de reset, radius komt uit `--tblr-border-radius` |
 | `padding:0.75rem` (9) | `.p-3` (16px, bewuste normalisatie naar het 4px-raster) |
 
-De vijftien nieuwe klassen, met hun CSS:
+**Gebouwd (WS5 stap 1).** Eenentwintig klassen met prefix `.a-`, plus de vier `.text-*-ink`. Dit is wat er in `website/admin/admin.css` staat en wat een sectiepass overneemt; de klassenamen hieronder zijn de namen die de code gebruikt. Waar deze subsectie eerder een `gsp-`-naam voorstelde, staat die tussen haakjes erachter.
 
 ```css
-/* 1-2. Tekstvloeren op donker. Vervangen color:var(--navy-300) (63x) en
-        color:var(--navy-200) (22x). navy-300 haalt de AA-vloer niet. */
-.text-muted-navy  { color: var(--navy-200); }
-.text-body-navy   { color: var(--navy-100); }
+/* Tekst. .a-soft is de gedempte-tekstvloer (was: .a-soft) en
+   vervangt elke color:var(--navy-300) op tekst. Op een <td> zetten deze
+   vier ook --tblr-table-color, want Tablers celregel is specifieker dan
+   een losse klasse. */
+.a-cell-name   { font-weight: 600; color: var(--white); --tblr-table-color: var(--white); }
+.a-cell-strong { color: var(--white); --tblr-table-color: var(--white); }
+.a-soft        { color: var(--admin-muted); --tblr-table-color: var(--admin-muted); }
+.a-meta        { font-size: var(--font-size-xs); color: var(--admin-muted);
+                 --tblr-table-color: var(--admin-muted); }   /* was: .fs-xs + .a-soft */
+.a-field-label { font-size: var(--font-size-xs); color: var(--admin-muted); margin-bottom: 4px; }
 
-/* 3-4. Typeschaal. Tablers eigen .fs-* is een andere schaal en botst met §1.3. */
-.fs-xs            { font-size: var(--font-size-xs); line-height: 1.45; }
-.fs-sm            { font-size: var(--font-size-sm); line-height: 1.5; }
-
-/* 5-6. Semantische inkt (§7.1.2). Vervangen de losse hexwaarden. */
-.text-danger-ink  { color: var(--ink-error); }
+/* Semantische inkt (§7.1.2). De eerste twee heetten hier al zo; de andere
+   twee zijn er in dezelfde vorm bij voor de overige twee inkttokens. */
 .text-success-ink { color: var(--ink-success); }
+.text-danger-ink  { color: var(--ink-error); }
+.text-warning-ink { color: var(--ink-warning); }
+.text-info-ink    { color: var(--ink-info); }
+.a-accent         { color: var(--gold-400); }   /* goudaccent, geen semantische familie */
 
-/* 7. Genest paneel binnen een kaart of drawer. Vervangt het paar
-      background:rgba(6,13,26,.6) + border:1px solid rgba(74,111,159,.3) (9x). */
-.gsp-panel        { background: var(--navy-900); border: 1px solid var(--navy-600);
-                    border-radius: var(--radius); padding: var(--space-md); }
+/* Toestanden. Laden, leeg en fout, in een tabelcel en daarbuiten. */
+.a-state-cell  { text-align: center; padding: var(--space-xl) var(--space-md);
+                 color: var(--admin-muted); --tblr-table-color: var(--admin-muted); }
+.a-state-block { color: var(--admin-muted); font-size: var(--font-size-sm); padding: var(--space-md) 0; }
 
-/* 8. Mono cijferwaarde: KPI's, bedragen, scores, tijdstempels (§1.3). */
-.gsp-num          { font-family: var(--font-mono); font-weight: 500;
-                    font-variant-numeric: tabular-nums; }
+/* Vlakken en groepen. */
+.a-panel    { border: 1px solid var(--admin-hairline); border-radius: var(--radius);
+              padding: var(--space-md); margin-bottom: var(--space-md);
+              background: color-mix(in srgb, var(--navy-300) 8%, transparent); }  /* was: .gsp-panel */
+.a-actions  { display: flex; flex-wrap: wrap; gap: var(--space-md); margin-top: var(--space-lg); }
+.a-listrow  { display: flex; align-items: center; gap: var(--space-md);
+              padding: var(--space-md) 0; border-bottom: 1px solid var(--admin-hairline); }
+.a-metric-row { display: flex; justify-content: space-between; padding: 6px 0;
+                border-bottom: 1px solid var(--admin-hairline); }
+.a-inline-list { margin: 0; padding-left: 1.1em; }
 
-/* 9. Eyebrow: mono, uppercase, gespatieerd. Kaartkopjes en veldlabels. */
-.gsp-eyebrow      { font-family: var(--font-mono); font-size: var(--font-size-xs);
-                    text-transform: uppercase; letter-spacing: .12em;
-                    color: var(--navy-200); }
+/* Chips en telkaartjes. */
+.a-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.a-chip  { color: var(--white); font-weight: 500; }
+.a-chip--skill { background: color-mix(in srgb, var(--gold-500) 18%, transparent); }
+.a-chip--lang  { background: color-mix(in srgb, var(--navy-300) 25%, transparent); }
+.a-stat  { flex: 1; text-align: center; padding: var(--space-md) var(--space-lg);
+           border: 1px solid var(--admin-hairline); border-radius: var(--radius);
+           background: color-mix(in srgb, var(--navy-300) 10%, transparent); }
+.a-stat__value { font-size: var(--font-size-xl); font-weight: 700;
+                 font-family: var(--font-mono); color: var(--gold-500); }
+.a-stat__value--positive { color: var(--ink-success); }
+.a-stat__label { font-size: var(--font-size-xs); color: var(--admin-muted); }
 
-/* 10. Klikbare rij of tegel. Hover en focus-visible zijn identiek (§8.x.0). */
-.gsp-clickable    { cursor: pointer; transition: background-color .15s ease; }
-.gsp-clickable:hover,
-.gsp-clickable:focus-visible { background: var(--navy-600); }
-.gsp-clickable:focus-visible { outline: 2px solid var(--gold-500); outline-offset: -2px; }
+/* Invoer en voorgevormde tekst. .a-textarea bevat de resize-y uit het oude
+   voorstel; .a-scrollbox bevat gsp-prewrap en gsp-scroll-y. */
+.a-textarea  { width: 100%; background: var(--navy-900); border: 1px solid var(--tblr-border-color);
+               border-radius: var(--radius); color: var(--white); padding: .75rem;
+               font-family: var(--font-primary); font-size: var(--font-size-sm);
+               resize: vertical; box-sizing: border-box; }
+.a-scrollbox { max-height: 160px; overflow-y: auto; font-size: var(--font-size-sm);
+               color: var(--navy-100); white-space: pre-wrap; word-break: break-word;
+               background: var(--navy-900); border-radius: var(--radius-sm);
+               padding: 10px; margin: 4px 0 0; }
 
-/* 11. Voorgevormde tekst (draftbody, notitie). Vervangt white-space:pre-wrap. */
-.gsp-prewrap      { white-space: pre-wrap; overflow-wrap: anywhere; }
+/* Rijen, tabs en het fallback-diagram. */
+.a-clickable    { cursor: pointer; }                    /* was: .gsp-clickable */
+.a-row-unread   { font-weight: 600; }
+.a-truncate-col { flex: 1; min-width: 0; }              /* was: .min-w-0 */
+.a-tabbar       { display: flex; gap: 4px; flex-wrap: wrap;
+                  border-bottom: 1px solid var(--admin-hairline);
+                  margin-bottom: var(--space-md); padding-bottom: var(--space-sm); }
+.a-tabbar .btn  { min-height: 44px; display: inline-flex; align-items: center; }
+.a-tabpane      { min-height: 120px; }
+.a-barchart     { display: flex; align-items: flex-end; gap: 6px; height: 120px; width: 100%; }
+.a-barchart__col { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 4px; }
+.a-barchart__cap { font-size: 9px; color: var(--admin-muted); }
+.a-barchart__bar { width: 100%; border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+                   background: var(--gold-500); height: var(--a-bar-h, 0); }
 
-/* 12. Verticaal schaalbare textarea. Vervangt resize:vertical (9x). */
-.resize-y         { resize: vertical; }
-
-/* 13. Scrollbaar deelvlak binnen een drawer of modal. */
-.gsp-scroll-y     { overflow-y: auto; overscroll-behavior: contain; }
-
-/* 14. Vangnet tegen tekstoverloop in een flexkolom (e-mailadres in een rij). */
-.min-w-0          { min-width: 0; }
-
-/* 15. Compacte tabeldichtheid (§7.2a). Zet alleen padding en regelhoogte. */
-.gsp-table-dense > :not(caption) > * > * { padding: .375rem .5rem; }
-.gsp-table-dense                          { font-size: var(--font-size-sm); }
+/* Sidebarkopje boven een groep navigatielinks. */
+.a-nav-caption { font-size: var(--font-size-xs); letter-spacing: .1em; }
 ```
+
+**Nog niet gebouwd.** Deze zes stonden in het oorspronkelijke voorstel en zijn er niet gekomen, elk met de reden. Ze horen bij de componentpassen van §7.2, niet bij de schil.
+
+| Voorgestelde klasse | Status en reden |
+|---|---|
+| `.text-body-navy` | Overbodig: `--tblr-body-color` staat al op `--navy-100`, dus dat is de standaardtekstkleur van het paneel. Alleen nodig als er ooit een vlak komt waar de body-erving niet klopt. |
+| `.fs-xs`, `.fs-sm` | Niet als losse schaalklassen gebouwd. De twee plekken die ze nodig hadden zijn `.a-meta` en `.a-state-block`, die de maat meenemen. Een losse schaal komt pas als een component hem los nodig heeft. |
+| `.gsp-num` | Mono cijferwaarde. Zit nu alleen in `.a-stat__value` en in de KPI-regel in `admin.css`. Wordt een eigen klasse zodra §7.2a de datatabel aanpakt, want daar komen bedragen en scores in kolommen. |
+| `.gsp-eyebrow` | Mono, uppercase, gespatieerd. `.a-field-label` is de huidige benadering maar staat in Plex Sans. Hangt samen met §7.1.4: pas als `.text-uppercase` losgekoppeld is van mono kan dit erin, anders krijgt elke hoofdletterregel twee keer mono. |
+| `.gsp-table-dense` | Tabeldichtheid hoort bij §7.2a en verandert de hoogte van elke rij; niet iets om los in de schil te zetten. |
+| Hover- en focusstaat op `.a-clickable` | Gebouwd is alleen `cursor: pointer`. De hover-/focusachtergrond uit het voorstel vraagt dat rijen toetsenbordbereikbaar zijn, en dat zijn ze nog niet (§7.4). Beide komen samen in de datatabelpass. |
 
 **Wat Tabler wél levert en dus niet nagebouwd wordt.** Gecontroleerd in `vendor/tabler/css/tabler.min.css`: `.offcanvas-end`, `.offcanvas-bottom`, `.modal-fullscreen-sm-down`, `.table-responsive`, `.nav-tabs`, `.form-switch`, `.is-invalid`, `.invalid-feedback`, `.alert-*`, `.badge` en de `-lt`-varianten bestaan allemaal. Voor geen daarvan komt eigen CSS.
 
@@ -510,8 +549,8 @@ Elke component geldt gelijk voor het adminpaneel en beide portalen. Waar een por
 
 | Staat | Weergave |
 |---|---|
-| Rust | Rijtekst `--navy-100`, meta-kolommen `.text-muted-navy`, kolomkop `.gsp-eyebrow` |
-| Hover (rij) | `background: var(--navy-600)`, 150ms; alleen op een klikbare rij (`.gsp-clickable`) |
+| Rust | Rijtekst `--navy-100`, meta-kolommen `.a-soft`, kolomkop `.gsp-eyebrow` |
+| Hover (rij) | `background: var(--navy-600)`, 150ms; alleen op een klikbare rij (`.a-clickable`) |
 | Focus-visible (rij) | Identiek aan hover, plus `outline: 2px solid var(--gold-500); outline-offset: -2px` |
 | Actief (geselecteerd) | `background: var(--navy-600)`, plus 2px `--gold-500` linkerrand op de eerste cel |
 | Disabled (rij zonder toegestane actie) | Tekst blijft `--navy-100`; alleen de actieknoppen krijgen `disabled` plus `title` met de reden. Een rij wordt nooit gedimd, want dat kost leesbaarheid zonder iets uit te leggen |
@@ -523,7 +562,7 @@ Elke component geldt gelijk voor het adminpaneel en beide portalen. Waar een por
 
 **1440.** Volle tabel, alle kolommen, dichtheidsschakelaar zichtbaar.
 
-**390.** Onder 768px is dit geen tabel meer maar een kaartlijst: per record één `.card.mb-2` met bovenin naam plus statusbadge, daaronder maximaal drie meta-regels in `.fs-xs.text-muted-navy`, en onderin één rij knoppen op volle breedte. Elk tikdoel is minimaal 44x44px (§8.x.0). Het selectievakje staat linksboven in de kaart. De filterbalk stapelt tot één kolom en de selects worden volle breedte. De bulkbalk plakt onderaan het scherm met `position: sticky; bottom: 0`, zonder marge en zonder `--fixed-stack-offset`: dat token wordt door `website/script.js` gezet en het adminpaneel laadt dat bestand niet, dus daar is het altijd leeg. De toast schuift daarom omhoog zolang de bulkbalk zichtbaar is (`bottom: calc(var(--space-md) + var(--gsp-bulkbar-h, 0px))`, waarbij `--gsp-bulkbar-h` door de bulkbalk zelf op zijn eigen `offsetHeight` wordt gezet en op `0px` bij verdwijnen). Zo dekken de twee elkaar op geen enkele breedte af. Horizontaal scrollen komt in geen enkele breedte voor; de enige uitzondering blijft `.table-responsive` op tablets tussen 768 en 1024px.
+**390.** Onder 768px is dit geen tabel meer maar een kaartlijst: per record één `.card.mb-2` met bovenin naam plus statusbadge, daaronder maximaal drie meta-regels in `.fs-xs.a-soft`, en onderin één rij knoppen op volle breedte. Elk tikdoel is minimaal 44x44px (§8.x.0). Het selectievakje staat linksboven in de kaart. De filterbalk stapelt tot één kolom en de selects worden volle breedte. De bulkbalk plakt onderaan het scherm met `position: sticky; bottom: 0`, zonder marge en zonder `--fixed-stack-offset`: dat token wordt door `website/script.js` gezet en het adminpaneel laadt dat bestand niet, dus daar is het altijd leeg. De toast schuift daarom omhoog zolang de bulkbalk zichtbaar is (`bottom: calc(var(--space-md) + var(--gsp-bulkbar-h, 0px))`, waarbij `--gsp-bulkbar-h` door de bulkbalk zelf op zijn eigen `offsetHeight` wordt gezet en op `0px` bij verdwijnen). Zo dekken de twee elkaar op geen enkele breedte af. Horizontaal scrollen komt in geen enkele breedte voor; de enige uitzondering blijft `.table-responsive` op tablets tussen 768 en 1024px.
 
 #### 7.2b Drawer (offcanvas uit de Tabler-bundel)
 
@@ -537,7 +576,7 @@ Elke component geldt gelijk voor het adminpaneel en beide portalen. Waar een por
 
 **Anatomie.** `<div class="offcanvas offcanvas-end" tabindex="-1" id="gspDrawer" aria-labelledby="gspDrawerTitle">`, breedte 560px op 1440. Kop (`.offcanvas-header`, `background: var(--navy-900)`, sticky): links `h2#gspDrawerTitle` in Newsreader `--font-size-2xl` met daaronder een `.gsp-eyebrow`-regel (type plus ID, bijvoorbeeld "KANDIDAAT · #1482"), rechts de statusbadge en de sluitknop. Direct onder de kop een tabsrij (`.nav.nav-tabs`, aangestuurd door `window.tabler.Tab`, `role="tablist"`). Daaronder `.offcanvas-body.gsp-scroll-y` met de actieve tabpaneel-inhoud. Onderaan een sticky voetbalk (`background: var(--navy-900)`, `border-top: 1px solid var(--navy-600)`) met maximaal twee acties: rechts de primaire, links de secundaire. Destructieve acties staan niet in de voetbalk maar in de tab waar ze thuishoren, achter de modal van §7.2c.
 
-**Tabs.** Elke tab is een `<button role="tab" aria-selected aria-controls>`; het paneel is `role="tabpanel"` met `tabindex="0"`. Pijl-links/rechts wisselt van tab, `Home`/`End` springt naar de eerste of laatste. De actieve tab draagt een 2px `--gold-500`-onderrand; inactieve tabs zijn `.text-muted-navy`. Elke tab laadt zijn eigen data pas bij eerste opening (lui) en houdt daarna zijn eigen laad-, lege- en foutstaat via `setContainerLoadError`.
+**Tabs.** Elke tab is een `<button role="tab" aria-selected aria-controls>`; het paneel is `role="tabpanel"` met `tabindex="0"`. Pijl-links/rechts wisselt van tab, `Home`/`End` springt naar de eerste of laatste. De actieve tab draagt een 2px `--gold-500`-onderrand; inactieve tabs zijn `.a-soft`. Elke tab laadt zijn eigen data pas bij eerste opening (lui) en houdt daarna zijn eigen laad-, lege- en foutstaat via `setContainerLoadError`.
 
 **Staten.** Rust en hover als hierboven. Focus-visible op tab en op sluitknop: 2px `--gold-500`, offset 2px. Laden per tab: drie vlakke `--navy-700`-blokken op de plaats van de velden, geen shimmer (§8.x.6). Leeg per tab: "Nog geen …" plus, waar van toepassing, de knop die de eerste zou aanmaken. Fout per tab: `setContainerLoadError` op de tabcontainer, zodat een kapotte tab de rest van de drawer niet meesleurt. Disabled tab: alleen wanneer de rol de inhoud niet mag zien; dan `aria-disabled="true"` plus een korte reden in het paneel, nooit een tab die stilzwijgend verdwijnt.
 
@@ -558,7 +597,7 @@ Elke component geldt gelijk voor het adminpaneel en beide portalen. Waar een por
 **Destructieve variant.** Voor AVG-wissen (§7.3.5) en de goedkeuringslijst bewaartermijnen (§7.3.1). Verschillen met de gewone modal:
 
 - Kop krijgt een waarschuwingsicoon in `--ink-error` en een kopregel die het gevolg noemt, niet de handeling: "Deze gegevens worden onomkeerbaar gewist", niet "Weet je het zeker?".
-- Body noemt in een `.gsp-panel` exact wat er gebeurt: welke tabellen, hoeveel rijen, en of het anonimiseren of hard verwijderen is. Bij een bulkactie staat het aantal er als `.gsp-num` en wordt het bij openen opnieuw opgehaald, niet uit de lijstweergave overgenomen.
+- Body noemt in een `.a-panel` exact wat er gebeurt: welke tabellen, hoeveel rijen, en of het anonimiseren of hard verwijderen is. Bij een bulkactie staat het aantal er als `.gsp-num` en wordt het bij openen opnieuw opgehaald, niet uit de lijstweergave overgenomen.
 - **Getypte bevestiging.** Eén tekstveld met een label dat de exact te typen tekenreeks noemt. De primaire knop blijft `disabled` tot de invoer letterlijk klopt (hoofdlettergevoelig, na `trim()`). De verwachte tekenreeks staat in het label als `<code>`, is selecteerbaar maar wordt nooit voorgevuld. Onder het veld staat, zodra er iets fout getypt is, "Komt niet overeen" in `.text-danger-ink`, met `aria-live="polite"`.
 - De primaire knop is `.btn-danger`, staat rechts, en heeft als tekst het werkwoord plus het object ("Wissen (3 items)"), nooit "OK".
 - ESC en backdrop-klik sluiten wel, want sluiten is de veilige uitkomst.
@@ -573,13 +612,13 @@ De te typen tekenreeksen zijn niet vrij te kiezen: ze komen overeen met wat de b
 
 *Vervangt*: de `.form-group`-regels in `index.html` en de handmatige veldopbouw in `admin.js`.
 
-**Anatomie per veld.** `<div class="mb-3">` met daarin, in deze volgorde: `<label class="form-label">` (Plex Sans, `--font-size-sm`, gewicht 500, kleur `--navy-100`; niet meer de huidige uppercase mono, die maakt lange labels slecht leesbaar), optioneel een `.form-hint.fs-xs.text-muted-navy` **boven** het veld wanneer de hint bepaalt hoe je invult, het veld zelf (`.form-control` / `.form-select` / `.form-check`), en daaronder de foutregel `.invalid-feedback`. Verplichte velden krijgen `required` plus een `*` in het label; optionele velden krijgen niets. Er wordt niet met "(optioneel)" gewerkt naast "*": één van de twee conventies, en dat is de asterisk.
+**Anatomie per veld.** `<div class="mb-3">` met daarin, in deze volgorde: `<label class="form-label">` (Plex Sans, `--font-size-sm`, gewicht 500, kleur `--navy-100`; niet meer de huidige uppercase mono, die maakt lange labels slecht leesbaar), optioneel een `.form-hint.fs-xs.a-soft` **boven** het veld wanneer de hint bepaalt hoe je invult, het veld zelf (`.form-control` / `.form-select` / `.form-check`), en daaronder de foutregel `.invalid-feedback`. Verplichte velden krijgen `required` plus een `*` in het label; optionele velden krijgen niets. Er wordt niet met "(optioneel)" gewerkt naast "*": één van de twee conventies, en dat is de asterisk.
 
 **Validatie.** Inline, op `blur` van een veld dat de gebruiker heeft aangeraakt, en opnieuw bij `submit`. Nooit op `input` tijdens het eerste typen: een e-mailadres dat halverwege rood wordt is ruis. Een ongeldig veld krijgt `.is-invalid` (1px `--ink-error`-rand plus `aria-invalid="true"`) en `aria-describedby` naar de foutregel. Een veld dat na correctie geldig is verliest de foutstaat direct op `input`. Er wordt geen groene vinkstaat gebruikt: correct is de norm en verdient geen kleur.
 
 **Foutsamenvatting.** Bij een mislukte `submit` verschijnt bovenaan het formulier (in een modal: bovenaan de body; in een drawertab: bovenaan het paneel) een blok met `role="alert"` en `tabindex="-1"`, dat direct focus krijgt. Inhoud: kop "Er zijn NN velden die aandacht nodig hebben", en daaronder een `<ul>` met per fout een link naar het veld (`href="#veldId"`, klik zet focus op het veld). De samenvatting wordt bij elke nieuwe `submit` opnieuw opgebouwd, nooit aangevuld. Bij een serverfout (422 met veldnamen) worden de velden op dezelfde manier gemarkeerd en verschijnt dezelfde samenvatting; een 5xx zonder veldinformatie verschijnt als één inline-melding (§7.2f) met de retryknop.
 
-**Staten.** Rust: veldvulling `--navy-800`, rand `--navy-600`, tekst `--white`, placeholder `.text-muted-navy`. Hover: rand `--navy-400`. Focus-visible: rand `--gold-500` plus `box-shadow: 0 0 0 3px var(--gold-glow)`; identiek aan focus, want een tekstveld heeft geen hoverbetekenis. Disabled: rand `--navy-600`, tekst `--navy-200`, `background: var(--navy-900)`, plus een korte reden als `.form-hint` eronder wanneer de reden niet uit de context blijkt. Laden (formulier wordt verzonden): alle velden `disabled`, primaire knop met spinner. Leeg is geen formulierstaat. Fout: hierboven beschreven.
+**Staten.** Rust: veldvulling `--navy-800`, rand `--navy-600`, tekst `--white`, placeholder `.a-soft`. Hover: rand `--navy-400`. Focus-visible: rand `--gold-500` plus `box-shadow: 0 0 0 3px var(--gold-glow)`; identiek aan focus, want een tekstveld heeft geen hoverbetekenis. Disabled: rand `--navy-600`, tekst `--navy-200`, `background: var(--navy-900)`, plus een korte reden als `.form-hint` eronder wanneer de reden niet uit de context blijkt. Laden (formulier wordt verzonden): alle velden `disabled`, primaire knop met spinner. Leeg is geen formulierstaat. Fout: hierboven beschreven.
 
 **Toetsenbord.** Tabvolgorde volgt de leesvolgorde; er wordt nergens een `tabindex` groter dan 0 gebruikt. `Enter` in een enkelregelig veld verzendt het formulier; `Ctrl+Enter` doet dat vanuit een `<textarea>`. Een fieldset met een groep radio's of checkboxes krijgt `<legend>`, geen los `<div>` met labeltekst.
 
@@ -735,9 +774,9 @@ De bestaande MFA-banner (`#mfaBanner`) is een inline-melding van het type waarsc
 
 #### 7.2g KPI-tegel en lege dashboardstaat
 
-**Anatomie.** `.card.card-sm` met `.card-body`: bovenin een `.gsp-eyebrow`-label (bijvoorbeeld "OPEN VACATURES"), daaronder de waarde in `.gsp-num` op `--font-size-3xl` (32px) in `--white`, en daaronder optioneel één regel context in `.fs-xs.text-muted-navy`. Geen icoon in de tegel: de vijf iconen die er nu staan voegen niets toe dat het label niet al zegt. Geen sparkline, geen percentageverandering, geen kleurvlak.
+**Anatomie.** `.card.card-sm` met `.card-body`: bovenin een `.gsp-eyebrow`-label (bijvoorbeeld "OPEN VACATURES"), daaronder de waarde in `.gsp-num` op `--font-size-3xl` (32px) in `--white`, en daaronder optioneel één regel context in `.fs-xs.a-soft`. Geen icoon in de tegel: de vijf iconen die er nu staan voegen niets toe dat het label niet al zegt. Geen sparkline, geen percentageverandering, geen kleurvlak.
 
-**Geen verzonnen cijfers.** Een KPI-tegel toont uitsluitend een getal dat een API-veld letterlijk teruggeeft. Er wordt niets afgeleid, geen trend berekend uit twee metingen, geen doel of benchmark getoond. Waar de API `null` teruggeeft (bijvoorbeeld `cost_per_hire_avg` zonder gevulde `fee_value`), toont de tegel **"n.v.t."** in `.text-muted-navy` met daaronder in `.fs-xs` de reden ("nog geen vervulde vacature met een vastgelegd tarief"). Nooit een 0 waar `null` bedoeld is: 0 is een meting, `null` is de afwezigheid van een meting, en dat verschil is op een dashboard het hele punt.
+**Geen verzonnen cijfers.** Een KPI-tegel toont uitsluitend een getal dat een API-veld letterlijk teruggeeft. Er wordt niets afgeleid, geen trend berekend uit twee metingen, geen doel of benchmark getoond. Waar de API `null` teruggeeft (bijvoorbeeld `cost_per_hire_avg` zonder gevulde `fee_value`), toont de tegel **"n.v.t."** in `.a-soft` met daaronder in `.fs-xs` de reden ("nog geen vervulde vacature met een vastgelegd tarief"). Nooit een 0 waar `null` bedoeld is: 0 is een meting, `null` is de afwezigheid van een meting, en dat verschil is op een dashboard het hele punt.
 
 **Staten.**
 
@@ -794,13 +833,13 @@ Per scherm: het wireframe in tekst, de componenten die het gebruikt, en de endpo
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-**Paginering: geen.** `GET /api/v1/admin/retention/review` kent geen `limit` en geen `offset`; het geeft de volledige set voor het gevraagde filter terug. Het scherm haalt die set dus in één keer op en toont hem in zijn geheel, zonder pagineercomponent, met de telling boven de tabel ("NN items"). Dat is verdedigbaar zolang de maandelijkse lijst in de tientallen loopt. Zodra de lijst structureel boven de bulkcap uitkomt, is `limit`/`offset` op dit endpoint een backendvoorwaarde (§7.8) en komt `renderPagination` alsnog in de voet; tot dan wordt er geen pager getekend die niets bestuurt.
+**Paginering: geen.** `GET /api/v1/admin/retention/review` kent geen `limit` en geen `offset`; het geeft de volledige set voor het gevraagde filter terug. Het scherm haalt die set dus in één keer op en toont hem in zijn geheel, zonder pagineercomponent, met de telling boven de tabel ("NN items"). Dat is verdedigbaar zolang de maandelijkse lijst in de tientallen loopt. Zodra de lijst structureel boven de bulkcap uitkomt, is `limit`/`offset` op dit endpoint een backendvoorwaarde (§7.7) en komt `renderPagination` alsnog in de voet; tot dan wordt er geen pager getekend die niets bestuurt.
 
-**Kolommen en velden.** `category` (label uit §7.2e), `subject_table` plus `subject_id` samengevoegd tot "kandidaat #1482" of "prospect #77" (de `email` uit de respons wordt **niet** in de lijst getoond: hij staat wel in de API-respons maar hoort niet in een overzicht dat over een schouder meegelezen wordt; het adres is alleen in de bevestigingsmodal zichtbaar, en daar gemaskeerd tot `j••••@voorbeeld.nl`), `term_expired_at` als datum plus het aantal dagen erachter in `.fs-xs.text-muted-navy`, `signal_missing_nl` verbatim (die tekst is door de backend geschreven om precies zo getoond te worden; niet inkorten, wel afbreken na twee regels met een uitklap), `action` als "Anonimiseren" of "Hard verwijderen", en `status` als badge (§7.2e).
+**Kolommen en velden.** `category` (label uit §7.2e), `subject_table` plus `subject_id` samengevoegd tot "kandidaat #1482" of "prospect #77" (de `email` uit de respons wordt **niet** in de lijst getoond: hij staat wel in de API-respons maar hoort niet in een overzicht dat over een schouder meegelezen wordt; het adres is alleen in de bevestigingsmodal zichtbaar, en daar gemaskeerd tot `j••••@voorbeeld.nl`), `term_expired_at` als datum plus het aantal dagen erachter in `.fs-xs.a-soft`, `signal_missing_nl` verbatim (die tekst is door de backend geschreven om precies zo getoond te worden; niet inkorten, wel afbreken na twee regels met een uitklap), `action` als "Anonimiseren" of "Hard verwijderen", en `status` als badge (§7.2e).
 
 **"Eerder overgeslagen" moet zichtbaar zijn, en staat gewoon in de standaardlijst.** Wanneer de generator een eerder afgewezen onderwerp opnieuw tegenkomt, zet hij het item terug op `status='pending'` en stempelt hij `reappeared_after_rejection_at` (`services/scheduler.py:1172-1180`: `status = CASE WHEN … IN ('rejected','no_longer_eligible') THEN 'pending' …`). Een heropend item staat dus **wel** in de standaardweergave (`status=pending`), niet erbuiten.
 
-Weergave: zo'n rij krijgt links een pictogram en, in de kolom Status, onder de badge "Te beoordelen" een regel `.fs-xs.text-muted-navy`: "Eerder afgewezen, opnieuw verschenen op &lt;`reappeared_after_rejection_at`&gt;". Dat is een zichtbaar ander signaal dan een item dat voor het eerst verschijnt, en dat is precies het punt: dit onderwerp is al eens bewust bewaard en verdient een tweede blik, geen routineklik.
+Weergave: zo'n rij krijgt links een pictogram en, in de kolom Status, onder de badge "Te beoordelen" een regel `.fs-xs.a-soft`: "Eerder afgewezen, opnieuw verschenen op &lt;`reappeared_after_rejection_at`&gt;". Dat is een zichtbaar ander signaal dan een item dat voor het eerst verschijnt, en dat is precies het punt: dit onderwerp is al eens bewust bewaard en verdient een tweede blik, geen routineklik.
 
 De statusfilter krijgt daarnaast de optie **"Afgewezen (bewaard)"** die `status=rejected` opvraagt, zodat wat destijds is afgewezen en sindsdien niet is teruggekomen ook opvraagbaar blijft. De samenvattingskaart telt de heropende items **client-side** uit de geladen `pending`-lijst (aantal rijen met een gevulde `reappeared_after_rejection_at`) en toont die tegel alleen wanneer het aantal groter dan nul is; `GET /review/summary` groepeert op `category` en `status` en kent dat onderscheid niet.
 
@@ -817,7 +856,7 @@ De statusfilter krijgt daarnaast de optie **"Afgewezen (bewaard)"** die `status=
 
 **Droogloop.** Ingeklapte kaart onderaan. `POST /api/v1/admin/retention/run` met `{ dry_run: true }` geeft per categorie `{ key, status, count }` met `status` in `counted`, `not_applicable`, `schema_not_ready` of `error`. Weergave: tabel met categorie, telling en een leesbare toelichting per status ("telt niet mee: bewaren", "kolom bestaat nog niet", "kon niet tellen"). **Geen bevestiging, ook geen getypte.** De aanroep is read-only en verandert niets; hem dezelfde drempel geven als een onomkeerbare verwijdering leert een beheerder juist dat een typebevestiging niets betekent. Eén knop "Uitvoeren", meer niet. `dry_run: false` bestaat niet meer aan de backendkant (410) en komt in de UI ook niet voor; er is geen schakelaar.
 
-**Tweede droogloopkaart: de Apollo-bulkpool.** `POST /api/v1/admin/apollo-pool/purge` met `{ dry_run: true }` geeft `{ total, would_anonymise, would_hard_delete, skipped }` voor de bulk-geharveste Apollo-rijen. Dat is de veertiende en laatste route van dit scherm en hij hoort hier, niet ergens anders, want hij telt dezelfde pool die als `category=apollo_pool_purge` in de beoordelingslijst staat. Eigen ingeklapte kaart naast de droogloop, met dezelfde vorm: knop "Uitvoeren", vier getallen in `.gsp-num`, en één regel uitleg bij `skipped` ("rijen die een beschermend signaal hebben opgepikt en daarom buiten de selectie vallen"). `dry_run: false` geeft 410 en zit niet in de UI; de kaart zegt er in `.fs-xs.text-muted-navy` bij: "Verwijderen gebeurt uitsluitend via de beoordelingslijst hierboven, categorie Apollo-bulkpool."
+**Tweede droogloopkaart: de Apollo-bulkpool.** `POST /api/v1/admin/apollo-pool/purge` met `{ dry_run: true }` geeft `{ total, would_anonymise, would_hard_delete, skipped }` voor de bulk-geharveste Apollo-rijen. Dat is de veertiende en laatste route van dit scherm en hij hoort hier, niet ergens anders, want hij telt dezelfde pool die als `category=apollo_pool_purge` in de beoordelingslijst staat. Eigen ingeklapte kaart naast de droogloop, met dezelfde vorm: knop "Uitvoeren", vier getallen in `.gsp-num`, en één regel uitleg bij `skipped` ("rijen die een beschermend signaal hebben opgepikt en daarom buiten de selectie vallen"). `dry_run: false` geeft 410 en zit niet in de UI; de kaart zegt er in `.fs-xs.a-soft` bij: "Verwijderen gebeurt uitsluitend via de beoordelingslijst hierboven, categorie Apollo-bulkpool."
 
 **Referentietabel.** Onderaan de sectie, in een uitklapbare kaart: `GET /api/v1/admin/retention/table`, alle rijen uit `RETENTION_TABLE`, met categorie, bewaartermijn, bron of opmerking, en actie. `placed_candidate` (bewaren, 7 jaar) en `logs` (alleen infrastructuur) staan hier met een neutrale badge "Komt niet in de beoordelingslijst", zodat zichtbaar is dat ze bestaan.
 
@@ -854,7 +893,7 @@ TOESTEMMINGEN
 └─────────────────────────────────────────────────────────┘
 ```
 
-**Talentpool wijzigen.** Modal (niet destructief), met: een radiogroep "Toestemming" met "Vastleggen" en "Intrekken"; bij "Vastleggen" een select "Omvang" met de twee waarden uit `TALENTPOOL_CONSENT_SCOPES` (verplicht, want de backend geeft 422 op `consent=true` zonder `scope`); en een verplicht `<textarea>` **"Bewijs van toestemming"** (`evidence`, 1 tot 2000 tekens) met de hint boven het veld: "Waar blijkt de toestemming uit? Bijvoorbeeld: ondertekend formulier van 2 september, of e-mail in het dossier." Het veld is verplicht in beide richtingen (ook bij intrekken), omdat de backend het zo eist. Inline validatie: leeg veld geeft "Vul kort in waar de toestemming uit blijkt"; boven 2000 tekens een teller in `.text-danger-ink`. Onder de modal een `.fs-xs.text-muted-navy`-regel: "Bij het vastleggen geldt een termijn van 12 maanden. Deze notitie komt in het auditlog; e-mailadressen erin worden automatisch onleesbaar gemaakt." Dat laatste is waar: `privacy.redact_emails()` doet dat.
+**Talentpool wijzigen.** Modal (niet destructief), met: een radiogroep "Toestemming" met "Vastleggen" en "Intrekken"; bij "Vastleggen" een select "Omvang" met de twee waarden uit `TALENTPOOL_CONSENT_SCOPES` (verplicht, want de backend geeft 422 op `consent=true` zonder `scope`); en een verplicht `<textarea>` **"Bewijs van toestemming"** (`evidence`, 1 tot 2000 tekens) met de hint boven het veld: "Waar blijkt de toestemming uit? Bijvoorbeeld: ondertekend formulier van 2 september, of e-mail in het dossier." Het veld is verplicht in beide richtingen (ook bij intrekken), omdat de backend het zo eist. Inline validatie: leeg veld geeft "Vul kort in waar de toestemming uit blijkt"; boven 2000 tekens een teller in `.text-danger-ink`. Onder de modal een `.fs-xs.a-soft`-regel: "Bij het vastleggen geldt een termijn van 12 maanden. Deze notitie komt in het auditlog; e-mailadressen erin worden automatisch onleesbaar gemaakt." Dat laatste is waar: `privacy.redact_emails()` doet dat.
 
 **Presentatie vastleggen.** Zelfde modal-vorm, met één extra en verplicht veld: **een vacaturekiezer**. Dit is een `<select>` (geen vrij tekstveld met ID) gevuld uit `GET /api/v1/admin/jobs?status=open&limit=200`, met per optie "&lt;titel&gt; · &lt;opdrachtgever&gt; · #&lt;id&gt;". Verplicht zodra "Vastleggen" gekozen is (`job_id` is dan verplicht in `AdminSpecPresentationConsentUpdate`); bij "Intrekken" is de kiezer `disabled` en wordt hij niet meegestuurd. `evidence` is ook hier verplicht. De hint boven de kiezer: "Toestemming voor presentatie geldt per rol, niet in het algemeen."
 
@@ -868,7 +907,7 @@ De naam uit het veld "Aangedragen door" wordt live in dat blok ingevuld, zodat z
 
 Twee foutgevallen krijgen elk hun eigen Nederlandstalige inline-melding in plaats van een generieke: het adres staat op de suppressielijst ("Dit adres staat op de suppressielijst. Er mag geen bericht naar dit adres, op geen enkele grondslag.") en er bestaat al een kandidaat met dit adres ("Er is al een kandidaat met dit adres. Open dat dossier; een referral-invoer mag een bestaande grondslag niet overschrijven.", met een knop "Kandidaat openen" die de drawer van die kandidaat opent).
 
-**Backendvoorwaarde (§7.8).** Allebei die gevallen komen vandaag terug als een 409 met een kale Engelse zin in `detail` (`routers/admin.py:913` en `:919`), zonder machineleesbare code en zonder het kandidaat-ID als apart veld. De UI mag niet op de Engelse zinstekst matchen om te bepalen welk van de twee het is, en kan het ID niet uit die zin parsen. `admin_create_referral` moet daarom hetzelfde gestructureerde `detail` geven als `retention_admin.py` en `gdpr.py` al doen: `{"code": "referral_email_suppressed"}` respectievelijk `{"code": "referral_candidate_exists", "candidate_id": <id>}`. Tot dat er is, toont het scherm één algemene 409-melding ("Deze referral kan niet worden vastgelegd; controleer of dit adres al bekend is of op de suppressielijst staat.") en geen knop, want een verkeerde knop is erger dan geen knop.
+**Backendvoorwaarde (§7.7).** Allebei die gevallen komen vandaag terug als een 409 met een kale Engelse zin in `detail` (`routers/admin.py:913` en `:919`), zonder machineleesbare code en zonder het kandidaat-ID als apart veld. De UI mag niet op de Engelse zinstekst matchen om te bepalen welk van de twee het is, en kan het ID niet uit die zin parsen. `admin_create_referral` moet daarom hetzelfde gestructureerde `detail` geven als `retention_admin.py` en `gdpr.py` al doen: `{"code": "referral_email_suppressed"}` respectievelijk `{"code": "referral_candidate_exists", "candidate_id": <id>}`. Tot dat er is, toont het scherm één algemene 409-melding ("Deze referral kan niet worden vastgelegd; controleer of dit adres al bekend is of op de suppressielijst staat.") en geen knop, want een verkeerde knop is erger dan geen knop.
 
 **Staten.** Tab-laden: drie vlakke blokken. Fout: `setContainerLoadError` op de tab. Leeg bestaat niet: er is altijd een toestemmingsstatus, ook als die "geen" is. Alle drie de modals: primaire knop met spinner tijdens verzenden, inline-melding bij 4xx, toast plus drawerherlading bij succes.
 
@@ -914,7 +953,7 @@ Kandidaat #1482 | Vectron Systems | Senior Embedded | Detachering | 1 okt 2026 |
 
 **Endpoints.** `PATCH /api/v1/admin/pipeline/{entry_id}/stage`, `GET /api/v1/admin/pipeline/{entry_id}/history`.
 
-**Backendvoorwaarde, blokkerend voor de admindrawer (§7.8).** Er is geen adminroute die pipeline-entries **opsomt**. `routers/admin.py` raakt `pipeline_entries` alleen met een `SELECT ... WHERE id = $1` vanuit de twee routes hierboven, `GET /admin/candidates/{kind}/{item_id}` levert geen entries, en `routers/clients_admin.py` evenmin; de enige lijstroute is `GET /api/v1/client/pipeline`, en die is gescoopt op de client achter het JWT en dus niet bruikbaar met een beheerderstoken. De drawer kent dus geen `entry_id` om `PATCH` of `GET .../history` op aan te roepen.
+**Backendvoorwaarde, blokkerend voor de admindrawer (§7.7).** Er is geen adminroute die pipeline-entries **opsomt**. `routers/admin.py` raakt `pipeline_entries` alleen met een `SELECT ... WHERE id = $1` vanuit de twee routes hierboven, `GET /admin/candidates/{kind}/{item_id}` levert geen entries, en `routers/clients_admin.py` evenmin; de enige lijstroute is `GET /api/v1/client/pipeline`, en die is gescoopt op de client achter het JWT en dus niet bruikbaar met een beheerderstoken. De drawer kent dus geen `entry_id` om `PATCH` of `GET .../history` op aan te roepen.
 
 Nodig: `GET /api/v1/admin/pipeline?candidate_id=&client_id=&job_id=&limit=&offset=`, admin-JWT, dezelfde rijvorm als de klantroute plus `client_id`. **Tot die route bestaat, wordt deze tab alleen in het klantportaal gebouwd** (waar `GET /client/pipeline` de entries wel levert) en blijft hij in de admindrawer achterwege. Er wordt geen tab getoond die zijn eigen inhoud niet kan ophalen.
 
@@ -945,7 +984,7 @@ PIPELINE
 | `placed` | Geplaatst |
 | `rejected` | Afgewezen |
 
-Die zeven zijn de enige waarden die de `<select>` aanbiedt, in deze volgorde, in het paneel en in beide portalen. De volgorde van invoering is vastgelegd en niet omkeerbaar: (1) `SELECT DISTINCT stage FROM pipeline_entries` op productie draaien, (2) elke afwijkende waarde migreren naar een van de zeven, (3) pas dán een CHECK-constraint zetten (migratie 043, backendvoorwaarde, §7.8). **Zolang die constraint er niet is, blijft de ontsnappingsklep staan**: als de huidige waarde van een entry niet in de zeven zit, wordt zij als geselecteerde optie toegevoegd met het achtervoegsel "(bestaande waarde)". De UI schrijft nooit stilzwijgend een fase weg die zij niet kent. Zodra de constraint er is, vervalt die optie en is de select gesloten.
+Die zeven zijn de enige waarden die de `<select>` aanbiedt, in deze volgorde, in het paneel en in beide portalen. De volgorde van invoering is vastgelegd en niet omkeerbaar: (1) `SELECT DISTINCT stage FROM pipeline_entries` op productie draaien, (2) elke afwijkende waarde migreren naar een van de zeven, (3) pas dán een CHECK-constraint zetten (migratie 043, backendvoorwaarde, §7.7). **Zolang die constraint er niet is, blijft de ontsnappingsklep staan**: als de huidige waarde van een entry niet in de zeven zit, wordt zij als geselecteerde optie toegevoegd met het achtervoegsel "(bestaande waarde)". De UI schrijft nooit stilzwijgend een fase weg die zij niet kent. Zodra de constraint er is, vervalt die optie en is de select gesloten.
 
 De historie toont elke `from_stage` en `to_stage` door dezelfde labelmap, met de ruwe waarde als er geen label is.
 
@@ -953,7 +992,7 @@ De historie toont elke `from_stage` en `to_stage` door dezelfde labelmap, met de
 
 **Historie.** Verticale tijdlijn: 2px `--navy-600`-lijn links, per item een 8px stip in `--navy-300` (`--gold-500` voor het nieuwste), tijdstempel in `.gsp-num.fs-xs`, dan "&lt;van&gt; → &lt;naar&gt;", dan de actor. `from_stage: null` toont als "(nieuw)". Maximaal tien items zichtbaar, daarna "Toon alles".
 
-**De actor is een getal, geen naam.** `GET .../history` doet `SELECT * FROM pipeline_stage_history` zonder join, dus `changed_by` is een `users.id`. Het scherm toont daarom "Gebruiker #12", niet een verzonnen naam, tenzij dat ID toevallig de ingelogde beheerder is (dan "Jij"). Een leesbare naam is een backendvoorwaarde (§7.8): een join op `users` die `changed_by_name` meegeeft. Het wireframe hierboven toont "Beheerder" als eindbeeld ná die wijziging; tot dan staat er het nummer.
+**De actor is een getal, geen naam.** `GET .../history` doet `SELECT * FROM pipeline_stage_history` zonder join, dus `changed_by` is een `users.id`. Het scherm toont daarom "Gebruiker #12", niet een verzonnen naam, tenzij dat ID toevallig de ingelogde beheerder is (dan "Jij"). Een leesbare naam is een backendvoorwaarde (§7.7): een join op `users` die `changed_by_name` meegeeft. Het wireframe hierboven toont "Beheerder" als eindbeeld ná die wijziging; tot dan staat er het nummer.
 
 **Staten.** Laden: drie vlakke blokken op de tijdlijnposities. Leeg (entry zonder historie, kan niet voorkomen maar wordt afgevangen): "Nog geen fasewijzigingen vastgelegd." Fout: `setContainerLoadError` op de historie alleen; de huidige fase en de wisselaar blijven bruikbaar.
 
@@ -985,11 +1024,11 @@ De historie toont elke `from_stage` en `to_stage` door dezelfde labelmap, met de
 
 **Wissen.** Eén tekstveld en één knop. De knop opent de destructieve modal (§7.2c). Body: het ingevoerde adres, en een `.gsp-panel` met de opsomming van wat er gebeurt (kandidaatgegevens, prospectgegevens, portalaccount, sollicitaties, berichten; anonimiseren dan wel verwijderen per tabel). **Getypte bevestiging: het volledige e-mailadres**, letterlijk zoals ingevoerd, hoofdletterongevoelig na `trim()` en `toLowerCase()`. Dit is de enige plek in dit systeem waar de te typen tekenreeks geen vaste tekst is, en dat is bewust: het adres is precies wat je niet mag verwisselen.
 
-De backend eist deze getypte bevestiging vandaag **niet**; `AdminEraseRequest` kent alleen `email` en een booleaanse `confirm`. De getypte bevestiging blijft (§7.6, besluit 3): dit is de enige onomkeerbare handeling in het paneel die één veld en één klik van elkaar verwijderd is. Maar een UI-maatregel bindt alleen deze UI, en niet een routine of een tweede cliënt die hetzelfde endpoint aanroept. Daarom is er een backendvoorwaarde voor het vervolg (§7.8): **`AdminEraseRequest.confirm` wordt het e-mailadres in plaats van een booleaan**, en het endpoint weigert wanneer `confirm` niet gelijk is aan `email` (genormaliseerd). Dan is elke cliënt gebonden aan dezelfde drempel en herhaalt de UI de regel in plaats van hem in zijn eentje te dragen. De aparte beheerders- en zelfbevestiging hieronder blijft daarnaast bestaan als tweede, andere vraag.
+De backend eist deze getypte bevestiging vandaag **niet**; `AdminEraseRequest` kent alleen `email` en een booleaanse `confirm`. De getypte bevestiging blijft (§7.6, besluit 3): dit is de enige onomkeerbare handeling in het paneel die één veld en één klik van elkaar verwijderd is. Maar een UI-maatregel bindt alleen deze UI, en niet een routine of een tweede cliënt die hetzelfde endpoint aanroept. Daarom is er een backendvoorwaarde voor het vervolg (§7.7): **`AdminEraseRequest.confirm` wordt het e-mailadres in plaats van een booleaan**, en het endpoint weigert wanneer `confirm` niet gelijk is aan `email` (genormaliseerd). Dan is elke cliënt gebonden aan dezelfde drempel en herhaalt de UI de regel in plaats van hem in zijn eentje te dragen. De aparte beheerders- en zelfbevestiging hieronder blijft daarnaast bestaan als tweede, andere vraag.
 
 `confirm: true` wordt **niet** standaard meegestuurd. De eerste aanroep gaat zonder. Geeft de backend 409 `erase_admin_or_self_requires_confirm`, dan verschijnt in de modal een tweede, aparte bevestiging: een inline-melding van het type waarschuwing met de tekst "Dit adres hoort bij een beheerdersaccount of bij je eigen account. Wissen verwijdert die toegang." plus een aangevinkt-moet-worden checkbox "Ik begrijp dat hiermee beheerderstoegang verdwijnt" en pas dan een tweede knop die de aanroep herhaalt met `confirm: true`. Twee stappen, niet één vinkje vooraf.
 
-**Suppressielijst.** Datatabel zonder selectie. `GET /api/v1/admin/suppression` neemt `limit` (max 500) en `offset`, maar geeft **geen** `total` terug, dus `renderPagination` kan niet weten hoeveel pagina's er zijn. Tot `total` er is (backendvoorwaarde, §7.8) gebruikt dit scherm geen pager maar een "Meer laden"-knop die `offset` ophoogt en verdwijnt zodra een pagina minder dan `limit` rijen teruggeeft; boven de tabel staat "NN getoond", niet "NN van MMM". Er wordt geen totaal gesuggereerd dat niet bestaat.
+**Suppressielijst.** Datatabel zonder selectie. `GET /api/v1/admin/suppression` neemt `limit` (max 500) en `offset`, maar geeft **geen** `total` terug, dus `renderPagination` kan niet weten hoeveel pagina's er zijn. Tot `total` er is (backendvoorwaarde, §7.7) gebruikt dit scherm geen pager maar een "Meer laden"-knop die `offset` ophoogt en verdwijnt zodra een pagina minder dan `limit` rijen teruggeeft; boven de tabel staat "NN getoond", niet "NN van MMM". Er wordt geen totaal gesuggereerd dat niet bestaat.
 
 De API geeft bewust **geen** plaintext-adressen terug, alleen `email_hash`, `email_domain`, `reason` en `created_at`. Het scherm toont dus domein en een ingekorte hash (eerste vier en laatste drie tekens, met de volledige hash in een `title` en een kopieerknop). Er staat boven de tabel één regel uitleg: "Deze lijst bewaart geen volledige e-mailadressen; alleen een onomkeerbare hash en het domein." Dat voorkomt de terugkerende vraag waarom je hier niet op adres kunt zoeken.
 
@@ -1005,7 +1044,7 @@ Vier kleinere toevoegingen aan bestaande secties.
 
 **(a) Deblokkeren.** `POST /api/v1/admin/users/{user_id}/unlock`. In het rijactiemenu van de gebruikerslijst komt een item "Deblokkeren", direct boven "Impersonate". Het is alleen ingeschakeld wanneer de gebruiker daadwerkelijk vergrendeld is; de gebruikerslijst moet dus `locked_until` en `failed_login_count` tonen.
 
-**Backendvoorwaarde, blokkerend (§7.8).** Geen van beide velden is vandaag op te halen: `GET /api/v1/admin/users` (`routers/admin.py:106`) en `GET /api/v1/admin/users/{user_id}` (`:120`) selecteren allebei uitsluitend `id, email, full_name, role, is_verified, created_at, updated_at`. Er is dus geen terugval via het detail-endpoint, want dat weet het ook niet. `failed_login_count` en `locked_until` moeten in de `SELECT` van `GET /users` bij. Tot dat zo is, wordt dit rijactie-item niet gebouwd: een knop "Deblokkeren" die altijd ingeschakeld staat omdat de UI de vergrendeling niet kan zien, is erger dan geen knop. Een vergrendelde gebruiker krijgt in de statuskolom een tweede badge "Vergrendeld" (familie negatief) met in `.fs-xs.text-muted-navy` eronder "tot &lt;tijdstip&gt;". Deblokkeren gaat via een gewone bevestigingsmodal, geen typebevestiging: het is een herstellende handeling. De modal zegt er wel bij wat het niet doet: "Dit reset geen wachtwoord en beëindigt geen bestaande sessie."
+**Backendvoorwaarde, blokkerend (§7.7).** Geen van beide velden is vandaag op te halen: `GET /api/v1/admin/users` (`routers/admin.py:106`) en `GET /api/v1/admin/users/{user_id}` (`:120`) selecteren allebei uitsluitend `id, email, full_name, role, is_verified, created_at, updated_at`. Er is dus geen terugval via het detail-endpoint, want dat weet het ook niet. `failed_login_count` en `locked_until` moeten in de `SELECT` van `GET /users` bij. Tot dat zo is, wordt dit rijactie-item niet gebouwd: een knop "Deblokkeren" die altijd ingeschakeld staat omdat de UI de vergrendeling niet kan zien, is erger dan geen knop. Een vergrendelde gebruiker krijgt in de statuskolom een tweede badge "Vergrendeld" (familie negatief) met in `.fs-xs.a-soft` eronder "tot &lt;tijdstip&gt;". Deblokkeren gaat via een gewone bevestigingsmodal, geen typebevestiging: het is een herstellende handeling. De modal zegt er wel bij wat het niet doet: "Dit reset geen wachtwoord en beëindigt geen bestaande sessie."
 
 **(b) Activiteitentab.** Nieuwe tab "Activiteit" in de kandidaat- en klantdrawer, gevoed door `GET /api/v1/admin/activities?subject_type=&subject_id=`. Weergave: dezelfde verticale tijdlijn als §7.3.4, met per item het type als chip (de zes waarden uit `ACTIVITY_TYPES`: `note` = Notitie, `call` = Telefoongesprek, `email` = E-mail, `meeting` = Afspraak, `task` = Taak, `status_change` = Statuswijziging), het tijdstempel in `.gsp-num.fs-xs`, de tekst, en de actor. Bovenaan de tab een compact formulier "Activiteit toevoegen" met typeselect, een `<textarea>` en één knop; het klapt uit vanaf een tekstknop en staat niet permanent open. Een taak (`type: "task"`) toont daarnaast zijn afgerond-staat als checkbox die `PATCH /activities/{id}` aanroept. Leeg: "Nog geen activiteiten vastgelegd." plus de knop die het formulier opent.
 
@@ -1015,7 +1054,7 @@ Vier kleinere toevoegingen aan bestaande secties.
 
 **Geen lege optie in de selects.** De backend doet `model_dump(exclude_none=True)`: een veld dat als `null` wordt meegestuurd valt uit de update en een leeg formulier geeft 400 "No fields to update". Het formulier stuurt daarom alleen de velden die daadwerkelijk zijn gewijzigd, en de `lawful_basis`-select heeft geen lege optie: leeglaten is geen handeling die dit endpoint kent. `lawful_basis` is een `<select>` met de drie gevalideerde waarden uit §7.2e, verplicht, met de hint boven het veld: "Zonder vastgelegde grondslag mag er geen outreach naar dit contact (Telecommunicatiewet art. 11.7)." `source_url` valideert client-side op `http://` of `https://`, dezelfde eis als de backend, met de foutregel "Vul een publieke http- of https-URL in".
 
-**(d) Healthwidget.** Nieuwe kaart op het dashboard, rechterkolom, onder Quick Actions. Bron: `GET /api/v1/admin/health`. Vier regels, elk met een statusstip en een waarde: database, OpenRouter, Apollo, en **dubbele profielkoppelingen** (`duplicate_profile_links`). Die laatste is de reden dat de kaart bestaat: hij hoort altijd 0 te zijn, en elke andere waarde betekent dat een kandidaat vanuit meer dan één profielrij gekoppeld is, iets wat de deduplicatie in de kandidatenlijst niet zelf repareert. Weergave: bij 0 een groene stip en "0 dubbele profielkoppelingen", zonder nadruk. Bij een waarde groter dan 0 wordt de hele kaart een inline-melding van het type fout met de tekst "NN dubbele profielkoppelingen. Dit hoort 0 te zijn." plus de knop "Kandidaten openen". Bij `null` (de query kon niet draaien): "Onbekend" in `.text-muted-navy`, niet 0. `candidates_count` en `open_jobs` uit dezelfde respons horen niet in deze kaart: die staan al in de KPI-rij en twee keer hetzelfde getal op één scherm nodigt uit tot vergelijken van dingen die gelijk zijn.
+**(d) Healthwidget.** Nieuwe kaart op het dashboard, rechterkolom, onder Quick Actions. Bron: `GET /api/v1/admin/health`. Vier regels, elk met een statusstip en een waarde: database, OpenRouter, Apollo, en **dubbele profielkoppelingen** (`duplicate_profile_links`). Die laatste is de reden dat de kaart bestaat: hij hoort altijd 0 te zijn, en elke andere waarde betekent dat een kandidaat vanuit meer dan één profielrij gekoppeld is, iets wat de deduplicatie in de kandidatenlijst niet zelf repareert. Weergave: bij 0 een groene stip en "0 dubbele profielkoppelingen", zonder nadruk. Bij een waarde groter dan 0 wordt de hele kaart een inline-melding van het type fout met de tekst "NN dubbele profielkoppelingen. Dit hoort 0 te zijn." plus de knop "Kandidaten openen". Bij `null` (de query kon niet draaien): "Onbekend" in `.a-soft`, niet 0. `candidates_count` en `open_jobs` uit dezelfde respons horen niet in deze kaart: die staan al in de KPI-rij en twee keer hetzelfde getal op één scherm nodigt uit tot vergelijken van dingen die gelijk zijn.
 
 #### 7.3.7 Job-alertschakelaar in het kandidatenportaal
 
@@ -1047,7 +1086,7 @@ De backend geeft geen reden mee, alleen de booleaan. `GET /api/v1/candidate/prof
 2. Toestemmingsomvang beperkt tot matching (`consent_scope !== 'matching_and_contact'`): "Je toestemming staat op alleen matching. Voor alerts is ook toestemming voor contact nodig." Knop: "Omvang aanpassen".
 3. Geen van beide zichtbaar: "Wij kunnen op dit moment geen alerts sturen. Neem contact op als dit onverwacht is." Geen knop, wel de contactlink. Dit is het geval waar de toestemming is ingetrokken, en dat kan het portaal met de huidige respons niet onderscheiden.
 
-Er wordt precies één regel getoond, in deze volgorde. **Backendvoorwaarde (§7.8)** om geval 3 te kunnen benoemen: `consent_withdrawn_at` (en, voor de volledigheid, `lawful_basis`) toevoegen aan `CandidatePortalProfile` en aan `_attach_talentpool_consent()`. Dan krijgt de ingetrokken toestemming zijn eigen zin ("Je hebt je toestemming ingetrokken. Zonder toestemming kunnen wij geen vacatures sturen.") met de knop "Toestemming opnieuw geven". Tot dan geldt: liever één eerlijke, algemene zin dan een specifieke die kan liegen.
+Er wordt precies één regel getoond, in deze volgorde. **Backendvoorwaarde (§7.7)** om geval 3 te kunnen benoemen: `consent_withdrawn_at` (en, voor de volledigheid, `lawful_basis`) toevoegen aan `CandidatePortalProfile` en aan `_attach_talentpool_consent()`. Dan krijgt de ingetrokken toestemming zijn eigen zin ("Je hebt je toestemming ingetrokken. Zonder toestemming kunnen wij geen vacatures sturen.") met de knop "Toestemming opnieuw geven". Tot dan geldt: liever één eerlijke, algemene zin dan een specifieke die kan liegen.
 
 **Staten.** Rust: schakelaar aan of uit. Wisselen: de schakelaar gaat direct om (optimistisch) en krijgt `aria-busy="true"`; bij een fout springt hij terug met een inline-melding "Kon de instelling niet opslaan, probeer opnieuw" en een retryknop. De schakelaar is nooit `disabled` tijdens het verzenden (dan verliest hij focus), alleen `aria-busy`. Laden bij binnenkomst: schakelaar in laadstaat als vlak blok, label blijft staan. Fout bij binnenkomst: `setContainerLoadError` op de kaart.
 
@@ -1059,9 +1098,9 @@ Er wordt precies één regel getoond, in deze volgorde. **Backendvoorwaarde (§7
 
 **(a) Kanban met stagewijziging.** `GET /api/v1/client/pipeline`, `PATCH /api/v1/client/pipeline/{entry_id}/stage`. Vandaag tekent `app.js` vier vaste kolommen (`new`, `screening`, `interview`, `offer`) en dumpt elke onbekende fase stil in `new`. Dat blijft niet zo. De kanban krijgt de zeven kolommen van de canonieke faselijst uit §7.3.4, in die volgorde: Gesourced, Nieuw, Screening, Gesprek, Aanbod, Geplaatst, Afgewezen. Een entry met een fase daarbuiten krijgt een eigen kolom achteraan met de ruwe waarde als kop en een `title` "Fase buiten het standaardoverzicht"; die kolom verdwijnt zodra de CHECK-constraint uit BV8 er is. Niets wordt stilzwijgend verplaatst.
 
-Kolomkop: fasenaam plus telling in `.gsp-num`. Kaart per entry: kandidaatnaam of, zonder presentatietoestemming, het geanonimiseerde label, daaronder de vacaturetitel in `.fs-xs.text-muted-navy`, daaronder de laatste wijzigingsdatum. **Stagewijziging gaat niet via slepen.** Elke kaart heeft rechtsboven een `<select>` met de zeven fasen plus, bij een fase daarbuiten, de bestaande waarde (dezelfde ontsnappingsklep als §7.3.4). Slepen is op een telefoon onbruikbaar, met een toetsenbord onbereikbaar zonder een tweede, parallelle bediening, en het is hier geen frequente handeling. Optimistische verplaatsing met terugdraaien bij fout, toast bij succes.
+Kolomkop: fasenaam plus telling in `.gsp-num`. Kaart per entry: kandidaatnaam of, zonder presentatietoestemming, het geanonimiseerde label, daaronder de vacaturetitel in `.fs-xs.a-soft`, daaronder de laatste wijzigingsdatum. **Stagewijziging gaat niet via slepen.** Elke kaart heeft rechtsboven een `<select>` met de zeven fasen plus, bij een fase daarbuiten, de bestaande waarde (dezelfde ontsnappingsklep als §7.3.4). Slepen is op een telefoon onbruikbaar, met een toetsenbord onbereikbaar zonder een tweede, parallelle bediening, en het is hier geen frequente handeling. Optimistische verplaatsing met terugdraaien bij fout, toast bij succes.
 
-Staten: laden = zeven kolomkoppen met elk twee vlakke kaartblokken; leeg per kolom = "Geen kandidaten in deze fase" in `.fs-xs.text-muted-navy`; leeg over de hele kanban = één kaart "Er staan nog geen kandidaten in de pipeline." plus de knop "Vacature plaatsen"; fout = `setContainerLoadError` over de hele kanban, want een halve kanban is misleidend. Op 390px worden de kolommen een verticale accordeon met de fasenaam plus telling als kop, de eerste fase met inhoud opengeklapt.
+Staten: laden = zeven kolomkoppen met elk twee vlakke kaartblokken; leeg per kolom = "Geen kandidaten in deze fase" in `.fs-xs.a-soft`; leeg over de hele kanban = één kaart "Er staan nog geen kandidaten in de pipeline." plus de knop "Vacature plaatsen"; fout = `setContainerLoadError` over de hele kanban, want een halve kanban is misleidend. Op 390px worden de kolommen een verticale accordeon met de fasenaam plus telling als kop, de eerste fase met inhoud opengeklapt.
 
 Zeven kolommen passen op 1440 niet naast elkaar zonder onleesbaar te worden: de rij scrollt daarom horizontaal (`overflow-x: auto`, kolombreedte 260px, `scroll-snap-type: x proximity`), met de kolomkoppen sticky bovenaan. Dat is de enige plek in dit document waar horizontaal scrollen bewust is, en het is een kanban, dus dat leest als het patroon dat het is.
 
@@ -1073,7 +1112,7 @@ Zeven kolommen passen op 1440 niet naast elkaar zonder onleesbaar te worden: de 
 | `pipeline_funnel` | Horizontale staven per fase, label uit dezelfde fasemap als de kanban | "Nog geen kandidaten in de pipeline" |
 | `source_breakdown` | Horizontale staven per herkomst, labels uit §7.2e (de backend groepeert al op `SOURCE_FAMILY`) | "Nog geen herkomstgegevens" |
 | `offer_rate` | Tegel, "NN,N%" | Bij nul sollicitaties geeft de backend 0; het scherm toont dan "n.v.t. (nog geen sollicitaties)", want 0% uit nul metingen is geen percentage |
-| `cost_per_hire_avg` | Tegel, bedrag | **"n.v.t."**, met eronder in `.fs-xs.text-muted-navy`: "Wordt pas getoond zodra er kostengegevens per plaatsing zijn vastgelegd." |
+| `cost_per_hire_avg` | Tegel, bedrag | **"n.v.t."**, met eronder in `.fs-xs.a-soft`: "Wordt pas getoond zodra er kostengegevens per plaatsing zijn vastgelegd." |
 
 `cost_per_hire_avg` is in de backend expliciet een placeholder (gemiddelde `fee_value` van vervulde vacatures) en is bij ontbrekende gegevens `null`. Er wordt geen schatting, geen branchegemiddelde en geen 0 getoond. Geen enkel getal op dit scherm wordt afgeleid of geëxtrapoleerd; wat de API niet teruggeeft, staat er niet.
 
@@ -1100,7 +1139,7 @@ Deze zes zijn geen streven. Een PR die er een breekt, gaat terug.
 3. **Focus keert terug.** Bij het sluiten van een modal, drawer of menu gaat de focus terug naar het element dat het opende. Een lijst die na een actie herlaadt, herstelt de focus op de rijactie van dezelfde record; is die record weg (verwijderd, verwerkt), dan gaat de focus naar de tabelkop en kondigt een `aria-live="polite"`-regio aan wat er gebeurd is.
 4. **Tabvolgorde volgt de leesvolgorde.** Nergens een `tabindex` groter dan 0. Geen element dat er klikbaar uitziet zonder tab-bereikbaar te zijn, en geen tab-stop zonder zichtbare focusstaat. Elke `:hover`-staat in dit document heeft een identieke `:focus-visible`-staat (§8.x.0); dat wordt met tab-navigatie geverifieerd, niet visueel geschat.
 5. **Contrast op donker.** De vloeren uit §7.1.2 gelden zonder uitzondering: tekst minimaal 4,5:1 (grote tekst 3:1), niet-tekstuele grenzen en icoonvormen minimaal 3:1. `--navy-300` is geen tekstkleur. `--gold-ink` is op donker verboden. `scripts/css_tokens_check.py` (§8.x.8) krijgt een tweede tabel met de donkere achtergrond als referentie, zodat een tokencombinatie die op wit slaagt en op navy zakt de build laat falen.
-6. **`prefers-reduced-motion`.** Elke overgang in dit document is 150 tot 200ms en betreft uitsluitend kleur, positie of dekking van al zichtbare elementen. Bij `reduce` gaan alle duren naar 0,01ms en blijft elke eindtoestand functioneel en visueel compleet: geen skeleton met shimmer, geen toast die zonder animatie onzichtbaar blijft, geen drawer die alleen ingeschoven bestaat. De globale regel staat in `website/styles.css` (het `@media (prefers-reduced-motion: reduce)`-blok vanaf regel 1652) en wordt letterlijk overgenomen in `website/theme.css`, want het adminpaneel laadt `styles.css` niet.
+6. **`prefers-reduced-motion`.** Elke overgang in dit document is 150 tot 200ms en betreft uitsluitend kleur, positie of dekking van al zichtbare elementen. Bij `reduce` gaan alle duren naar 0,01ms en blijft elke eindtoestand functioneel en visueel compleet: geen skeleton met shimmer, geen toast die zonder animatie onzichtbaar blijft, geen drawer die alleen ingeschoven bestaat. De globale regel staat in `website/styles.css` (het `@media (prefers-reduced-motion: reduce)`-blok vanaf regel 1652). Het adminpaneel laadt `styles.css` niet en heeft daarom een eigen kopie; *gebouwd in* `website/admin/admin.css`, niet in `theme.css`. Dat is bewust: `theme.css` is de tokenlaag die de drie portalen delen, en een `*`-regel met `!important` is geen token. Zodra het kandidaat- en klantportaal dezelfde regel nodig hebben, verhuist hij naar één gedeeld bestand.
 
 Daarnaast: elke tabel heeft `<caption>` of een `aria-label` die zegt waar hij over gaat; elke `<th>` heeft `scope`; elk pictogram is `aria-hidden="true"` met de betekenis in de tekst ernaast; elk formulierveld heeft een echt gekoppeld `<label>`, nooit alleen een `placeholder`.
 
@@ -1122,8 +1161,8 @@ Daarnaast: elke tabel heeft `<caption>` of een `aria-label` die zegt waar hij ov
 Deze drie stonden open. Ze zijn genomen door de design-reviewer namens de eigenaar, onder voorbehoud van diens tegenbericht, en zijn hierboven al verwerkt. Ze staan hier bij elkaar omdat ze de bouw sturen en niet in één scherm thuishoren.
 
 1. **Categoriebreed goedkeuren van bewaartermijnen blijft uitgesloten op ≤600px.** Elke andere actie in de goedkeuringslijst werkt daar wel. Op desktop toont de bevestigingsmodal niet alleen het aantal maar ook de rijen die geraakt worden, opgehaald met `GET .../review?status=pending&category=…` op het moment van openen (§7.3.1). Wie een hele categorie goedkeurt, moet hebben kunnen zien wát hij goedkeurt.
-2. **De canonieke faselijst is `sourced, new, screening, interview, offer, placed, rejected`** (§7.3.4). Invoeringsvolgorde: `SELECT DISTINCT stage` op productie, afwijkers migreren, dan pas de CHECK-constraint (migratie 043, backendvoorwaarde §7.8). Zolang die constraint er niet is, blijft de "(bestaande waarde)"-ontsnappingsklep in de select staan; daarna vervalt hij.
-3. **Getypte bevestiging: bij AVG-wissen behouden, bij de droogloop schrappen.** Het adres typen bij een onomkeerbare wissing is een echte waarborg; dezelfde handeling vragen bij een read-only telling leert alleen af dat de handeling iets betekent. Omdat een UI-maatregel alleen deze UI bindt, is er een backendvoorwaarde voor het vervolg: `AdminEraseRequest.confirm` wordt het e-mailadres in plaats van een booleaan (§7.3.5, §7.8).
+2. **De canonieke faselijst is `sourced, new, screening, interview, offer, placed, rejected`** (§7.3.4). Invoeringsvolgorde: `SELECT DISTINCT stage` op productie, afwijkers migreren, dan pas de CHECK-constraint (migratie 043, backendvoorwaarde §7.7). Zolang die constraint er niet is, blijft de "(bestaande waarde)"-ontsnappingsklep in de select staan; daarna vervalt hij.
+3. **Getypte bevestiging: bij AVG-wissen behouden, bij de droogloop schrappen.** Het adres typen bij een onomkeerbare wissing is een echte waarborg; dezelfde handeling vragen bij een read-only telling leert alleen af dat de handeling iets betekent. Omdat een UI-maatregel alleen deze UI bindt, is er een backendvoorwaarde voor het vervolg: `AdminEraseRequest.confirm` wordt het e-mailadres in plaats van een booleaan (§7.3.5, §7.7).
 
 ---
 
@@ -1190,16 +1229,19 @@ Tabler 1.4 blijft, geen herbouw. De schil staat op de canonieke tokens en de fro
 
 **Semantische inkt.** De vier tokens uit §7.1.2 staan in `admin.css` met exact die namen en waarden: `--ink-success #4ADE80`, `--ink-error #F87171`, `--ink-warning #FBBF24`, `--ink-info #7DD3FC`. `--tblr-blue/red/green/yellow` wijzen ernaar, dus de `-lt`-badgefamilies uit §7.2e halen hun contrastvloer op navy. De vier bijbehorende tekstklassen zijn `.text-success-ink`, `.text-danger-ink`, `.text-warning-ink` en `.text-info-ink`; §7.1.3 noemt de eerste twee, de andere twee zijn er in dezelfde vorm bij gekomen voor de audit-logkolom. Goud is geen semantische familie: `.a-accent` is het accent, en de gele badgefamilie staat op `--ink-warning`, niet op goud (§7.2e).
 
-**Vier bewuste tokencorrecties.**
+**Vijf bewuste tokencorrecties.**
 
 - De inline compat-shim die `--navy-*` op eigen waarden zette (`#142235`, `#0E1B2E`) en radius 8–20px gaf, is weg. Het paneel draait op `--navy-800 #0A1628`, `--navy-700 #0F1D35` en radius 3px.
 - Gedempte tekst is `--navy-200`, niet `--navy-300` (3,51:1 op `--navy-800`, 3,26:1 op `--navy-700`), conform de contrastvloertabel in §7.1.2.
 - De kaartrand is `--navy-500` in plaats van Tablers doorschijnende default en in plaats van de `--navy-600` uit het codeblok van §7.1.2. Zie de noot daar.
 - Knoptekst op goud is `--navy-900` (1,51:1 naar 12,3:1) en de focusring staat op volle `--gold-500` in plaats van 25% dekking.
+- `--tblr-font-sans-serif` staat op `--font-primary`. Dat zet de UI-letter van Tablers eigen Inter naar IBM Plex Sans op 134 knooppunten: de tabel, de formulieren, de knoppen, de nav en de badges. Het is de grootste zichtbare verandering van de schilpass en de reden dat knoppen 6 tot 14px breder zijn geworden. Gewenst en merkconform (§1.3 en §7.1.4: Plex Sans is de UI-body), maar hij verdient het om benoemd te worden in plaats van als bijvangst van een tokenregel te verschijnen.
 
 **Bewaakt door.** `scripts/css_tokens_check.py` doet `admin.css` mee in de tokenpariteit en faalt op elke hardcoded navy- of goudwaarde daarin, in elke schrijfwijze (hex, `rgb()`, `rgb(r g b / a)` en kale triples). De zes `--tblr-*-rgb`-regels zijn vrijgesteld met een `css-tokens-check: rgb-triple`-commentaar: Tabler bouwt daar zelf `rgba(var(--x-rgb), a)` mee en een triple kan niet uit een kleur-var komen. `scripts/admin_ui_check.py` test de paneelcomponenten (focus, focustrap, stapeling, Escape, klik-buiten, getypte bevestiging, sorteren met `aria-sort`) op twee paden: met en zonder Bootstrap.
 
 **Bootstrap.** De gevendorde `admin/vendor/tabler/js/tabler.min.js` is een UMD die `window.tabler` exporteert met daarin de volledige `bootstrap`-namespace (Modal, Offcanvas, Collapse, Tab, Toast), maar zet `window.bootstrap` zelf niet. `js/vendor-fallback-tabler-js.js` zet die na het laden door, voor de lokale kopie en voor de CDN-fallback. Zonder die doorzet draait `ui.js` permanent op zijn vangnet en sluit het mobiele sidebarmenu niet na een navigatie. Het vangnet (dezelfde markup en klassen, eigen backdrop, focustrap en Escape) blijft staan voor een ontbrekende bundel.
+
+**Engelse resten.** De chrome van het paneel wordt Nederlands, maar dat is een kopijpass per sectie en geen onderdeel van deze refactor. Wat er in stap 1 t/m 3 nog Engels staat: de sectietitels in de registry en de sidebar (User Management, All Jobs, All Candidates, Outreach, Blog, Analytics, Audit Log, Content CMS, Settings), de kolomkoppen van de tabellen in `index.html`, en de toasts en knoplabels in `users.js`, `jobs.js`, `blog.js`, `outreach.js` en `cms.js`.
 
 **Nog niet gebouwd uit §7.1.** De vijf ontbrekende tokens in `theme.css` (§7.1.1 punt 2: `--space-4xl`, `--space-5xl`, `--font-size-base`, `--font-size-6xl`, `--gold-ink`), de `gsp-`-utilityset en de zes stukken eigen CSS uit §7.1.3, en de lettertypeverscherpingen uit §7.1.4, waaronder het loskoppelen van `.text-uppercase` van mono. Die horen bij de componentpassen van §7.2.
 

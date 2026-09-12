@@ -157,10 +157,10 @@
     try {
       const res = await Auth.fetch(`/v1/admin/outreach/run/${name}`, { method: 'POST' });
       if (res?.ok || res?.status === 202) {
-        Auth.toast('Job started — refresh in a minute', 'success');
+        Auth.toast('Taak gestart. Ververs over een minuut.', 'success');
       } else {
         const data = await res?.json();
-        Auth.toast(data?.detail || 'Failed to start job', 'error');
+        Auth.toast(data?.detail || 'Taak starten mislukt', 'error');
       }
     } catch { Auth.toast('Network error', 'error'); }
     finally { if (btn) { btn.disabled = false; btn.innerHTML = btn.dataset.origText || btn.innerHTML; } }
