@@ -87,14 +87,14 @@ const Admin = {
   },
   setLoading(tbodyId, cols) {
     const el = document.querySelector(tbodyId);
-    mount(el, html`<tr><td colspan="${cols}" style="text-align:center;padding:2rem;color:var(--navy-300);">
+    mount(el, html`<tr><td colspan="${cols}" class="a-state-cell">
       <i class="fa-solid fa-spinner fa-spin"></i> Loading…</td></tr>`);
   },
   // msg is always a literal called by our own code (never API/user text),
   // so it is passed through raw() rather than escaped a second time.
   setEmpty(tbodyId, cols, msg = 'No results') {
     const el = document.querySelector(tbodyId);
-    mount(el, html`<tr><td colspan="${cols}" style="text-align:center;padding:2rem;color:var(--navy-300);">${raw(msg)}</td></tr>`);
+    mount(el, html`<tr><td colspan="${cols}" class="a-state-cell">${raw(msg)}</td></tr>`);
   },
   // Table-row error state with a retry link — replaces an infinite spinner
   // when a fetch fails or times out.
@@ -102,7 +102,7 @@ const Admin = {
     const el = document.querySelector(tbodyId);
     if (!el) return;
     const id = '_retry_' + Math.random().toString(36).slice(2, 9);
-    mount(el, html`<tr><td colspan="${cols}" style="text-align:center;padding:2rem;color:var(--navy-300);">
+    mount(el, html`<tr><td colspan="${cols}" class="a-state-cell">
       <i class="fa-solid fa-triangle-exclamation"></i> Kon niet laden — <a href="#" id="${id}">probeer opnieuw</a>
     </td></tr>`);
     document.getElementById(id)?.addEventListener('click', (e) => { e.preventDefault(); if (typeof retryFn === 'function') retryFn(); });
@@ -111,7 +111,7 @@ const Admin = {
   setContainerLoadError(el, retryFn) {
     if (!el) return;
     const id = '_retry_' + Math.random().toString(36).slice(2, 9);
-    mount(el, html`<div style="color:var(--navy-300);font-size:var(--font-size-sm);padding:1rem 0;">
+    mount(el, html`<div class="a-state-block">
       <i class="fa-solid fa-triangle-exclamation"></i> Kon niet laden — <a href="#" id="${id}">probeer opnieuw</a>
     </div>`);
     document.getElementById(id)?.addEventListener('click', (e) => { e.preventDefault(); if (typeof retryFn === 'function') retryFn(); });
@@ -174,23 +174,23 @@ const Admin = {
     if (badge) badge.textContent = items.length || '0';
     if (!el) return;
     if (!items.length) {
-      mount(el, html`<div style="color:var(--navy-300);font-size:var(--font-size-sm);padding:0.5rem 0;">
+      mount(el, html`<div class="a-state-block">
         Nog geen zelf geregistreerde kandidaten. Nieuwe registraties via het kandidatenportaal verschijnen hier automatisch.
       </div>`);
       return;
     }
     mount(el, html`${items.map(c => html`
       <div class="activity-item">
-        <div class="activity-icon" style="background:rgba(74,222,128,0.12);color:#4ade80;"><i class="fa-solid fa-user-plus"></i></div>
-        <div class="activity-content" style="flex:1;min-width:0;">
-          <div class="activity-text" style="font-weight:500;color:var(--white);">
+        <div class="activity-icon activity-icon--positive"><i class="fa-solid fa-user-plus"></i></div>
+        <div class="activity-content a-truncate-col">
+          <div class="activity-text a-cell-strong fw-medium">
             ${c.full_name || c.email || 'Onbekend'}
-            ${c.is_verified ? raw('<i class="fa-regular fa-circle-check ms-1" style="color:#4ade80;" title="Geverifieerd"></i>') : ''}
+            ${c.is_verified ? raw('<i class="fa-regular fa-circle-check ms-1 a-positive" title="Geverifieerd"></i>') : ''}
           </div>
-          <div class="activity-text" style="color:var(--navy-300);">${c.current_title || '—'}${c.location ? ' · ' + c.location : ''}</div>
+          <div class="activity-text a-soft">${c.current_title || '—'}${c.location ? ' · ' + c.location : ''}</div>
           <div class="activity-time">${this.timeAgo(c.created_at)}</div>
         </div>
-        <button class="btn btn-sm btn-ghost-secondary" data-action="view-candidate" data-kind="self-registered" data-id="${c.user_id ?? c.id}" style="flex-shrink:0;" title="Profiel bekijken">
+        <button class="btn btn-sm btn-ghost-secondary flex-shrink-0" data-action="view-candidate" data-kind="self-registered" data-id="${c.user_id ?? c.id}" title="Profiel bekijken">
           <i class="fa-regular fa-eye"></i>
         </button>
       </div>`)}`);
@@ -199,7 +199,7 @@ const Admin = {
   renderRecentActivity(items) {
     const el = document.getElementById('recentActivityList');
     if (!el) return;
-    if (!items.length) { mount(el, html`<div style="color:var(--navy-300);font-size:var(--font-size-sm);padding:1rem 0;">Nog geen activiteit.</div>`); return; }
+    if (!items.length) { mount(el, html`<div class="a-state-block">Nog geen activiteit.</div>`); return; }
     const icons = { user_update: 'fa-user-pen', user_delete: 'fa-user-xmark', impersonate: 'fa-mask',
       job_update: 'fa-briefcase', content_update: 'fa-newspaper', settings_update: 'fa-gear',
       placement: 'fa-calendar-check' };
@@ -207,11 +207,11 @@ const Admin = {
       const changeKeys = (e.changes && typeof e.changes === 'object') ? Object.keys(e.changes).slice(0, 2) : [];
       return html`
       <div class="activity-item">
-        <div class="activity-icon" style="background:rgba(250,200,0,0.1);color:var(--gold-400);">
+        <div class="activity-icon activity-icon--gold">
           <i class="fa-regular ${icons[e.action] || 'fa-circle-dot'}"></i>
         </div>
-        <div class="activity-content" style="flex:1;">
-          <div class="activity-text">${e.action?.replace(/_/g, ' ')} <span style="color:var(--navy-300);">by ${e.actor_email || 'system'}</span>${changeKeys.length ? html` <span style="color:var(--navy-300);">(${changeKeys.join(', ')})</span>` : ''}</div>
+        <div class="activity-content flex-fill">
+          <div class="activity-text">${e.action?.replace(/_/g, ' ')} <span class="a-soft">by ${e.actor_email || 'system'}</span>${changeKeys.length ? html` <span class="a-soft">(${changeKeys.join(', ')})</span>` : ''}</div>
           <div class="activity-time">${this.timeAgo(e.created_at)}</div>
         </div>
       </div>`;
@@ -223,15 +223,15 @@ const Admin = {
     const badge = document.getElementById('pendingBadge');
     if (badge) badge.textContent = items.length || '0';
     if (!el) return;
-    if (!items.length) { mount(el, html`<div style="color:var(--navy-300);font-size:var(--font-size-sm);padding:0.5rem 0;">Geen openstaande verificaties.</div>`); return; }
+    if (!items.length) { mount(el, html`<div class="a-state-block">Geen openstaande verificaties.</div>`); return; }
     mount(el, html`${items.map(u => html`
       <div class="activity-item">
-        <div class="activity-icon" style="background:rgba(250,200,0,0.1);color:var(--gold-500);"><i class="fa-solid fa-user-plus"></i></div>
-        <div class="activity-content" style="flex:1;">
-          <div class="activity-text">${u.full_name || u.email} — <span style="color:var(--gold-400);">${u.role}</span></div>
+        <div class="activity-icon activity-icon--gold"><i class="fa-solid fa-user-plus"></i></div>
+        <div class="activity-content flex-fill">
+          <div class="activity-text">${u.full_name || u.email} — <span class="a-accent">${u.role}</span></div>
           <div class="activity-time">${this.timeAgo(u.created_at)}</div>
         </div>
-        <button class="btn btn-sm btn-primary" data-action="verify-user" data-id="${u.id}" style="flex-shrink:0;">Verify</button>
+        <button class="btn btn-sm btn-primary flex-shrink-0" data-action="verify-user" data-id="${u.id}">Verify</button>
       </div>`)}`);
   },
 
@@ -291,13 +291,13 @@ const Admin = {
     if (!items.length) { this.setEmpty('#section-users table tbody', 6, 'Geen gebruikers gevonden voor deze filters.'); return; }
     mount(tbody, html`${items.map(u => html`
       <tr>
-        <td style="font-weight:600;color:var(--white);">${u.full_name || '—'}</td>
-        <td style="color:var(--navy-200);font-size:var(--font-size-xs);">${u.email}</td>
+        <td class="a-cell-name">${u.full_name || '—'}</td>
+        <td class="a-meta">${u.email}</td>
         <td><span class="${this.badge(u.role)}">${u.role}</span></td>
         <td><span class="${u.is_verified ? 'badge bg-green-lt' : 'badge bg-blue-lt'}">${u.is_verified ? 'Verified' : 'Pending'}</span></td>
-        <td style="font-size:var(--font-size-xs);color:var(--navy-300);">${this.timeAgo(u.created_at)}</td>
+        <td class="a-meta">${this.timeAgo(u.created_at)}</td>
         <td>
-          <div class="action-menu-wrap" style="position:relative;">
+          <div class="action-menu-wrap">
             <button class="btn btn-sm btn-ghost-secondary" data-action="toggle-user-menu" data-id="${u.id}">
               <i class="fa-solid fa-ellipsis-vertical"></i>
             </button>
@@ -305,7 +305,7 @@ const Admin = {
               ${!u.is_verified ? html`<button data-action="verify-user" data-id="${u.id}"><i class="fa-regular fa-circle-check"></i> Verify</button>` : ''}
               <button data-action="edit-user" data-id="${u.id}"><i class="fa-solid fa-pen"></i> Edit Role</button>
               <button data-action="impersonate-user" data-id="${u.id}" data-email="${u.email}"><i class="fa-solid fa-mask"></i> Impersonate</button>
-              <button data-action="delete-user" data-id="${u.id}" data-email="${u.email}" style="color:#f87171;"><i class="fa-solid fa-trash"></i> Delete</button>
+              <button data-action="delete-user" data-id="${u.id}" data-email="${u.email}" class="a-danger"><i class="fa-solid fa-trash"></i> Delete</button>
             </div>
           </div>
         </td>
@@ -330,7 +330,7 @@ const Admin = {
     const user = (this._data.users?.items || []).find(u => u.id === userId);
     if (!user) return;
     this.openModal('editUserModal', html`
-      <h3 style="color:var(--white);margin-bottom:var(--space-lg);">Edit User: ${user.full_name || user.email}</h3>
+      <h3 class="a-modal__title">Edit User: ${user.full_name || user.email}</h3>
       <div class="form-group">
         <label>Full Name</label>
         <input type="text" id="editUserName" value="${user.full_name || ''}">
@@ -350,7 +350,7 @@ const Admin = {
           <option value="false" ${raw(!user.is_verified ? 'selected' : '')}>No</option>
         </select>
       </div>
-      <div style="display:flex;gap:var(--space-md);margin-top:var(--space-lg);">
+      <div class="a-actions">
         <button class="btn btn-primary" data-action="save-user-edit" data-id="${userId}">Save Changes</button>
         <button class="btn btn-ghost-secondary" data-action="close-modal">Cancel</button>
       </div>
@@ -450,9 +450,9 @@ const Admin = {
     if (!items.length) { this.setEmpty('#section-jobs table tbody', 5, 'Nog geen vacatures. Vacatures die klanten aanleveren verschijnen hier voor goedkeuring.'); return; }
     mount(tbody, html`${items.map(j => html`
       <tr>
-        <td style="font-weight:600;color:var(--white);">${j.title || 'Untitled'}</td>
-        <td style="color:var(--navy-200);">${j.company_name || '—'}</td>
-        <td style="text-align:center;">${j.application_count ?? '—'}</td>
+        <td class="a-cell-name">${j.title || 'Untitled'}</td>
+        <td class="a-soft">${j.company_name || '—'}</td>
+        <td class="text-center">${j.application_count ?? '—'}</td>
         <td><span class="${this.badge(j.status)}">${j.status || 'draft'}</span></td>
         <td>
           ${(j.status === 'draft' || j.status === 'pending') ? html`
@@ -460,10 +460,10 @@ const Admin = {
               <i class="fa-regular fa-circle-check"></i> Approve
             </button>` : ''}
           ${j.status === 'open' ? html`
-            <button class="btn btn-sm btn-ghost-secondary" data-action="set-job-status" data-id="${j.id}" data-status="closed" title="Close" style="color:#f87171;">
+            <button class="btn btn-sm btn-ghost-secondary a-danger" data-action="set-job-status" data-id="${j.id}" data-status="closed" title="Close">
               <i class="fa-solid fa-xmark"></i> Close
             </button>` : ''}
-          <button class="btn btn-sm btn-ghost-secondary" data-action="confirm-delete-job" data-id="${j.id}" title="Delete" style="color:#f87171;">
+          <button class="btn btn-sm btn-ghost-secondary a-danger" data-action="confirm-delete-job" data-id="${j.id}" title="Delete">
             <i class="fa-solid fa-trash"></i>
           </button>
         </td>
@@ -529,7 +529,7 @@ const Admin = {
   async openNewJobModal() {
     const clients = await this.fetchClientOptions();
     this.openModal('newJobModal', html`
-      <h3 style="color:var(--white);margin-bottom:var(--space-lg);">Nieuwe vacature</h3>
+      <h3 class="a-modal__title">Nieuwe vacature</h3>
       ${!clients.length ? html`
         <div class="alert alert-warning" role="alert">Nog geen opdrachtgevers met een portal-account gevonden.</div>
       ` : ''}
@@ -564,30 +564,30 @@ const Admin = {
           <option value="interim">Interim</option>
         </select>
       </div>
-      <div style="display:flex;gap:var(--space-md);">
-        <div class="form-group" style="flex:1;">
+      <div class="d-flex gap-3">
+        <div class="form-group flex-fill">
           <label>Salaris min (EUR/mnd)</label>
           <input type="number" id="newJobSalaryMin">
         </div>
-        <div class="form-group" style="flex:1;">
+        <div class="form-group flex-fill">
           <label>Salaris max (EUR/mnd)</label>
           <input type="number" id="newJobSalaryMax">
         </div>
       </div>
       <div class="form-group">
         <label>Omschrijving</label>
-        <textarea id="newJobDescription" rows="4" style="width:100%;background:rgba(6,13,26,0.6);border:1px solid rgba(74,111,159,0.3);border-radius:var(--radius-md);color:var(--white);padding:0.75rem;font-family:var(--font-primary);font-size:var(--font-size-sm);resize:vertical;box-sizing:border-box;"></textarea>
+        <textarea id="newJobDescription" rows="4" class="a-textarea"></textarea>
       </div>
       <div class="form-group">
         <label>Eisen</label>
-        <textarea id="newJobRequirements" rows="3" style="width:100%;background:rgba(6,13,26,0.6);border:1px solid rgba(74,111,159,0.3);border-radius:var(--radius-md);color:var(--white);padding:0.75rem;font-family:var(--font-primary);font-size:var(--font-size-sm);resize:vertical;box-sizing:border-box;"></textarea>
+        <textarea id="newJobRequirements" rows="3" class="a-textarea"></textarea>
       </div>
       <div class="form-group">
-        <label style="display:flex;align-items:center;gap:0.5rem;font-weight:normal;">
+        <label class="d-flex align-items-center gap-2 fw-normal">
           <input type="checkbox" id="newJobSponsorship"> Sponsoring kennismigrant mogelijk
         </label>
       </div>
-      <div style="display:flex;gap:var(--space-md);margin-top:var(--space-lg);">
+      <div class="a-actions">
         <button class="btn btn-primary" data-action="save-new-job" ${raw(!clients.length ? 'disabled' : '')}>Vacature aanmaken</button>
         <button class="btn btn-ghost-secondary" data-action="close-modal">Annuleren</button>
       </div>
@@ -685,16 +685,16 @@ const Admin = {
       const itemId = effKind === 'self-registered' ? (c.user_id ?? c.id) : (c.candidate_id ?? c.id);
       return html`
       <tr>
-        <td style="font-weight:600;color:var(--white);">
+        <td class="a-cell-name">
           ${c.full_name || '—'}
-          ${c.is_verified ? raw('<i class="fa-regular fa-circle-check ms-1" style="color:#4ade80;" title="Geverifieerd"></i>') : raw('<i class="fa-regular fa-circle ms-1" style="color:var(--navy-300);" title="Niet geverifieerd"></i>')}
+          ${c.is_verified ? raw('<i class="fa-regular fa-circle-check ms-1 a-positive" title="Geverifieerd"></i>') : raw('<i class="fa-regular fa-circle ms-1 a-soft" title="Niet geverifieerd"></i>')}
         </td>
-        <td style="color:var(--navy-200);font-size:var(--font-size-xs);">${c.email}</td>
+        <td class="a-meta">${c.email}</td>
         <td>${c.current_title || '—'}</td>
-        <td style="text-align:center;">${c.years_experience ? c.years_experience + ' yrs' : '—'}</td>
-        <td style="text-align:center;">
+        <td class="text-center">${c.years_experience ? c.years_experience + ' yrs' : '—'}</td>
+        <td class="text-center">
           <span title="Matches">${c.match_count ?? 0}</span>
-          ${c.placement_count ? html` / <span style="color:#4ade80;" title="Placed">${c.placement_count} placed</span>` : ''}
+          ${c.placement_count ? html` / <span class="a-positive" title="Placed">${c.placement_count} placed</span>` : ''}
         </td>
         <td><span class="${kb.cls}" title="${c.source ? 'Bron: ' + c.source : ''}">${kb.label}</span></td>
         <td>
@@ -712,7 +712,7 @@ const Admin = {
   /* ---- Candidate detail modal (kind-aware) ---- */
   async viewCandidate(kind, itemId) {
     this.openModal('viewCandidateModal', html`
-      <div style="text-align:center;padding:2rem 0;color:var(--navy-300);">
+      <div class="a-state-cell">
         <i class="fa-solid fa-spinner fa-spin"></i> Laden…
       </div>`);
     try {
@@ -720,9 +720,9 @@ const Admin = {
       if (!res?.ok) {
         const d = await res?.json().catch(() => null);
         this.openModal('viewCandidateModal', html`
-          <h3 style="color:var(--white);margin-bottom:var(--space-md);">Kon profiel niet laden</h3>
-          <p style="color:var(--navy-300);">${d?.detail || 'Er ging iets mis bij het ophalen van dit profiel.'}</p>
-          <div style="display:flex;gap:var(--space-md);margin-top:var(--space-lg);">
+          <h3 class="a-modal__title">Kon profiel niet laden</h3>
+          <p class="a-soft">${d?.detail || 'Er ging iets mis bij het ophalen van dit profiel.'}</p>
+          <div class="a-actions">
             <button class="btn btn-primary btn-sm" data-action="view-candidate" data-kind="${kind}" data-id="${itemId}">Opnieuw proberen</button>
             <button class="btn btn-ghost-secondary btn-sm" data-action="close-modal">Sluiten</button>
           </div>`);
@@ -732,9 +732,9 @@ const Admin = {
       this.renderCandidateDetailModal(kind, itemId, detail);
     } catch {
       this.openModal('viewCandidateModal', html`
-        <h3 style="color:var(--white);margin-bottom:var(--space-md);">Netwerkfout</h3>
-        <p style="color:var(--navy-300);">Kon geen verbinding maken met de server.</p>
-        <div style="display:flex;gap:var(--space-md);margin-top:var(--space-lg);">
+        <h3 class="a-modal__title">Netwerkfout</h3>
+        <p class="a-soft">Kon geen verbinding maken met de server.</p>
+        <div class="a-actions">
           <button class="btn btn-primary btn-sm" data-action="view-candidate" data-kind="${kind}" data-id="${itemId}">Opnieuw proberen</button>
           <button class="btn btn-ghost-secondary btn-sm" data-action="close-modal">Sluiten</button>
         </div>`);
@@ -786,12 +786,13 @@ const Admin = {
     const cvFilePath = p('cv_file_path');
     const kb = this.kindBadge(kind);
 
-    const chips = (arr, color) => arr.length
-      ? html`<div style="display:flex;flex-wrap:wrap;gap:6px;">${arr.map(s => html`<span class="badge" style="background:${color};color:var(--white);font-weight:500;">${s}</span>`)}</div>`
-      : html`<div style="color:var(--navy-300);">—</div>`;
+    // variant is 'skill' of 'lang'; de kleur zit in .a-chip--<variant>.
+    const chips = (arr, variant) => arr.length
+      ? html`<div class="a-chips">${arr.map(s => html`<span class="badge a-chip a-chip--${variant}">${s}</span>`)}</div>`
+      : html`<div class="a-soft">—</div>`;
 
     const field = (label, value) => html`
-      <div><div style="font-size:var(--font-size-xs);color:var(--navy-300);margin-bottom:4px;">${label}</div><div>${value}</div></div>`;
+      <div><div class="a-field-label">${label}</div><div>${value}</div></div>`;
 
     let salaryDisplay = raw('—');
     if (salaryMin || salaryMax) {
@@ -817,11 +818,11 @@ const Admin = {
     const hasContactLinks = !!(email || safeLinkedin || safeGithub || safePortfolio);
 
     this.openModal('viewCandidateModal', html`
-      <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:var(--space-md);margin-bottom:var(--space-md);">
-        <h3 style="color:var(--white);margin:0;">${fullName}</h3>
+      <div class="d-flex align-items-start justify-content-between gap-3 mb-3">
+        <h3 class="a-cell-strong m-0">${fullName}</h3>
         <span class="${kb.cls}">${kb.label}</span>
       </div>
-      ${hasContactLinks ? html`<div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:var(--space-lg);">${contactLinks}</div>` : ''}
+      ${hasContactLinks ? html`<div class="d-flex flex-wrap gap-2 mb-4">${contactLinks}</div>` : ''}
 
       <div class="detail-grid">
         ${field('Phone', phone || '—')}
@@ -838,40 +839,40 @@ const Admin = {
         ${field('Registered', p('created_at') ? this.formatDate(p('created_at')) : '—')}
       </div>
 
-      <div style="margin-bottom:var(--space-md);">
-        <div style="font-size:var(--font-size-xs);color:var(--navy-300);margin-bottom:6px;">Skills</div>
-        ${chips(skills, 'rgba(250,200,0,0.18)')}
+      <div class="mb-3">
+        <div class="a-field-label">Skills</div>
+        ${chips(skills, 'skill')}
       </div>
-      <div style="margin-bottom:var(--space-lg);">
-        <div style="font-size:var(--font-size-xs);color:var(--navy-300);margin-bottom:6px;">Languages</div>
-        ${chips(languages, 'rgba(74,111,159,0.25)')}
+      <div class="mb-4">
+        <div class="a-field-label">Languages</div>
+        ${chips(languages, 'lang')}
       </div>
 
-      <div style="margin-bottom:var(--space-lg);padding:var(--space-md);background:rgba(74,111,159,0.08);border:1px solid rgba(74,111,159,0.18);border-radius:var(--radius-md);">
-        <div style="font-size:var(--font-size-xs);color:var(--navy-300);margin-bottom:6px;"><i class="fa-regular fa-file-lines me-1"></i>CV</div>
+      <div class="a-panel mb-4">
+        <div class="a-field-label"><i class="fa-regular fa-file-lines me-1"></i>CV</div>
         ${cvFilePath
-          ? html`<div style="color:#4ade80;"><i class="fa-regular fa-circle-check me-1"></i>CV geüpload</div>
-             <div style="font-size:var(--font-size-xs);color:var(--navy-300);margin-top:4px;">
+          ? html`<div class="a-positive"><i class="fa-regular fa-circle-check me-1"></i>CV geüpload</div>
+             <div class="a-meta mt-1">
                Het bestand zelf is nog niet downloadbaar vanuit dit paneel — alleen via de geauthenticeerde kandidaatroute.
              </div>`
-          : html`<div style="color:var(--navy-300);">Geen CV geüpload</div>`}
+          : html`<div class="a-soft">Geen CV geüpload</div>`}
         ${cvText ? html`
-          <div style="margin-top:10px;font-size:var(--font-size-xs);color:var(--navy-300);margin-bottom:4px;">Preview (tekst uit CV)</div>
-          <div style="max-height:160px;overflow-y:auto;font-size:var(--font-size-sm);color:var(--navy-100);white-space:pre-wrap;background:rgba(6,13,26,0.5);border-radius:var(--radius-sm);padding:10px;">${cvText.slice(0, 2000)}${cvText.length > 2000 ? '…' : ''}</div>
+          <div class="a-field-label mt-2">Preview (tekst uit CV)</div>
+          <div class="a-scrollbox">${cvText.slice(0, 2000)}${cvText.length > 2000 ? '…' : ''}</div>
         ` : ''}
       </div>
 
-      <div style="display:flex;gap:var(--space-md);flex-wrap:wrap;margin-bottom:var(--space-lg);">
-        <div style="background:rgba(74,111,159,0.1);border:1px solid rgba(74,111,159,0.2);border-radius:var(--radius-md);padding:var(--space-md) var(--space-lg);text-align:center;flex:1;">
-          <div style="font-size:var(--font-size-xl);font-weight:700;color:var(--gold-500);">${p('match_count') ?? 0}</div>
-          <div style="font-size:var(--font-size-xs);color:var(--navy-300);">Matches</div>
+      <div class="d-flex gap-3 flex-wrap mb-4">
+        <div class="a-stat">
+          <div class="a-stat__value">${p('match_count') ?? 0}</div>
+          <div class="a-meta">Matches</div>
         </div>
-        <div style="background:rgba(74,111,159,0.1);border:1px solid rgba(74,111,159,0.2);border-radius:var(--radius-md);padding:var(--space-md) var(--space-lg);text-align:center;flex:1;">
-          <div style="font-size:var(--font-size-xl);font-weight:700;color:#4ade80;">${p('placement_count') ?? 0}</div>
-          <div style="font-size:var(--font-size-xs);color:var(--navy-300);">Placed</div>
+        <div class="a-stat">
+          <div class="a-stat__value a-stat__value--positive">${p('placement_count') ?? 0}</div>
+          <div class="a-meta">Placed</div>
         </div>
       </div>
-      <div style="display:flex;gap:var(--space-md);">
+      <div class="d-flex gap-3">
         <button class="btn btn-ghost-secondary btn-sm" data-action="close-modal">Close</button>
       </div>
     `);
@@ -913,22 +914,22 @@ const Admin = {
     if (!items.length) { this.setEmpty('#section-outreach table tbody', 8, 'Nog geen outreach-concepten. Start een sourcing- of drafting-run hierboven om concepten te genereren.'); return; }
     mount(tbody, html`${items.map(d => html`
       <tr>
-        <td style="color:var(--navy-200);font-size:var(--font-size-xs);">${d.target_name || d.target_email || '—'}</td>
-        <td style="color:var(--navy-200);">${d.company || '—'}</td>
-        <td style="color:var(--white);">${d.subject || '—'}</td>
+        <td class="a-meta">${d.target_name || d.target_email || '—'}</td>
+        <td class="a-soft">${d.company || '—'}</td>
+        <td class="a-cell-strong">${d.subject || '—'}</td>
         <td><span class="${this.badge(d.target_type)}">${d.target_type}</span></td>
-        <td style="font-size:var(--font-size-xs);color:var(--navy-300);">${d.ai_model || '—'}</td>
-        <td style="font-size:var(--font-size-xs);color:var(--navy-300);">${this.timeAgo(d.created_at)}</td>
+        <td class="a-meta">${d.ai_model || '—'}</td>
+        <td class="a-meta">${this.timeAgo(d.created_at)}</td>
         <td><span class="${this.badge(d.status)}">${d.status}</span></td>
         <td>
           <button class="btn btn-sm btn-ghost-secondary" data-action="open-draft-modal" data-id="${d.id}" title="Review">
             <i class="fa-regular fa-eye"></i>
           </button>
           ${d.status === 'draft' ? html`
-            <button class="btn btn-sm btn-ghost-secondary" data-action="approve-draft" data-id="${d.id}" title="Approve &amp; send" style="color:#4ade80;">
+            <button class="btn btn-sm btn-ghost-secondary a-positive" data-action="approve-draft" data-id="${d.id}" title="Approve &amp; send">
               <i class="fa-regular fa-paper-plane"></i>
             </button>
-            <button class="btn btn-sm btn-ghost-secondary" data-action="reject-draft" data-id="${d.id}" title="Reject" style="color:#f87171;">
+            <button class="btn btn-sm btn-ghost-secondary a-danger" data-action="reject-draft" data-id="${d.id}" title="Reject">
               <i class="fa-solid fa-xmark"></i>
             </button>` : ''}
         </td>
@@ -940,16 +941,16 @@ const Admin = {
     if (!d) return;
     const editable = d.status === 'draft';
     this.openModal('outreachDraftModal', html`
-      <h3 style="color:var(--white);margin-bottom:var(--space-lg);">Outreach Draft</h3>
+      <h3 class="a-modal__title">Outreach Draft</h3>
       <div class="detail-grid">
-        <div><div style="font-size:var(--font-size-xs);color:var(--navy-300);margin-bottom:4px;">To</div><div>${d.target_name || '—'} &lt;${d.target_email || ''}&gt;</div></div>
-        <div><div style="font-size:var(--font-size-xs);color:var(--navy-300);margin-bottom:4px;">Company</div><div>${d.company || '—'}</div></div>
-        <div><div style="font-size:var(--font-size-xs);color:var(--navy-300);margin-bottom:4px;">Type</div><div><span class="${this.badge(d.target_type)}">${d.target_type}</span></div></div>
-        <div><div style="font-size:var(--font-size-xs);color:var(--navy-300);margin-bottom:4px;">Status</div><div><span class="${this.badge(d.status)}">${d.status}</span></div></div>
-        <div><div style="font-size:var(--font-size-xs);color:var(--navy-300);margin-bottom:4px;">Channel</div><div>${d.channel || '—'}</div></div>
-        <div><div style="font-size:var(--font-size-xs);color:var(--navy-300);margin-bottom:4px;">Language</div><div>${d.language || '—'}</div></div>
-        <div><div style="font-size:var(--font-size-xs);color:var(--navy-300);margin-bottom:4px;">AI Model</div><div>${d.ai_model || '—'}</div></div>
-        <div><div style="font-size:var(--font-size-xs);color:var(--navy-300);margin-bottom:4px;">Created</div><div>${this.formatDate(d.created_at)}</div></div>
+        <div><div class="a-field-label">To</div><div>${d.target_name || '—'} &lt;${d.target_email || ''}&gt;</div></div>
+        <div><div class="a-field-label">Company</div><div>${d.company || '—'}</div></div>
+        <div><div class="a-field-label">Type</div><div><span class="${this.badge(d.target_type)}">${d.target_type}</span></div></div>
+        <div><div class="a-field-label">Status</div><div><span class="${this.badge(d.status)}">${d.status}</span></div></div>
+        <div><div class="a-field-label">Channel</div><div>${d.channel || '—'}</div></div>
+        <div><div class="a-field-label">Language</div><div>${d.language || '—'}</div></div>
+        <div><div class="a-field-label">AI Model</div><div>${d.ai_model || '—'}</div></div>
+        <div><div class="a-field-label">Created</div><div>${this.formatDate(d.created_at)}</div></div>
       </div>
       <div class="form-group">
         <label>Subject</label>
@@ -957,13 +958,13 @@ const Admin = {
       </div>
       <div class="form-group">
         <label>Body</label>
-        <textarea id="draftBody" rows="10" style="width:100%;background:rgba(6,13,26,0.6);border:1px solid rgba(74,111,159,0.3);border-radius:var(--radius-md);color:var(--white);padding:0.75rem;font-family:var(--font-primary);font-size:var(--font-size-sm);resize:vertical;box-sizing:border-box;" ${raw(editable ? '' : 'disabled')}>${d.body || ''}</textarea>
+        <textarea id="draftBody" rows="10" class="a-textarea" ${raw(editable ? '' : 'disabled')}>${d.body || ''}</textarea>
       </div>
-      <div style="display:flex;gap:var(--space-md);margin-top:var(--space-lg);flex-wrap:wrap;">
+      <div class="a-actions">
         ${editable ? html`
           <button class="btn btn-ghost-secondary" data-action="save-draft" data-id="${d.id}"><i class="fa-regular fa-floppy-disk"></i> Save</button>
           <button class="btn btn-primary" data-action="approve-draft" data-id="${d.id}"><i class="fa-regular fa-paper-plane"></i> Approve &amp; Send</button>
-          <button class="btn btn-ghost-secondary" data-action="reject-draft" data-id="${d.id}" style="color:#f87171;"><i class="fa-solid fa-xmark"></i> Reject</button>` : ''}
+          <button class="btn btn-ghost-secondary a-danger" data-action="reject-draft" data-id="${d.id}"><i class="fa-solid fa-xmark"></i> Reject</button>` : ''}
         <button class="btn btn-ghost-secondary" data-action="close-modal">Close</button>
       </div>
     `);
@@ -1071,21 +1072,21 @@ const Admin = {
       const tags = Array.isArray(p.tags) ? p.tags.join(', ') : (p.tags || '—');
       return html`
       <tr>
-        <td style="font-weight:600;color:var(--white);">${p.title_nl || '—'}</td>
-        <td style="color:var(--navy-200);font-size:var(--font-size-xs);">${p.slug}</td>
-        <td style="color:var(--navy-200);font-size:var(--font-size-xs);">${tags}</td>
+        <td class="a-cell-name">${p.title_nl || '—'}</td>
+        <td class="a-meta">${p.slug}</td>
+        <td class="a-meta">${tags}</td>
         <td><span class="${this.badge(p.status)}">${p.status}</span></td>
-        <td style="font-size:var(--font-size-xs);color:var(--navy-300);">${p.published_at ? this.formatDate(p.published_at) : '—'}</td>
+        <td class="a-meta">${p.published_at ? this.formatDate(p.published_at) : '—'}</td>
         <td>
           <button class="btn btn-sm btn-ghost-secondary" data-action="open-blog-modal" data-id="${p.id}" title="Edit">
             <i class="fa-solid fa-pen"></i>
           </button>
           ${p.status === 'draft' ? html`
-            <button class="btn btn-sm btn-ghost-secondary" data-action="publish-blog-post" data-id="${p.id}" title="Publish" style="color:#4ade80;">
+            <button class="btn btn-sm btn-ghost-secondary a-positive" data-action="publish-blog-post" data-id="${p.id}" title="Publish">
               <i class="fa-regular fa-circle-check"></i>
             </button>` : ''}
           ${p.status === 'published' ? html`
-            <button class="btn btn-sm btn-ghost-secondary" data-action="archive-blog-post" data-id="${p.id}" title="Archive" style="color:#f87171;">
+            <button class="btn btn-sm btn-ghost-secondary a-danger" data-action="archive-blog-post" data-id="${p.id}" title="Archive">
               <i class="fa-solid fa-box-archive"></i>
             </button>` : ''}
         </td>
@@ -1096,7 +1097,7 @@ const Admin = {
   openBlogModal(id) {
     const p = id ? (this._data.blog?.items || []).find(x => x.id === id) : null;
     this.openModal('blogModal', html`
-      <h3 style="color:var(--white);margin-bottom:var(--space-lg);">${p ? 'Edit Post' : 'New Post'}</h3>
+      <h3 class="a-modal__title">${p ? 'Edit Post' : 'New Post'}</h3>
       <div class="form-group">
         <label>Slug</label>
         <input type="text" id="blogSlug" value="${p?.slug || ''}">
@@ -1111,19 +1112,19 @@ const Admin = {
       </div>
       <div class="form-group">
         <label>Excerpt (NL)</label>
-        <textarea id="blogExcerptNl" rows="3" style="width:100%;background:rgba(6,13,26,0.6);border:1px solid rgba(74,111,159,0.3);border-radius:var(--radius-md);color:var(--white);padding:0.75rem;font-family:var(--font-primary);font-size:var(--font-size-sm);resize:vertical;box-sizing:border-box;">${p?.excerpt_nl || ''}</textarea>
+        <textarea id="blogExcerptNl" rows="3" class="a-textarea">${p?.excerpt_nl || ''}</textarea>
       </div>
       <div class="form-group">
         <label>Excerpt (EN)</label>
-        <textarea id="blogExcerptEn" rows="3" style="width:100%;background:rgba(6,13,26,0.6);border:1px solid rgba(74,111,159,0.3);border-radius:var(--radius-md);color:var(--white);padding:0.75rem;font-family:var(--font-primary);font-size:var(--font-size-sm);resize:vertical;box-sizing:border-box;">${p?.excerpt_en || ''}</textarea>
+        <textarea id="blogExcerptEn" rows="3" class="a-textarea">${p?.excerpt_en || ''}</textarea>
       </div>
       <div class="form-group">
         <label>Body HTML (NL)</label>
-        <textarea id="blogBodyNl" rows="10" style="width:100%;background:rgba(6,13,26,0.6);border:1px solid rgba(74,111,159,0.3);border-radius:var(--radius-md);color:var(--white);padding:0.75rem;font-family:var(--font-primary);font-size:var(--font-size-sm);resize:vertical;box-sizing:border-box;">${p?.body_nl || ''}</textarea>
+        <textarea id="blogBodyNl" rows="10" class="a-textarea">${p?.body_nl || ''}</textarea>
       </div>
       <div class="form-group">
         <label>Body HTML (EN)</label>
-        <textarea id="blogBodyEn" rows="10" style="width:100%;background:rgba(6,13,26,0.6);border:1px solid rgba(74,111,159,0.3);border-radius:var(--radius-md);color:var(--white);padding:0.75rem;font-family:var(--font-primary);font-size:var(--font-size-sm);resize:vertical;box-sizing:border-box;">${p?.body_en || ''}</textarea>
+        <textarea id="blogBodyEn" rows="10" class="a-textarea">${p?.body_en || ''}</textarea>
       </div>
       <div class="form-group">
         <label>Tags (comma-separated)</label>
@@ -1133,7 +1134,7 @@ const Admin = {
         <label>Read time (min)</label>
         <input type="number" id="blogReadTime" value="${p?.read_time_min ?? ''}">
       </div>
-      <div style="display:flex;gap:var(--space-md);margin-top:var(--space-lg);">
+      <div class="a-actions">
         <button class="btn btn-primary" data-action="save-blog-post" data-id="${p ? p.id : ''}">Save</button>
         <button class="btn btn-ghost-secondary" data-action="close-modal">Cancel</button>
       </div>
@@ -1209,7 +1210,7 @@ const Admin = {
   async loadAnalytics() {
     const growthEl = document.getElementById('userGrowthChart');
     const summaryEl = document.getElementById('analyticsSummary');
-    const spinner = html`<div style="text-align:center;padding:1rem 0;color:var(--navy-300);"><i class="fa-solid fa-spinner fa-spin"></i></div>`;
+    const spinner = html`<div class="a-state-cell"><i class="fa-solid fa-spinner fa-spin"></i></div>`;
     mount(growthEl, spinner);
     mount(summaryEl, spinner);
     try {
@@ -1235,7 +1236,7 @@ const Admin = {
     const growthEl = document.getElementById('userGrowthChart');
     if (!growthEl || !data.user_growth) return;
     const entries = Object.entries(data.user_growth).sort(([a], [b]) => a.localeCompare(b));
-    if (!entries.length) { mount(growthEl, html`<div style="color:var(--navy-300);font-size:var(--font-size-sm);">No data yet</div>`); return; }
+    if (!entries.length) { mount(growthEl, html`<div class="a-soft">No data yet</div>`); return; }
 
     if (window.ApexCharts) {
       mount(growthEl, raw(''));
@@ -1256,14 +1257,14 @@ const Admin = {
       this._growthChart.render();
     } else {
       const max = Math.max(...entries.map(([, v]) => v), 1);
-      mount(growthEl, html`<div style="display:flex;align-items:flex-end;gap:6px;height:120px;width:100%;">
+      mount(growthEl, html`<div class="a-barchart">
         ${entries.map(([month, count]) => {
           const h = Math.round((count / max) * 110);
           const label = new Date(month).toLocaleDateString('en-GB', { month: 'short' });
-          return html`<div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:4px;">
-            <div style="font-size:9px;color:var(--navy-300);">${count}</div>
-            <div style="width:100%;border-radius:4px 4px 0 0;background:var(--gold-gradient);height:${h}px;"></div>
-            <div style="font-size:9px;color:var(--navy-300);">${label}</div>
+          return html`<div class="a-barchart__col">
+            <div class="a-barchart__cap">${count}</div>
+            <div class="a-barchart__bar" style="--a-bar-h:${h}px;"></div>
+            <div class="a-barchart__cap">${label}</div>
           </div>`;
         })}
       </div>`);
@@ -1277,9 +1278,9 @@ const Admin = {
     const el = document.getElementById('analyticsSummary');
     if (!el) return;
     const row = (label, value) => html`
-      <div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid rgba(74,111,159,0.15);">
-        <span style="color:var(--navy-300);">${label}</span>
-        <strong style="color:var(--white);">${value}%</strong>
+      <div class="a-metric-row">
+        <span class="a-soft">${label}</span>
+        <strong class="a-cell-strong">${value}%</strong>
       </div>`;
     mount(el, html`
       ${row('Fill rate', data.job_fill_rate ?? 0)}
@@ -1321,11 +1322,11 @@ const Admin = {
   // one bulky diff never blows out the row height.
   auditChangesHtml(changes) {
     if (!changes || typeof changes !== 'object' || !Object.keys(changes).length) return raw('—');
-    return html`<ul style="margin:0;padding-left:1.1em;list-style:disc;">${Object.entries(changes).map(([k, v]) => {
+    return html`<ul class="a-inline-list">${Object.entries(changes).map(([k, v]) => {
       if (v !== null && typeof v === 'object') {
         const str = JSON.stringify(v);
         const truncated = str.length > 300 ? str.slice(0, 300) + '…' : str;
-        return html`<li><strong>${k}</strong>: <details><summary style="cursor:pointer;color:var(--navy-300);">JSON</summary><pre style="white-space:pre-wrap;word-break:break-all;margin:4px 0 0;font-size:var(--font-size-xs);">${truncated}</pre></details></li>`;
+        return html`<li><strong>${k}</strong>: <details><summary class="a-clickable a-soft">JSON</summary><pre class="a-scrollbox">${truncated}</pre></details></li>`;
       }
       return html`<li><strong>${k}</strong>: ${v}</li>`;
     })}</ul>`;
@@ -1336,14 +1337,14 @@ const Admin = {
     if (!tbody) return;
     const items = data.items || [];
     if (!items.length) { this.setEmpty('#section-audit table tbody', 5, 'Nog geen audit-log entries voor dit filter.'); return; }
-    const colors = { user_delete: '#f87171', impersonate: '#fb923c', settings_update: '#a78bfa' };
+    const colors = { user_delete: 'a-danger', impersonate: 'a-warn', settings_update: 'a-alt' };
     mount(tbody, html`${items.map(e => html`
       <tr>
-        <td style="font-size:var(--font-size-xs);color:var(--navy-300);white-space:nowrap;">${this.formatDate(e.created_at)}</td>
-        <td><span style="color:${colors[e.action] || 'var(--gold-400)'};">${e.action?.replace(/_/g, ' ')}</span></td>
-        <td style="font-size:var(--font-size-xs);color:var(--navy-200);">${e.actor_email || 'system'}</td>
-        <td style="font-size:var(--font-size-xs);color:var(--navy-300);">${e.target_type ? e.target_type + ' #' + e.target_id : '—'}</td>
-        <td style="font-size:var(--font-size-xs);color:var(--navy-300);">${this.auditChangesHtml(e.changes)}</td>
+        <td class="a-meta text-nowrap">${this.formatDate(e.created_at)}</td>
+        <td><span class="${colors[e.action] || 'a-accent'}">${e.action?.replace(/_/g, ' ')}</span></td>
+        <td class="a-meta">${e.actor_email || 'system'}</td>
+        <td class="a-meta">${e.target_type ? e.target_type + ' #' + e.target_id : '—'}</td>
+        <td class="a-meta">${this.auditChangesHtml(e.changes)}</td>
       </tr>`)}`);
   },
 
@@ -1400,12 +1401,12 @@ const Admin = {
   renderContent(rows) {
     const el = document.getElementById('contentList');
     if (!el) return;
-    if (!rows.length) { mount(el, html`<div style="color:var(--navy-300);padding:1rem;">Nog geen content-items. Voeg ze toe via de API of database.</div>`); return; }
+    if (!rows.length) { mount(el, html`<div class="a-state-block">Nog geen content-items. Voeg ze toe via de API of database.</div>`); return; }
     mount(el, html`${rows.map(item => html`
-      <div style="display:flex;align-items:center;gap:var(--space-md);padding:var(--space-md) 0;border-bottom:1px solid rgba(74,111,159,0.08);">
-        <div style="flex:1;">
-          <div style="font-size:var(--font-size-xs);color:var(--navy-300);">${item.section} / ${item.key}</div>
-          <div style="color:var(--navy-100);margin-top:2px;font-size:var(--font-size-sm);">${(item.value || '').slice(0, 80)}${(item.value || '').length > 80 ? '…' : ''}</div>
+      <div class="a-listrow">
+        <div class="flex-fill">
+          <div class="a-meta">${item.section} / ${item.key}</div>
+          <div class="a-soft mt-1">${(item.value || '').slice(0, 80)}${(item.value || '').length > 80 ? '…' : ''}</div>
         </div>
         <button class="btn btn-sm btn-ghost-secondary" data-action="edit-content" data-id="${item.id}" data-key="${item.key}" data-value="${item.value || ''}">
           <i class="fa-solid fa-pen"></i>
@@ -1415,12 +1416,12 @@ const Admin = {
 
   editContent(id, key, value) {
     this.openModal('editContentModal', html`
-      <h3 style="color:var(--white);margin-bottom:var(--space-lg);">Edit: ${key}</h3>
+      <h3 class="a-modal__title">Edit: ${key}</h3>
       <div class="form-group">
         <label>Value</label>
-        <textarea id="editContentValue" rows="5" style="width:100%;background:rgba(6,13,26,0.6);border:1px solid rgba(74,111,159,0.3);border-radius:var(--radius-md);color:var(--white);padding:0.75rem;font-family:var(--font-primary);font-size:var(--font-size-sm);resize:vertical;">${value}</textarea>
+        <textarea id="editContentValue" rows="5" class="a-textarea">${value}</textarea>
       </div>
-      <div style="display:flex;gap:var(--space-md);margin-top:var(--space-lg);">
+      <div class="a-actions">
         <button class="btn btn-primary" data-action="save-content" data-id="${id}">Save</button>
         <button class="btn btn-ghost-secondary" data-action="close-modal">Cancel</button>
       </div>
@@ -1486,11 +1487,11 @@ const Admin = {
     if (!tbody) return;
     if (!clients.length) { this.setEmpty('#section-clients table tbody', 6, 'Nog geen opdrachtgevers met een portal-account.'); return; }
     mount(tbody, html`${clients.map(c => html`
-      <tr data-action="open-client" data-id="${c.id}" style="cursor:pointer;">
-        <td style="font-weight:600;color:var(--white);">${c.company_name || 'Onbekend'}</td>
-        <td style="color:var(--navy-200);">${c.domain || '—'}</td>
+      <tr data-action="open-client" data-id="${c.id}" class="a-clickable">
+        <td class="a-cell-name">${c.company_name || 'Onbekend'}</td>
+        <td class="a-soft">${c.domain || '—'}</td>
         <td class="text-center">${c.open_job_count ?? 0}</td>
-        <td style="color:var(--navy-200);">${c.primary_contact?.full_name || c.primary_contact?.email || '—'}</td>
+        <td class="a-soft">${c.primary_contact?.full_name || c.primary_contact?.email || '—'}</td>
         <td><span class="${this.erkendReferentBadgeClass(c.erkend_referent)}">${this.erkendReferentLabel(c.erkend_referent)}</span></td>
         <td class="text-end"><i class="fa-solid fa-chevron-right text-secondary"></i></td>
       </tr>`)}`);
@@ -1508,14 +1509,14 @@ const Admin = {
       ['activity', 'Notities/Activiteit'], ['prospects', 'Prospects'],
     ];
     this.openModal('clientDrawer', html`
-      <h3 style="color:var(--white);margin-bottom:4px;">${client?.company_name || 'Opdrachtgever'}</h3>
-      <div style="color:var(--navy-300);font-size:var(--font-size-sm);margin-bottom:var(--space-lg);">${client?.domain || '—'}</div>
-      <div style="display:flex;gap:4px;flex-wrap:wrap;border-bottom:1px solid rgba(74,111,159,0.2);margin-bottom:var(--space-md);padding-bottom:var(--space-sm);">
+      <h3 class="a-cell-strong mb-1">${client?.company_name || 'Opdrachtgever'}</h3>
+      <div class="a-soft mb-4">${client?.domain || '—'}</div>
+      <div class="a-tabbar">
         ${tabs.map(([key, label]) => html`
           <button class="btn btn-sm ${key === 'info' ? 'btn-primary' : 'btn-ghost-secondary'}"
             data-action="client-tab" data-client-id="${clientId}" data-tab="${key}">${label}</button>`)}
       </div>
-      <div id="clientDrawerTabContent" style="min-height:120px;"><i class="fa-solid fa-spinner fa-spin"></i></div>
+      <div id="clientDrawerTabContent" class="a-tabpane"><i class="fa-solid fa-spinner fa-spin"></i></div>
     `, { wide: true });
     this.switchClientTab(clientId, 'info');
   },
@@ -1568,9 +1569,9 @@ const Admin = {
       </div>
       <div class="form-group">
         <label>Notities</label>
-        <textarea id="clientInfoNotes" rows="5" style="width:100%;background:rgba(6,13,26,0.6);border:1px solid rgba(74,111,159,0.3);border-radius:var(--radius-md);color:var(--white);padding:0.75rem;font-family:var(--font-primary);font-size:var(--font-size-sm);resize:vertical;box-sizing:border-box;">${client.notes || ''}</textarea>
+        <textarea id="clientInfoNotes" rows="5" class="a-textarea">${client.notes || ''}</textarea>
       </div>
-      <div style="display:flex;gap:var(--space-md);margin-top:var(--space-lg);">
+      <div class="a-actions">
         <button class="btn btn-primary" data-action="save-client-info" data-client-id="${clientId}">Opslaan</button>
       </div>
     `);
@@ -1626,7 +1627,7 @@ const Admin = {
     if (!el) return;
     const items = (this._data.clientContacts && this._data.clientContacts[clientId]) || [];
     mount(el, html`
-      <div style="display:flex;justify-content:flex-end;margin-bottom:var(--space-md);">
+      <div class="d-flex justify-content-end mb-3">
         <button class="btn btn-sm btn-primary" data-action="client-contact-new" data-client-id="${clientId}">
           <i class="fa-solid fa-plus"></i> Nieuw contact
         </button>
@@ -1638,19 +1639,19 @@ const Admin = {
             <thead><tr><th>Naam</th><th>Rol</th><th>E-mail</th><th>Telefoon</th><th>Primair</th><th style="width:110px;">Acties</th></tr></thead>
             <tbody>${items.map(c => html`
               <tr>
-                <td style="color:var(--white);">${c.full_name}</td>
+                <td class="a-cell-strong">${c.full_name}</td>
                 <td>${this.roleLabel(c.role)}</td>
-                <td style="color:var(--navy-200);">${c.email || '—'}</td>
-                <td style="color:var(--navy-200);">${c.phone || '—'}</td>
+                <td class="a-soft">${c.email || '—'}</td>
+                <td class="a-soft">${c.phone || '—'}</td>
                 <td>${c.is_primary ? html`<span class="badge bg-yellow-lt">Primair</span>` : html`
                   <button class="btn btn-sm btn-ghost-secondary" data-action="client-contact-make-primary" data-client-id="${clientId}" data-id="${c.id}">Maak primair</button>`}</td>
                 <td>
                   <button class="btn btn-sm btn-ghost-secondary" data-action="client-contact-edit" data-client-id="${clientId}" data-id="${c.id}" title="Bewerken"><i class="fa-solid fa-pen"></i></button>
-                  <button class="btn btn-sm btn-ghost-secondary" data-action="client-contact-delete" data-client-id="${clientId}" data-id="${c.id}" title="Verwijderen" style="color:#f87171;"><i class="fa-solid fa-trash"></i></button>
+                  <button class="btn btn-sm btn-ghost-secondary a-danger" data-action="client-contact-delete" data-client-id="${clientId}" data-id="${c.id}" title="Verwijderen"><i class="fa-solid fa-trash"></i></button>
                 </td>
               </tr>`)}</tbody>
           </table>
-        </div>` : html`<div style="color:var(--navy-300);padding:1rem 0;">Nog geen contacten voor deze opdrachtgever.</div>`}
+        </div>` : html`<div class="a-state-block">Nog geen contacten voor deze opdrachtgever.</div>`}
     `);
   },
 
@@ -1661,8 +1662,8 @@ const Admin = {
     const formEl = document.getElementById('clientContactForm');
     if (!formEl) return;
     mount(formEl, html`
-      <div style="border:1px solid rgba(74,111,159,0.2);border-radius:var(--radius-md);padding:var(--space-md);margin-bottom:var(--space-md);">
-        <h4 style="color:var(--white);margin-bottom:var(--space-md);">${contact ? 'Contact bewerken' : 'Nieuw contact'}</h4>
+      <div class="a-panel">
+        <h4 class="a-modal__title">${contact ? 'Contact bewerken' : 'Nieuw contact'}</h4>
         <div class="form-group"><label>Naam</label><input type="text" id="ccFullName" value="${contact?.full_name || ''}"></div>
         <div class="form-group"><label>E-mail</label><input type="email" id="ccEmail" value="${contact?.email || ''}"></div>
         <div class="form-group"><label>Telefoon</label><input type="text" id="ccPhone" value="${contact?.phone || ''}"></div>
@@ -1677,7 +1678,7 @@ const Admin = {
         <div class="form-group">
           <label><input type="checkbox" id="ccPrimary" ${raw(contact?.is_primary ? 'checked' : '')}> Primair contact</label>
         </div>
-        <div style="display:flex;gap:var(--space-md);margin-top:var(--space-md);">
+        <div class="d-flex gap-3 mt-3">
           <button class="btn btn-primary btn-sm" data-action="client-contact-save" data-client-id="${clientId}" data-id="${contactId || ''}">Opslaan</button>
           <button class="btn btn-ghost-secondary btn-sm" data-action="client-contact-cancel" data-client-id="${clientId}">Annuleren</button>
         </div>
@@ -1747,13 +1748,13 @@ const Admin = {
             <thead><tr><th>Titel</th><th>Type</th><th>Status</th><th>Sollicitaties</th></tr></thead>
             <tbody>${items.map(j => html`
               <tr>
-                <td style="color:var(--white);">${j.title || 'Untitled'}</td>
-                <td style="color:var(--navy-200);">${j.employment_type ? this.dienstlijnLabel(j.employment_type) : '—'}</td>
+                <td class="a-cell-strong">${j.title || 'Untitled'}</td>
+                <td class="a-soft">${j.employment_type ? this.dienstlijnLabel(j.employment_type) : '—'}</td>
                 <td><span class="${this.badge(j.status)}">${j.status || 'draft'}</span></td>
                 <td class="text-center">${j.application_count ?? '—'}</td>
               </tr>`)}</tbody>
           </table>
-        </div>` : html`<div style="color:var(--navy-300);padding:1rem 0;">Nog geen vacatures voor deze opdrachtgever.</div>`);
+        </div>` : html`<div class="a-state-block">Nog geen vacatures voor deze opdrachtgever.</div>`);
     } catch {
       this.setContainerLoadError(el, () => this.loadClientJobsTab(clientId));
     }
@@ -1784,13 +1785,13 @@ const Admin = {
             <thead><tr><th>Type</th><th>Notitie</th><th>Datum</th><th>Status</th></tr></thead>
             <tbody>${items.map(a => html`
               <tr>
-                <td style="color:var(--white);">${this.activityTypeLabel(a.type)}</td>
-                <td style="color:var(--navy-200);">${a.body || '—'}</td>
-                <td style="color:var(--navy-200);">${this.formatDate(a.created_at)}</td>
+                <td class="a-cell-strong">${this.activityTypeLabel(a.type)}</td>
+                <td class="a-soft">${a.body || '—'}</td>
+                <td class="a-soft">${this.formatDate(a.created_at)}</td>
                 <td>${a.completed_at ? html`<span class="badge bg-secondary-lt">Afgerond</span>` : (a.due_at ? html`<span class="badge bg-blue-lt">Open</span>` : '—')}</td>
               </tr>`)}</tbody>
           </table>
-        </div>` : html`<div style="color:var(--navy-300);padding:1rem 0;">Nog geen notities of activiteit voor deze opdrachtgever.</div>`);
+        </div>` : html`<div class="a-state-block">Nog geen notities of activiteit voor deze opdrachtgever.</div>`);
     } catch {
       this.setContainerLoadError(el, () => this.loadClientActivityTab(clientId));
     }
@@ -1814,7 +1815,7 @@ const Admin = {
       if (!res.ok) throw new Error(data.detail);
       const items = data.items || [];
       mount(el, html`
-        <div style="color:var(--navy-300);font-size:var(--font-size-xs);margin-bottom:var(--space-sm);">
+        <div class="a-meta mb-2">
           Gematcht op bedrijfsnaam (geen directe koppeling in de database).
         </div>
         ${items.length ? html`
@@ -1823,13 +1824,13 @@ const Admin = {
               <thead><tr><th>Bedrijf</th><th>Contact</th><th>Functie</th><th>Status</th></tr></thead>
               <tbody>${items.map(p => html`
                 <tr>
-                  <td style="color:var(--white);">${p.company_name || '—'}</td>
-                  <td style="color:var(--navy-200);">${p.contact_name || '—'}</td>
-                  <td style="color:var(--navy-200);">${p.contact_title || '—'}</td>
+                  <td class="a-cell-strong">${p.company_name || '—'}</td>
+                  <td class="a-soft">${p.contact_name || '—'}</td>
+                  <td class="a-soft">${p.contact_title || '—'}</td>
                   <td><span class="${this.badge(p.status)}">${p.status || '—'}</span></td>
                 </tr>`)}</tbody>
             </table>
-          </div>` : html`<div style="color:var(--navy-300);padding:1rem 0;">Geen prospects gevonden voor deze bedrijfsnaam.</div>`}
+          </div>` : html`<div class="a-state-block">Geen prospects gevonden voor deze bedrijfsnaam.</div>`}
       `);
     } catch {
       this.setContainerLoadError(el, () => this.loadClientProspectsTab(clientId));
@@ -1906,13 +1907,13 @@ const Admin = {
     if (!items.length) { this.setEmpty('#section-leads table tbody', 7, 'Geen leads gevonden voor deze filters.'); return; }
     mount(tbody, html`${items.map(l => html`
       <tr data-action="view-lead" data-source="${l.source}" data-id="${l.id}"
-        style="cursor:pointer;${raw(l.is_read ? '' : 'font-weight:600;')}">
+        class="a-clickable${raw(l.is_read ? '' : ' a-row-unread')}">
         <td><span class="badge ${l.source === 'quiz_submissions' ? 'bg-yellow-lt' : 'bg-blue-lt'}">${l.source === 'quiz_submissions' ? 'Quiz' : 'Contact'}</span></td>
-        <td style="color:var(--white);">${l.name || '—'}</td>
-        <td style="color:var(--navy-200);">${l.email || '—'}</td>
+        <td class="a-cell-strong">${l.name || '—'}</td>
+        <td class="a-soft">${l.email || '—'}</td>
         <td>${l.interest_type ? html`<span class="badge bg-secondary-lt">${this.leadInterestLabel(l.interest_type)}</span>` : '—'}</td>
-        <td style="color:var(--navy-300);font-size:var(--font-size-xs);">${this.leadOriginText(l)}</td>
-        <td style="color:var(--navy-200);">${this.formatDate(l.created_at)}</td>
+        <td class="a-meta">${this.leadOriginText(l)}</td>
+        <td class="a-soft">${this.formatDate(l.created_at)}</td>
         <td>${l.is_read
           ? html`<span class="badge bg-secondary-lt">Gelezen</span>`
           : html`<span class="badge bg-green-lt">Ongelezen</span>`}</td>
@@ -1922,7 +1923,7 @@ const Admin = {
   /* ---- Lead detail modal (WS2) ---- */
   async viewLeadDetail(source, leadId) {
     this.openModal('leadDetailModal', html`
-      <div style="text-align:center;padding:2rem 0;color:var(--navy-300);">
+      <div class="a-state-cell">
         <i class="fa-solid fa-spinner fa-spin"></i> Laden…
       </div>`);
     try {
@@ -1930,9 +1931,9 @@ const Admin = {
       if (!res?.ok) {
         const d = await res?.json().catch(() => null);
         this.openModal('leadDetailModal', html`
-          <h3 style="color:var(--white);margin-bottom:var(--space-md);">Kon lead niet laden</h3>
-          <p style="color:var(--navy-300);">${d?.detail || 'Er ging iets mis bij het ophalen van deze lead.'}</p>
-          <div style="display:flex;gap:var(--space-md);margin-top:var(--space-lg);">
+          <h3 class="a-modal__title">Kon lead niet laden</h3>
+          <p class="a-soft">${d?.detail || 'Er ging iets mis bij het ophalen van deze lead.'}</p>
+          <div class="a-actions">
             <button class="btn btn-primary btn-sm" data-action="view-lead" data-source="${source}" data-id="${leadId}">Opnieuw proberen</button>
             <button class="btn btn-ghost-secondary btn-sm" data-action="close-modal">Sluiten</button>
           </div>`);
@@ -1943,9 +1944,9 @@ const Admin = {
       this.renderLeadDetailModal(detail);
     } catch {
       this.openModal('leadDetailModal', html`
-        <h3 style="color:var(--white);margin-bottom:var(--space-md);">Netwerkfout</h3>
-        <p style="color:var(--navy-300);">Kon geen verbinding maken met de server.</p>
-        <div style="display:flex;gap:var(--space-md);margin-top:var(--space-lg);">
+        <h3 class="a-modal__title">Netwerkfout</h3>
+        <p class="a-soft">Kon geen verbinding maken met de server.</p>
+        <div class="a-actions">
           <button class="btn btn-primary btn-sm" data-action="view-lead" data-source="${source}" data-id="${leadId}">Opnieuw proberen</button>
           <button class="btn btn-ghost-secondary btn-sm" data-action="close-modal">Sluiten</button>
         </div>`);
@@ -1959,16 +1960,16 @@ const Admin = {
   renderLeadDetailModal(detail) {
     const isQuiz = detail.source === 'quiz_submissions';
     const field = (label, value) => html`
-      <div style="margin-bottom:var(--space-md);">
-        <div style="font-size:var(--font-size-xs);color:var(--navy-300);margin-bottom:4px;">${label}</div>
-        <div style="color:var(--white);">${value}</div>
+      <div class="mb-3">
+        <div class="a-field-label">${label}</div>
+        <div class="a-cell-strong">${value}</div>
       </div>`;
     const domainScores = (detail.domain_scores && typeof detail.domain_scores === 'object')
-      ? html`<ul style="margin:0;padding-left:1.1em;">${Object.entries(detail.domain_scores).map(([k, v]) => html`<li>${k}: ${v}</li>`)}</ul>`
+      ? html`<ul class="a-inline-list">${Object.entries(detail.domain_scores).map(([k, v]) => html`<li>${k}: ${v}</li>`)}</ul>`
       : raw('—');
 
     this.openModal('leadDetailModal', html`
-      <h3 style="color:var(--white);margin-bottom:var(--space-lg);">${isQuiz ? 'Quiz-inzending' : (detail.name || 'Lead')}</h3>
+      <h3 class="a-modal__title">${isQuiz ? 'Quiz-inzending' : (detail.name || 'Lead')}</h3>
       ${field('E-mail', detail.email || '—')}
       ${isQuiz ? html`
         ${field('Score', (detail.score != null && detail.max_score != null) ? `${detail.score} / ${detail.max_score}` : '—')}
@@ -1985,7 +1986,7 @@ const Admin = {
       ${field('Status', detail.is_read
         ? html`<span class="badge bg-secondary-lt">Gelezen</span>`
         : html`<span class="badge bg-green-lt">Ongelezen</span>`)}
-      <div style="display:flex;gap:var(--space-md);margin-top:var(--space-lg);">
+      <div class="a-actions">
         <button class="btn btn-sm ${detail.is_read ? 'btn-ghost-secondary' : 'btn-primary'}"
           data-action="toggle-lead-read" data-source="${detail.source}" data-id="${detail.id}" data-read="${detail.is_read ? '1' : '0'}">
           ${detail.is_read ? 'Markeer als ongelezen' : 'Markeer als gelezen'}
@@ -2028,7 +2029,7 @@ const Admin = {
      ============================================================ */
   async loadReporting() {
     const el = document.getElementById('reportingContent');
-    if (el) mount(el, html`<div style="text-align:center;padding:3rem;color:var(--navy-300);"><i class="fa-solid fa-spinner fa-spin"></i> Laden…</div>`);
+    if (el) mount(el, html`<div class="a-state-cell"><i class="fa-solid fa-spinner fa-spin"></i> Laden…</div>`);
     try {
       const [jobsRes, leadsRes, unreadRes] = await Promise.all([
         Auth.fetch('/v1/admin/jobs?status=open&limit=200'),
@@ -2041,7 +2042,7 @@ const Admin = {
       const unreadData = unreadRes?.ok ? await unreadRes.json() : null;
       this.renderReporting(jobsData, leadsData, unreadData);
     } catch {
-      if (el) mount(el, html`<div style="text-align:center;padding:3rem;color:#f87171;">Rapportage kon niet geladen worden.</div>`);
+      if (el) mount(el, html`<div class="a-state-cell a-danger">Rapportage kon niet geladen worden.</div>`);
     }
   },
 
@@ -2074,8 +2075,8 @@ const Admin = {
       if (created >= startOfMonth) month[key] = (month[key] || 0) + 1;
     });
 
-    const jobsCapNote = (jobsData.total || 0) > jobs.length ? html`<div style="color:var(--navy-300);font-size:var(--font-size-xs);margin-top:var(--space-sm);">Toont ${jobs.length} van ${jobsData.total} open vacatures.</div>` : '';
-    const leadsCapNote = (leadsData.total || 0) > leads.length ? html`<div style="color:var(--navy-300);font-size:var(--font-size-xs);margin-top:var(--space-sm);">Gebaseerd op de meest recente ${leads.length} van ${leadsData.total} leads.</div>` : '';
+    const jobsCapNote = (jobsData.total || 0) > jobs.length ? html`<div class="a-meta mt-2">Toont ${jobs.length} van ${jobsData.total} open vacatures.</div>` : '';
+    const leadsCapNote = (leadsData.total || 0) > leads.length ? html`<div class="a-meta mt-2">Gebaseerd op de meest recente ${leads.length} van ${leadsData.total} leads.</div>` : '';
 
     const rows = [
       ['werving_selectie', 'Werving & selectie'], ['detachering_internationaal', 'Detachering (internationaal)'],
@@ -2111,8 +2112,8 @@ const Admin = {
             <div class="card-body">
               ${byType.size ? html`<table class="table table-vcenter card-table">
                 <tbody>${Array.from(byType.entries()).map(([t, n]) => html`
-                  <tr><td style="color:var(--navy-200);">${this.dienstlijnLabel(t)}</td><td class="text-end" style="color:var(--white);font-weight:600;">${n}</td></tr>`)}</tbody>
-              </table>` : html`<div style="color:var(--navy-300);">Geen open vacatures.</div>`}
+                  <tr><td class="a-soft">${this.dienstlijnLabel(t)}</td><td class="text-end a-cell-name">${n}</td></tr>`)}</tbody>
+              </table>` : html`<div class="a-soft">Geen open vacatures.</div>`}
               ${jobsCapNote}
             </div>
           </div>
@@ -2125,9 +2126,9 @@ const Admin = {
                 <thead><tr><th>Categorie</th><th class="text-end">Deze week</th><th class="text-end">Deze maand</th></tr></thead>
                 <tbody>${rows.map(([key, label]) => html`
                   <tr>
-                    <td style="color:var(--navy-200);">${label}</td>
-                    <td class="text-end" style="color:var(--white);">${week[key] || 0}</td>
-                    <td class="text-end" style="color:var(--white);">${month[key] || 0}</td>
+                    <td class="a-soft">${label}</td>
+                    <td class="text-end a-cell-strong">${week[key] || 0}</td>
+                    <td class="text-end a-cell-strong">${month[key] || 0}</td>
                   </tr>`)}</tbody>
               </table>
               ${leadsCapNote}
@@ -2164,7 +2165,7 @@ const Admin = {
         for (let i = 1; i <= Math.min(pages, 7); i++) nums.push(pageBtn(String(i), i, { active: i === current }));
         return nums;
       })()}
-      ${pages > 7 ? html`<span style="color:var(--navy-300);padding:0 4px;">…${pages}</span>` : ''}
+      ${pages > 7 ? html`<span class="pagination-ellipsis">…${pages}</span>` : ''}
       ${pageBtn('<i class="fa-solid fa-chevron-right"></i>', current + 1, { icon: true, disabled: current === pages })}
     `);
   },

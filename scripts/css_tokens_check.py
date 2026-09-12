@@ -38,6 +38,17 @@ failing the build:
      passed via --allow (repeatable) or a comma list in
      CSS_TOKENS_CHECK_ALLOW.
 
+  5. website/admin/admin.css doet mee in dezelfde tokenpariteit (WS5 stap 1:
+     de inline compat-shim in admin/index.html die --navy-*/--radius-* met
+     eigen waarden overschreef is vervangen door dit bestand). Twee regels:
+     (a) admin.css mag geen token herdeclareren dat styles.css of theme.css
+         al met een andere waarde declareert;
+     (b) admin.css mag geen navy- of goudwaarde hardcoderen -- elke navy/
+         goudkleur gaat via var(--navy-*)/var(--gold-*). Een letterlijke
+         hex/rgb uit de navy- of goudschaal faalt.
+     Semantisch groen/rood/oranje/paars zijn geen merkkleuren en mogen wel
+     als hex in admin.css staan (--admin-positive en broertjes).
+
 Usage:
     python3 scripts/css_tokens_check.py
     python3 scripts/css_tokens_check.py --allow --font-size-3xl --allow --font-size-4xl
@@ -53,6 +64,7 @@ ROOT = Path(__file__).resolve().parent.parent
 WEBSITE = ROOT / "website"
 STYLESHEET = WEBSITE / "styles.css"
 THEME = WEBSITE / "theme.css"
+ADMIN_CSS = WEBSITE / "admin" / "admin.css"
 CLASSES_MD = ROOT / "scratchpad" / "ws1-css-requests" / "classes.md"
 
 ALLOW_COMMENT = "css-tokens-check: safe on dark"
@@ -67,6 +79,24 @@ SURFACE_SPECIFIC = {
     "--shadow": "elevatie op wit versus op navy",
     "--shadow-md": "elevatie op wit versus op navy",
     "--shadow-lg": "elevatie op wit versus op navy",
+}
+
+# Elke navy- en goudwaarde uit SITE-DESIGN-SPEC.md §1.2, plus de twee
+# waarden die de oude inline shim in admin/index.html gebruikte
+# (#142235 / #0E1B2E) -- die mogen nooit terugkeren.
+BRAND_LITERALS = {
+    "#030812": "--navy-950", "#060d1a": "--navy-900", "#0a1628": "--navy-800",
+    "#0f1d35": "--navy-700", "#152b4a": "--navy-600", "#1e3a5e": "--navy-500",
+    "#2a4a75": "--navy-400", "#4a6f9f": "--navy-300", "#7fa0c9": "--navy-200",
+    "#c5d6eb": "--navy-100",
+    "#fac800": "--gold-500", "#fbd74a": "--gold-400", "#fce488": "--gold-300",
+    "#d4a800": "--gold-600", "#ad8800": "--gold-700",
+    "#142235": "oude shim-navy", "#0e1b2e": "oude shim-navy",
+    "#18293d": "oude shim-navy", "#1a2a42": "oude shim-navy",
+    "#24354f": "oude shim-navy", "#8695ac": "oude shim-navy",
+    "#b8c4d6": "oude shim-navy", "#e2e8f0": "oude shim-navy",
+    "rgb(250,200,0)": "--gold-500", "rgba(250,200,0": "--gold-500",
+    "rgba(74,111,159": "--navy-300", "rgba(6,13,26": "--navy-900",
 }
 
 GRAY_TEXT_BANNED = ("gray-100", "gray-200", "gray-300")
@@ -229,6 +259,33 @@ def check_theme_parity(allowlist):
     return findings, allowed
 
 
+def check_admin_css(allowlist):
+    """(a) pariteit met styles.css/theme.css, (b) geen hardcoded merkkleur."""
+    if not ADMIN_CSS.exists():
+        return [f"{ADMIN_CSS} ontbreekt"], []
+    parity = []
+    admin_tokens = parse_root_tokens(ADMIN_CSS)
+    base = {}
+    base.update(parse_root_tokens(STYLESHEET))
+    base.update(parse_root_tokens(THEME))
+    for name, aval in admin_tokens.items():
+        if name in allowlist:
+            continue
+        bval = base.get(name)
+        if bval is not None and bval != aval:
+            parity.append(f"{name}: admin.css={aval!r} maar styles/theme.css={bval!r}")
+
+    literals = []
+    clean = strip_comments_keep_lines(ADMIN_CSS.read_text(encoding="utf-8"))
+    for i, line in enumerate(clean.splitlines()):
+        low = line.lower().replace(" ", "")
+        for lit, token in BRAND_LITERALS.items():
+            if lit in low:
+                literals.append(f"admin.css:{i + 1}  hardcoded {lit} -- gebruik var({token})\n      {line.strip()}")
+                break
+    return parity, literals
+
+
 def main():
     argv = sys.argv[1:]
     allowlist = set()
@@ -259,32 +316,43 @@ def main():
     text_findings = check_gray_gold_text(clean_text, raw_lines)
     radius_findings = check_card_radius(raw_lines, card_classes)
     parity_findings, parity_allowed = check_theme_parity(allowlist)
+    admin_parity, admin_literals = check_admin_css(allowlist)
 
-    total = len(text_findings) + len(radius_findings) + len(parity_findings)
+    total = (len(text_findings) + len(radius_findings) + len(parity_findings)
+             + len(admin_parity) + len(admin_literals))
 
     if text_findings:
-        print(f"[1/3] Text-color floor violations in styles.css: {len(text_findings)}")
+        print(f"[1/4] Text-color floor violations in styles.css: {len(text_findings)}")
         for lineno, reason, line in text_findings:
             print(f"  styles.css:{lineno}  {reason}\n      {line}")
     else:
-        print("[1/3] Text-color floor: clean.")
+        print("[1/4] Text-color floor: clean.")
 
     if radius_findings:
-        print(f"[2/3] Kaartklasse border-radius violations: {len(radius_findings)}")
+        print(f"[2/4] Kaartklasse border-radius violations: {len(radius_findings)}")
         for lineno, reason, line in radius_findings:
             print(f"  styles.css:{lineno}  {reason}\n      {line}")
     else:
-        print("[2/3] Kaartklasse border-radius: clean.")
+        print("[2/4] Kaartklasse border-radius: clean.")
 
     if parity_findings:
-        print(f"[3/3] styles.css vs theme.css token mismatches: {len(parity_findings)}")
+        print(f"[3/4] styles.css vs theme.css token mismatches: {len(parity_findings)}")
         for name, sval, tval in parity_findings:
             print(f"  {name}: styles.css={sval!r}  theme.css={tval!r}")
     else:
-        print("[3/3] styles.css/theme.css token parity: clean.")
+        print("[3/4] styles.css/theme.css token parity: clean.")
     for name, sval, tval, reason in parity_allowed:
         print(f"  warning: {name} divergeert bewust ({reason})")
         print(f"    styles.css={sval!r}  theme.css={tval!r}")
+
+    if admin_parity or admin_literals:
+        print(f"[4/4] admin.css: {len(admin_parity) + len(admin_literals)} overtreding(en)")
+        for f in admin_parity:
+            print(f"  {f}")
+        for f in admin_literals:
+            print(f"  {f}")
+    else:
+        print("[4/4] admin.css tokenpariteit en merkkleuren: clean.")
 
     if total:
         print(f"\ncss_tokens_check: {total} violation(s) found.")

@@ -15,97 +15,20 @@
        cdnjs/jsdelivr staying up. vendor-fallback-css.js falls back to the CDN
        copy if the vendored file is ever missing (WS-A.9b: no inline onerror=
        attributes -- those are blocked by the enforced CSP too). -->
+  <!-- theme.css levert de designtokens uit SITE-DESIGN-SPEC.md §1 en is de
+       eerste stylesheet: alles daarna (Tabler, admin.css) bouwt erop voort.
+       De oude inline compat-shim die --navy-*/--radius-* met eigen waarden
+       overschreef is weg; canoniek zijn nu de tokens uit theme.css. -->
+  <link rel="stylesheet" href="../theme.css">
   <script src="js/vendor-fallback-css.js"></script>
+  <!-- Na de gevendorde Tabler-CSS, zodat de merkoverrides in admin.css winnen. -->
+  <link rel="stylesheet" href="admin.css">
   <!-- ApexCharts vendored locally (WS-B.2) -- was a bare CDN <script> with no
        fallback; script-src 'self' already covers vendor/ in website/_headers,
        so no CDN entry or SRI is needed for it any more. Pinned at v4.7.0
        (sha384 verified against the CDN copy at vendor time; bump the file
        together with this comment if the pin ever changes). -->
   <script src="vendor/apexcharts.min.js"></script>
-  <style>
-    /* ==== Legacy design-token compatibility ====
-       admin.js still writes inline style="...var(--navy-300)..." etc (~150
-       occurrences) and the fallback bar-chart branch uses --gold-gradient.
-       Re-declared here (recalibrated to the new brand) so admin.js needs
-       no changes beyond the badge()/button class mappings below. */
-    :root, [data-bs-theme=dark] {
-      --navy-900:#142235; --navy-800:#142235; --navy-700:#18293d; --navy-600:#1a2a42;
-      --navy-500:#24354f; --navy-400:#3a4f6e; --navy-300:#8695ac; --navy-200:#b8c4d6; --navy-100:#e2e8f0;
-      --white:#ffffff;
-      --gold-gradient: linear-gradient(135deg,#FBD74A 0%,#FAC800 45%,#D4A800 100%);
-      --gold-400: #FBD74A;
-      --gold-500: #FAC800;
-      --space-xs:4px; --space-sm:8px; --space-md:16px; --space-lg:24px; --space-xl:32px; --space-2xl:48px;
-      --radius-sm:8px; --radius-md:10px; --radius:12px; --radius-lg:16px; --radius-xl:20px;
-      --font-primary:'IBM Plex Sans','Segoe UI',system-ui,-apple-system,sans-serif;
-      --font-display:'Newsreader',Georgia,'Times New Roman',serif;
-      --font-mono:'IBM Plex Mono',ui-monospace,'SF Mono',Menlo,monospace;
-      --font-size-xs:.75rem; --font-size-sm:.875rem; --font-size-md:1rem; --font-size-xl:1.25rem;
-
-      /* ==== Tabler brand overrides — GSP navy/gold ==== */
-      --tblr-primary:#FAC800;
-      --tblr-primary-rgb:250,200,0;
-      --tblr-body-bg:#0E1B2E;
-      --tblr-bg-surface:#142235;
-      --tblr-bg-surface-tertiary:#1a2a42;
-      --tblr-border-color:#24354f;
-    }
-    body, .page { font-family: var(--font-primary); }
-    .navbar-brand img { height: 28px; width: auto; }
-    h1, h2, h3, h4, .navbar-brand, .page-title, .card-title {
-      font-family: var(--font-display);
-      font-weight: 500;
-      letter-spacing: 0;
-    }
-    /* Eyebrow-style small section captions */
-    .text-uppercase { font-family: var(--font-mono); }
-    /* KPI tiles: numeric value in mono, matching the salary/data-chip convention */
-    .card .h1, .card .display-6, .card [class*="fs-"].fw-bold, .subheader + .h1 {
-      font-family: var(--font-mono);
-      font-weight: 500;
-    }
-
-    /* ==== Toast (auth.js Auth.toast) — admin no longer loads the site stylesheet ==== */
-    .toast-container { position:fixed; bottom:24px; right:24px; z-index:9998; display:flex; flex-direction:column; gap:8px; }
-    .toast { display:flex; align-items:center; gap:10px; padding:14px 20px; border-radius:var(--radius-sm); font-size:.88rem; font-weight:500; box-shadow:0 20px 50px rgba(3,8,18,.5); max-width:360px; opacity:0; transform:translateY(16px); transition:opacity .3s ease, transform .3s ease; }
-    .toast-visible { opacity:1; transform:translateY(0); }
-    .toast-removing { opacity:0; transform:translateX(40px); }
-    .toast-success { background:#065f46; color:#fff; }
-    .toast-error { background:#991b1b; color:#fff; }
-    .toast-warning { background:#78350f; color:#fff; }
-    .toast-info { background:var(--navy-600); color:#fff; }
-    .toast-icon { font-size:1.1rem; line-height:1; }
-
-    /* ==== Compatibility classes for admin.js-generated markup ==== */
-    .portal-section { display:none; }
-    .portal-section.active { display:block; }
-    .action-menu-wrap { position:relative; display:inline-block; }
-    .action-menu { position:absolute; right:0; top:100%; background:var(--tblr-bg-surface); border:1px solid var(--tblr-border-color); border-radius:var(--radius-md); box-shadow:0 8px 32px rgba(0,0,0,.4); z-index:200; min-width:160px; overflow:hidden; }
-    .action-menu button { display:flex; align-items:center; gap:8px; padding:.65rem 1rem; font-size:var(--font-size-sm); background:none; border:none; width:100%; text-align:left; cursor:pointer; font-family:var(--font-primary); }
-    .action-menu button:hover { background:var(--tblr-bg-surface-tertiary); }
-    .activity-item { display:flex; align-items:flex-start; gap:12px; padding:12px 0; border-bottom:1px solid var(--tblr-border-color); }
-    .activity-item:last-child { border-bottom:none; }
-    .activity-icon { width:34px; height:34px; border-radius:50%; display:flex; align-items:center; justify-content:center; flex-shrink:0; font-size:.8rem; }
-    .activity-text { font-size:var(--font-size-sm); }
-    .activity-time { font-size:11px; color:var(--navy-300); margin-top:2px; }
-    .form-group { margin-bottom:var(--space-lg); }
-    .form-group label { display:block; font-size:var(--font-size-xs); font-weight:600; color:var(--navy-200); text-transform:uppercase; letter-spacing:.06em; margin-bottom:.4rem; }
-    .form-group input, .form-group select, .form-group textarea { width:100%; background:var(--tblr-body-bg); border:1px solid var(--tblr-border-color); border-radius:var(--radius-md); color:var(--white); padding:.65rem 1rem; font-family:var(--font-primary); font-size:var(--font-size-sm); outline:none; box-sizing:border-box; }
-    .form-group input:focus, .form-group select:focus, .form-group textarea:focus { border-color:var(--tblr-primary); box-shadow:0 0 0 3px rgba(var(--tblr-primary-rgb),.15); }
-    .pagination-wrap { display:flex; gap:6px; flex-wrap:wrap; }
-    .pagination-wrap button { min-width:32px; height:32px; padding:0 8px; background:var(--tblr-bg-surface-tertiary); border:1px solid var(--tblr-border-color); border-radius:var(--radius-sm); color:var(--navy-200); font-family:var(--font-primary); font-size:var(--font-size-xs); cursor:pointer; }
-    .pagination-wrap button.active { background:var(--tblr-primary); color:#1a1a1a; border-color:var(--tblr-primary); font-weight:700; }
-    .pagination-wrap button:hover:not(.active):not(:disabled) { border-color:var(--tblr-primary); color:var(--tblr-primary); }
-    .pagination-wrap button:disabled { opacity:.35; cursor:not-allowed; }
-    /* Detail-modal field grid: 2 columns on desktop, single column on phones */
-    .detail-grid { display:grid; grid-template-columns:1fr 1fr; gap:var(--space-md); margin-bottom:var(--space-lg); }
-    @media (max-width:576px) { .detail-grid { grid-template-columns:1fr; } }
-    /* Wide tables scroll inside their own container on small screens — keep the
-       scrollbar visible as an affordance instead of silently clipping columns. */
-    .table-responsive { overflow-x:auto; -webkit-overflow-scrolling:touch; scrollbar-width:thin; }
-    .table-responsive::-webkit-scrollbar { height:6px; }
-    .table-responsive::-webkit-scrollbar-thumb { background:var(--navy-400); border-radius:3px; }
-  </style>
 </head>
 <body>
 <div class="page">
