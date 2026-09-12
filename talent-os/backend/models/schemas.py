@@ -825,10 +825,22 @@ class CandidateSearchParams(BaseModel):
     offset: int = 0
 
 
+# WS5 BV8 (SITE-DESIGN-SPEC.md §7.6 besluit 2): the canonical pipeline
+# stages, in the order the UI offers them. migrations/043 puts the same
+# seven behind a CHECK constraint on pipeline_entries.stage; this Literal
+# is the API-boundary half of that pair, so an unknown stage is a 422 that
+# names the allowed values rather than a 500 out of Postgres. Both the
+# admin panel's PATCH and the client portal's add/PATCH go through it --
+# the two write paths that exist.
+PIPELINE_STAGES = ("sourced", "new", "screening", "interview", "offer", "placed", "rejected")
+
+PipelineStage = Literal["sourced", "new", "screening", "interview", "offer", "placed", "rejected"]
+
+
 class PipelineAdd(BaseModel):
     candidate_id: int
     job_id: int
-    stage: str = "sourced"
+    stage: PipelineStage = "sourced"
     notes: Optional[str] = None
 
 
@@ -1217,7 +1229,7 @@ class ClientAdminUpdate(BaseModel):
 # ── WS-C.5: Pipeline Stage History ───────────────────────────────────────
 
 class PipelineStageUpdate(BaseModel):
-    stage: str = Field(..., min_length=1, max_length=50)
+    stage: PipelineStage
 
 
 class PipelineStageHistoryItem(BaseModel):
