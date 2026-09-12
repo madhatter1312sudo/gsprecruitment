@@ -77,7 +77,7 @@
     // wachtrij), dus dit label is UI-eigen.
     retentiestatus: {
       pending: 'Te beoordelen',
-      rejected: 'Afgewezen (bewaren)',
+      rejected: 'Afgewezen (bewaard)',
       purging: 'Wordt verwerkt',
       purged: 'Verwerkt',
       no_longer_eligible: 'Niet meer van toepassing',

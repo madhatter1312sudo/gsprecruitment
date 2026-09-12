@@ -1097,12 +1097,22 @@ def main():
         last_bulk = RETENTION_STATE["bulk_calls"][-1] if RETENTION_STATE["bulk_calls"] else {}
         if last_bulk.get("expected_count") != RETENTION_BIG_COUNT or last_bulk.get("confirm") != "APPROVE":
             failures.append(f"retention: categoriebrede aanroep droeg niet de volle telling plus confirm -- {last_bulk!r}")
-        # Na de 409 vervalt het oude aantal: een tweede klik zonder
-        # verversen mag niet hetzelfde verouderde getal opnieuw sturen.
+        # Na de 409 vervalt het oude aantal en gaat de knop op slot: een
+        # tweede poging mag niet hetzelfde verouderde getal opnieuw sturen,
+        # ook niet als iemand langs de disabled heen klikt.
         calls_before_retry = len(RETENTION_STATE["bulk_calls"])
+        locked = page.eval_on_selector("#retentionBulkModal .btn-outline-danger",
+                                        "el => ({disabled: el.disabled, lock: el.dataset.gspLock})")
+        if not locked["disabled"] or locked["lock"] != "1":
+            failures.append(f"retention: de bulkknop stond na de 409 niet uit en op slot -- {locked!r}")
         if wait_for_enabled(page, "#retentionBulkModal .btn-outline-danger", True, timeout=600):
             click_or_fail(page, failures, "#retentionBulkModal .btn-outline-danger", "de bulkknop")
             page.wait_for_timeout(500)
+        # Geforceerde klik: een click() vanuit JS gaat langs de disabled
+        # heen die de browser voor een muisklik afvangt. De handler zelf
+        # hoort de handeling dan nog steeds te weigeren.
+        page.evaluate("() => document.querySelector('#retentionBulkModal .btn-outline-danger').click()")
+        page.wait_for_timeout(600)
         if len(RETENTION_STATE["bulk_calls"]) != calls_before_retry:
             failures.append("retention: een tweede klik na de 409 stuurde alsnog een bulkaanroep "
                             "zonder dat de telling ververst was")
@@ -1111,6 +1121,9 @@ def main():
         click_or_fail(page, failures, '[data-action="retention-bulk-refresh"]', "de knop Verversen")
         if not wait_for_enabled(page, "#retentionBulkModal .btn-outline-danger", True):
             failures.append("retention: na verversen bleef de bulkknop uit")
+        elif page.eval_on_selector("#retentionBulkModal .btn-outline-danger",
+                                    "el => el.dataset.gspLock") == "1":
+            failures.append("retention: het slot bleef op de bulkknop staan na verversen")
         else:
             calls_before_ok = len(RETENTION_STATE["bulk_calls"])
             click_or_fail(page, failures, "#retentionBulkModal .btn-outline-danger", "de bulkknop")

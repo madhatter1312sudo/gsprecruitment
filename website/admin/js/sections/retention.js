@@ -287,7 +287,6 @@
     }
     const s = this._retention.summary;
     const cats = this.retentionCategoryCounts().filter(c => c.total > 0).length;
-    const lastKnown = this._retention.lastGeneratedKnown && this._retention.lastGeneratedAt;
     mount(el, html`
       ${this.retentionTile('Te beoordelen', s.pending_total ?? 0)}
       ${this.retentionTile('Categorieën met items', cats)}
@@ -941,6 +940,12 @@
         // klik niet hetzelfde verouderde getal opnieuw stuurt. Alleen
         // "Verversen" vult het weer.
         this._retention.bulkExpected = 0;
+        // Ook de knop zelf uit en op slot: het lege aantal alleen is een
+        // guard in de handler, het slot maakt de handeling ook onbereikbaar.
+        // fillRetentionCategoryModal() haalt het slot er weer af zodra
+        // "Verversen" een verse telling heeft opgehaald.
+        const b = handle.button('danger');
+        if (b) { b.disabled = true; b.dataset.gspLock = '1'; }
         this.retentionShowModalError(handle, ERROR_TEXT[d.code],
           { action: 'retention-bulk-refresh', actionLabel: 'Verversen' });
       } else {
