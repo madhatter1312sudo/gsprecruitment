@@ -110,7 +110,7 @@ CONTACTS_BY_CLIENT = {
 
 JOBS_BY_CLIENT = {
     1: [{"id": 201, "title": "Embedded Software Engineer", "employment_type": "werving_selectie",
-         "status": "open", "application_count": 3}],
+         "status": "open", "application_count": 3, "company_name": "Example Engineering B.V."}],
     2: [],
 }
 
@@ -126,6 +126,55 @@ ACTIVITIES_BY_CLIENT = {
          "created_at": "2026-01-01T00:00:00Z"}],
     2: [],
 }
+
+# ---- Kandidaatdrawer: tab Toestemmingen + referral-intake (§7.3.2) -------
+# Eén sourced kandidaat (candidates.id 1482, geen consent bij aanvang) is
+# genoeg om alle drie de modals tegen echte gestubde routes te toetsen; de
+# drie tabs Profiel/Matches/Activiteit hoeven voor dit doel alleen zonder
+# console error te renderen, dus die leunen op de generieke lege-lijst-
+# fallback onderaan route_admin_api.
+CANDIDATE_RECORD = {
+    "id": 1482, "full_name": "Voorbeeld Kandidaat", "email": "kandidaat@example.invalid",
+    "current_title": "Embedded Engineer", "current_company": None, "years_experience": 5,
+    "location": "Eindhoven", "source": "apollo", "status": "active",
+    "lawful_basis": "gerechtvaardigd_belang",
+    "consent_talentpool_at": None, "consent_talentpool_until": None, "consent_scope": None,
+    "consent_source": None, "consent_withdrawn_at": None,
+    "consent_spec_presentation_at": None, "consent_spec_presentation_job_id": None,
+    "job_alert_optin_at": None, "job_alert_unsubscribed_at": None,
+    "created_at": "2026-01-01T00:00:00Z",
+}
+
+CANDIDATE_STATE = {
+    "talentpool_calls": [], "presentation_calls": [], "referral_calls": [],
+    # "ok" | "suppressed" | "exists" | "unknown" -- welke uitkomst de
+    # volgende POST /candidates/referral teruggeeft.
+    "referral_mode": "ok",
+}
+
+
+def candidate_roster_item():
+    r = CANDIDATE_RECORD
+    return {
+        "kind": "sourced", "id": r["id"], "candidate_id": None, "user_id": None,
+        "full_name": r["full_name"], "email": r["email"], "current_title": r["current_title"],
+        "years_experience": r["years_experience"], "match_count": 0, "placement_count": 0,
+        "source": r["source"], "status": r["status"], "is_verified": True,
+    }
+
+
+def candidate_detail():
+    d = dict(CANDIDATE_RECORD)
+    d["skills"] = []
+    d["languages"] = []
+    d["tags"] = []
+    d["match_count"] = 0
+    d["placement_count"] = 0
+    d["kind"] = "sourced"
+    d["user_id"] = None
+    d["is_verified"] = None
+    return d
+
 
 LEADS = [
     {"id": 1, "source": "contact_submissions", "name": "Lead One", "email": "lead1@example.com",
@@ -348,7 +397,11 @@ def route_admin_api(route, request):
             all_open = [j for c in JOBS_BY_CLIENT.values() for j in c if j["status"] == "open"]
             json_response({"items": all_open, "total": len(all_open)})
             return
-        json_response({"items": [], "total": 0})
+        # Ongefilterd, geen client_id: as-built afwijking 3 (§7.3.2) --
+        # de eenmalige, ongefilterde ophaling die de consenttab gebruikt
+        # om een titel te vinden bij een vastgelegde presentatietoestemming.
+        all_jobs = [j for c in JOBS_BY_CLIENT.values() for j in c]
+        json_response({"items": all_jobs, "total": len(all_jobs)})
         return
 
     # ---- Client contacts (WS-C.4) ----
@@ -548,8 +601,87 @@ def route_admin_api(route, request):
     if path == "/api/v1/admin/content":
         json_response([])
         return
-    if path == "/api/v1/admin/candidates":
-        json_response({"items": [], "total": 0})
+    if path == "/api/v1/admin/candidates" and method == "GET":
+        json_response({"items": [candidate_roster_item()], "total": 1})
+        return
+    m = re.match(r"^/api/v1/admin/candidates/sourced/(\d+)$", path)
+    if m and method == "GET":
+        if int(m.group(1)) == CANDIDATE_RECORD["id"]:
+            json_response(candidate_detail())
+        else:
+            json_response({"detail": "Not found"}, status=404)
+        return
+    m = re.match(r"^/api/v1/admin/candidates/(\d+)/talentpool-consent$", path)
+    if m and method == "PATCH":
+        body = json.loads(request.post_data or "{}")
+        CANDIDATE_STATE["talentpool_calls"].append(body)
+        if body.get("consent"):
+            CANDIDATE_RECORD.update({
+                "consent_talentpool_at": "2026-09-03T00:00:00Z",
+                "consent_talentpool_until": "2027-09-03T00:00:00Z",
+                "consent_scope": body.get("scope"),
+                "consent_source": "admin",
+            })
+        else:
+            CANDIDATE_RECORD.update({
+                "consent_talentpool_at": None, "consent_talentpool_until": None,
+                "consent_scope": None, "consent_source": None,
+            })
+        json_response({
+            "id": CANDIDATE_RECORD["id"],
+            "consent_talentpool_at": CANDIDATE_RECORD["consent_talentpool_at"],
+            "consent_talentpool_until": CANDIDATE_RECORD["consent_talentpool_until"],
+            "consent_scope": CANDIDATE_RECORD["consent_scope"],
+            "consent_source": CANDIDATE_RECORD["consent_source"],
+            "lawful_basis": CANDIDATE_RECORD["lawful_basis"],
+        })
+        return
+    m = re.match(r"^/api/v1/admin/candidates/(\d+)/spec-presentation-consent$", path)
+    if m and method == "PATCH":
+        body = json.loads(request.post_data or "{}")
+        CANDIDATE_STATE["presentation_calls"].append(body)
+        if body.get("consent"):
+            CANDIDATE_RECORD.update({
+                "consent_spec_presentation_at": "2026-09-05T00:00:00Z",
+                "consent_spec_presentation_job_id": body.get("job_id"),
+            })
+        else:
+            CANDIDATE_RECORD.update({
+                "consent_spec_presentation_at": None, "consent_spec_presentation_job_id": None,
+            })
+        json_response({
+            "id": CANDIDATE_RECORD["id"],
+            "consent_spec_presentation_at": CANDIDATE_RECORD["consent_spec_presentation_at"],
+            "consent_spec_presentation_job_id": CANDIDATE_RECORD["consent_spec_presentation_job_id"],
+        })
+        return
+    if path == "/api/v1/admin/candidates/referral" and method == "POST":
+        body = json.loads(request.post_data or "{}")
+        CANDIDATE_STATE["referral_calls"].append(body)
+        mode = CANDIDATE_STATE["referral_mode"]
+        if mode == "suppressed":
+            json_response({"detail": {
+                "code": "referral_email_suppressed",
+                "message": "This e-mail address is on the suppression list.",
+            }}, status=409)
+            return
+        if mode == "exists":
+            json_response({"detail": {
+                "code": "referral_candidate_exists", "candidate_id": CANDIDATE_RECORD["id"],
+                "message": f"A candidate record already exists for this e-mail address (id {CANDIDATE_RECORD['id']}).",
+            }}, status=409)
+            return
+        if mode == "unknown":
+            json_response({"detail": {
+                "code": "referral_something_else",
+                "message": "Something else went wrong that this screen does not know a Dutch sentence for.",
+            }}, status=409)
+            return
+        json_response({
+            "id": 9001, "full_name": body.get("full_name"), "source": "referral",
+            "lawful_basis": "toestemming_referral", "date_found": "2026-09-10",
+            "referred_by": body.get("referred_by"), "confirmation_email_sent": True,
+        }, status=201)
         return
 
     json_response({"items": [], "total": 0})
@@ -1230,6 +1362,141 @@ def main():
         if new_errors:
             failures.append(f"retention (na retry): {len(new_errors)} console error(s): {new_errors[:3]}")
 
+        # ---- Kandidaatdrawer: tab Toestemmingen + referral-intake (§7.3.2) ----
+        errors_before = len(console_errors)
+        page.click('.nav-link[data-section="candidates"]')
+        wait_until(page, lambda: page.query_selector('#section-candidates table tbody tr [data-action="view-candidate"]') is not None)
+        click_or_fail(page, failures, '#section-candidates table tbody tr [data-action="view-candidate"]',
+                      "de bekijkknop van de kandidaatrij")
+        if not wait_until(page, lambda: page.query_selector('#candidateDrawerTabContent') is not None):
+            failures.append("candidates: de kandidaatdrawer ging niet open")
+        click_or_fail(page, failures, '#candidateDrawer [data-tab="toestemmingen"]', "de tab Toestemmingen")
+        if not wait_until(page, lambda: page.query_selector('[data-action="candidate-talentpool-edit"]') is not None):
+            failures.append("candidates: de tab Toestemmingen rendeerde niet")
+
+        # Talentpool vastleggen met lege evidence: inline fout, nul aanroepen.
+        click_or_fail(page, failures, '[data-action="candidate-talentpool-edit"]', "de knop Wijzigen (talentpool)")
+        if not wait_until(page, lambda: page.query_selector('#tpEvidence') is not None):
+            failures.append("candidates: de talentpoolmodal ging niet open")
+        click_or_fail(page, failures, '#candidateTalentpoolModal .btn-primary', "Opslaan (talentpool, leeg)")
+        if not wait_until(page, lambda: "Vul kort in" in text_of(page, '#tpEvidenceError')):
+            failures.append("candidates: lege evidence gaf geen inline fout in de talentpoolmodal")
+        if CANDIDATE_STATE["talentpool_calls"]:
+            failures.append("candidates: een talentpoolaanroep ging uit met lege evidence")
+
+        # Vastleggen zonder omvang: nul aanroepen.
+        page.fill('#tpEvidence', 'Ondertekend formulier van 2 september.')
+        click_or_fail(page, failures, '#candidateTalentpoolModal .btn-primary', "Opslaan (talentpool, zonder omvang)")
+        if not wait_until(page, lambda: text_of(page, '#tpScopeError').strip() != ''):
+            failures.append("candidates: het ontbreken van een omvang gaf geen inline fout")
+        if CANDIDATE_STATE["talentpool_calls"]:
+            failures.append("candidates: een talentpoolaanroep ging uit zonder omvang")
+
+        # Vastleggen met omvang: één aanroep, consent=True plus scope.
+        page.select_option('#tpScope', 'matching_and_contact')
+        click_or_fail(page, failures, '#candidateTalentpoolModal .btn-primary', "Opslaan (talentpool, vastleggen)")
+        if not wait_for_calls(page, CANDIDATE_STATE["talentpool_calls"], 1):
+            failures.append("candidates: het vastleggen van talentpooltoestemming stuurde geen aanroep")
+        elif (CANDIDATE_STATE["talentpool_calls"][0].get("scope") != "matching_and_contact"
+              or CANDIDATE_STATE["talentpool_calls"][0].get("consent") is not True):
+            failures.append(f"candidates: talentpool-vastleggen stuurde de verkeerde payload -- {CANDIDATE_STATE['talentpool_calls'][0]!r}")
+        wait_until(page, lambda: page.query_selector('#candidateTalentpoolModal.show') is None)
+
+        # Intrekken: geen scope in de payload.
+        click_or_fail(page, failures, '[data-action="candidate-talentpool-edit"]', "Wijzigen (talentpool, intrekken)")
+        wait_until(page, lambda: page.query_selector('#tpConsentWithdraw') is not None)
+        page.check('#tpConsentWithdraw')
+        page.fill('#tpEvidence', 'Telefonisch ingetrokken op 4 september.')
+        click_or_fail(page, failures, '#candidateTalentpoolModal .btn-primary', "Opslaan (talentpool, intrekken)")
+        if not wait_for_calls(page, CANDIDATE_STATE["talentpool_calls"], 2):
+            failures.append("candidates: het intrekken van talentpooltoestemming stuurde geen aanroep")
+        else:
+            second_tp = CANDIDATE_STATE["talentpool_calls"][1]
+            if second_tp.get("consent") is not False or "scope" in second_tp:
+                failures.append(f"candidates: intrekken stuurde toch een omvang mee -- {second_tp!r}")
+
+        # Presentatie vastleggen: stuurt job_id; intrekken stuurt het niet.
+        click_or_fail(page, failures, '[data-action="candidate-presentation-edit"]', "Vastleggen (presentatie)")
+        if not wait_until(page, lambda: page.query_selector('#spJob') is not None and not is_disabled(page, '#spJob')):
+            failures.append("candidates: de vacaturekiezer laadde niet, of bleef disabled, in de presentatiemodal")
+        page.select_option('#spJob', '201')
+        page.fill('#spEvidence', 'E-mail in het dossier van 5 september.')
+        click_or_fail(page, failures, '#candidatePresentationModal .btn-primary', "Opslaan (presentatie, vastleggen)")
+        if not wait_for_calls(page, CANDIDATE_STATE["presentation_calls"], 1):
+            failures.append("candidates: het vastleggen van presentatietoestemming stuurde geen aanroep")
+        elif CANDIDATE_STATE["presentation_calls"][0].get("job_id") != 201:
+            failures.append(f"candidates: presentatie-vastleggen stuurde niet job_id=201 -- {CANDIDATE_STATE['presentation_calls'][0]!r}")
+        wait_until(page, lambda: page.query_selector('#candidatePresentationModal.show') is None)
+
+        click_or_fail(page, failures, '[data-action="candidate-presentation-edit"]', "Vastleggen (presentatie, intrekken)")
+        wait_until(page, lambda: page.query_selector('#spConsentWithdraw') is not None)
+        page.check('#spConsentWithdraw')
+        page.fill('#spEvidence', 'Telefonisch ingetrokken op 6 september.')
+        click_or_fail(page, failures, '#candidatePresentationModal .btn-primary', "Opslaan (presentatie, intrekken)")
+        if not wait_for_calls(page, CANDIDATE_STATE["presentation_calls"], 2):
+            failures.append("candidates: het intrekken van presentatietoestemming stuurde geen aanroep")
+        else:
+            second_sp = CANDIDATE_STATE["presentation_calls"][1]
+            if second_sp.get("consent") is not False or "job_id" in second_sp:
+                failures.append(f"candidates: intrekken van presentatie stuurde toch een job_id mee -- {second_sp!r}")
+
+        # Referral: twee eigen 409's op detail.code, val terug op detail.message.
+        click_or_fail(page, failures, '#candidateDrawer [data-action="close-modal"]', "sluitknop van de kandidaatdrawer")
+        wait_until(page, lambda: page.query_selector('#candidateDrawer.show') is None)
+
+        CANDIDATE_STATE["referral_mode"] = "suppressed"
+        click_or_fail(page, failures, '[data-action="open-referral-modal"]', "de knop Referral vastleggen")
+        if not wait_until(page, lambda: page.query_selector('#refFullName') is not None):
+            failures.append("candidates: de referralmodal ging niet open")
+        page.fill('#refFullName', 'Voorbeeld Referral')
+        page.fill('#refEmail', 'referral@example.invalid')
+        page.fill('#refReferredBy', 'Jan Voorbeeld')
+        if "Jan Voorbeeld" not in text_of(page, '#referralInfoName'):
+            failures.append("candidates: het informatieblok toont de naam uit Aangedragen door niet live")
+        page.fill('#refEvidence', 'Mondeling bevestigd door Jan op 3 september.')
+        click_or_fail(page, failures, '#candidateReferralModal .btn-primary', "Vastleggen (referral, suppressed)")
+        if not wait_for_calls(page, CANDIDATE_STATE["referral_calls"], 1):
+            failures.append("candidates: de referral-aanroep (suppressed) ging niet uit")
+        if not wait_for_text(page, '#candidateReferralAlert', 'suppressielijst'):
+            failures.append(f"candidates: de suppressielijst-melding verscheen niet -- kreeg {text_of(page, '#candidateReferralAlert')!r}")
+        if page.query_selector('#candidateReferralAlert [data-action]') is not None:
+            failures.append("candidates: de suppressielijst-melding toonde onterecht een knop")
+
+        CANDIDATE_STATE["referral_mode"] = "exists"
+        click_or_fail(page, failures, '#candidateReferralModal .btn-primary', "Vastleggen (referral, exists)")
+        if not wait_for_calls(page, CANDIDATE_STATE["referral_calls"], 2):
+            failures.append("candidates: de referral-aanroep (exists) ging niet uit")
+        if not wait_until(page, lambda: page.query_selector('[data-action="candidate-referral-open-existing"]') is not None):
+            failures.append("candidates: de knop Kandidaat openen verscheen niet bij referral_candidate_exists")
+        else:
+            click_or_fail(page, failures, '[data-action="candidate-referral-open-existing"]', "de knop Kandidaat openen")
+            if not wait_until(page, lambda: page.query_selector('#candidateDrawerTabContent') is not None
+                              and page.query_selector('#candidateReferralModal.show') is None):
+                failures.append("candidates: 'Kandidaat openen' opende de drawer niet (of sloot de referralmodal niet)")
+
+        CANDIDATE_STATE["referral_mode"] = "unknown"
+        click_or_fail(page, failures, '#candidateDrawer [data-action="close-modal"]',
+                      "sluitknop van de kandidaatdrawer (na Kandidaat openen)")
+        wait_until(page, lambda: page.query_selector('#candidateDrawer.show') is None)
+        click_or_fail(page, failures, '[data-action="open-referral-modal"]', "Referral vastleggen (opnieuw)")
+        wait_until(page, lambda: page.query_selector('#refFullName') is not None)
+        page.fill('#refFullName', 'Voorbeeld Referral Twee')
+        page.fill('#refEmail', 'referral2@example.invalid')
+        page.fill('#refReferredBy', 'Piet Voorbeeld')
+        page.fill('#refEvidence', 'Mondeling bevestigd door Piet op 4 september.')
+        click_or_fail(page, failures, '#candidateReferralModal .btn-primary', "Vastleggen (referral, onbekende code)")
+        if not wait_for_calls(page, CANDIDATE_STATE["referral_calls"], 3):
+            failures.append("candidates: de referral-aanroep (onbekende code) ging niet uit")
+        if not wait_for_text(page, '#candidateReferralAlert', "does not know a Dutch sentence"):
+            failures.append(f"candidates: de onbekende 409-code viel niet terug op detail.message -- kreeg {text_of(page, '#candidateReferralAlert')!r}")
+
+        # De drie referral-409's zijn opzettelijk en al op tekst getoetst
+        # hierboven; Chromium logt elke 409-respons zelf ook als console
+        # error, zoals bij de opzettelijke 500 van Bewaartermijnen.
+        new_errors = [e for e in console_errors[errors_before:] if "409 (Conflict)" not in e]
+        if new_errors:
+            failures.append(f"candidates: {len(new_errors)} console error(s): {new_errors[:3]}")
+
         browser.close()
 
     if failures:
@@ -1239,8 +1506,10 @@ def main():
         sys.exit(1)
 
     print("PASS: Opdrachtgevers (list + tabbed drawer), Leads (inbox + unread filter + PATCH), "
-          "Rapportage en Bewaartermijnen (lijst, generate, goedkeuren met getypte bevestiging, "
-          "afwijzen, categoriebrede bulk met 409-mismatch, droogloop en 500 met retry) "
+          "Rapportage, Bewaartermijnen (lijst, generate, goedkeuren met getypte bevestiging, "
+          "afwijzen, categoriebrede bulk met 409-mismatch, droogloop en 500 met retry) en "
+          "Toestemmingen/referral (§7.3.2: talentpool- en presentatiemodal met clientside-validatie "
+          "en de juiste payload per richting, plus de drie referral-409-uitkomsten) "
           "renderden allemaal correct, zonder console errors.")
     sys.exit(0)
 
