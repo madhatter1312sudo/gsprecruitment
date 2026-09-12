@@ -1843,9 +1843,18 @@ html[data-lang="en"] .lang-nl { display: none; }
 .talentpool-optin-check input { margin-top: 3px; flex-shrink: 0; }
 .talentpool-optin-row { display: flex; gap: 8px; }
 .talentpool-optin-row input { flex: 1; }
+/* minmax(0, 1fr), niet 1fr: een grid-track heeft standaard min-width:auto,
+   dus de track groeit mee met de breedste onbreekbare inhoud in plaats van
+   zich naar de viewport te voegen. Op 390px leverde `1fr` een track van
+   661px op; de hero van kandidaten.html werd daardoor midden in woorden
+   afgekapt en was door body{overflow-x:hidden} ook niet weg te scrollen.
+   .signup-panel is een flex-rij; op mobiel moeten de kaart en de
+   talentpool-opt-in onder elkaar staan, niet naast elkaar (de opt-in heeft
+   daar zijn margin-top/border-top ook voor). */
 @media (max-width: 1023px) {
-  .signup-split { grid-template-columns: 1fr; }
+  .signup-split { grid-template-columns: minmax(0, 1fr); }
   .signup-value, .signup-panel { padding: 48px 24px; }
+  .signup-panel { flex-direction: column; }
   .signup-card { padding: 32px 24px; }
 }
 
@@ -1892,8 +1901,17 @@ html[data-lang="en"] .lang-nl { display: none; }
 .cta-band h2 { color: #fff; }
 .cta-band p { color: rgba(255, 255, 255, 0.72); max-width: 560px; margin: 10px auto 0; }
 .cta-band .hero-actions { justify-content: center; margin-top: 26px; }
-.cta-band .btn-outline { color: #fff; border-color: rgba(255, 255, 255, 0.4); }
-.cta-band .btn-outline:hover { background: rgba(255, 255, 255, 0.1); border-color: #fff; }
+/* .btn-outline is ontworpen voor lichte secties: var(--navy) tekst op een
+   transparante achtergrond. In de navy hero en de navy CTA-band levert dat
+   rgb(10,22,40) op rgb(6,13,26) op, oftewel 1,07:1, en is het knoplabel
+   onzichtbaar ("Onze werkwijze" op werkgevers.html, "Bekijk vacatures" op
+   404.html). Op donkere vlakken dus wit op wit-transparant: #fff op
+   var(--navy-900) is 18,8:1. De .cta-band-regel stond er al, .page-hero
+   ontbrak. */
+.cta-band .btn-outline,
+.page-hero .btn-outline { color: #fff; border-color: rgba(255, 255, 255, 0.4); }
+.cta-band .btn-outline:hover,
+.page-hero .btn-outline:hover { background: rgba(255, 255, 255, 0.1); border-color: #fff; }
 
 @media (max-width: 860px) {
   .choice-grid { grid-template-columns: 1fr; }
