@@ -155,6 +155,20 @@
       percentage: 'Percentage',
       vast: 'Vast bedrag',
     },
+    // §7.3.4 "De canonieke faselijst": pipeline_entries.stage, de zeven
+    // waarden uit migratie 043 (BV8), letterlijk in de spec-volgorde. De
+    // <select> in de tab Pipeline (kandidaat- en klantdrawer) biedt ze
+    // alleen in deze volgorde aan; de historie en een eventuele badge
+    // lezen dezelfde map, zodat "Screening" overal hetzelfde woord is.
+    pipelinefase: {
+      sourced: 'Gesourced',
+      new: 'Nieuw',
+      screening: 'Screening',
+      interview: 'Gesprek',
+      offer: 'Aanbod',
+      placed: 'Geplaatst',
+      rejected: 'Afgewezen',
+    },
   };
 
   // Kleurfamilie per waarde (§7.2e: neutraal, informatief, aandacht,
@@ -201,7 +215,11 @@
     return 'badge ' + (TONE_CLASS[map[key]] || TONE_CLASS.neutraal);
   }
 
-  root.AdminLabels = { maps: MAPS, tones: TONES, label, badgeClass };
+  // pipelineStages: de zeven waarden in spec-volgorde (Object.keys behoudt
+  // invoegvolgorde voor tekstsleutels), de enige plek die de <select> in
+  // §7.3.4 raadpleegt om te weten welke zeven opties er zijn en in welke
+  // volgorde.
+  root.AdminLabels = { maps: MAPS, tones: TONES, label, badgeClass, pipelineStages: Object.keys(MAPS.pipelinefase) };
 
   // De zes bestaande aanroepnamen op Admin blijven bestaan als dunne
   // doorgeefluiken, zodat geen enkele sectie hoefde te veranderen.

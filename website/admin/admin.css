@@ -57,19 +57,24 @@
      .a-tap           label om een selectievakje, 44px tikdoel op een telefoon
      .a-confirm-mismatch  "Komt niet overeen" onder het bevestigingsveld
      .a-skel-block    vlak laadblok in een drawertab (§7.2b, §7.3.2), geen shimmer
+     .a-timeline      verticale historietijdlijn, __item is één regel (§7.3.4)
+     .a-pipeline-controls  select + knop op de kaart Pipeline (§7.3.4)
      .text-success-ink .text-danger-ink .text-warning-ink .text-info-ink
                       de vier semantische tekstkleuren uit §7.1.3, op de
                       --ink-*-tokens uit §7.1.2
      .a-accent        het goudaccent (geen semantische familie, §7.2e)
    Panelen (ui.js): .a-modal (+ --wide, __title, __subtitle, __close), .a-drawer,
    .a-backdrop, .a-confirm-hint, .a-sortable (kolomkop met aria-sort), .a-nav-caption (sidebarkopje).
-   Samen 44 klassenamen: de 29 uit §7.1.3, de veertien die de sectie
+   Samen 46 klassenamen: de 29 uit §7.1.3, de veertien die de sectie
    Bewaartermijnen (§7.3.1) nodig had (.a-eyebrow, .a-num, .a-wide-only,
    .a-bulkbar, .a-cardlist, .a-clamp, .a-disclosure, .a-col-check,
    .a-col-actions, .a-col-cat, .a-col-status, .a-row-selected, .a-tap,
-   .a-confirm-mismatch), en .a-skel-block die Toestemmingen (§7.3.2) als
+   .a-confirm-mismatch), .a-skel-block die Toestemmingen (§7.3.2) als
    eerste afnemer nodig had voor de "drie vlakke blokken"-laadstaat van een
-   drawertab (§7.2b) -- die staat stond nog nergens in dit bestand.
+   drawertab (§7.2b) -- die staat stond nog nergens in dit bestand -- en de
+   twee die de tab Pipeline (§7.3.4) erbij bracht: .a-timeline (hergebruikt
+   .a-disclosure voor de accordeon en .a-skel-block voor de laadstaat, dus
+   geen eigen klasse nodig voor die twee) en .a-pipeline-controls.
    Modifiers tellen niet als eigen naam: .a-num--xl,
    --date en --loading, .a-clamp--open, .a-cardlist--compact,
    .a-scrollbox--rows en .a-modal__title--danger horen bij hun basisklasse.
@@ -420,6 +425,58 @@ h1, h2, h3, h4,
   margin-bottom: var(--space-md);
 }
 .a-skel-block:last-child { margin-bottom: 0; }
+
+/* §7.3.4: select + knop op de kaart Pipeline. Naast elkaar op breed
+   scherm; op 390px gestapeld, allebei volle breedte (de select mag niet
+   smaller worden dan het label eronder toestaat). */
+.a-pipeline-controls {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--space-md);
+  flex-wrap: wrap;
+  margin-bottom: var(--space-md);
+}
+.a-pipeline-controls .form-group { flex: 1 1 220px; min-width: 0; }
+@media (max-width: 600px) {
+  .a-pipeline-controls { flex-direction: column; align-items: stretch; }
+  .a-pipeline-controls .btn { width: 100%; }
+}
+
+/* §7.3.4 "Historie": verticale tijdlijn. 2px --navy-600-lijn links, 8px
+   stip per item in --navy-300, --gold-500 voor het nieuwste (het eerste
+   item -- de lijst komt hier al nieuwste-eerst binnen, admin.js sorteert
+   dat vóór het renderen). Hergebruikt door §7.3.6(b) (Activiteitentab). */
+.a-timeline {
+  list-style: none;
+  margin: 0;
+  padding: 0 0 0 24px;
+  position: relative;
+}
+.a-timeline::before {
+  content: "";
+  position: absolute;
+  left: 7px;
+  top: .3em;
+  bottom: .3em;
+  width: 2px;
+  background: var(--navy-600);
+}
+.a-timeline__item {
+  position: relative;
+  padding-bottom: var(--space-md);
+}
+.a-timeline__item:last-child { padding-bottom: 0; }
+.a-timeline__item::before {
+  content: "";
+  position: absolute;
+  left: -21px;
+  top: .3em;
+  width: 8px;
+  height: 8px;
+  border-radius: var(--radius-full);
+  background: var(--navy-300);
+}
+.a-timeline__item--newest::before { background: var(--gold-500); }
 
 .a-clickable { cursor: pointer; }
 /* Geselecteerde rij (§7.2a): eigen vlak plus een gouden linkerrand op de
@@ -871,13 +928,18 @@ h1, h2, h3, h4,
    horen bij de gedeelde componentklasse en niet bij één sectie. Andere
    secties krijgen dit bij hun eigen §8.x.0-pas. Een selectievakje wordt
    niet zelf 44px groot -- dat levert een enorm vierkant op -- maar krijgt
-   zijn tikdoel van het label eromheen (.a-tap). */
+   zijn tikdoel van het label eromheen (.a-tap).
+   §7.3.4: de fasewisselaar in de tab Pipeline staat in de offcanvas zelf,
+   niet in een modal -- .modal .form-select/.form-control dekte dat niet,
+   dus .offcanvas krijgt dezelfde twee regels. */
 @media (max-width: 600px) {
   #section-retention .btn,
   #section-candidates .btn,
   #section-placements .btn,
   .offcanvas .btn,
   .modal .btn,
+  .offcanvas .form-select,
+  .offcanvas .form-control,
   .modal .form-select,
   .modal .form-control {
     min-height: 44px;
