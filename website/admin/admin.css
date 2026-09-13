@@ -539,7 +539,14 @@ h1, h2, h3, h4,
    zelf al overflow-y), zodat ze bij een lang formulier niet buiten beeld
    vallen (design-reviewer op 1212e07, gemeten op de brede plaatsingen-
    modal op 1440x1000). Zelfde navy-900 als de rest van het paneel, dus
-   geen randeffect nodig om de inhoud erachter af te dekken. */
+   geen randeffect nodig om de inhoud erachter af te dekken.
+   Regressie op ece9d6d: zonder gereserveerde ruimte lag deze footer over
+   de laatste velden zodra de inhoud hoger was dan de viewport
+   (elementFromPoint gaf de knop terug in plaats van het veld eronder --
+   klik-hijack). ui.js meet de footerhoogte na het mounten en zet die als
+   extra padding-bottom op de scrollcontainer (boven op de padding
+   hieronder), herberekend bij resize omdat de knoppen op 390px stapelen
+   en de footer dan hoger wordt. */
 .a-sticky-footer {
   position: sticky;
   bottom: 0;

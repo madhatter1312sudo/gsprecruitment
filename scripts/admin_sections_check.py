@@ -1164,6 +1164,33 @@ def check_or_fail(page, failures, selector, what, timeout=6000):
     return True
 
 
+def element_from_point_is_self(page, selector):
+    """design-reviewer op ece9d6d: bewijst dat een sticky voettekst niet
+    over `selector` heen ligt. True wanneer het midden van het element
+    zichzelf teruggeeft via document.elementFromPoint; false wanneer iets
+    ervoor ligt (klik-hijack -- typisch de voettekst zelf)."""
+    return bool(page.eval_on_selector(selector,
+        "el => { const r = el.getBoundingClientRect(); "
+        "const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2); "
+        "return hit === el; }"))
+
+
+def fields_behind_sticky_footer(page, container_selector):
+    """design-reviewer op ece9d6d: na scrollen naar onder mag geen enkel
+    formulierveld in `container_selector` binnen de band van zijn eigen
+    .a-sticky-footer liggen. Geeft de id's (of tagnamen) van de rest-
+    gevallen terug; een lege lijst is de geslaagde staat."""
+    return page.eval_on_selector(container_selector,
+        "el => { const footer = el.querySelector('.a-sticky-footer'); "
+        "if (!footer) return []; "
+        "const fr = footer.getBoundingClientRect(); "
+        "const fields = [...el.querySelectorAll('input, select, textarea, button')] "
+        "  .filter(f => !footer.contains(f)); "
+        "return fields.filter(f => { const r = f.getBoundingClientRect(); "
+        "  return r.width > 0 && r.height > 0 && !(r.bottom <= fr.top || r.top >= fr.bottom); }) "
+        "  .map(f => f.id || f.tagName); }") or []
+
+
 def check_retention_category_labels():
     """D3: elke categorie uit core/retention.RETENTION_TABLE heeft een
     Nederlands label in js/labels.js. Zonder dat toont de droogloop of de
@@ -1926,10 +1953,18 @@ def main():
         # aanroep te laten mislukken.
         if not wait_until(page, lambda: is_disabled(page, '[data-action="candidate-presentation-edit"]')):
             failures.append("candidates: de presentatieknop bleef aan nadat talentpool was ingetrokken")
-        presentation_title = page.eval_on_selector(
-            '[data-action="candidate-presentation-edit"]', "el => el.getAttribute('title') || ''")
-        if "ingetrokken" not in (presentation_title or ""):
-            failures.append(f"candidates: de disabled presentatieknop mist een Nederlandse reden -- kreeg {presentation_title!r}")
+        # code-reviewer op ece9d6d: is_disabled() geeft default=True terug
+        # als het element ontbreekt, dus de wait_until hierboven kan
+        # spuriously slagen op een re-render waarin de knop even weg is.
+        # Een kale eval_on_selector daarna stierf dan met "Failed to find
+        # element" in plaats van een failure-regel op te leveren.
+        if page.query_selector('[data-action="candidate-presentation-edit"]') is None:
+            failures.append("candidates: de presentatieknop is niet meer te vinden na het intrekken van talentpool")
+        else:
+            presentation_title = page.eval_on_selector(
+                '[data-action="candidate-presentation-edit"]', "el => el.getAttribute('title') || ''")
+            if "ingetrokken" not in (presentation_title or ""):
+                failures.append(f"candidates: de disabled presentatieknop mist een Nederlandse reden -- kreeg {presentation_title!r}")
         # chief-of-staff op 3c8f690: dezelfde reden hoort ook zichtbaar te
         # staan, niet alleen als title (geen hover op 390), en de
         # talentpoolkaart hoort "Ingetrokken op <datum>" te tonen.
@@ -2280,6 +2315,38 @@ def main():
         click_or_fail(page, failures, '#placementFormOneOffAdd', "placements: 'Regel toevoegen' (eenmalige kosten)")
         wait_until(page, lambda: page.query_selector('[data-oneoff-field="label"][data-oneoff-index="0"]') is not None)
         fill_or_fail(page, failures, '[data-oneoff-field="label"][data-oneoff-index="0"]', "Search fee", "placements: omschrijving eenmalige kost")
+
+        # design-reviewer op ece9d6d: de sticky voettekst mag geen enkel
+        # veld overlappen (klik-hijack). 1440x1000: "Regel toevoegen" zit
+        # vlak boven de footer in een lang formulier.
+        if page.query_selector('#placementFormOneOffAdd') is None:
+            failures.append("placements: 'Regel toevoegen' niet gevonden voor de klik-hijacktest")
+        elif not element_from_point_is_self(page, '#placementFormOneOffAdd'):
+            failures.append("placements (1440): de sticky voettekst overlapt 'Regel toevoegen' (klik-hijack)")
+        page.eval_on_selector('#placementFormModal .modal-body', "el => { el.scrollTop = el.scrollHeight; }")
+        page.wait_for_timeout(150)
+        stuck_fields = fields_behind_sticky_footer(page, '#placementFormModal')
+        if stuck_fields:
+            failures.append(f"placements (1440): velden liggen na scrollen naar onder binnen de footerband -- {stuck_fields}")
+
+        # Zelfde overlapcontrole op 390, waar de knoppen stapelen en de
+        # footer dus hoger wordt: Afrekenbasis staat er vlak boven.
+        page.set_viewport_size({"width": 390, "height": 844})
+        page.wait_for_timeout(200)
+        if page.query_selector('#placementFormBillingBasis') is None:
+            failures.append("placements (390): #placementFormBillingBasis niet gevonden voor de klik-hijacktest")
+        elif not element_from_point_is_self(page, '#placementFormBillingBasis'):
+            failures.append("placements (390): de sticky voettekst overlapt Afrekenbasis (klik-hijack)")
+        # Zelfde scroll-naar-onder-controle als bij 1440: op 390 stapelen de
+        # knoppen (hogere footer), dus dit toetst een andere footerhoogte,
+        # niet dezelfde aanname nogmaals.
+        page.eval_on_selector('#placementFormModal .modal-body', "el => { el.scrollTop = el.scrollHeight; }")
+        page.wait_for_timeout(150)
+        stuck_fields_390 = fields_behind_sticky_footer(page, '#placementFormModal')
+        if stuck_fields_390:
+            failures.append(f"placements (390): velden liggen na scrollen naar onder binnen de footerband -- {stuck_fields_390}")
+        page.set_viewport_size({"width": 1400, "height": 1000})
+        page.wait_for_timeout(200)
 
         # security-auditor LOW-2 op 1212e07: een eenmalige kost boven het
         # geldplafond mag geen aanroep opleveren, net als elk ander bedrag.

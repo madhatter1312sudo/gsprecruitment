@@ -34,7 +34,9 @@
        een blijvend geopende drawer). Maximaal twee acties, in een sticky
        voettekst onderin de drawer: secundair links, primair rechts.
        Alias van primary/secondary hierboven; button()/setBusy() werken
-       er hetzelfde op.
+       er hetzelfde op. keepOpen staat hier standaard aan (een drawer
+       sluit niet vanzelf na een footeractie zoals een modal dat na "OK"
+       wel doet); zet keepOpen: false expliciet om dat te overschrijven.
 
      ui.tabs({ tabs, active, action, dataset }) -> RawHtml
        Tabstrip met role="tablist" en aria-selected. tabs is
@@ -295,8 +297,13 @@
     // allebei identiek blijft. opts.primary/opts.secondary winnen als een
     // aanroeper toch beide meegeeft.
     const footer = opts.footer || {};
-    const primaryOpt = opts.primary || footer.primary || null;
-    const secondaryOpt = opts.secondary || footer.secondary || null;
+    // code-reviewer op ece9d6d: een drawer blijft geopend na een
+    // footeractie (het is geen modal die na "OK" hoort te sluiten), dus
+    // keepOpen staat hier standaard aan -- opts.primary/opts.secondary
+    // zelf (de modalvorm) behouden hun bestaande standaard (sluiten,
+    // tenzij de aanroeper keepOpen zet), dat verandert hier niet.
+    const primaryOpt = opts.primary || (footer.primary ? { keepOpen: true, ...footer.primary } : null);
+    const secondaryOpt = opts.secondary || (footer.secondary ? { keepOpen: true, ...footer.secondary } : null);
     const buttons = [];
     if (secondaryOpt) buttons.push({ ...secondaryOpt, cls: 'btn btn-ghost-secondary', role: 'secondary' });
     if (opts.danger) buttons.push({ ...opts.danger, cls: 'btn btn-outline-danger', role: 'danger' });
@@ -374,12 +381,30 @@
                <div class="modal-content"><div class="modal-body">${inner}</div></div>
              </div>`);
 
+    // design-reviewer op ece9d6d: de sticky voettekst nam geen ruimte in de
+    // scrollcontainer in beslag, dus zodra de inhoud hoger was dan de
+    // viewport lag de footer over de laatste velden (klik-hijack:
+    // elementFromPoint op zo'n veld gaf de knop terug). De footer krijgt
+    // zijn eigen, op dat moment gemeten hoogte terug als extra
+    // padding-bottom op de scrollcontainer, boven op de bestaande
+    // (--space-2xl/--space-xl); dat is de gemeten variant uit de twee die
+    // de review noemde, niet een vaste CSS-waarde, want de knoppen
+    // stapelen op 390px en maken de footer dan hoger. De meting zelf moet
+    // wachten tot na instance.show()/fallbackShow() hieronder: vóór dat
+    // moment staat het paneel nog op display:none (Bootstraps eigen
+    // .show()-toggle) en levert footerEl.offsetHeight altijd 0 op, wat de
+    // padding stilzwijgend op de kale basiswaarde liet staan.
+    let onFooterResize = null;
+    const scrollBody = el.querySelector(isDrawer ? '.offcanvas-body' : '.modal-body');
+    const footerEl = el.querySelector('.a-sticky-footer');
+
     let instance = null;
     let closed = false;
     let releaseTrap = null;
 
     function unwire() {
       if (releaseTrap) { releaseTrap(); releaseTrap = null; }
+      if (onFooterResize) { root.removeEventListener('resize', onFooterResize); onFooterResize = null; }
       el.removeEventListener(hiddenEvent, onHidden);
       const i = openPanels.indexOf(handle);
       if (i !== -1) openPanels.splice(i, 1);
@@ -477,6 +502,17 @@
       instance.show();
     } else {
       fallbackShow(el, isDrawer ? 'offcanvas-backdrop' : 'modal-backdrop');
+    }
+    // Nu pas zichtbaar (geen fade-klasse, dus geen overgangswachttijd
+    // nodig): footerEl.offsetHeight klopt nu wel.
+    if (scrollBody && footerEl) {
+      if (scrollBody.dataset.gspBasePad === undefined) {
+        scrollBody.dataset.gspBasePad = String(parseFloat(root.getComputedStyle(scrollBody).paddingBottom) || 0);
+      }
+      const basePad = parseFloat(scrollBody.dataset.gspBasePad) || 0;
+      onFooterResize = () => { scrollBody.style.paddingBottom = (basePad + footerEl.offsetHeight) + 'px'; };
+      onFooterResize();
+      root.addEventListener('resize', onFooterResize);
     }
     releaseTrap = attachFocusTrap(el);
     // Bij een getypte bevestiging is dat veld het eerste interactieve
