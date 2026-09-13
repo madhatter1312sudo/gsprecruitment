@@ -449,6 +449,12 @@ h1, h2, h3, h4,
 .a-pipeline-controls .form-group { flex: 1 1 220px; min-width: 0; }
 @media (max-width: 600px) {
   .a-pipeline-controls { flex-direction: column; align-items: stretch; }
+  /* design-reviewer FIX FIRST op claude/admin-pipeline: flex: 1 1 220px
+     hierboven is een breedtebasis voor de rijrichting op breed scherm; in
+     flex-direction: column wordt diezelfde 220px een HOOGTEbasis, en dus
+     165px lege ruimte tussen select en knop. flex: 0 0 auto laat het
+     formuliergroepje zijn eigen (veld)hoogte houden. */
+  .a-pipeline-controls .form-group { flex: 0 0 auto; }
   .a-pipeline-controls .btn { width: 100%; }
 }
 
