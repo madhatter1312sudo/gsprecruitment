@@ -34,6 +34,24 @@ Covers:
     twee droogloopkaarten vragen geen bevestiging; een 500 geeft de
     retrylink en herstelt daarna.
 
+  - Plaatsingen (SITE-DESIGN-SPEC.md §7.3.3): de lijst (60 rijen naast de
+    paginagrootte van 20) toont vertaalde labels, geen ruwe enumwaarde;
+    server-side sortering op kandidaat verplaatst de enige afwijkende rij
+    naar het einde (oplopend) en het begin (aflopend) van de hele
+    verzameling; status-, opdrachtgever- en kandidaatfilters (het laatste
+    lost eerst op naar een candidate_id: numeriek direct, een naam via de
+    kandidatenlijst, met een hint bij nul of meerdere treffers); de drawer
+    (Overzicht/Financieel/Marge) toont bedragen met euroteken en
+    tabular-nums; statuswisseling gebruikt de gewone bevestiging behalve
+    naar geannuleerd (destructief, geen getypte bevestiging); marge toont
+    de waarschuwingszin letterlijk, "n.v.t. (invoer ontbreekt)" bij null,
+    blokkeert een ongeldig bedrag vóór de aanroep en normaliseert een
+    komma-decimaal; aanmaken valideert bedragen tegen de backendgrenzen
+    (nul aanroepen bij een ongeldig bedrag) en bewerken kan de vier
+    onwijzigbare FK-velden niet meesturen; verwijderen vraagt de getypte
+    plaatsings-ID, toont een 409 met detail.code zonder te sluiten en
+    slaagt daarna; een 500 geeft de retrylink en herstelt daarna.
+
 Exit 0 = alle secties slagen zonder console errors, 1 = mislukt.
 """
 import json
@@ -52,6 +70,12 @@ WEBSITE = ROOT / "website"
 # otherwise None lets Playwright use its own installed browser (CI).
 CHROMIUM_PATH = os.environ.get("CHROMIUM_PATH") or (
     "/opt/pw-browsers/chromium" if os.path.exists("/opt/pw-browsers/chromium") else None
+)
+
+# Letterlijk dezelfde zin als WARNING_SENTENCE in js/sections/placements.js
+# (§7.3.3) -- de marge-tab moet exact deze tekst tonen, niet een parafrase.
+WARNING_SENTENCE_PY = (
+    "Voorlopig. Deze berekening is nog niet door de eigenaar vastgesteld en mag niet naar buiten."
 )
 
 FAKE_JWT = (
@@ -109,9 +133,14 @@ CONTACTS_BY_CLIENT = {
 }
 
 JOBS_BY_CLIENT = {
-    1: [{"id": 201, "title": "Embedded Software Engineer", "employment_type": "werving_selectie",
+    # client_id staat er expliciet bij (routers/admin.py:400 SELECT j.*,
+    # c.company_name -- job_orders.client_id komt dus altijd mee): de
+    # plaatsingensectie gebruikt dat veld om de vacaturekiezer per
+    # opdrachtgever te filteren (js/sections/placements.js).
+    1: [{"id": 201, "client_id": 1, "title": "Embedded Software Engineer", "employment_type": "werving_selectie",
          "status": "open", "application_count": 3, "company_name": "Example Engineering B.V."}],
-    2: [],
+    2: [{"id": 202, "client_id": 2, "title": "Mechatronica Engineer", "employment_type": "detachering",
+         "status": "open", "application_count": 1, "company_name": "Example Mechatronics B.V."}],
 }
 
 PROSPECTS = [
@@ -179,6 +208,78 @@ CANDIDATE_STATE = {
     # "ok" | "suppressed" | "exists" | "unknown" -- welke uitkomst de
     # volgende POST /candidates/referral teruggeeft.
     "referral_mode": "ok",
+}
+
+# ---- Plaatsingen (§7.3.3) -----------------------------------------------
+# Vier vaste plaatsingen met verschillende doelen: #1 (concept, volledig
+# gevuld) voor de drawer/financieel/marge-weergave en een statuswissel naar
+# 'actief'; #2 (actief) voor de destructieve annuleer-overgang; #3
+# (beeindigd, alle geldvelden None) voor de "geen overgang meer mogelijk"-
+# tekst en de "n.v.t. (invoer ontbreekt)"-marge; #4 (concept) puur om
+# verwijderd te worden. Plus 56 extra rijen (in totaal 60, naast de
+# paginagrootte van 20) om paginering en server-side sortering te bewijzen.
+PLACEMENT_1 = {
+    "id": 1, "candidate_id": 1482, "job_id": 201, "client_id": 1,
+    "placement_type": "detachering", "start_date": "2026-10-01", "end_date": None,
+    "hourly_bill_rate": "95.50", "monthly_purchase_price": None,
+    "eor_partner": "Acme EOR", "eor_cost_factor": "1.3500",
+    "billing_basis": "per_uur", "expected_billable_hours": "160.00",
+    "fee_type": None, "fee_percentage": None, "fee_amount": None,
+    "one_off_costs": [{"label": "Onboarding", "amount": "500.00"}],
+    "status": "concept", "notes": "Eerste maand ingepland.",
+}
+PLACEMENT_2 = {
+    "id": 2, "candidate_id": 1482, "job_id": 201, "client_id": 1,
+    "placement_type": "werving_selectie", "start_date": "2026-06-01", "end_date": None,
+    "hourly_bill_rate": None, "monthly_purchase_price": None,
+    "eor_partner": None, "eor_cost_factor": None,
+    "billing_basis": None, "expected_billable_hours": None,
+    "fee_type": "percentage", "fee_percentage": "20.00", "fee_amount": None,
+    "one_off_costs": [], "status": "actief", "notes": None,
+}
+PLACEMENT_3 = {
+    "id": 3, "candidate_id": 1483, "job_id": 202, "client_id": 2,
+    "placement_type": "werving_selectie", "start_date": "2026-01-15", "end_date": "2026-03-01",
+    "hourly_bill_rate": None, "monthly_purchase_price": None,
+    "eor_partner": None, "eor_cost_factor": None,
+    "billing_basis": None, "expected_billable_hours": None,
+    "fee_type": None, "fee_percentage": None, "fee_amount": None,
+    "one_off_costs": [], "status": "beeindigd", "notes": None,
+}
+PLACEMENT_4 = {
+    "id": 4, "candidate_id": 1482, "job_id": 201, "client_id": 1,
+    "placement_type": "detachering", "start_date": "2026-11-01", "end_date": None,
+    "hourly_bill_rate": "80.00", "monthly_purchase_price": None,
+    "eor_partner": None, "eor_cost_factor": None,
+    "billing_basis": "per_uur", "expected_billable_hours": "80.00",
+    "fee_type": None, "fee_percentage": None, "fee_amount": None,
+    "one_off_costs": [], "status": "concept", "notes": None,
+}
+PLACEMENTS_EXTRA_COUNT = 56
+PLACEMENTS = [PLACEMENT_1, PLACEMENT_2, PLACEMENT_3, PLACEMENT_4] + [
+    {
+        "id": 100 + i, "candidate_id": 1482, "job_id": 201, "client_id": 1,
+        "placement_type": "detachering" if i % 2 == 0 else "werving_selectie",
+        "start_date": f"2026-01-{(i % 27) + 1:02d}", "end_date": None,
+        "hourly_bill_rate": None, "monthly_purchase_price": None,
+        "eor_partner": None, "eor_cost_factor": None,
+        "billing_basis": None, "expected_billable_hours": None,
+        "fee_type": None, "fee_percentage": None, "fee_amount": None,
+        "one_off_costs": [], "status": "concept", "notes": None,
+    }
+    for i in range(PLACEMENTS_EXTRA_COUNT)
+]
+PLACEMENTS_BY_ID = {p["id"]: p for p in PLACEMENTS}
+
+PLACEMENTS_STATE = {
+    "mode": "ok",  # "ok" | "error" (500 op de lijst)
+    "creates": [], "updates": [], "status_calls": [], "deletes": [],
+    "margin_calls": [],
+    # Eén geforceerde 409 met een gestructureerde detail (code + message),
+    # om de generieke Admin.errorDetail()-vertakking te bewijzen ook al
+    # geeft de echte routers/placements.py voor DELETE zelf geen
+    # gestructureerde detail terug (alleen 404 met een platte string).
+    "delete_conflict_once": True,
 }
 
 
@@ -771,7 +872,187 @@ def route_admin_api(route, request):
         }, status=201)
         return
 
+    # ---- Plaatsingen (§7.3.3) ----
+    if path == "/api/v1/admin/placements" and method == "GET":
+        if PLACEMENTS_STATE["mode"] == "error":
+            json_response({"detail": "Server error"}, status=500)
+            return
+        rows = [p for p in PLACEMENTS if p["id"] not in PLACEMENTS_STATE.get("deleted_ids", set())]
+        status = qs.get("status", [None])[0]
+        candidate_id = qs.get("candidate_id", [None])[0]
+        job_id = qs.get("job_id", [None])[0]
+        client_id = qs.get("client_id", [None])[0]
+        if status:
+            rows = [p for p in rows if p["status"] == status]
+        if candidate_id is not None:
+            rows = [p for p in rows if str(p["candidate_id"]) == str(candidate_id)]
+        if job_id is not None:
+            rows = [p for p in rows if str(p["job_id"]) == str(job_id)]
+        if client_id is not None:
+            rows = [p for p in rows if str(p["client_id"]) == str(client_id)]
+        sort = qs.get("sort", [None])[0]
+        if sort:
+            order = qs.get("order", ["asc"])[0]
+            rows = sorted(rows, key=lambda r: (r.get(sort) is None, r.get(sort)), reverse=(order == "desc"))
+        total = len(rows)
+        limit = qint(qs, "limit", 20)
+        offset = qint(qs, "offset", 0)
+        json_response({"items": rows[offset:offset + limit], "total": total})
+        return
+    if path == "/api/v1/admin/placements" and method == "POST":
+        body = json.loads(request.post_data or "{}")
+        PLACEMENTS_STATE["creates"].append(body)
+        new_id = max(PLACEMENTS_BY_ID.keys()) + 1
+        row = {
+            "id": new_id, "candidate_id": body.get("candidate_id"), "job_id": body.get("job_id"),
+            "client_id": body.get("client_id"), "placement_type": body.get("placement_type"),
+            "start_date": body.get("start_date"), "end_date": body.get("end_date"),
+            "hourly_bill_rate": body.get("hourly_bill_rate"), "monthly_purchase_price": body.get("monthly_purchase_price"),
+            "eor_partner": body.get("eor_partner"), "eor_cost_factor": body.get("eor_cost_factor"),
+            "billing_basis": body.get("billing_basis"), "expected_billable_hours": body.get("expected_billable_hours"),
+            "fee_type": body.get("fee_type"), "fee_percentage": body.get("fee_percentage"),
+            "fee_amount": body.get("fee_amount"), "one_off_costs": body.get("one_off_costs") or [],
+            "status": "concept", "notes": body.get("notes"),
+        }
+        PLACEMENTS.append(row)
+        PLACEMENTS_BY_ID[new_id] = row
+        json_response(row, status=201)
+        return
+    m = re.match(r"^/api/v1/admin/placements/(\d+)/margin$", path)
+    if m and method == "GET":
+        p = PLACEMENTS_BY_ID.get(int(m.group(1)))
+        if not p:
+            json_response({"detail": "Placement not found"}, status=404)
+            return
+        gross = qs.get("gross_monthly_salary", [None])[0]
+        annual = qs.get("annual_salary", [None])[0]
+        PLACEMENTS_STATE["margin_calls"].append({"id": p["id"], "gross_monthly_salary": gross, "annual_salary": annual})
+        json_response(compute_stub_margin(p, gross, annual))
+        return
+    m = re.match(r"^/api/v1/admin/placements/(\d+)/status$", path)
+    if m and method == "POST":
+        pid = int(m.group(1))
+        p = PLACEMENTS_BY_ID.get(pid)
+        if not p:
+            json_response({"detail": "Placement not found"}, status=404)
+            return
+        body = json.loads(request.post_data or "{}")
+        PLACEMENTS_STATE["status_calls"].append({"id": pid, "body": body})
+        new_status = body.get("status")
+        # Zelfde graaf als _ALLOWED_TRANSITIONS in routers/placements.py.
+        allowed = {"concept": {"actief", "geannuleerd"}, "actief": {"beeindigd", "geannuleerd"},
+                   "beeindigd": set(), "geannuleerd": set()}
+        if new_status not in allowed.get(p["status"], set()):
+            json_response({"detail": f"Invalid status transition: {p['status']} -> {new_status}."}, status=422)
+            return
+        p["status"] = new_status
+        json_response(p)
+        return
+    m = re.match(r"^/api/v1/admin/placements/(\d+)$", path)
+    if m and method == "GET":
+        pid = int(m.group(1))
+        p = PLACEMENTS_BY_ID.get(pid)
+        if not p or pid in PLACEMENTS_STATE.get("deleted_ids", set()):
+            json_response({"detail": "Placement not found"}, status=404)
+            return
+        json_response(p)
+        return
+    if m and method == "PATCH":
+        pid = int(m.group(1))
+        p = PLACEMENTS_BY_ID.get(pid)
+        if not p:
+            json_response({"detail": "Placement not found"}, status=404)
+            return
+        body = json.loads(request.post_data or "{}")
+        PLACEMENTS_STATE["updates"].append({"id": pid, "body": body})
+        p.update(body)
+        json_response(p)
+        return
+    if m and method == "DELETE":
+        pid = int(m.group(1))
+        p = PLACEMENTS_BY_ID.get(pid)
+        if not p:
+            json_response({"detail": "Placement not found"}, status=404)
+            return
+        PLACEMENTS_STATE["deletes"].append(pid)
+        # Eén geforceerde 409 met een gestructureerde detail (code +
+        # message), voor plaatsing #4: bewijst dat het scherm
+        # Admin.errorDetail() gebruikt (§7.2f) in plaats van op de
+        # letterlijke tekst te vertakken, ook al geeft de echte
+        # routers/placements.py voor DELETE zelf alleen 404 met een platte
+        # string terug.
+        if pid == 4 and PLACEMENTS_STATE["delete_conflict_once"]:
+            PLACEMENTS_STATE["delete_conflict_once"] = False
+            json_response({"detail": {"code": "placement_delete_conflict",
+                                       "message": "Deze plaatsing kan op dit moment niet verwijderd worden."}}, status=409)
+            return
+        PLACEMENTS_STATE.setdefault("deleted_ids", set()).add(pid)
+        route.fulfill(status=204, content_type="application/json", body="")
+        return
+
     json_response({"items": [], "total": 0})
+
+
+def compute_stub_margin(p, gross, annual):
+    """Zelfde twee formules als core/margin.compute_margin(), met gewone
+    floats in plaats van Decimal -- precies genoeg voor deze stub, en
+    zonder de precisievoetangels waar de test toch niet op let."""
+    def dec(v):
+        return float(v) if v not in (None, "") else None
+    hourly = dec(p.get("hourly_bill_rate"))
+    hours = dec(p.get("expected_billable_hours"))
+    monthly_price = dec(p.get("monthly_purchase_price"))
+    eor_factor = dec(p.get("eor_cost_factor"))
+    gross_v = dec(gross)
+    annual_v = dec(annual)
+    fee_type = p.get("fee_type")
+    fee_pct = dec(p.get("fee_percentage"))
+    fee_amt = dec(p.get("fee_amount"))
+    result = {
+        "provisional": True, "placement_type": p.get("placement_type"),
+        "inputs": {
+            "billing_basis": p.get("billing_basis"), "hourly_bill_rate": hourly,
+            "expected_billable_hours": hours, "monthly_purchase_price": monthly_price,
+            "eor_cost_factor": eor_factor, "gross_monthly_salary": gross_v,
+            "annual_salary": annual_v, "fee_type": fee_type,
+            "fee_percentage": fee_pct, "fee_amount": fee_amt,
+        },
+        "revenue": None, "cost": None, "margin": None, "margin_pct": None, "fee": None,
+    }
+    if p.get("placement_type") == "detachering":
+        revenue = None
+        if p.get("billing_basis") == "per_uur":
+            if hourly is not None and hours is not None:
+                revenue = hourly * hours
+        else:
+            revenue = hourly
+        cost = monthly_price
+        if cost is None and gross_v is not None and eor_factor is not None:
+            cost = gross_v * eor_factor
+        margin = None
+        margin_pct = None
+        if revenue is not None and cost is not None:
+            margin = revenue - cost
+            if revenue:
+                margin_pct = (margin / revenue) * 100
+        result.update({
+            "revenue": round(revenue, 2) if revenue is not None else None,
+            "cost": round(cost, 2) if cost is not None else None,
+            "margin": round(margin, 2) if margin is not None else None,
+            "margin_pct": round(margin_pct, 2) if margin_pct is not None else None,
+        })
+    elif p.get("placement_type") == "werving_selectie":
+        fee = None
+        if fee_type == "vast":
+            fee = fee_amt
+        elif fee_type == "percentage" and fee_pct is not None and annual_v is not None:
+            fee = (fee_pct / 100) * annual_v
+        result.update({
+            "fee": round(fee, 2) if fee is not None else None,
+            "revenue": round(fee, 2) if fee is not None else None,
+            "margin": round(fee, 2) if fee is not None else None,
+        })
+    return result
 
 
 def click_or_fail(page, failures, selector, what, timeout=6000):
@@ -1802,6 +2083,287 @@ def main():
         if new_errors:
             failures.append(f"candidates: {len(new_errors)} console error(s): {new_errors[:3]}")
 
+        # ---- Plaatsingen (§7.3.3) ----
+        errors_before = len(console_errors)
+        page.click('.nav-link[data-section="placements"]')
+        wait_until(page, lambda: len(page.query_selector_all('#placementsBody tr')) > 0)
+
+        rows = page.query_selector_all('#placementsBody tr')
+        if len(rows) != 20:
+            failures.append(f"placements: lijst toonde {len(rows)} rijen, verwacht 20 (paginagrootte naast 60 rijen)")
+        if page.query_selector('#placementsPagination button[data-page="2"]') is None:
+            failures.append("placements: paginering met 60 rijen toonde geen pagina 2")
+        first_row_text = text_of(page, '#placementsBody tr')
+        if "Kandidaat #1482" not in first_row_text:
+            failures.append(f"placements: eerste rij toont geen 'Kandidaat #1482' -- kreeg {first_row_text[:160]!r}")
+        if "Example Engineering B.V." not in first_row_text:
+            failures.append(f"placements: opdrachtgeverkolom toont geen naam -- kreeg {first_row_text[:160]!r}")
+        if "Concept" not in first_row_text:
+            failures.append(f"placements: statuskolom toont geen vertaald label -- kreeg {first_row_text[:160]!r}")
+        if "concept" in first_row_text.replace("Concept", ""):
+            failures.append("placements: de ruwe status 'concept' lekte naast het vertaalde label")
+
+        # Server-side sortering: eerste klik op "Kandidaat" is ascending en
+        # zet het aria-sort-attribuut; de enige rij met candidate_id 1483
+        # (plaatsing #3) zakt dan naar het einde van de hele verzameling en
+        # verdwijnt van pagina 1 (59 rijen met 1482 komen ervoor).
+        click_or_fail(page, failures, '#placementsHead [data-sort-key="candidate_id"]', "de sorteerbare kolomkop Kandidaat")
+        wait_until(page, lambda: page.get_attribute('#placementsHead [data-sort-key="candidate_id"]', 'aria-sort') == 'ascending')
+        wait_until(page, lambda: "Kandidaat #1483" not in text_of(page, '#placementsBody'))
+        if "Kandidaat #1483" in text_of(page, '#placementsBody'):
+            failures.append("placements: oplopend sorteren op kandidaat zette #1483 niet achteraan de hele verzameling")
+        click_or_fail(page, failures, '#placementsHead [data-sort-key="candidate_id"]', "de sorteerbare kolomkop Kandidaat (tweede klik)")
+        wait_until(page, lambda: page.get_attribute('#placementsHead [data-sort-key="candidate_id"]', 'aria-sort') == 'descending')
+        wait_until(page, lambda: "Kandidaat #1483" in text_of(page, '#placementsBody'))
+        if "Kandidaat #1483" not in text_of(page, '#placementsBody'):
+            failures.append("placements: aflopend sorteren op kandidaat zette #1483 niet vooraan")
+
+        # Statusfilter.
+        select_or_fail(page, failures, '#placementStatusFilter', 'actief', "placements: statusfilter")
+        wait_until(page, lambda: len(page.query_selector_all('#placementsBody tr')) == 1)
+        status_filtered = text_of(page, '#placementsBody')
+        if "Actief" not in status_filtered:
+            failures.append(f"placements: statusfilter 'actief' toonde geen actieve plaatsing -- kreeg {status_filtered[:160]!r}")
+        select_or_fail(page, failures, '#placementStatusFilter', '', "placements: statusfilter terugzetten")
+        wait_until(page, lambda: len(page.query_selector_all('#placementsBody tr')) > 1)
+
+        # Opdrachtgeverfilter.
+        select_or_fail(page, failures, '#placementClientFilter', '2', "placements: opdrachtgeverfilter")
+        wait_until(page, lambda: len(page.query_selector_all('#placementsBody tr')) == 1)
+        client_filtered = text_of(page, '#placementsBody')
+        if "Example Mechatronics B.V." not in client_filtered or "Beëindigd" not in client_filtered:
+            failures.append(f"placements: opdrachtgeverfilter toonde niet de juiste rij -- kreeg {client_filtered[:200]!r}")
+        select_or_fail(page, failures, '#placementClientFilter', '', "placements: opdrachtgeverfilter terugzetten")
+        wait_until(page, lambda: len(page.query_selector_all('#placementsBody tr')) > 1)
+
+        # Kandidaatzoekveld (as-built afwijking 1): numeriek gaat direct als
+        # candidate_id, een naam lost op via de kandidatenlijst, en bij
+        # meerdere treffers blijft de lijst ongefilterd met een hint.
+        fill_or_fail(page, failures, '#placementCandidateSearch', '1482', "placements: kandidaatzoekveld (numeriek)")
+        page.wait_for_timeout(600)
+        numeric_search_text = text_of(page, '#placementsBody')
+        if "Kandidaat #1483" in numeric_search_text:
+            failures.append("placements: numeriek kandidaat-ID filterde #1483 niet weg")
+        fill_or_fail(page, failures, '#placementCandidateSearch', 'Voorbeeld', "placements: kandidaatzoekveld (ambigu)")
+        page.wait_for_timeout(600)
+        ambiguous_hint = text_of(page, '#placementCandidateSearchHint')
+        if "Meerdere kandidaten gevonden" not in ambiguous_hint:
+            failures.append(f"placements: ambigue kandidaatzoekopdracht toonde geen hint -- kreeg {ambiguous_hint!r}")
+        fill_or_fail(page, failures, '#placementCandidateSearch', 'Zelf Geregistreerd', "placements: kandidaatzoekveld (uniek)")
+        page.wait_for_timeout(600)
+        wait_until(page, lambda: len(page.query_selector_all('#placementsBody tr')) == 1)
+        unique_search_text = text_of(page, '#placementsBody')
+        if "Kandidaat #1483" not in unique_search_text:
+            failures.append(f"placements: unieke naamzoekopdracht vond de verkeerde kandidaat -- kreeg {unique_search_text[:160]!r}")
+        fill_or_fail(page, failures, '#placementCandidateSearch', '', "placements: kandidaatzoekveld leegmaken")
+        page.wait_for_timeout(600)
+        wait_until(page, lambda: len(page.query_selector_all('#placementsBody tr')) > 1)
+
+        # ---- Drawer: Overzicht, statuswisseling gewoon en naar geannuleerd ----
+        click_or_fail(page, failures, '[data-action="open-placement-drawer"][data-id="1"]', "placements: 'Openen' op plaatsing #1")
+        wait_until(page, lambda: page.query_selector('#placementDrawerTabContent') is not None
+                   and "Kandidaat #1482" in text_of(page, '#placementDrawerTabContent'))
+        overview_text = text_of(page, '#placementDrawerTabContent')
+        for needle in ("Kandidaat #1482", "Example Engineering B.V.", "Embedded Software Engineer", "Detachering", "1 okt 2026"):
+            if needle not in overview_text:
+                failures.append(f"placements: overzichttab mist {needle!r} -- kreeg {overview_text[:300]!r}")
+        if page.query_selector('#placementStatusSelect') is None:
+            failures.append("placements: overzichttab toonde geen statuswisselaar voor een concept-plaatsing")
+
+        select_or_fail(page, failures, '#placementStatusSelect', 'actief', "placements: status wijzigen naar actief")
+        wait_until(page, lambda: page.query_selector('#placementStatusModal') is not None
+                   and text_of(page, '#placementStatusModal').count('Concept') >= 1
+                   and 'Actief' in text_of(page, '#placementStatusModal'))
+        if page.query_selector('#placementStatusModal .btn-outline-danger') is not None:
+            failures.append("placements: statuswissel naar actief gebruikte per ongeluk de destructieve knop")
+        calls_before = len(PLACEMENTS_STATE["status_calls"])
+        click_or_fail(page, failures, '#placementStatusModal .btn-primary', "placements: 'Bevestigen' (status naar actief)")
+        if not wait_for_calls(page, PLACEMENTS_STATE["status_calls"], calls_before + 1):
+            failures.append("placements: statuswissel naar actief riep de status-route niet aan")
+        elif PLACEMENTS_STATE["status_calls"][-1]["body"].get("status") != "actief":
+            failures.append(f"placements: statuswissel stuurde de verkeerde body -- kreeg {PLACEMENTS_STATE['status_calls'][-1]}")
+        wait_until(page, lambda: page.query_selector('#placementStatusModal') is None)
+        wait_until(page, lambda: "Actief" in text_of(page, '#placementDrawerTabContent'))
+
+        select_or_fail(page, failures, '#placementStatusSelect', 'geannuleerd', "placements: status wijzigen naar geannuleerd")
+        wait_until(page, lambda: page.query_selector('#placementStatusModal') is not None)
+        if page.query_selector('#placementStatusModal .btn-outline-danger') is None:
+            failures.append("placements: statuswissel naar geannuleerd gebruikte niet de destructieve knop")
+        if page.query_selector('#placementStatusModal input[id^="confirm_"]') is not None:
+            failures.append("placements: statuswissel naar geannuleerd vroeg per ongeluk een getypte bevestiging")
+        calls_before = len(PLACEMENTS_STATE["status_calls"])
+        click_or_fail(page, failures, '#placementStatusModal .btn-outline-danger', "placements: annuleerknop (status naar geannuleerd)")
+        if not wait_for_calls(page, PLACEMENTS_STATE["status_calls"], calls_before + 1):
+            failures.append("placements: statuswissel naar geannuleerd riep de status-route niet aan")
+        wait_until(page, lambda: "Geannuleerd" in text_of(page, '#placementDrawerTabContent'))
+        if "definitief" not in text_of(page, '#placementDrawerTabContent').lower():
+            failures.append("placements: een terminale status toonde geen 'geen overgang meer mogelijk'-tekst")
+
+        # ---- Drawer: Financieel ----
+        click_or_fail(page, failures, '#placementDrawer [data-tab="financieel"]', "placements: tabblad Financieel")
+        wait_until(page, lambda: "Uurtarief" in text_of(page, '#placementDrawerTabContent'))
+        fin_text = text_of(page, '#placementDrawerTabContent')
+        for needle in ("€ 95,50", "160,00", "n.v.t.", "Acme EOR", "1,3500", "Onboarding", "€ 500,00"):
+            if needle not in fin_text:
+                failures.append(f"placements: financieeltab mist {needle!r} -- kreeg {fin_text[:400]!r}")
+
+        # ---- Drawer: Marge (null-invoer, herberekenen, ongeldig bedrag) ----
+        click_or_fail(page, failures, '#placementDrawer [data-tab="marge"]', "placements: tabblad Marge")
+        wait_until(page, lambda: "Voorlopig" in text_of(page, '#placementDrawerTabContent'))
+        margin_text = text_of(page, '#placementDrawerTabContent')
+        if WARNING_SENTENCE_PY not in margin_text:
+            failures.append(f"placements: margewaarschuwing niet letterlijk -- kreeg {margin_text[:300]!r}")
+        wait_until(page, lambda: "€ 15.280,00" in text_of(page, '#placementMarginResult'))
+        null_result = text_of(page, '#placementMarginResult')
+        if null_result.count('n.v.t. (invoer ontbreekt)') < 3:
+            failures.append(f"placements: marge zonder invoer toonde geen 'n.v.t. (invoer ontbreekt)' -- kreeg {null_result[:300]!r}")
+
+        margin_calls_before = len(PLACEMENTS_STATE["margin_calls"])
+        fill_or_fail(page, failures, '#placementMarginGross', '12,34,56', "placements: bruto maandsalaris (ongeldig)")
+        click_or_fail(page, failures, '#placementMarginRecalc', "placements: 'Herberekenen' (ongeldig bedrag)")
+        page.wait_for_timeout(300)
+        if len(PLACEMENTS_STATE["margin_calls"]) != margin_calls_before:
+            failures.append("placements: een ongeldig margebedrag riep de margeroute toch aan")
+        if not text_of(page, '#placementMarginGrossError').strip():
+            failures.append("placements: een ongeldig margebedrag toonde geen inline fout")
+
+        fill_or_fail(page, failures, '#placementMarginGross', '5200,00', "placements: bruto maandsalaris (komma-decimaal)")
+        click_or_fail(page, failures, '#placementMarginRecalc', "placements: 'Herberekenen'")
+        if not wait_for_calls(page, PLACEMENTS_STATE["margin_calls"], margin_calls_before + 1):
+            failures.append("placements: herberekenen riep de margeroute niet aan")
+        elif float(PLACEMENTS_STATE["margin_calls"][-1].get("gross_monthly_salary") or -1) != 5200:
+            failures.append(f"placements: komma-decimaal werd niet genormaliseerd -- kreeg {PLACEMENTS_STATE['margin_calls'][-1]!r}")
+        wait_until(page, lambda: "€ 7.020,00" in text_of(page, '#placementMarginResult'))
+        recalculated = text_of(page, '#placementMarginResult')
+        if "€ 8.260,00" not in recalculated:
+            failures.append(f"placements: herberekende marge klopt niet -- kreeg {recalculated[:300]!r}")
+        if recalculated.count('Voorlopig') < 1:
+            failures.append("placements: de provisional-waarschuwing herhaalde niet in de uitkomst")
+
+        click_or_fail(page, failures, '#placementDrawer [data-action="close-modal"]', "placements: sluitknop van de drawer")
+        wait_until(page, lambda: page.query_selector('#placementDrawer.show') is None)
+
+        # ---- Aanmaken: verplichte velden, ongeldig bedrag (nul aanroepen), komma-decimaal ----
+        click_or_fail(page, failures, '[data-action="open-new-placement-modal"]', "placements: 'Nieuwe plaatsing'")
+        wait_until(page, lambda: page.query_selector('#placementFormCandidate') is not None)
+        candidate_option_text = page.eval_on_selector('#placementFormCandidate', "el => el.textContent")
+        if "1482" not in candidate_option_text or "1483" not in candidate_option_text:
+            failures.append(f"placements: kandidaatkiezer mist opties -- kreeg {candidate_option_text[:200]!r}")
+        select_or_fail(page, failures, '#placementFormCandidate', '1482', "placements: kandidaat kiezen")
+        select_or_fail(page, failures, '#placementFormClient', '1', "placements: opdrachtgever kiezen")
+        select_or_fail(page, failures, '#placementFormJob', '201', "placements: vacature kiezen")
+        select_or_fail(page, failures, '#placementFormType', 'werving_selectie', "placements: type kiezen")
+        fill_or_fail(page, failures, '#placementFormFeePercentage', '150', "placements: feepercentage (ongeldig, > 100)")
+        creates_before = len(PLACEMENTS_STATE["creates"])
+        click_or_fail(page, failures, '#placementFormModal .btn-primary', "placements: 'Plaatsing aanmaken' (ongeldig bedrag)")
+        page.wait_for_timeout(300)
+        if len(PLACEMENTS_STATE["creates"]) != creates_before:
+            failures.append("placements: een feepercentage boven 100 riep de aanmaakroute toch aan")
+        if not text_of(page, '#placementFormFeePercentageError').strip():
+            failures.append("placements: een feepercentage boven 100 toonde geen inline fout")
+
+        fill_or_fail(page, failures, '#placementFormFeePercentage', '20,5', "placements: feepercentage (komma-decimaal)")
+        click_or_fail(page, failures, '#placementFormOneOffAdd', "placements: 'Regel toevoegen' (eenmalige kosten)")
+        wait_until(page, lambda: page.query_selector('[data-oneoff-field="label"][data-oneoff-index="0"]') is not None)
+        fill_or_fail(page, failures, '[data-oneoff-field="label"][data-oneoff-index="0"]', "Search fee", "placements: omschrijving eenmalige kost")
+        fill_or_fail(page, failures, '[data-oneoff-field="amount"][data-oneoff-index="0"]', "1234,56", "placements: bedrag eenmalige kost")
+        click_or_fail(page, failures, '#placementFormModal .btn-primary', "placements: 'Plaatsing aanmaken'")
+        if not wait_for_calls(page, PLACEMENTS_STATE["creates"], creates_before + 1):
+            failures.append("placements: aanmaken riep de POST-route niet aan")
+        else:
+            created_body = PLACEMENTS_STATE["creates"][-1]
+            if created_body.get("fee_percentage") != 20.5:
+                failures.append(f"placements: komma-decimaal in feepercentage werd niet genormaliseerd -- kreeg {created_body.get('fee_percentage')!r}")
+            costs = created_body.get("one_off_costs") or []
+            if not costs or costs[0].get("label") != "Search fee" or costs[0].get("amount") != 1234.56:
+                failures.append(f"placements: eenmalige kosten kwamen niet correct mee -- kreeg {costs!r}")
+            for key in ("candidate_id", "job_id", "client_id", "placement_type"):
+                if key not in created_body:
+                    failures.append(f"placements: aanmaken miste verplicht veld {key!r} in de payload")
+        wait_until(page, lambda: page.query_selector('#placementFormModal.show') is None)
+
+        # ---- Bewerken: PATCH bevat geen candidate_id/job_id/client_id/type ----
+        click_or_fail(page, failures, '[data-action="open-placement-drawer"][data-id="2"]', "placements: 'Openen' op plaatsing #2")
+        wait_until(page, lambda: "Kandidaat #1482" in text_of(page, '#placementDrawerTabContent'))
+        click_or_fail(page, failures, '#placementDrawer [data-tab="financieel"]', "placements: tabblad Financieel (plaatsing #2)")
+        wait_until(page, lambda: page.query_selector('[data-action="open-placement-edit-modal"]') is not None)
+        click_or_fail(page, failures, '[data-action="open-placement-edit-modal"]', "placements: 'Bewerken'")
+        wait_until(page, lambda: page.query_selector('#placementFormNotes') is not None)
+        if page.query_selector('#placementFormCandidate') is not None:
+            failures.append("placements: het bewerkmodal toonde per ongeluk de kandidaatkiezer")
+        summary_text = text_of(page, '#placementFormModal')
+        if "Kandidaat #1482" not in summary_text or "Werving & selectie" not in summary_text:
+            failures.append(f"placements: bewerkmodal toonde geen alleen-lezen samenvatting -- kreeg {summary_text[:300]!r}")
+        fill_or_fail(page, failures, '#placementFormNotes', 'Bijgewerkt via test', "placements: notities bewerken")
+        updates_before = len(PLACEMENTS_STATE["updates"])
+        click_or_fail(page, failures, '#placementFormModal .btn-primary', "placements: 'Opslaan' (bewerken)")
+        if not wait_for_calls(page, PLACEMENTS_STATE["updates"], updates_before + 1):
+            failures.append("placements: bewerken riep de PATCH-route niet aan")
+        else:
+            update_body = PLACEMENTS_STATE["updates"][-1]["body"]
+            for key in ("candidate_id", "job_id", "client_id", "placement_type"):
+                if key in update_body:
+                    failures.append(f"placements: PATCH bevatte het onwijzigbare veld {key!r}")
+            if update_body.get("notes") != "Bijgewerkt via test":
+                failures.append(f"placements: PATCH stuurde niet de gewijzigde notities -- kreeg {update_body!r}")
+        wait_until(page, lambda: page.query_selector('#placementFormModal.show') is None)
+        click_or_fail(page, failures, '#placementDrawer [data-tab="overzicht"]', "placements: tabblad Overzicht (na bewerken)")
+        wait_until(page, lambda: "Bijgewerkt via test" in text_of(page, '#placementDrawerTabContent'))
+        click_or_fail(page, failures, '#placementDrawer [data-action="close-modal"]', "placements: sluitknop van de drawer (na bewerken)")
+        wait_until(page, lambda: page.query_selector('#placementDrawer.show') is None)
+
+        # ---- Verwijderen: verkeerd ID, 409 met detail.code, daarna het juiste ID ----
+        wait_until(page, lambda: page.query_selector('[data-action="confirm-delete-placement"][data-id="4"]') is not None)
+        click_or_fail(page, failures, '[data-action="confirm-delete-placement"][data-id="4"]', "placements: verwijderknop op plaatsing #4")
+        wait_until(page, lambda: page.query_selector('#placementDeleteModal') is not None)
+        fill_or_fail(page, failures, '#placementDeleteModal input[id^="confirm_"]', "44", "placements: verkeerde getypte bevestiging")
+        if is_disabled(page, '#placementDeleteModal .btn-outline-danger') is not True:
+            failures.append("placements: verwijderknop stond aan bij een foutieve getypte bevestiging")
+        fill_or_fail(page, failures, '#placementDeleteModal input[id^="confirm_"]', "4", "placements: juiste getypte bevestiging")
+        if not wait_for_enabled(page, '#placementDeleteModal .btn-outline-danger', True):
+            failures.append("placements: verwijderknop bleef uit na de juiste getypte bevestiging")
+        deletes_before = len(PLACEMENTS_STATE["deletes"])
+        click_or_fail(page, failures, '#placementDeleteModal .btn-outline-danger', "placements: 'Verwijderen' (eerste poging, 409)")
+        if not wait_for_calls(page, PLACEMENTS_STATE["deletes"], deletes_before + 1):
+            failures.append("placements: eerste verwijderpoging riep de DELETE-route niet aan")
+        wait_for_text(page, '#placementDeleteAlert', 'kan op dit moment niet verwijderd worden')
+        conflict_text = text_of(page, '#placementDeleteAlert')
+        if "kan op dit moment niet verwijderd worden" not in conflict_text:
+            failures.append(f"placements: de 409 op verwijderen toonde niet de detail.code-melding -- kreeg {conflict_text!r}")
+        if page.query_selector('#placementDeleteModal.show') is None:
+            failures.append("placements: de modal sloot na een 409 in plaats van open te blijven")
+        click_or_fail(page, failures, '#placementDeleteModal .btn-outline-danger', "placements: 'Verwijderen' (tweede poging)")
+        if not wait_for_calls(page, PLACEMENTS_STATE["deletes"], deletes_before + 2):
+            failures.append("placements: tweede verwijderpoging riep de DELETE-route niet aan")
+        wait_until(page, lambda: page.query_selector('#placementDeleteModal.show') is None)
+        wait_until(page, lambda: page.query_selector('[data-action="confirm-delete-placement"][data-id="4"]') is None)
+
+        # ---- 500 met retry ----
+        PLACEMENTS_STATE["mode"] = "error"
+        page.select_option('#placementStatusFilter', 'concept')
+        wait_for_text(page, '#placementsBody', "probeer opnieuw")
+        err_text = text_of(page, '#placementsBody')
+        if "probeer opnieuw" not in err_text.lower():
+            failures.append(f"placements: 500 toonde geen foutstaat met retrylink -- kreeg {err_text[:200]!r}")
+        PLACEMENTS_STATE["mode"] = "ok"
+        retry = page.query_selector('#placementsBody a')
+        if retry is None:
+            failures.append("placements: geen retrylink gevonden om van de 500 te herstellen")
+        else:
+            retry.click()
+            wait_until(page, lambda: "probeer opnieuw" not in text_of(page, '#placementsBody').lower())
+            recovered_placements = text_of(page, '#placementsBody')
+            if "kon niet laden" in recovered_placements.lower() or "probeer opnieuw" in recovered_placements.lower():
+                failures.append(f"placements: herstelde niet na de retry -- kreeg {recovered_placements[:200]!r}")
+        page.select_option('#placementStatusFilter', '')
+
+        # 409/422/500 loggen zichzelf ook als console error; die grens gaat
+        # er hierna overheen, zoals bij Bewaartermijnen en Toestemmingen.
+        new_errors = [e for e in console_errors[errors_before:]
+                      if "409 (Conflict)" not in e and "422" not in e and "500 (Internal Server Error)" not in e]
+        if new_errors:
+            failures.append(f"placements: {len(new_errors)} console error(s): {new_errors[:3]}")
+
         browser.close()
 
     if failures:
@@ -1812,10 +2374,14 @@ def main():
 
     print("PASS: Opdrachtgevers (list + tabbed drawer), Leads (inbox + unread filter + PATCH), "
           "Rapportage, Bewaartermijnen (lijst, generate, goedkeuren met getypte bevestiging, "
-          "afwijzen, categoriebrede bulk met 409-mismatch, droogloop en 500 met retry) en "
+          "afwijzen, categoriebrede bulk met 409-mismatch, droogloop en 500 met retry), "
           "Toestemmingen/referral (§7.3.2: talentpool- en presentatiemodal met clientside-validatie "
-          "en de juiste payload per richting, plus de drie referral-409-uitkomsten) "
-          "renderden allemaal correct, zonder console errors.")
+          "en de juiste payload per richting, plus de drie referral-409-uitkomsten) en "
+          "Plaatsingen (§7.3.3: lijst met 60 rijen naast de paginagrootte, server-side sortering en "
+          "filters, drawer met Overzicht/Financieel/Marge, statuswissel gewoon en destructief naar "
+          "geannuleerd, marge met null-invoer/herberekenen/ongeldig bedrag, aanmaken en bewerken met "
+          "komma-decimalen en een onwijzigbare FK-set, verwijderen met een 409 en het juiste ID, en "
+          "500 met retry) renderden allemaal correct, zonder console errors.")
     sys.exit(0)
 
 

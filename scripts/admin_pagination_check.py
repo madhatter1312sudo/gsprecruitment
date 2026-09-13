@@ -155,6 +155,26 @@ def make_jobs(n=TOTAL_ROWS):
     } for i in range(1, n + 1)]
 
 
+def make_placements(n=TOTAL_ROWS):
+    statuses = ["concept", "actief", "beeindigd", "geannuleerd"]
+    types = ["werving_selectie", "detachering"]
+    return [{
+        "id": i,
+        # candidate_id oplopend per rij (in plaats van één vaste waarde):
+        # de generieke paginacheck vergelijkt de volledige rijtekst tussen
+        # pagina 1 en 2, en die moeten dus zichtbaar verschillen.
+        "candidate_id": 1000 + i,
+        "job_id": 1, "client_id": 1,
+        "placement_type": types[i % 2],
+        "start_date": "2026-01-01", "end_date": None,
+        "hourly_bill_rate": None, "monthly_purchase_price": None,
+        "eor_partner": None, "eor_cost_factor": None,
+        "billing_basis": None, "expected_billable_hours": None,
+        "fee_type": None, "fee_percentage": None, "fee_amount": None,
+        "one_off_costs": [], "status": statuses[i % 4], "notes": None,
+    } for i in range(1, n + 1)]
+
+
 # Bewaartermijnen (§7.3.1) pagineert op 50, niet op de 20 van de andere
 # secties, en de route heeft bewust geen default-limit. Deze fixture is
 # daarom ruim boven twee pagina's.
@@ -188,6 +208,7 @@ LIST_DATA = {
     "blog": make_blog(),
     "audit": make_audit(),
     "jobs": make_jobs(),
+    "placements": make_placements(),
 }
 
 # WS-B.2: id an admin_pagination_check DELETE request uses to exercise the
@@ -292,6 +313,9 @@ def route_admin_api(route, request):
         body = json.loads(request.post_data or "{}")
         json_response({"id": job_id, "status": body.get("status", "open")})
         return
+    if path == "/api/v1/admin/placements":
+        json_response(paginate(LIST_DATA["placements"], qs))
+        return
     if path == "/api/v1/admin/analytics":
         json_response({"job_fill_rate": 0, "client_retention_rate": 0, "candidate_satisfaction": 0, "user_growth": {}})
         return
@@ -314,6 +338,7 @@ SECTIONS = [
     ("blog", "#section-blog table tbody tr", "blogPagination"),
     ("audit", "#section-audit table tbody tr", "auditPagination"),
     ("jobs", "#section-jobs table tbody tr", "jobsPagination"),
+    ("placements", "#section-placements table tbody tr", "placementsPagination"),
 ]
 
 
