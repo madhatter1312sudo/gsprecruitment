@@ -619,8 +619,10 @@ def main():
         page.wait_for_timeout(400)
         if not page.evaluate("() => document.getElementById('clientDrawer')?.classList.contains('offcanvas')"):
             failures.append("integratie: het Opdrachtgeversdetail is geen Offcanvas")
-        if page.eval_on_selector_all('#clientDrawer [role=tab]', "els => els.length") != 5:
-            failures.append("integratie: de drawer heeft geen tablist met vijf tabbladen")
+        # Zes sinds §7.3.4 (de tab Pipeline erbij, tussen Vacatures en
+        # Notities/Activiteit).
+        if page.eval_on_selector_all('#clientDrawer [role=tab]', "els => els.length") != 6:
+            failures.append("integratie: de drawer heeft geen tablist met zes tabbladen")
         if page.eval_on_selector('#clientDrawer [role=tab][data-tab=info]', "el => el.getAttribute('aria-selected')") != "true":
             failures.append("integratie: het Info-tabblad staat niet op aria-selected=true")
         page.click('#clientDrawer [data-action="client-tab"][data-tab="contacts"]')

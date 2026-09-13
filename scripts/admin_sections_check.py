@@ -210,6 +210,96 @@ CANDIDATE_STATE = {
     "referral_mode": "ok",
 }
 
+# ---- Pipeline (§7.3.4) --------------------------------------------------
+# Vijf entries, dezelfde rijvorm als PIPELINE_ROW_SQL/project_pipeline_rows
+# (core/pipeline.py): pe.* plus full_name/current_title/current_company/
+# location/skills/job_title, de consentkolommen zijn er (net als op de
+# echte admin-route, gate_name=False) al uit. In array-volgorde nieuwste
+# eerst, zoals de echte route ORDER BY pe.created_at DESC, pe.id DESC
+# teruggeeft -- deze stub sorteert zelf niet, dus de volgorde hieronder
+# IS de teruggegeven volgorde.
+#   604  candidate 1482, client 1, stage 'new'            -- hoofdpad: fase
+#        wijzigen zonder eerdere mislukking, historie met alle drie de
+#        actor-varianten op een andere entry (603) getest.
+#   603  candidate 1482, client 1, stage 'sourced-legacy'  -- fase buiten de
+#        zeven canonieke waarden: bewijst de "(bestaande waarde)"-optie EN
+#        dat die nooit verstuurd wordt. Historie: from_stage null EN
+#        changed_by/changed_by_name allebei leeg -> "(nieuw)" / "Onbekend".
+#   602  candidate 1482, client 1, stage 'screening'       -- GET history
+#        geeft hier altijd 500: bewijst dat de fasewisselaar bruikbaar
+#        blijft terwijl alleen de historie een foutstaat toont.
+#   601  candidate 1482, client 1, stage 'placed'          -- 422 dan 500
+#        dan een geslaagde PATCH (PIPELINE_STATE.stage_fail_sequence), en
+#        een historie van twaalf items (> 10) voor "Toon alles".
+#   600  candidate 1483, client 1, stage 'interview'       -- alleen voor de
+#        klantdrawer: candidate_id verschilt van de andere vier, dus
+#        showCandidateName (§7.3.4 admin.js) heeft hier iets om te tonen.
+PIPELINE_ENTRIES = [
+    {"id": 604, "client_id": 1, "candidate_id": 1482, "job_id": 201, "stage": "new",
+     "notes": None, "created_at": "2026-09-05T00:00:00Z", "updated_at": "2026-09-05T00:00:00Z",
+     "full_name": "Voorbeeld Kandidaat", "current_title": "Embedded Engineer", "current_company": None,
+     "location": "Eindhoven", "skills": [], "job_title": "Embedded Software Engineer"},
+    {"id": 603, "client_id": 1, "candidate_id": 1482, "job_id": 205, "stage": "sourced-legacy",
+     "notes": None, "created_at": "2026-09-04T00:00:00Z", "updated_at": "2026-09-04T00:00:00Z",
+     "full_name": "Voorbeeld Kandidaat", "current_title": "Embedded Engineer", "current_company": None,
+     "location": "Eindhoven", "skills": [], "job_title": "Legacy Systems Engineer"},
+    {"id": 602, "client_id": 1, "candidate_id": 1482, "job_id": 202, "stage": "screening",
+     "notes": None, "created_at": "2026-09-03T00:00:00Z", "updated_at": "2026-09-03T00:00:00Z",
+     "full_name": "Voorbeeld Kandidaat", "current_title": "Embedded Engineer", "current_company": None,
+     "location": "Eindhoven", "skills": [], "job_title": "Mechatronica Engineer"},
+    {"id": 601, "client_id": 1, "candidate_id": 1482, "job_id": 207, "stage": "placed",
+     "notes": None, "created_at": "2026-09-02T00:00:00Z", "updated_at": "2026-09-02T00:00:00Z",
+     "full_name": "Voorbeeld Kandidaat", "current_title": "Embedded Engineer", "current_company": None,
+     "location": "Eindhoven", "skills": [], "job_title": "Test Engineer"},
+    {"id": 600, "client_id": 1, "candidate_id": 1483, "job_id": 206, "stage": "interview",
+     "notes": None, "created_at": "2026-09-01T00:00:00Z", "updated_at": "2026-09-01T00:00:00Z",
+     "full_name": "Zelf Geregistreerd Voorbeeld", "current_title": "Mechatronica Engineer", "current_company": None,
+     "location": "Veldhoven", "skills": [], "job_title": "Mechatronica Stagiair"},
+]
+PIPELINE_ENTRIES_BY_ID = {e["id"]: e for e in PIPELINE_ENTRIES}
+
+PIPELINE_HISTORY_BY_ENTRY = {
+    # De drie actor-varianten (§7.3.4): een genoemde actor, "Gebruiker
+    # #<id>" wanneer changed_by_name null is maar changed_by niet, en
+    # "Onbekend" wanneer allebei leeg zijn (entry 603 hieronder).
+    604: [
+        {"id": 1, "pipeline_entry_id": 604, "from_stage": None, "to_stage": "sourced",
+         "changed_by": 12, "changed_by_name": None, "changed_at": "2026-08-28T09:05:00Z"},
+        {"id": 2, "pipeline_entry_id": 604, "from_stage": "sourced", "to_stage": "new",
+         "changed_by": 1, "changed_by_name": "Sanne de Wit", "changed_at": "2026-09-03T14:20:00Z"},
+    ],
+    603: [
+        {"id": 1, "pipeline_entry_id": 603, "from_stage": None, "to_stage": "sourced-legacy",
+         "changed_by": None, "changed_by_name": None, "changed_at": "2026-08-01T00:00:00Z"},
+    ],
+    602: [
+        {"id": 1, "pipeline_entry_id": 602, "from_stage": None, "to_stage": "screening",
+         "changed_by": 1, "changed_by_name": "Sections Check", "changed_at": "2026-08-01T00:00:00Z"},
+    ],
+    # Twaalf items (> 10): bewijst "Maximaal tien items zichtbaar, daarna
+    # 'Toon alles'" zonder op een latere PATCH te hoeven wachten.
+    601: [
+        {"id": i, "pipeline_entry_id": 601, "from_stage": None if i == 1 else "sourced",
+         "to_stage": "sourced" if i == 1 else "placed", "changed_by": 1,
+         "changed_by_name": f"Actor {i}", "changed_at": f"2026-08-{i:02d}T00:00:00Z"}
+        for i in range(1, 13)
+    ],
+    600: [
+        {"id": 1, "pipeline_entry_id": 600, "from_stage": None, "to_stage": "interview",
+         "changed_by": 1, "changed_by_name": "Sections Check", "changed_at": "2026-08-01T00:00:00Z"},
+    ],
+}
+
+PIPELINE_STATE = {
+    "stage_calls": [],
+    # Per entry_id een lijst geplande uitkomsten die de volgende PATCH-
+    # aanroep(en) op die entry moet(en) teruggeven, in volgorde
+    # weggehaald; leeg (of geen sleutel) betekent gewoon slagen.
+    "stage_fail_sequence": {601: ["422", "500"]},
+    # Entry-id's waarvan GET history altijd 500 teruggeeft.
+    "history_error_entry_ids": {602},
+}
+
 # ---- Plaatsingen (§7.3.3) -----------------------------------------------
 # Vier vaste plaatsingen met verschillende doelen: #1 (concept, volledig
 # gevuld) voor de drawer/financieel/marge-weergave en een statuswissel naar
@@ -872,6 +962,68 @@ def route_admin_api(route, request):
         }, status=201)
         return
 
+    # ---- Pipeline (§7.3.4, tab Pipeline in kandidaat- en klantdrawer) ----
+    if path == "/api/v1/admin/pipeline" and method == "GET":
+        candidate_id = qs.get("candidate_id", [None])[0]
+        client_id = qs.get("client_id", [None])[0]
+        rows = PIPELINE_ENTRIES
+        if candidate_id is not None:
+            rows = [r for r in rows if r["candidate_id"] == int(candidate_id)]
+        if client_id is not None:
+            rows = [r for r in rows if r["client_id"] == int(client_id)]
+        json_response({"items": rows, "total": len(rows), "limit": qint(qs, "limit", 50), "offset": 0})
+        return
+    m = re.match(r"^/api/v1/admin/pipeline/(\d+)/stage$", path)
+    if m and method == "PATCH":
+        entry_id = int(m.group(1))
+        entry = PIPELINE_ENTRIES_BY_ID.get(entry_id)
+        if entry is None:
+            json_response({"detail": "Pipeline entry not found"}, status=404)
+            return
+        body = json.loads(request.post_data or "{}")
+        PIPELINE_STATE["stage_calls"].append({"entry_id": entry_id, "body": body})
+        # Eerst de geplande mislukkingen voor deze entry (422, dan 500),
+        # deterministisch en zonder volgorde-afhankelijkheid: elke
+        # aanroep pop't de volgende uitkomst van de lijst, en zodra die
+        # leeg is slaagt de aanroep gewoon.
+        sequence = PIPELINE_STATE["stage_fail_sequence"].get(entry_id)
+        if sequence:
+            outcome = sequence.pop(0)
+            if outcome == "422":
+                json_response({"detail": {"code": "pipeline_stage_invalid",
+                                           "message": "Deze fase is ongeldig."}}, status=422)
+                return
+            if outcome == "500":
+                json_response({"detail": "Internal server error"}, status=500)
+                return
+        from_stage = entry["stage"]
+        new_stage = body.get("stage")
+        entry["stage"] = new_stage
+        if from_stage != new_stage:
+            history = PIPELINE_HISTORY_BY_ENTRY.setdefault(entry_id, [])
+            history.append({
+                "id": max([h["id"] for h in history], default=0) + 1,
+                "pipeline_entry_id": entry_id, "from_stage": from_stage, "to_stage": new_stage,
+                # De admin die is ingelogd in deze testrun (zie user hieronder
+                # in main()): id 1, full_name "Sections Check".
+                "changed_by": 1, "changed_by_name": "Sections Check",
+                "changed_at": "2026-09-10T12:00:00Z",
+            })
+        json_response(entry)
+        return
+    m = re.match(r"^/api/v1/admin/pipeline/(\d+)/history$", path)
+    if m and method == "GET":
+        entry_id = int(m.group(1))
+        if entry_id not in PIPELINE_ENTRIES_BY_ID:
+            json_response({"detail": "Pipeline entry not found"}, status=404)
+            return
+        if entry_id in PIPELINE_STATE["history_error_entry_ids"]:
+            json_response({"detail": "Internal server error"}, status=500)
+            return
+        items = PIPELINE_HISTORY_BY_ENTRY.get(entry_id, [])
+        json_response({"items": items, "total": len(items)})
+        return
+
     # ---- Plaatsingen (§7.3.3) ----
     if path == "/api/v1/admin/placements" and method == "GET":
         if PLACEMENTS_STATE["mode"] == "error":
@@ -1346,9 +1498,36 @@ def main():
                     if "werving_selectie" in text:
                         failures.append("clients: raw employment_type value leaked into the jobs tab")
 
+            # ---- Tab Pipeline (§7.3.4): client_id=1 levert vijf entries
+            # (604/603/602/601/600) -- accordeon, alleen de nieuwste open,
+            # en showCandidateName=true zet de kandidaatnaam in de kop
+            # zodat een client met meerdere kandidaten ze uit elkaar kan
+            # houden (de kandidaatdrawer laat die naam juist weg). ----
+            click_or_fail(page, failures, '[data-action="client-tab"][data-tab="pipeline"]', "clients: de tab Pipeline")
+            if not wait_until(page, lambda: page.query_selector('#pipelineStage_604') is not None):
+                failures.append("clients: de tab Pipeline rendeerde niet (entry 604)")
+            details_ids = page.eval_on_selector_all(
+                '#clientDrawerTabContent details.a-disclosure', "els => els.map(e => e.id)")
+            if details_ids != ["pipelineEntry_604", "pipelineEntry_603", "pipelineEntry_602",
+                                "pipelineEntry_601", "pipelineEntry_600"]:
+                failures.append(f"clients: pipeline-accordeon toont niet de verwachte vijf entries in volgorde -- kreeg {details_ids!r}")
+            open_ids = page.eval_on_selector_all(
+                '#clientDrawerTabContent details.a-disclosure[open]', "els => els.map(e => e.id)")
+            if open_ids != ["pipelineEntry_604"]:
+                failures.append(f"clients: alleen de nieuwste entry hoort opengeklapt te zijn -- kreeg {open_ids!r}")
+            summaries_text = page.eval_on_selector_all(
+                '#clientDrawerTabContent details.a-disclosure summary', "els => els.map(e => e.textContent)")
+            if not any("Voorbeeld Kandidaat" in t for t in summaries_text):
+                failures.append(f"clients: pipeline-kaarten tonen niet de kandidaatnaam -- kreeg {summaries_text!r}")
+            if not any("Zelf Geregistreerd Voorbeeld" in t for t in summaries_text):
+                failures.append(f"clients: pipeline-kaarten tonen niet de afwijkende tweede kandidaatnaam (entry 600) -- kreeg {summaries_text!r}")
+
         page.click('#clientDrawer [data-action="close-modal"]')
         page.wait_for_timeout(300)
-        new_errors = console_errors[errors_before:]
+        # De tab Pipeline haalt ook de historie van entry 602 op, die
+        # opzettelijk altijd 500 teruggeeft (§7.3.4-test); Chromium logt
+        # dat zelf ook als console error, zoals elders in deze suite.
+        new_errors = [e for e in console_errors[errors_before:] if "500 (Internal Server Error)" not in e]
         if new_errors:
             failures.append(f"clients: {len(new_errors)} console error(s): {new_errors[:3]}")
 
@@ -1810,6 +1989,136 @@ def main():
         # zodra het profieldetail geladen is, niet alleen "Kandidaat".
         if not wait_for_text(page, '#candidateDrawer__title', CANDIDATE_RECORD["full_name"]):
             failures.append(f"candidates: de drawerkop toont niet de echte naam -- kreeg {text_of(page, '#candidateDrawer__title')!r}")
+
+        # ---- Tab Pipeline (§7.3.4), vervangt Matches ----
+        click_or_fail(page, failures, '#candidateDrawer [data-tab="pipeline"]', "candidates: de tab Pipeline")
+        if not wait_until(page, lambda: page.query_selector('#pipelineStage_604') is not None):
+            failures.append("candidates: de tab Pipeline rendeerde niet (entry 604)")
+
+        # Vier entries voor candidate_id 1482 (604/603/602/601) -> accordeon,
+        # alleen de nieuwste (604, eerst in de API-volgorde) opengeklapt.
+        details_ids = page.eval_on_selector_all(
+            '#candidateDrawerTabContent details.a-disclosure', "els => els.map(e => e.id)")
+        if details_ids != ["pipelineEntry_604", "pipelineEntry_603", "pipelineEntry_602", "pipelineEntry_601"]:
+            failures.append(f"candidates: pipeline-accordeon toont niet de verwachte vier entries in volgorde -- kreeg {details_ids!r}")
+        open_ids = page.eval_on_selector_all(
+            '#candidateDrawerTabContent details.a-disclosure[open]', "els => els.map(e => e.id)")
+        if open_ids != ["pipelineEntry_604"]:
+            failures.append(f"candidates: alleen de nieuwste entry hoort opengeklapt te zijn -- kreeg {open_ids!r}")
+
+        # Select met precies de zeven canonieke fasen, in spec-volgorde,
+        # Nederlandse labels, huidige fase (new) geselecteerd.
+        options = page.eval_on_selector_all(
+            '#pipelineStage_604 option', "els => els.map(e => ({value: e.value, text: e.textContent, selected: e.selected}))")
+        expected_stages = [
+            ("sourced", "Gesourced"), ("new", "Nieuw"), ("screening", "Screening"),
+            ("interview", "Gesprek"), ("offer", "Aanbod"), ("placed", "Geplaatst"), ("rejected", "Afgewezen"),
+        ]
+        if [(o["value"], o["text"]) for o in options] != expected_stages:
+            failures.append(f"candidates: select #pipelineStage_604 heeft niet precies de zeven fasen in spec-volgorde -- kreeg {options!r}")
+        elif not any(o["value"] == "new" and o["selected"] for o in options):
+            failures.append(f"candidates: select #pipelineStage_604 stond niet op de huidige fase 'new' -- kreeg {options!r}")
+
+        # Historie van 604: "(nieuw) -> Gesourced" / "Gebruiker #12", dan
+        # "Gesourced -> Nieuw" / "Sanne de Wit" -- de eerste twee van de
+        # drie actor-varianten, en de rechterpijl (geen streepje).
+        if not wait_for_text(page, '#pipelineHistoryWrap_604', "Sanne de Wit"):
+            failures.append(f"candidates: historie van entry 604 toont niet de genoemde actor -- kreeg {text_of(page, '#pipelineHistoryWrap_604')!r}")
+        hist_604 = text_of(page, '#pipelineHistoryWrap_604')
+        if "(nieuw) → Gesourced" not in hist_604 or "Gebruiker #12" not in hist_604:
+            failures.append(f"candidates: historie van entry 604 mist '(nieuw) → Gesourced' / 'Gebruiker #12' -- kreeg {hist_604!r}")
+        if "Gesourced → Nieuw" not in hist_604:
+            failures.append(f"candidates: historie van entry 604 mist 'Gesourced → Nieuw' (rechterpijl) -- kreeg {hist_604!r}")
+        if "Laatst gewijzigd" not in hist_604 or "Sanne de Wit" not in hist_604:
+            failures.append(f"candidates: 'Laatst gewijzigd' toont niet de laatste actor -- kreeg {hist_604!r}")
+
+        # Fase wijzigen (604, hoofdpad): één PATCH met de juiste payload,
+        # geen automatische opslag vóór de klik, na succes herlaadt alleen
+        # de historie (niet lokaal aangevuld).
+        stage_calls_before = len(PIPELINE_STATE["stage_calls"])
+        select_or_fail(page, failures, '#pipelineStage_604', 'screening', "candidates: fase kiezen (entry 604)")
+        if len(PIPELINE_STATE["stage_calls"]) != stage_calls_before:
+            failures.append("candidates: het wisselen van de select alleen stuurde al een PATCH (geen automatische opslag verwacht)")
+        click_or_fail(page, failures, '[data-action="pipeline-change-stage"][data-entry-id="604"]', "candidates: Fase wijzigen (entry 604)")
+        if not wait_for_calls(page, PIPELINE_STATE["stage_calls"], stage_calls_before + 1):
+            failures.append("candidates: Fase wijzigen (604) stuurde geen PATCH")
+        elif PIPELINE_STATE["stage_calls"][-1] != {"entry_id": 604, "body": {"stage": "screening"}}:
+            failures.append(f"candidates: PATCH-payload voor entry 604 klopt niet -- kreeg {PIPELINE_STATE['stage_calls'][-1]!r}")
+        if not wait_for_text(page, '#pipelineHistoryWrap_604', "Sections Check"):
+            failures.append("candidates: historie van 604 herlaadde niet na een geslaagde fasewijziging")
+        toast_texts = page.eval_on_selector_all(".toast-container .toast span:last-child", "els => els.map(e => e.textContent)")
+        if not any("Fase bijgewerkt" in t for t in toast_texts):
+            failures.append(f"candidates: geen toast na een geslaagde fasewijziging -- kreeg {toast_texts!r}")
+
+        # Ontsnappingsklep (603): fase buiten de zeven verschijnt als
+        # geselecteerde, achtste optie met "(bestaande waarde)", en wordt
+        # nooit verstuurd, ook niet bij een klik zonder eerst iets anders
+        # te kiezen.
+        click_or_fail(page, failures, '#pipelineEntry_603 summary', "candidates: entry 603 openklappen")
+        if not wait_until(page, lambda: page.query_selector('#pipelineStage_603') is not None):
+            failures.append("candidates: entry 603 klapte niet open")
+        opts_603 = page.eval_on_selector_all(
+            '#pipelineStage_603 option', "els => els.map(e => ({value: e.value, text: e.textContent, selected: e.selected}))")
+        if len(opts_603) != 8:
+            failures.append(f"candidates: select #pipelineStage_603 heeft geen acht opties (zeven plus ontsnappingsklep) -- kreeg {opts_603!r}")
+        escape_opt = next((o for o in opts_603 if o["value"] == "sourced-legacy"), None)
+        if not escape_opt or "(bestaande waarde)" not in escape_opt["text"] or not escape_opt["selected"]:
+            failures.append(f"candidates: de ontsnappingsklep-optie ontbreekt, is niet geselecteerd, of mist het achtervoegsel -- kreeg {opts_603!r}")
+        calls_603_before = len(PIPELINE_STATE["stage_calls"])
+        click_or_fail(page, failures, '[data-action="pipeline-change-stage"][data-entry-id="603"]', "candidates: Fase wijzigen (entry 603, ontsnappingsklep)")
+        page.wait_for_timeout(300)
+        if len(PIPELINE_STATE["stage_calls"]) != calls_603_before:
+            failures.append("candidates: de ontsnappingsklep-waarde 'sourced-legacy' werd toch verstuurd")
+        if not wait_until(page, lambda: "Kies een van de zeven fasen" in text_of(page, '#pipelineEntryAlert_603')):
+            failures.append(f"candidates: geen inline-melding bij een poging de ontsnappingsklep-waarde op te slaan -- kreeg {text_of(page, '#pipelineEntryAlert_603')!r}")
+        hist_603 = text_of(page, '#pipelineHistoryWrap_603')
+        if "(nieuw)" not in hist_603 or "sourced-legacy" not in hist_603 or "Onbekend" not in hist_603:
+            failures.append(f"candidates: historie van entry 603 mist '(nieuw)'/ruwe waarde/'Onbekend' -- kreeg {hist_603!r}")
+
+        # Historiefout (602): de fasewisselaar blijft bruikbaar.
+        click_or_fail(page, failures, '#pipelineEntry_602 summary', "candidates: entry 602 openklappen")
+        if not wait_until(page, lambda: "probeer opnieuw" in text_of(page, '#pipelineHistoryWrap_602').lower()):
+            failures.append(f"candidates: historiefout (602) toonde geen foutstaat -- kreeg {text_of(page, '#pipelineHistoryWrap_602')!r}")
+        if is_disabled(page, '#pipelineStage_602', default=True):
+            failures.append("candidates: de fasewisselaar van entry 602 is uitgeschakeld door een historiefout")
+        if is_disabled(page, '[data-action="pipeline-change-stage"][data-entry-id="602"]', default=True):
+            failures.append("candidates: de knop Fase wijzigen van entry 602 is uitgeschakeld door een historiefout")
+
+        # 422 dan 500 dan geslaagd (601), en meer dan tien historie-items
+        # met "Toon alles".
+        click_or_fail(page, failures, '#pipelineEntry_601 summary', "candidates: entry 601 openklappen")
+        if not wait_until(page, lambda: page.query_selector('[data-action="pipeline-history-show-all"][data-entry-id="601"]') is not None):
+            failures.append("candidates: entry 601 toonde geen 'Toon alles' bij twaalf historie-items")
+        visible_before = page.eval_on_selector_all('#pipelineHistoryWrap_601 .a-timeline__item', "els => els.length")
+        if visible_before != 10:
+            failures.append(f"candidates: entry 601 toont niet precies tien items vóór 'Toon alles' -- kreeg {visible_before}")
+        click_or_fail(page, failures, '[data-action="pipeline-history-show-all"][data-entry-id="601"]', "candidates: Toon alles (entry 601)")
+        if not wait_until(page, lambda: page.eval_on_selector_all('#pipelineHistoryWrap_601 .a-timeline__item', "els => els.length") == 12):
+            failures.append("candidates: 'Toon alles' (601) onthulde niet alle twaalf items")
+
+        select_or_fail(page, failures, '#pipelineStage_601', 'rejected', "candidates: fase kiezen (entry 601, poging 1)")
+        click_or_fail(page, failures, '[data-action="pipeline-change-stage"][data-entry-id="601"]', "candidates: Fase wijzigen (entry 601, poging 1, verwacht 422)")
+        if not wait_until(page, lambda: text_of(page, '#pipelineEntryAlert_601').strip() != ''):
+            failures.append("candidates: geen inline-melding na de 422 op entry 601")
+        reverted = page.eval_on_selector('#pipelineStage_601', "el => el.value")
+        if reverted != "placed":
+            failures.append(f"candidates: select van entry 601 draaide niet terug naar 'placed' na de 422 -- kreeg {reverted!r}")
+
+        select_or_fail(page, failures, '#pipelineStage_601', 'rejected', "candidates: fase kiezen (entry 601, poging 2)")
+        click_or_fail(page, failures, '[data-action="pipeline-change-stage"][data-entry-id="601"]', "candidates: Fase wijzigen (entry 601, poging 2, verwacht 500)")
+        if not wait_until(page, lambda: "Internal server error" in text_of(page, '#pipelineEntryAlert_601')):
+            failures.append(f"candidates: geen inline-melding na de 500 op entry 601 -- kreeg {text_of(page, '#pipelineEntryAlert_601')!r}")
+        reverted = page.eval_on_selector('#pipelineStage_601', "el => el.value")
+        if reverted != "placed":
+            failures.append(f"candidates: select van entry 601 draaide niet terug naar 'placed' na de 500 -- kreeg {reverted!r}")
+
+        select_or_fail(page, failures, '#pipelineStage_601', 'rejected', "candidates: fase kiezen (entry 601, poging 3)")
+        click_or_fail(page, failures, '[data-action="pipeline-change-stage"][data-entry-id="601"]', "candidates: Fase wijzigen (entry 601, poging 3, verwacht 200)")
+        if not wait_until(page, lambda: page.eval_on_selector('#pipelineStage_601', "el => el.value") == "rejected"):
+            failures.append("candidates: entry 601 slaagde niet op de derde poging")
+        if PIPELINE_ENTRIES_BY_ID[601]["stage"] != "rejected":
+            failures.append(f"candidates: de server-fixture van entry 601 bleef op {PIPELINE_ENTRIES_BY_ID[601]['stage']!r} na een geslaagde PATCH")
+
         click_or_fail(page, failures, '#candidateDrawer [data-tab="toestemmingen"]', "candidates: de tab Toestemmingen")
         if not wait_until(page, lambda: page.query_selector('[data-action="candidate-talentpool-edit"]') is not None):
             failures.append("candidates: de tab Toestemmingen rendeerde niet")
@@ -2127,8 +2436,11 @@ def main():
         # De referral- en de talentpool-409's zijn opzettelijk en al op
         # tekst getoetst hierboven; Chromium logt elke 409-respons zelf ook
         # als console error, zoals bij de opzettelijke 500 van
-        # Bewaartermijnen.
-        new_errors = [e for e in console_errors[errors_before:] if "409 (Conflict)" not in e]
+        # Bewaartermijnen. Idem voor de opzettelijke 422/500 op de tab
+        # Pipeline (entry 601) en de permanente 500 op de historie van
+        # entry 602.
+        new_errors = [e for e in console_errors[errors_before:]
+                      if "409 (Conflict)" not in e and "422" not in e and "500 (Internal Server Error)" not in e]
         if new_errors:
             failures.append(f"candidates: {len(new_errors)} console error(s): {new_errors[:3]}")
 
