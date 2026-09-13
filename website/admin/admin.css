@@ -282,7 +282,12 @@ h1, h2, h3, h4,
    modalbreedte, met de labeltekst als losse hoofdletterregel eronder. Een
    .form-check-label hoort bij het bekende Bootstrap-formcheckpatroon, niet
    bij dit paneel-eigen label, en krijgt daarom zijn eigen regel eronder. */
-.form-group label:not(.form-check-label) { display: block; font-size: var(--font-size-xs); font-weight: 600; color: var(--navy-200); text-transform: uppercase; letter-spacing: .06em; margin-bottom: .4rem; }
+/* §7.2d regel 617: Plex Sans, --font-size-sm, gewicht 500, --navy-100 --
+   niet meer de uppercase mono die lange labels slecht leesbaar maakte
+   (design-reviewer op 1212e07). Gemeten op "Nieuwe vacature": vóór deze
+   pas 11px hoofdletters met 0.06em spatiëring in --navy-200; erna 13px
+   Plex Sans gewicht 500 in --navy-100, zoals de rest van de paneeltekst. */
+.form-group label:not(.form-check-label) { display: block; font-size: var(--font-size-sm); font-weight: 500; color: var(--navy-100); margin-bottom: .4rem; }
 .form-group .form-check-label { display: inline-block; font-size: var(--font-size-sm); color: var(--navy-100); margin-bottom: 0; }
 .form-group input:not([type="checkbox"]):not([type="radio"]), .form-group select, .form-group textarea { width: 100%; background: var(--tblr-body-bg); border: 1px solid var(--tblr-border-color); border-radius: var(--radius); color: var(--white); padding: .65rem 1rem; font-family: var(--font-primary); font-size: var(--font-size-sm); outline: none; box-sizing: border-box; }
 .form-group input:focus, .form-group select:focus, .form-group textarea:focus { border-color: var(--tblr-primary); box-shadow: 0 0 0 3px var(--gold-glow); }
@@ -451,8 +456,26 @@ h1, h2, h3, h4,
 .a-modal { z-index: 1055; }
 /* Eigen backdrop voor het geval Bootstrap-JS ontbreekt (zie ui.js). Met
    Bootstrap maakt die zijn eigen backdrop en is deze klasse er niet. */
+/* Bootstraps eigen backdrop draagt alleen .modal-backdrop /
+   .offcanvas-backdrop, nooit .a-backdrop (die klasse zet alleen het eigen
+   vangnet in fallbackShow() hieronder als Bootstrap-JS ontbreekt). Op de
+   gekwalificeerde selector alleen bleef de merkkleur dode code voor elke
+   echte Bootstrap-backdrop: gemeten opacity .24 (Tablers eigen
+   backdrop-opacity) in plaats van de bedoelde .72 (design-reviewer op
+   1212e07). Kleur geldt op de kale klasse (wint op ladingsvolgorde, gelijke
+   specificiteit); opacity moet ook op `.show` staan, want Tabler zet die
+   zelf op .modal-backdrop.show / .offcanvas-backdrop.show (specificiteit
+   0,2,0) -- een losse `.modal-backdrop{opacity:...}` (0,1,0) verliest daar
+   altijd tegen, ongeacht ladingsvolgorde. */
+.modal-backdrop,
+.offcanvas-backdrop { background: var(--navy-950); }
+.modal-backdrop.show,
+.offcanvas-backdrop.show { opacity: .72; }
+/* Het eigen vangnet heeft geen ingebouwde fixed/inset-positionering zoals
+   Bootstraps klasse die wel meebrengt, dus die twee blijven aan
+   .a-backdrop hangen. */
 .modal-backdrop.a-backdrop,
-.offcanvas-backdrop.a-backdrop { position: fixed; inset: 0; z-index: 1050; background: var(--navy-950); opacity: .72; }
+.offcanvas-backdrop.a-backdrop { position: fixed; inset: 0; z-index: 1050; }
 .a-modal .modal-content,
 .a-drawer.offcanvas {
   background: var(--navy-900);
@@ -491,6 +514,47 @@ h1, h2, h3, h4,
   z-index: 1055;
 }
 .a-drawer .offcanvas-body { padding: var(--space-xl); }
+
+/* §7.2b regel 589: op 390px is een drawer offcanvas-bottom, geen
+   offcanvas-end (design-reviewer op 1212e07). Bootstraps eigen
+   .offcanvas-bottom zet height op --bs-offcanvas-height (default 30vh);
+   de tweede klasse hier wint op specificiteit en zet dat op 92vh. */
+.offcanvas-bottom.a-drawer--bottom {
+  height: 92vh;
+  max-height: 92vh;
+  border-radius: var(--radius) var(--radius) 0 0;
+}
+/* Puur decoratieve sleepgreep (aria-hidden, geen interactie): een balkje
+   boven de sluitknop, zoals een van-onder-inschuivend paneel hoort. */
+.a-drawer__grip {
+  width: 40px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--navy-500);
+  margin: 0 auto var(--space-md);
+}
+
+/* §7.2b/§7.2c: het bevestigingsblok en de knoppenrij staan sticky
+   onderaan de scrollende inhoud (.modal-body / .offcanvas-body hebben
+   zelf al overflow-y), zodat ze bij een lang formulier niet buiten beeld
+   vallen (design-reviewer op 1212e07, gemeten op de brede plaatsingen-
+   modal op 1440x1000). Zelfde navy-900 als de rest van het paneel, dus
+   geen randeffect nodig om de inhoud erachter af te dekken. */
+.a-sticky-footer {
+  position: sticky;
+  bottom: 0;
+  background: var(--navy-900);
+  border-top: 1px solid var(--navy-600);
+  padding-top: var(--space-md);
+  margin-top: var(--space-lg);
+}
+.a-sticky-footer .a-actions,
+.a-sticky-footer .a-panel { margin-top: 0; }
+/* Drawervoettekst (ui.drawer's `footer`-optie): maximaal twee acties,
+   secundair links en primair rechts, in plaats van naast elkaar
+   geclusterd zoals een modal dat al deed en blijft doen (§7.2c-modals
+   veranderen hier bewust niet in uiterlijk, alleen in plakgedrag). */
+.a-drawer .a-sticky-footer .a-actions { justify-content: space-between; }
 
 /* Op een telefoon is de modal fullscreen (§7.2c) en staan de knoppen
    gestapeld en op volle breedte, met de primaire of destructieve knop

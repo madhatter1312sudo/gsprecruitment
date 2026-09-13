@@ -31,10 +31,12 @@
       kent alleen candidate_id als exacte match, geen ILIKE op naam). Het
       zoekveld "Kandidaat" lost daarom eerst op: een numerieke invoer gaat
       direct als candidate_id mee; een naam/e-mail wordt opgezocht via
-      GET /v1/admin/candidates?search=... en alleen bij precies één
-      treffer toegepast. Bij nul of meerdere treffers blijft de lijst
-      ongefilterd op dat veld en verschijnt een toelichting onder het veld
-      (resolvePlacementCandidateSearch()).
+      GET /v1/admin/candidates?limit=200 (eenmalig opgehaald en gecachet,
+      client-side gefilterd op naam/e-mail -- ook die lijstroute kent geen
+      ?search= met een resultaat dat aan candidate_id te koppelen is) en
+      alleen bij precies één treffer toegepast. Bij nul of meerdere
+      treffers blijft de lijst ongefilterd op dat veld en verschijnt een
+      toelichting onder het veld (resolvePlacementCandidateSearch()).
    2. De lijst toont "Kandidaat #<id>" (zoals de bewaartermijnenlijst
       §7.3.1 al doet voor kandidaten) in plaats van een naam: er is geen
       join op de lijstroute en er bestaat geen goedkope naamslijst om op
@@ -349,6 +351,11 @@
       activeTab: 'overzicht',
       dataset: { id: placementId },
       body: html`<div id="placementDrawerTabContent" class="a-tabpane"><i class="fa-solid fa-spinner fa-spin"></i></div>`,
+      // design-reviewer op 1212e07: "Bewerken" wijzigt ook start-/
+      // einddatum en notities (Overzicht), niet alleen de financiële
+      // velden, dus hoort in de sticky drawervoettekst (§7.2b), niet
+      // alleen in de tab Financieel. Eén knop, primair, rechts.
+      footer: { primary: { label: 'Bewerken', keepOpen: true, onClick: () => { this.openPlacementEditFromDrawer(placementId); } } },
       onClose: () => { this._placementDrawer = null; },
     });
     this.switchPlacementTab(placementId, 'overzicht');
@@ -513,10 +520,6 @@
     const moneyRow = (label, value) => html`<div class="a-metric-row"><span class="a-soft">${label}</span><span class="a-num a-num--tab">${value}</span></div>`;
     const textRow = (label, value) => html`<div class="a-metric-row"><span class="a-soft">${label}</span><span>${value}</span></div>`;
     mount(el, html`
-      <div class="d-flex justify-content-between align-items-center mb-3">
-        <div class="a-field-label mb-0">Financieel</div>
-        <button type="button" class="btn btn-sm btn-outline-secondary" data-action="open-placement-edit-modal" data-id="${p.id}">Bewerken</button>
-      </div>
       ${textRow('Afrekenbasis', AdminLabels.label('afrekenbasis', p.billing_basis, 'n.v.t.'))}
       ${moneyRow('Uurtarief', this.placementMoney(p.hourly_bill_rate))}
       ${moneyRow('Verwachte factureerbare uren', this.placementNumber(p.expected_billable_hours))}
@@ -691,6 +694,18 @@
         Auth.toast('Plaatsing verwijderd', 'success');
         if (this._placementDrawer) this._placementDrawer.close();
         await this.loadPlacements(this._lastParams.placements || {});
+        // code-reviewer op 1212e07: de laatste rij van de laatste pagina
+        // verwijderen liet _currentPage.placements op een pagina staan die
+        // na de herlading niet meer bestaat (een lege tabel, terwijl
+        // pagina 1 wel rijen heeft). Terug naar de nieuwe laatste pagina.
+        const table = this._placementsTable;
+        if (table) {
+          const lastPage = Math.max(1, Math.ceil((table.state.total || 0) / this._pageSize));
+          if ((this._currentPage.placements || 1) > lastPage) {
+            this._currentPage.placements = lastPage;
+            await this.loadPlacements(this._lastParams.placements || {});
+          }
+        }
         return;
       }
       const data = res ? await res.json().catch(() => null) : null;
@@ -798,8 +813,7 @@
           <label class="form-label" for="placementFormType">Type plaatsing *</label>
           <select class="form-select" id="placementFormType">
             <option value="">(kies een type)</option>
-            <option value="werving_selectie">Werving & selectie</option>
-            <option value="detachering">Detachering</option>
+            ${Object.keys(AdminLabels.maps.plaatsingstype).map(t => html`<option value="${t}">${AdminLabels.label('plaatsingstype', t)}</option>`)}
           </select>
           <div class="invalid-feedback" id="placementFormTypeError"></div>
         </div>
@@ -948,8 +962,20 @@
       placementType = document.getElementById('placementFormType')?.value;
       setFieldError('placementFormCandidate', candidateId ? '' : 'Kies een kandidaat.');
       setFieldError('placementFormClient', clientId ? '' : 'Kies een opdrachtgever.');
-      setFieldError('placementFormJob', jobId ? '' : 'Kies een vacature.');
       setFieldError('placementFormType', placementType ? '' : 'Kies een type plaatsing.');
+      // code-reviewer op 1212e07: zonder deze check komt een vacature die
+      // niet bij de gekozen opdrachtgever hoort pas als de letterlijke
+      // Engelse 422-string van _validate_references (routers/placements.py)
+      // in de modal terecht, in plaats van een Nederlandse inline fout
+      // vóór het versturen.
+      let jobError = jobId ? '' : 'Kies een vacature.';
+      if (jobId && clientId) {
+        const job = this._data.placementJobMap && this._data.placementJobMap.get(Number(jobId));
+        if (job && job.client_id != null && Number(job.client_id) !== Number(clientId)) {
+          jobError = 'Deze vacature hoort niet bij de gekozen opdrachtgever.';
+        }
+      }
+      setFieldError('placementFormJob', jobError);
     }
 
     const moneyField = (id, opts) => {
@@ -968,7 +994,13 @@
     const oneOffPayload = [];
     oneOffCosts.forEach((row, i) => {
       const label = (row.label || '').trim();
-      const amountParsed = parsePlacementDecimal(row.amount, { decimals: 2 });
+      // security-auditor LOW-2 op 1212e07: zonder max ging
+      // 99999999999999999,99 als 100000000000000000 de JSON in.
+      // OneOffCost.amount heeft in models/schemas.py zelf geen le, maar
+      // hetzelfde plafond als elk ander bedrag is de veilige keus (er is
+      // geen reden dat één regel eenmalige kosten groter mag zijn dan de
+      // rest van de plaatsing).
+      const amountParsed = parsePlacementDecimal(row.amount, { decimals: 2, max: MONEY_MAX });
       let rowValid = true;
       const labelErrEl = document.getElementById(`placementOneOffLabelError${i}`);
       if (!label) { if (labelErrEl) labelErrEl.textContent = 'Omschrijving is verplicht.'; rowValid = false; }
@@ -1046,10 +1078,7 @@
                 <label class="form-label" for="placementStatusFilter">Status</label>
                 <select class="form-select" id="placementStatusFilter">
                   <option value="">Alle</option>
-                  <option value="concept">Concept</option>
-                  <option value="actief">Actief</option>
-                  <option value="beeindigd">Beëindigd</option>
-                  <option value="geannuleerd">Geannuleerd</option>
+                  ${Object.keys(AdminLabels.maps.plaatsingstatus).map(s => html`<option value="${s}">${AdminLabels.label('plaatsingstatus', s)}</option>`)}
                 </select>
               </div>
               <div>
@@ -1096,7 +1125,6 @@
     ],
     actions: {
       'open-new-placement-modal': () => Admin.openPlacementFormModal(null),
-      'open-placement-edit-modal': (el) => Admin.openPlacementEditFromDrawer(Number(el.dataset.id)),
       'open-placement-drawer': (el) => Admin.openPlacementDrawer(Number(el.dataset.id)),
       'confirm-delete-placement': (el) => Admin.confirmDeletePlacement(Number(el.dataset.id)),
       'placement-tab': (el) => Admin.switchPlacementTab(Number(el.dataset.id), el.dataset.tab),

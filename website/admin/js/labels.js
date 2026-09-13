@@ -168,7 +168,10 @@
       purged: 'positief', no_longer_eligible: 'neutraal',
     },
     plaatsingstatus: {
-      concept: 'informatief', actief: 'positief',
+      // design-reviewer op 1212e07: §7.2e regel 710 zet 'concept' op
+      // neutraal, niet informatief -- een concept is nog geen actieve
+      // toestand die om aandacht vraagt.
+      concept: 'neutraal', actief: 'positief',
       beeindigd: 'neutraal', geannuleerd: 'negatief',
     },
   };

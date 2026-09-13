@@ -2280,6 +2280,19 @@ def main():
         click_or_fail(page, failures, '#placementFormOneOffAdd', "placements: 'Regel toevoegen' (eenmalige kosten)")
         wait_until(page, lambda: page.query_selector('[data-oneoff-field="label"][data-oneoff-index="0"]') is not None)
         fill_or_fail(page, failures, '[data-oneoff-field="label"][data-oneoff-index="0"]', "Search fee", "placements: omschrijving eenmalige kost")
+
+        # security-auditor LOW-2 op 1212e07: een eenmalige kost boven het
+        # geldplafond mag geen aanroep opleveren, net als elk ander bedrag.
+        fill_or_fail(page, failures, '[data-oneoff-field="amount"][data-oneoff-index="0"]', "99999999999999999,99",
+                     "placements: bedrag eenmalige kost (ongeldig, boven het plafond)")
+        creates_before_overflow = len(PLACEMENTS_STATE["creates"])
+        click_or_fail(page, failures, '#placementFormModal .btn-primary', "placements: 'Plaatsing aanmaken' (eenmalige kost boven het plafond)")
+        page.wait_for_timeout(300)
+        if len(PLACEMENTS_STATE["creates"]) != creates_before_overflow:
+            failures.append("placements: een eenmalige kost boven het plafond riep de aanmaakroute toch aan")
+        if not text_of(page, '#placementOneOffAmountError0').strip():
+            failures.append("placements: een eenmalige kost boven het plafond toonde geen inline fout")
+
         fill_or_fail(page, failures, '[data-oneoff-field="amount"][data-oneoff-index="0"]', "1234,56", "placements: bedrag eenmalige kost")
         click_or_fail(page, failures, '#placementFormModal .btn-primary', "placements: 'Plaatsing aanmaken'")
         if not wait_for_calls(page, PLACEMENTS_STATE["creates"], creates_before + 1):
@@ -2297,11 +2310,20 @@ def main():
         wait_until(page, lambda: page.query_selector('#placementFormModal.show') is None)
 
         # ---- Bewerken: PATCH bevat geen candidate_id/job_id/client_id/type ----
+        # code-reviewer op 1212e07: submitPlacementForm sluit de modal vóór
+        # await loadPlacements, en ui.table.reload zet de tbody eerst op de
+        # laadrij -- zonder deze wachtregel klikt dit soms op een tbody die
+        # nog aan het herladen is (1 op 3 rood).
+        wait_until(page, lambda: page.query_selector('[data-action="open-placement-drawer"][data-id="2"]') is not None)
         click_or_fail(page, failures, '[data-action="open-placement-drawer"][data-id="2"]', "placements: 'Openen' op plaatsing #2")
         wait_until(page, lambda: "Kandidaat #1482" in text_of(page, '#placementDrawerTabContent'))
         click_or_fail(page, failures, '#placementDrawer [data-tab="financieel"]', "placements: tabblad Financieel (plaatsing #2)")
-        wait_until(page, lambda: page.query_selector('[data-action="open-placement-edit-modal"]') is not None)
-        click_or_fail(page, failures, '[data-action="open-placement-edit-modal"]', "placements: 'Bewerken'")
+        # design-reviewer op 1212e07: "Bewerken" verhuisde van een losse
+        # knop in de tab Financieel naar de sticky drawervoettekst
+        # (ui.drawer's `footer`-optie, §7.2b), want het bewerkmodal
+        # wijzigt ook Overzicht-velden (start-/einddatum, notities).
+        wait_until(page, lambda: page.query_selector('#placementDrawer .a-sticky-footer .btn-primary') is not None)
+        click_or_fail(page, failures, '#placementDrawer .a-sticky-footer .btn-primary', "placements: 'Bewerken' (drawervoettekst)")
         wait_until(page, lambda: page.query_selector('#placementFormNotes') is not None)
         if page.query_selector('#placementFormCandidate') is not None:
             failures.append("placements: het bewerkmodal toonde per ongeluk de kandidaatkiezer")
@@ -2352,6 +2374,14 @@ def main():
         wait_until(page, lambda: page.query_selector('#placementDeleteModal.show') is None)
         wait_until(page, lambda: page.query_selector('[data-action="confirm-delete-placement"][data-id="4"]') is None)
 
+        # Elk paneel van de vorige stappen moet dicht zijn voordat de
+        # 500-test begint: een mutant die een modal open laat, laat een
+        # kaal retry.click() hieronder anders 30s hangen en gooit de
+        # failure-lijst weg in plaats van de fout te melden (code-reviewer
+        # op 1212e07).
+        page.keyboard.press('Escape')
+        wait_until(page, lambda: page.query_selector('.modal.show, .offcanvas.show') is None)
+
         # ---- 500 met retry ----
         PLACEMENTS_STATE["mode"] = "error"
         page.select_option('#placementStatusFilter', 'concept')
@@ -2364,11 +2394,15 @@ def main():
         if retry is None:
             failures.append("placements: geen retrylink gevonden om van de 500 te herstellen")
         else:
-            retry.click()
-            wait_until(page, lambda: "probeer opnieuw" not in text_of(page, '#placementsBody').lower())
-            recovered_placements = text_of(page, '#placementsBody')
-            if "kon niet laden" in recovered_placements.lower() or "probeer opnieuw" in recovered_placements.lower():
-                failures.append(f"placements: herstelde niet na de retry -- kreeg {recovered_placements[:200]!r}")
+            try:
+                retry.click(timeout=6000)
+            except Exception as exc:
+                failures.append(f"placements: retrylink niet klikbaar binnen 6000ms ({exc})")
+            else:
+                wait_until(page, lambda: "probeer opnieuw" not in text_of(page, '#placementsBody').lower())
+                recovered_placements = text_of(page, '#placementsBody')
+                if "kon niet laden" in recovered_placements.lower() or "probeer opnieuw" in recovered_placements.lower():
+                    failures.append(f"placements: herstelde niet na de retry -- kreeg {recovered_placements[:200]!r}")
         page.select_option('#placementStatusFilter', '')
 
         # 409/422/500 loggen zichzelf ook als console error; die grens gaat
