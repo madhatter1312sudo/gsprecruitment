@@ -12,13 +12,13 @@ const { html, raw, mount } = GSP;
 
 const Admin = {
   _data: {},
-  _currentPage: { users: 1, candidates: 1, audit: 1, outreach: 1, blog: 1, leads: 1, jobs: 1, retention: 1 },
+  _currentPage: { users: 1, candidates: 1, audit: 1, outreach: 1, blog: 1, leads: 1, jobs: 1, retention: 1, placements: 1 },
   // Filters passed to the load*() call that produced the currently-rendered
   // page, keyed the same as _currentPage — a data-page click re-derives the
   // page from here instead of needing a fresh closure per render.
   // `clients` isn't in _currentPage/goToPage's loaders map -- the roster
   // fetches a single limit=200 page (see loadClients()), no data-page UI.
-  _lastParams: { users: {}, candidates: {}, audit: {}, outreach: {}, blog: {}, leads: {}, jobs: {}, clients: {}, retention: {} },
+  _lastParams: { users: {}, candidates: {}, audit: {}, outreach: {}, blog: {}, leads: {}, jobs: {}, clients: {}, retention: {}, placements: {} },
   _pageSize: 20,
 
   /* ---- Init ---- */
@@ -351,6 +351,7 @@ const Admin = {
       users: 'loadUsers', candidates: 'loadCandidates',
       outreach: 'loadOutreach', blog: 'loadBlog', audit: 'loadAuditLog',
       leads: 'loadLeads', jobs: 'loadJobs', retention: 'loadRetentionReview',
+      placements: 'loadPlacements',
     };
     const fn = loaders[section];
     if (!fn || !Number.isFinite(page) || page < 1) return;

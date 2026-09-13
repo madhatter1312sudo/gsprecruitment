@@ -57,22 +57,31 @@
      .a-tap           label om een selectievakje, 44px tikdoel op een telefoon
      .a-confirm-mismatch  "Komt niet overeen" onder het bevestigingsveld
      .a-skel-block    vlak laadblok in een drawertab (§7.2b, §7.3.2), geen shimmer
+     .a-notes         vrije tekst met regeleindes in een detailpaneel (§7.3.3), zonder inline style=
+     .a-hide-cardlist verbergt een kolom of knop onder 768px (§7.3.3, sectie-eigen: alleen
+                      deze kaartlijst toont op 390px minder kolommen dan op desktop)
      .text-success-ink .text-danger-ink .text-warning-ink .text-info-ink
                       de vier semantische tekstkleuren uit §7.1.3, op de
                       --ink-*-tokens uit §7.1.2
      .a-accent        het goudaccent (geen semantische familie, §7.2e)
-   Panelen (ui.js): .a-modal (+ --wide, __title, __subtitle, __close), .a-drawer,
-   .a-backdrop, .a-confirm-hint, .a-sortable (kolomkop met aria-sort), .a-nav-caption (sidebarkopje).
-   Samen 44 klassenamen: de 29 uit §7.1.3, de veertien die de sectie
+   Panelen (ui.js): .a-modal (+ --wide, __title, __subtitle, __close), .a-drawer
+   (+ __grip, --bottom: sleepgreep en offcanvas-bottom-variant op 390px, §7.3.3),
+   .a-panel-footer (voettekst van een modal of drawer, buiten de scrollende
+   inhoud -- een broer van .modal-body/.offcanvas-body, §7.3.3), .a-backdrop,
+   .a-confirm-hint, .a-sortable (kolomkop met aria-sort), .a-nav-caption (sidebarkopje).
+   Samen 46 klassenamen: de 29 uit §7.1.3, de veertien die de sectie
    Bewaartermijnen (§7.3.1) nodig had (.a-eyebrow, .a-num, .a-wide-only,
    .a-bulkbar, .a-cardlist, .a-clamp, .a-disclosure, .a-col-check,
    .a-col-actions, .a-col-cat, .a-col-status, .a-row-selected, .a-tap,
-   .a-confirm-mismatch), en .a-skel-block die Toestemmingen (§7.3.2) als
+   .a-confirm-mismatch), .a-skel-block die Toestemmingen (§7.3.2) als
    eerste afnemer nodig had voor de "drie vlakke blokken"-laadstaat van een
-   drawertab (§7.2b) -- die staat stond nog nergens in dit bestand.
+   drawertab (§7.2b) -- die staat stond nog nergens in dit bestand -- en de
+   twee die Plaatsingen (§7.3.3) toevoegde: .a-notes en .a-hide-cardlist.
    Modifiers tellen niet als eigen naam: .a-num--xl,
-   --date en --loading, .a-clamp--open, .a-cardlist--compact,
+   --date, --loading en --tab, .a-clamp--open, .a-cardlist--compact,
    .a-scrollbox--rows en .a-modal__title--danger horen bij hun basisklasse.
+   De panelklassen (.a-modal, .a-drawer, .a-panel-footer, .a-backdrop, ...)
+   tellen apart mee, niet in de 46 -- dezelfde afspraak als hierboven.
    Die veertien horen bij de componenten van §7.2: .a-eyebrow en .a-num
    zijn de `gsp-eyebrow`/`gsp-num` uit §7.1.3 met de .a-prefix die
    diezelfde subsectie voorschrijft, .a-cardlist is de `gsp-cardlist` uit
@@ -282,7 +291,12 @@ h1, h2, h3, h4,
    modalbreedte, met de labeltekst als losse hoofdletterregel eronder. Een
    .form-check-label hoort bij het bekende Bootstrap-formcheckpatroon, niet
    bij dit paneel-eigen label, en krijgt daarom zijn eigen regel eronder. */
-.form-group label:not(.form-check-label) { display: block; font-size: var(--font-size-xs); font-weight: 600; color: var(--navy-200); text-transform: uppercase; letter-spacing: .06em; margin-bottom: .4rem; }
+/* §7.2d regel 617: Plex Sans, --font-size-sm, gewicht 500, --navy-100 --
+   niet meer de uppercase mono die lange labels slecht leesbaar maakte
+   (design-reviewer op 1212e07). Gemeten op "Nieuwe vacature": vóór deze
+   pas 11px hoofdletters met 0.06em spatiëring in --navy-200; erna 13px
+   Plex Sans gewicht 500 in --navy-100, zoals de rest van de paneeltekst. */
+.form-group label:not(.form-check-label) { display: block; font-size: var(--font-size-sm); font-weight: 500; color: var(--navy-100); margin-bottom: .4rem; }
 .form-group .form-check-label { display: inline-block; font-size: var(--font-size-sm); color: var(--navy-100); margin-bottom: 0; }
 .form-group input:not([type="checkbox"]):not([type="radio"]), .form-group select, .form-group textarea { width: 100%; background: var(--tblr-body-bg); border: 1px solid var(--tblr-border-color); border-radius: var(--radius); color: var(--white); padding: .65rem 1rem; font-family: var(--font-primary); font-size: var(--font-size-sm); outline: none; box-sizing: border-box; }
 .form-group input:focus, .form-group select:focus, .form-group textarea:focus { border-color: var(--tblr-primary); box-shadow: 0 0 0 3px var(--gold-glow); }
@@ -366,6 +380,14 @@ h1, h2, h3, h4,
 
 .a-metric-row { display: flex; justify-content: space-between; gap: var(--space-md); padding: 6px 0; border-bottom: 1px solid var(--admin-hairline); }
 
+/* §7.3.3 Plaatsingen: bedragen en andere tabelwaarden lijnen uit op hun
+   cijfers (.a-num zet al de mono lettertype; dit voegt alleen de
+   uitlijning toe, apart van .a-num--date dat een andere leesmaat is). */
+.a-num--tab { font-variant-numeric: tabular-nums; }
+/* Notities in de plaatsingsdrawer: vrije tekst met regeleindes, geen
+   opgemaakte HTML (html`` escapet de tekst toch al). */
+.a-notes { white-space: pre-wrap; }
+
 .a-listrow { display: flex; align-items: center; gap: var(--space-md); padding: var(--space-md) 0; border-bottom: 1px solid var(--admin-hairline); }
 .a-listrow:last-child { border-bottom: none; }
 
@@ -443,8 +465,26 @@ h1, h2, h3, h4,
 .a-modal { z-index: 1055; }
 /* Eigen backdrop voor het geval Bootstrap-JS ontbreekt (zie ui.js). Met
    Bootstrap maakt die zijn eigen backdrop en is deze klasse er niet. */
+/* Bootstraps eigen backdrop draagt alleen .modal-backdrop /
+   .offcanvas-backdrop, nooit .a-backdrop (die klasse zet alleen het eigen
+   vangnet in fallbackShow() hieronder als Bootstrap-JS ontbreekt). Op de
+   gekwalificeerde selector alleen bleef de merkkleur dode code voor elke
+   echte Bootstrap-backdrop: gemeten opacity .24 (Tablers eigen
+   backdrop-opacity) in plaats van de bedoelde .72 (design-reviewer op
+   1212e07). Kleur geldt op de kale klasse (wint op ladingsvolgorde, gelijke
+   specificiteit); opacity moet ook op `.show` staan, want Tabler zet die
+   zelf op .modal-backdrop.show / .offcanvas-backdrop.show (specificiteit
+   0,2,0) -- een losse `.modal-backdrop{opacity:...}` (0,1,0) verliest daar
+   altijd tegen, ongeacht ladingsvolgorde. */
+.modal-backdrop,
+.offcanvas-backdrop { background: var(--navy-950); }
+.modal-backdrop.show,
+.offcanvas-backdrop.show { opacity: .72; }
+/* Het eigen vangnet heeft geen ingebouwde fixed/inset-positionering zoals
+   Bootstraps klasse die wel meebrengt, dus die twee blijven aan
+   .a-backdrop hangen. */
 .modal-backdrop.a-backdrop,
-.offcanvas-backdrop.a-backdrop { position: fixed; inset: 0; z-index: 1050; background: var(--navy-950); opacity: .72; }
+.offcanvas-backdrop.a-backdrop { position: fixed; inset: 0; z-index: 1050; }
 .a-modal .modal-content,
 .a-drawer.offcanvas {
   background: var(--navy-900);
@@ -483,6 +523,62 @@ h1, h2, h3, h4,
   z-index: 1055;
 }
 .a-drawer .offcanvas-body { padding: var(--space-xl); }
+
+/* §7.2b regel 589: op 390px is een drawer offcanvas-bottom, geen
+   offcanvas-end (design-reviewer op 1212e07). Bootstraps eigen
+   .offcanvas-bottom zet height op --bs-offcanvas-height (default 30vh);
+   de tweede klasse hier wint op specificiteit en zet dat op 92vh. */
+.offcanvas-bottom.a-drawer--bottom {
+  height: 92vh;
+  max-height: 92vh;
+  border-radius: var(--radius) var(--radius) 0 0;
+}
+/* Puur decoratieve sleepgreep (aria-hidden, geen interactie): een balkje
+   boven de sluitknop, zoals een van-onder-inschuivend paneel hoort. */
+.a-drawer__grip {
+  width: 40px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--navy-500);
+  margin: 0 auto var(--space-md);
+}
+
+/* §7.2b/§7.2c: het bevestigingsblok en de knoppenrij staan in een eigen
+   voettekst BUITEN de scrollende inhoud (chief-of-staff op 09e99cc): een
+   broer van .modal-body binnen .modal-content, respectievelijk van
+   .offcanvas-body binnen .offcanvas. Beide ouders zijn al een flexkolom
+   (Bootstrap: .modal-content en .offcanvas zetten zelf
+   display:flex;flex-direction:column, en modal-dialog-scrollable geeft
+   .modal-content een max-height terwijl .modal-body en .offcanvas-body
+   zelf al flex:1 1 auto/flex-grow:1 plus overflow-y:auto hebben), dus
+   flexbox houdt deze footer vanzelf op zijn plek: geen position:sticky,
+   geen gemeten padding, geen resize-listener. Twee eerdere pogingen
+   loste dit niet op (1212e07: sticky binnen de scrollcontainer bleef bij
+   scrollTop 0 over de eerste velden liggen; ece9d6d: een gemeten
+   padding-bottom raakte na tabwissels en resizes uit de pas, met een
+   lege band of alsnog overlap als gevolg). flex-shrink:0 voorkomt dat de
+   footer inkrimpt als de inhoud erboven veel ruimte claimt (zelfde
+   conventie als Bootstraps eigen .modal-footer). */
+.a-panel-footer {
+  flex-shrink: 0;
+  background: var(--navy-900);
+  border-top: 1px solid var(--navy-600);
+  padding: var(--space-md) var(--space-2xl);
+}
+.a-drawer .a-panel-footer { padding: var(--space-md) var(--space-xl); }
+.a-panel-footer .a-actions,
+.a-panel-footer .a-panel { margin-top: 0; }
+/* Drawervoettekst (ui.drawer's `footer`-optie): maximaal twee acties,
+   secundair links en primair rechts, in plaats van naast elkaar
+   geclusterd zoals een modal dat al deed en blijft doen (§7.2c-modals
+   veranderen hier bewust niet in uiterlijk). Op 390px staan de acties
+   net als bij een modal gestapeld en op volle breedte (§7.2b, dezelfde
+   regel als hieronder voor .a-modal .a-actions). */
+.a-drawer .a-panel-footer .a-actions { justify-content: space-between; }
+@media (max-width: 576px) {
+  .a-drawer .a-panel-footer .a-actions { flex-direction: column-reverse; }
+  .a-drawer .a-panel-footer .a-actions .btn { width: 100%; }
+}
 
 /* Op een telefoon is de modal fullscreen (§7.2c) en staan de knoppen
    gestapeld en op volle breedte, met de primaire of destructieve knop
@@ -773,6 +869,16 @@ h1, h2, h3, h4,
     width: 100%;
     margin-top: var(--space-sm);
   }
+  /* §7.3.3 Plaatsingen, 390: de kaart toont alleen kandidaat, opdracht-
+     gever, type en status plus "Openen" (de spec noemt vacature/start/
+     einde niet en de rijverwijderknop niet). Eigen klasse in plaats van
+     retentie's data-label-aanpak: deze tabel heeft geen kolom met
+     meerdere regels tekst die op één kaartregel moet samenkomen.
+     ".a-cardlist td" hierboven zet zelf al display:block met dezelfde
+     specificiteit (1 klasse + 1 element); ".a-cardlist td.a-hide-cardlist"
+     moet daarom net zo specifiek zijn om te winnen. */
+  .a-cardlist td.a-hide-cardlist,
+  .a-hide-cardlist { display: none; }
 }
 
 /* 44px-tikdoel (§8.x.0). Sectiebreed voor #section-retention en
@@ -786,6 +892,7 @@ h1, h2, h3, h4,
 @media (max-width: 600px) {
   #section-retention .btn,
   #section-candidates .btn,
+  #section-placements .btn,
   .offcanvas .btn,
   .modal .btn,
   .modal .form-select,

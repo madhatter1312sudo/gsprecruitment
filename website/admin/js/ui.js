@@ -25,9 +25,18 @@
        handelende knop (§7.2c: laden houdt het paneel staan).
 
      ui.drawer({ id, title, subtitle, tabs, tabAction, activeTab, dataset,
-                 body, onSelect, onClose }) -> handle
-       Offcanvas aan de rechterkant voor detailpanelen. Afnemer: het
+                 body, footer, onSelect, onClose }) -> handle
+       Offcanvas: rechterkant vanaf 768px, onderin (offcanvas-bottom, max
+       92vh, decoratieve sleepgreep) op 390px (§7.2b). Afnemer: het
        Opdrachtgevers-detailpaneel (js/sections/clients.js).
+       footer: { primary, secondary } (zelfde vorm als hierboven, zonder
+       danger en zonder confirmText -- dat hoort bij een modal, niet bij
+       een blijvend geopende drawer). Maximaal twee acties, in een sticky
+       voettekst onderin de drawer: secundair links, primair rechts.
+       Alias van primary/secondary hierboven; button()/setBusy() werken
+       er hetzelfde op. keepOpen staat hier standaard aan (een drawer
+       sluit niet vanzelf na een footeractie zoals een modal dat na "OK"
+       wel doet); zet keepOpen: false expliciet om dat te overschrijven.
 
      ui.tabs({ tabs, active, action, dataset }) -> RawHtml
        Tabstrip met role="tablist" en aria-selected. tabs is
@@ -206,8 +215,12 @@
   document.addEventListener('mousedown', (e) => {
     const p = topPanel();
     if (!p) return;
-    const content = p.el.querySelector('.modal-content, .offcanvas-body');
-    if (content && content.contains(e.target)) return;
+    // .a-panel-footer erbij: op een drawer staat die als broer van
+    // .offcanvas-body (chief-of-staff op 09e99cc), dus zonder deze
+    // uitbreiding zou een klik op "Bewerken" als klik-buiten gelden en de
+    // drawer meteen weer sluiten.
+    const content = p.el.querySelectorAll('.modal-content, .offcanvas-body, .a-panel-footer');
+    if (Array.prototype.some.call(content, (c) => c.contains(e.target))) return;
     const onBackdrop = e.target.classList
       && BACKDROP_CLASSES.some(c => e.target.classList.contains(c));
     if (p.el.contains(e.target) || onBackdrop) p.close();
@@ -252,8 +265,16 @@
     // show() niets meer doet (het paneel is in zijn eigen boekhouding al
     // open). De klasse gaat er daarom meteen weer op.
     const wasShown = el.classList.contains('show');
+    // design-reviewer op 1212e07 (§7.2b regel 589): op 390px is een
+    // drawer offcanvas-bottom, niet offcanvas-end (dat schuift op een
+    // telefoon van rechts in en laat het grootste deel van het scherm
+    // onbereikbaar). Bepaald bij het openen, niet reactief: hetzelfde
+    // moment waarop besluit 1 (§7.6) een categoriebrede modal op mobiel
+    // al sluit in plaats van herschikt.
+    const isNarrowDrawer = isDrawer && typeof root.matchMedia === 'function'
+      && root.matchMedia('(max-width: 767px)').matches;
     el.className = isDrawer
-      ? 'offcanvas offcanvas-end a-drawer'
+      ? 'offcanvas a-drawer' + (isNarrowDrawer ? ' offcanvas-bottom a-drawer--bottom' : ' offcanvas-end')
       : 'modal a-modal' + (opts.wide ? ' a-modal--wide' : '');
     if (wasShown) el.classList.add('show');
     el.tabIndex = -1;
@@ -272,10 +293,25 @@
     const confirmId = opts.confirmText ? uid('confirm') : null;
     const hintId = confirmId ? confirmId + '_hint' : null;
     const mismatchId = confirmId ? confirmId + '_mismatch' : null;
+    // opts.footer ({ primary, secondary }): het drawerpatroon uit §7.2b --
+    // maximaal twee acties, geen getypte bevestiging en geen destructieve
+    // variant (die hoort bij een modal, niet bij een blijvend geopende
+    // drawer). Aliast op dezelfde primary/secondary die een modal al
+    // gebruikt, zodat de knoppen-, spinner- en gate-logica hieronder voor
+    // allebei identiek blijft. opts.primary/opts.secondary winnen als een
+    // aanroeper toch beide meegeeft.
+    const footer = opts.footer || {};
+    // code-reviewer op ece9d6d: een drawer blijft geopend na een
+    // footeractie (het is geen modal die na "OK" hoort te sluiten), dus
+    // keepOpen staat hier standaard aan -- opts.primary/opts.secondary
+    // zelf (de modalvorm) behouden hun bestaande standaard (sluiten,
+    // tenzij de aanroeper keepOpen zet), dat verandert hier niet.
+    const primaryOpt = opts.primary || (footer.primary ? { keepOpen: true, ...footer.primary } : null);
+    const secondaryOpt = opts.secondary || (footer.secondary ? { keepOpen: true, ...footer.secondary } : null);
     const buttons = [];
-    if (opts.secondary) buttons.push({ ...opts.secondary, cls: 'btn btn-ghost-secondary', role: 'secondary' });
+    if (secondaryOpt) buttons.push({ ...secondaryOpt, cls: 'btn btn-ghost-secondary', role: 'secondary' });
     if (opts.danger) buttons.push({ ...opts.danger, cls: 'btn btn-outline-danger', role: 'danger' });
-    if (opts.primary) buttons.push({ ...opts.primary, cls: 'btn btn-primary', role: 'primary' });
+    if (primaryOpt) buttons.push({ ...primaryOpt, cls: 'btn btn-primary', role: 'primary' });
     const gated = (b) => confirmId && (b.role === 'primary' || b.role === 'danger');
     const btnIds = buttons.map(() => uid('btn'));
 
@@ -314,23 +350,59 @@
       ? tabs({ tabs: opts.tabs, active: opts.activeTab, action: opts.tabAction, dataset: opts.dataset })
       : '';
     const bodyId = id + '__body';
+    // chief-of-staff op 09e99cc: een sticky footer die zelf in de
+    // scrollcontainer blijft staan, lost het probleem niet op -- bij
+    // scrollTop 0 ligt hij nog altijd over de eerste/onderste velden, en
+    // in rust laat hij een lege band vallen zodra padding en footerhoogte
+    // niet exact matchen (ze deden dat niet: de padding-toevoeging in
+    // ui.js werd vóór instance.show() gemeten en at wat resize- en
+    // tabwissel-timing betreft nooit helemaal in). De footer hoort
+    // daarom BUITEN de scrollcontainer: een broer van .modal-body
+    // (binnen .modal-content, dat Bootstraps eigen
+    // modal-dialog-scrollable al als flexkolom met max-height beheert)
+    // respectievelijk van .offcanvas-body (.offcanvas zelf is al een
+    // flexkolom). Geen position:sticky, geen gemeten padding, geen
+    // resize-listener meer nodig: flexbox houdt de footer vanzelf op zijn
+    // plek zonder overlap, in beide richtingen.
+    const footerHtml = (confirmHtml || buttonsHtml)
+      ? html`<div class="a-panel-footer">${confirmHtml}${buttonsHtml}</div>`
+      : '';
 
-    const inner = html`
+    // Puur decoratief (aria-hidden): een sleepgreep hoort bij een van-
+    // onder-inschuivend paneel, niet bij een keyboard- of
+    // schermlezerscontract, dus geen eigen interactie of label.
+    const gripHtml = isNarrowDrawer
+      ? raw('<div class="a-drawer__grip" aria-hidden="true"></div>')
+      : '';
+
+    // De scrollende inhoud (alles behalve de footer) blijft één stuk, of
+    // het paneel nu een modal of een drawer is.
+    const scrollableInner = html`
+      ${gripHtml}
       <button type="button" class="a-modal__close" data-action="close-modal"
         aria-label="${opts.closeLabel || 'Sluiten'}"><i class="fa-solid fa-xmark"></i></button>
       ${titleHtml}
       ${subtitleHtml}
       ${tabsHtml}
-      <div id="${bodyId}">${opts.body || ''}</div>
-      ${confirmHtml}
-      ${buttonsHtml}`;
+      <div id="${bodyId}">${opts.body || ''}</div>`;
 
     mount(el, isDrawer
-      ? html`<div class="offcanvas-body">${inner}</div>`
+      // .offcanvas-body en .a-panel-footer zijn broers binnen .offcanvas
+      // (el zelf), dat al display:flex; flex-direction:column staat
+      // (Bootstrap): .offcanvas-body neemt de resterende ruimte
+      // (flex:1 1 auto; overflow-y:auto, ook van Bootstrap) en de footer
+      // krijgt zijn eigen, ongescheelde plek eronder.
+      ? html`<div class="offcanvas-body">${scrollableInner}</div>${footerHtml}`
       // modal-fullscreen-sm-down: op een telefoon vult het paneel het scherm
       // (§7.2c). Tabler levert die klasse; hij doet boven 576px niets.
+      // modal-dialog-scrollable maakt .modal-content zelf een flexkolom met
+      // een max-height op de viewport; .modal-body en de footer zijn
+      // broers daarbinnen, dus dezelfde flex-mechaniek als de drawer.
       : html`<div class="modal-dialog modal-dialog-centered modal-dialog-scrollable modal-fullscreen-sm-down">
-               <div class="modal-content"><div class="modal-body">${inner}</div></div>
+               <div class="modal-content">
+                 <div class="modal-body">${scrollableInner}</div>
+                 ${footerHtml}
+               </div>
              </div>`);
 
     let instance = null;

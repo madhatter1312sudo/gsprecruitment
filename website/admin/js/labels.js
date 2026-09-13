@@ -135,6 +135,26 @@
       matching_only: 'Alleen matching',
       matching_and_contact: 'Matching en contact',
     },
+    // §7.3.3 Plaatsingen: _PLACEMENT_TYPES / _PLACEMENT_STATUSES /
+    // _BILLING_BASES / _FEE_TYPES (models/schemas.py, talent-os/backend).
+    plaatsingstype: {
+      werving_selectie: 'Werving & selectie',
+      detachering: 'Detachering',
+    },
+    plaatsingstatus: {
+      concept: 'Concept',
+      actief: 'Actief',
+      beeindigd: 'Beëindigd',
+      geannuleerd: 'Geannuleerd',
+    },
+    afrekenbasis: {
+      vast_maandbedrag: 'Vast maandbedrag',
+      per_uur: 'Per uur',
+    },
+    kostentype: {
+      percentage: 'Percentage',
+      vast: 'Vast bedrag',
+    },
   };
 
   // Kleurfamilie per waarde (§7.2e: neutraal, informatief, aandacht,
@@ -146,6 +166,13 @@
     retentiestatus: {
       pending: 'aandacht', rejected: 'neutraal', purging: 'informatief',
       purged: 'positief', no_longer_eligible: 'neutraal',
+    },
+    plaatsingstatus: {
+      // design-reviewer op 1212e07: §7.2e regel 710 zet 'concept' op
+      // neutraal, niet informatief -- een concept is nog geen actieve
+      // toestand die om aandacht vraagt.
+      concept: 'neutraal', actief: 'positief',
+      beeindigd: 'neutraal', geannuleerd: 'negatief',
     },
   };
 
