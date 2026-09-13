@@ -116,6 +116,25 @@
       quiz_submissions: 'quizinzending',
       contact_submissions: 'contactinzending',
     },
+    // §7.2e "Grondslag": candidates.lawful_basis (vier vrije-tekstwaarden,
+    // core/privacy.py en de referral-route) plus client_prospects.lawful_basis
+    // (drie gevalideerde waarden, routers/prospects.py). De kandidaatdrawer
+    // (§7.3.2) toont alleen de eerste vier; de prospectselect elders alleen
+    // de laatste drie.
+    grondslag: {
+      portal_registratie: 'Eigen portalaccount (art. 13)',
+      opt_in_talentpool: 'Toestemming talentpool',
+      toestemming_referral: 'Toestemming via referral',
+      gerechtvaardigd_belang: 'Gerechtvaardigd belang',
+      zakelijk_functioneel_adres: 'Zakelijk functioneel adres',
+      opt_in: 'Opt-in',
+      bestaande_relatie: 'Bestaande relatie',
+    },
+    // §7.2e "Toestemmingsomvang": TALENTPOOL_CONSENT_SCOPES (models/schemas.py).
+    toestemmingsomvang: {
+      matching_only: 'Alleen matching',
+      matching_and_contact: 'Matching en contact',
+    },
   };
 
   // Kleurfamilie per waarde (§7.2e: neutraal, informatief, aandacht,

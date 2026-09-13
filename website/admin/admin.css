@@ -56,17 +56,21 @@
      .a-row-selected  geselecteerde rij: eigen vlak plus gouden linkerrand
      .a-tap           label om een selectievakje, 44px tikdoel op een telefoon
      .a-confirm-mismatch  "Komt niet overeen" onder het bevestigingsveld
+     .a-skel-block    vlak laadblok in een drawertab (§7.2b, §7.3.2), geen shimmer
      .text-success-ink .text-danger-ink .text-warning-ink .text-info-ink
                       de vier semantische tekstkleuren uit §7.1.3, op de
                       --ink-*-tokens uit §7.1.2
      .a-accent        het goudaccent (geen semantische familie, §7.2e)
    Panelen (ui.js): .a-modal (+ --wide, __title, __subtitle, __close), .a-drawer,
    .a-backdrop, .a-confirm-hint, .a-sortable (kolomkop met aria-sort), .a-nav-caption (sidebarkopje).
-   Samen 43 klassenamen: de 29 uit §7.1.3 plus de veertien die de sectie
+   Samen 44 klassenamen: de 29 uit §7.1.3, de veertien die de sectie
    Bewaartermijnen (§7.3.1) nodig had (.a-eyebrow, .a-num, .a-wide-only,
    .a-bulkbar, .a-cardlist, .a-clamp, .a-disclosure, .a-col-check,
    .a-col-actions, .a-col-cat, .a-col-status, .a-row-selected, .a-tap,
-   .a-confirm-mismatch). Modifiers tellen niet als eigen naam: .a-num--xl,
+   .a-confirm-mismatch), en .a-skel-block die Toestemmingen (§7.3.2) als
+   eerste afnemer nodig had voor de "drie vlakke blokken"-laadstaat van een
+   drawertab (§7.2b) -- die staat stond nog nergens in dit bestand.
+   Modifiers tellen niet als eigen naam: .a-num--xl,
    --date en --loading, .a-clamp--open, .a-cardlist--compact,
    .a-scrollbox--rows en .a-modal__title--danger horen bij hun basisklasse.
    Die veertien horen bij de componenten van §7.2: .a-eyebrow en .a-num
@@ -143,6 +147,14 @@
   --tblr-red: var(--ink-error);
   --tblr-green: var(--ink-success);
   --tblr-yellow: var(--ink-warning);
+
+  /* §7.2d: .invalid-feedback en .is-invalid komen uit de gevendorde
+     Tabler-CSS met een hardcoded #d63939 (niet afgeleid van --tblr-red
+     hierboven), dus zonder deze twee regels blijft de validatiekleur van
+     elk formulier in dit paneel buiten de merktokens om. Zelfde kleur als
+     --ink-error, dus dezelfde 6,09:1 op --navy-700 (§7.1.2). */
+  --tblr-form-invalid-color: var(--ink-error);
+  --tblr-form-invalid-border-color: var(--ink-error);
 
   /* css-tokens-check: rgb-triple -- Tabler bouwt hier zelf
      rgba(var(--x-rgb), a) mee voor tinten, randen en de focusring. Een
@@ -262,8 +274,17 @@ h1, h2, h3, h4,
 .activity-text { font-size: var(--font-size-sm); }
 .activity-time { font-size: 11px; color: var(--admin-muted); margin-top: 2px; }
 .form-group { margin-bottom: var(--space-lg); }
-.form-group label { display: block; font-size: var(--font-size-xs); font-weight: 600; color: var(--navy-200); text-transform: uppercase; letter-spacing: .06em; margin-bottom: .4rem; }
-.form-group input, .form-group select, .form-group textarea { width: 100%; background: var(--tblr-body-bg); border: 1px solid var(--tblr-border-color); border-radius: var(--radius); color: var(--white); padding: .65rem 1rem; font-family: var(--font-primary); font-size: var(--font-size-sm); outline: none; box-sizing: border-box; }
+/* design-reviewer op b9d5b21 (§7.3.2): zonder de twee :not()-uitsluitingen
+   hieronder pakt deze regel ook een <input type="radio"|"checkbox"> en zijn
+   .form-check-label, en dat maakt van een radiogroep in een <fieldset
+   class="form-group"> (de Toestemming-keuze Vastleggen/Intrekken in de
+   drie modals van §7.3.2) twee liggende ellipsen van de volle
+   modalbreedte, met de labeltekst als losse hoofdletterregel eronder. Een
+   .form-check-label hoort bij het bekende Bootstrap-formcheckpatroon, niet
+   bij dit paneel-eigen label, en krijgt daarom zijn eigen regel eronder. */
+.form-group label:not(.form-check-label) { display: block; font-size: var(--font-size-xs); font-weight: 600; color: var(--navy-200); text-transform: uppercase; letter-spacing: .06em; margin-bottom: .4rem; }
+.form-group .form-check-label { display: inline-block; font-size: var(--font-size-sm); color: var(--navy-100); margin-bottom: 0; }
+.form-group input:not([type="checkbox"]):not([type="radio"]), .form-group select, .form-group textarea { width: 100%; background: var(--tblr-body-bg); border: 1px solid var(--tblr-border-color); border-radius: var(--radius); color: var(--white); padding: .65rem 1rem; font-family: var(--font-primary); font-size: var(--font-size-sm); outline: none; box-sizing: border-box; }
 .form-group input:focus, .form-group select:focus, .form-group textarea:focus { border-color: var(--tblr-primary); box-shadow: 0 0 0 3px var(--gold-glow); }
 .pagination-wrap { display: flex; gap: 6px; flex-wrap: wrap; }
 .pagination-wrap button { min-width: 32px; height: 32px; padding: 0 8px; background: var(--tblr-bg-surface-tertiary); border: 1px solid var(--tblr-border-color); border-radius: var(--radius-sm); color: var(--navy-200); font-family: var(--font-primary); font-size: var(--font-size-xs); cursor: pointer; }
@@ -375,6 +396,17 @@ h1, h2, h3, h4,
   padding-bottom: var(--space-sm);
 }
 .a-tabpane { min-height: 120px; }
+/* §7.2b drawer-laadstaat: "drie vlakke --navy-700-blokken op de plaats van
+   de velden, geen shimmer". Eerste afnemer: de tab Toestemmingen (§7.3.2),
+   drie kaarten dus drie blokken. --navy-600 omdat de kaart zelf al op
+   --navy-700 staat (zelfde redenering als .a-num--loading hierboven). */
+.a-skel-block {
+  height: 88px;
+  border-radius: var(--radius);
+  background: var(--navy-600);
+  margin-bottom: var(--space-md);
+}
+.a-skel-block:last-child { margin-bottom: 0; }
 
 .a-clickable { cursor: pointer; }
 /* Geselecteerde rij (§7.2a): eigen vlak plus een gouden linkerrand op de
@@ -743,12 +775,35 @@ h1, h2, h3, h4,
   }
 }
 
-/* 44px-tikdoel in deze sectie (§8.x.0). Sectiebreed, niet paneelbreed: de
-   knopmaat van de andere secties hoort bij hun eigen pass. Een
-   selectievakje wordt niet zelf 44px groot -- dat levert een enorm vierkant
-   op -- maar krijgt zijn tikdoel van het label eromheen. */
+/* 44px-tikdoel (§8.x.0). Sectiebreed voor #section-retention en
+   #section-candidates (die twee secties zijn tot nu toe door deze pas
+   gegaan), en breed voor .offcanvas/.modal: elke drawer en elke modal in
+   het paneel deelt dezelfde knop- en veldmaten (§7.2b/§7.2c), dus die twee
+   horen bij de gedeelde componentklasse en niet bij één sectie. Andere
+   secties krijgen dit bij hun eigen §8.x.0-pas. Een selectievakje wordt
+   niet zelf 44px groot -- dat levert een enorm vierkant op -- maar krijgt
+   zijn tikdoel van het label eromheen (.a-tap). */
 @media (max-width: 600px) {
-  #section-retention .btn { min-height: 44px; min-width: 44px; }
+  #section-retention .btn,
+  #section-candidates .btn,
+  .offcanvas .btn,
+  .modal .btn,
+  .modal .form-select,
+  .modal .form-control {
+    min-height: 44px;
+    min-width: 44px;
+  }
+  /* design-reviewer op 2e47403: de radiolabel zelf (.form-check-label,
+     "Vastleggen"/"Intrekken" in de drie modals van §7.3.2) is een korte
+     tekstregel, geen 44px hoog. De ellips-bug verborg dit eerder, want
+     toen was de hele rij toch al 390px breed. flex + min-height zet het
+     tikdoel op de hele rij (label plus radio), niet alleen op de tekst. */
+  .modal .form-check,
+  .offcanvas .form-check {
+    min-height: 44px;
+    display: flex;
+    align-items: center;
+  }
   .a-tap {
     display: inline-flex;
     align-items: center;

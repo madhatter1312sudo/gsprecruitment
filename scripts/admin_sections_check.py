@@ -110,7 +110,7 @@ CONTACTS_BY_CLIENT = {
 
 JOBS_BY_CLIENT = {
     1: [{"id": 201, "title": "Embedded Software Engineer", "employment_type": "werving_selectie",
-         "status": "open", "application_count": 3}],
+         "status": "open", "application_count": 3, "company_name": "Example Engineering B.V."}],
     2: [],
 }
 
@@ -126,6 +126,117 @@ ACTIVITIES_BY_CLIENT = {
          "created_at": "2026-01-01T00:00:00Z"}],
     2: [],
 }
+
+# ---- Kandidaatdrawer: tab Toestemmingen + referral-intake (§7.3.2) -------
+# Twee kandidaten. CANDIDATE_RECORD (kind sourced, candidates.id 1482, geen
+# consent bij aanvang) is genoeg om alle drie de modals tegen echte
+# gestubde routes te toetsen. SELF_REG_CANDIDATE_RECORD (kind
+# self-registered, users.id 501, gekoppeld aan candidates.id 1483 met al
+# actieve talentpool- en presentatietoestemming) bewijst de HIGH-1-
+# reparatie: GET /candidates/self-registered/501 draagt geen enkele
+# consentkolom (self_reg_detail() hieronder, een letterlijke kopie van wat
+# routers/admin.py:861-906 teruggeeft), dus zonder de tweede aanroep op
+# kind 'sourced' met candidate_id 1483 zou de tab altijd "Geen toestemming"
+# en job-alerts "Nee" tonen. De drie tabs Profiel/Matches/Activiteit hoeven
+# voor dit doel alleen zonder console error te renderen, dus die leunen op
+# de generieke lege-lijst-fallback onderaan route_admin_api.
+CANDIDATE_RECORD = {
+    "id": 1482, "full_name": "Voorbeeld Kandidaat", "email": "kandidaat@example.invalid",
+    "current_title": "Embedded Engineer", "current_company": None, "years_experience": 5,
+    "location": "Eindhoven", "source": "apollo", "status": "active",
+    "lawful_basis": "gerechtvaardigd_belang",
+    "consent_talentpool_at": None, "consent_talentpool_until": None, "consent_scope": None,
+    "consent_source": None, "consent_withdrawn_at": None,
+    "consent_spec_presentation_at": None, "consent_spec_presentation_job_id": None,
+    "job_alert_optin_at": None, "job_alert_unsubscribed_at": None,
+    "created_at": "2026-01-01T00:00:00Z",
+}
+
+SELF_REG_USER_ID = 501
+SELF_REG_CANDIDATE_ID = 1483
+SELF_REG_CANDIDATE_RECORD = {
+    "id": SELF_REG_CANDIDATE_ID, "full_name": "Zelf Geregistreerd Voorbeeld", "email": "zelf@example.invalid",
+    "current_title": "Mechatronica Engineer", "current_company": None, "years_experience": 3,
+    "location": "Veldhoven", "source": "portal_registration", "status": "active",
+    "lawful_basis": "portal_registratie",
+    "consent_talentpool_at": "2026-08-01T00:00:00Z", "consent_talentpool_until": "2027-08-01T00:00:00Z",
+    "consent_scope": "matching_and_contact", "consent_source": "self", "consent_withdrawn_at": None,
+    "consent_spec_presentation_at": "2026-08-05T00:00:00Z", "consent_spec_presentation_job_id": 201,
+    "job_alert_optin_at": "2026-08-01T00:00:00Z", "job_alert_unsubscribed_at": None,
+    "created_at": "2026-08-01T00:00:00Z",
+}
+
+# Eén dict op candidates.id, gebruikt door de PATCH-routes en de
+# sourced-detailroute hieronder, zodat een PATCH op de ene kandidaat de
+# andere niet raakt.
+CANDIDATES_BY_ID = {
+    CANDIDATE_RECORD["id"]: CANDIDATE_RECORD,
+    SELF_REG_CANDIDATE_ID: SELF_REG_CANDIDATE_RECORD,
+}
+
+CANDIDATE_STATE = {
+    "talentpool_calls": [], "presentation_calls": [], "referral_calls": [],
+    # "ok" | "suppressed" | "exists" | "unknown" -- welke uitkomst de
+    # volgende POST /candidates/referral teruggeeft.
+    "referral_mode": "ok",
+}
+
+
+def candidate_roster_item():
+    r = CANDIDATE_RECORD
+    return {
+        "kind": "sourced", "id": r["id"], "candidate_id": None, "user_id": None,
+        "full_name": r["full_name"], "email": r["email"], "current_title": r["current_title"],
+        "years_experience": r["years_experience"], "match_count": 0, "placement_count": 0,
+        "source": r["source"], "status": r["status"], "is_verified": True,
+    }
+
+
+def self_registered_roster_item():
+    r = SELF_REG_CANDIDATE_RECORD
+    return {
+        "kind": "self-registered", "id": SELF_REG_USER_ID, "candidate_id": SELF_REG_CANDIDATE_ID,
+        "user_id": SELF_REG_USER_ID, "full_name": r["full_name"], "email": r["email"],
+        "current_title": r["current_title"], "years_experience": r["years_experience"],
+        "match_count": 0, "placement_count": 0, "source": r["source"], "status": r["status"],
+        "is_verified": True,
+    }
+
+
+def build_candidate_detail(record):
+    """GET /candidates/sourced/{id}: SELECT c.* plus wat de route er zelf
+    bijzet. Dit is de ENIGE respons die consentvelden draagt, voor beide
+    kandidaten (admin.py:813-859)."""
+    d = dict(record)
+    d["skills"] = []
+    d["languages"] = []
+    d["tags"] = []
+    d["match_count"] = 0
+    d["placement_count"] = 0
+    d["kind"] = "sourced"
+    d["user_id"] = None
+    d["is_verified"] = None
+    return d
+
+
+def self_reg_detail():
+    """GET /candidates/self-registered/501: routers/admin.py:861-906.
+    Draagt full_name/email/candidate_id, maar bewust GEEN enkele
+    consent_*/job_alert_*-kolom -- dat is precies de HIGH-1-bug die
+    resolveConsentDetail() in candidates.js moet omzeilen."""
+    r = SELF_REG_CANDIDATE_RECORD
+    return {
+        "id": SELF_REG_USER_ID, "email": r["email"], "full_name": r["full_name"],
+        "role": "candidate", "is_verified": True, "created_at": r["created_at"], "updated_at": None,
+        "profile": {
+            "phone": None, "current_title": r["current_title"], "current_company": None,
+            "location": r["location"], "skills": [], "languages": [],
+            "years_experience": r["years_experience"], "cv_file_path": None,
+        },
+        "kind": "self-registered", "candidate_id": SELF_REG_CANDIDATE_ID,
+        "candidate_status": r["status"], "candidate_source": r["source"], "match_count": 0,
+    }
+
 
 LEADS = [
     {"id": 1, "source": "contact_submissions", "name": "Lead One", "email": "lead1@example.com",
@@ -348,7 +459,11 @@ def route_admin_api(route, request):
             all_open = [j for c in JOBS_BY_CLIENT.values() for j in c if j["status"] == "open"]
             json_response({"items": all_open, "total": len(all_open)})
             return
-        json_response({"items": [], "total": 0})
+        # Ongefilterd, geen client_id: as-built afwijking 3 (§7.3.2) --
+        # de eenmalige, ongefilterde ophaling die de consenttab gebruikt
+        # om een titel te vinden bij een vastgelegde presentatietoestemming.
+        all_jobs = [j for c in JOBS_BY_CLIENT.values() for j in c]
+        json_response({"items": all_jobs, "total": len(all_jobs)})
         return
 
     # ---- Client contacts (WS-C.4) ----
@@ -548,22 +663,134 @@ def route_admin_api(route, request):
     if path == "/api/v1/admin/content":
         json_response([])
         return
-    if path == "/api/v1/admin/candidates":
-        json_response({"items": [], "total": 0})
+    if path == "/api/v1/admin/candidates" and method == "GET":
+        json_response({"items": [candidate_roster_item(), self_registered_roster_item()], "total": 2})
+        return
+    m = re.match(r"^/api/v1/admin/candidates/sourced/(\d+)$", path)
+    if m and method == "GET":
+        record = CANDIDATES_BY_ID.get(int(m.group(1)))
+        if record is None:
+            json_response({"detail": "Not found"}, status=404)
+        else:
+            json_response(build_candidate_detail(record))
+        return
+    m = re.match(r"^/api/v1/admin/candidates/self-registered/(\d+)$", path)
+    if m and method == "GET":
+        if int(m.group(1)) == SELF_REG_USER_ID:
+            json_response(self_reg_detail())
+        else:
+            json_response({"detail": "Not found"}, status=404)
+        return
+    m = re.match(r"^/api/v1/admin/candidates/(\d+)/talentpool-consent$", path)
+    if m and method == "PATCH":
+        record = CANDIDATES_BY_ID.get(int(m.group(1)))
+        if record is None:
+            json_response({"detail": "Candidate not found"}, status=404)
+            return
+        body = json.loads(request.post_data or "{}")
+        CANDIDATE_STATE["talentpool_calls"].append(body)
+        if body.get("consent"):
+            # admin.py:934-948 -- de vastleg-tak raakt consent_withdrawn_at
+            # nooit, ook niet als die al gezet was door een eerdere
+            # intrekking (MEDIUM-2-test hieronder: eenmaal ingetrokken
+            # blijft dat na een nieuwe vastlegging op de backend staan).
+            record.update({
+                "consent_talentpool_at": "2026-09-03T00:00:00Z",
+                "consent_talentpool_until": "2027-09-03T00:00:00Z",
+                "consent_scope": body.get("scope"),
+                "consent_source": "admin",
+            })
+        else:
+            record.update({
+                "consent_talentpool_at": None, "consent_talentpool_until": None,
+                "consent_scope": None, "consent_source": None,
+                "consent_withdrawn_at": "2026-09-04T00:00:00Z",
+            })
+        # De RETURNING-kolommen van de echte route (admin.py:945-946 en
+        # 962-963) dragen consent_withdrawn_at nooit mee -- dat is precies
+        # de MEDIUM-2-bug die dit scherm dwingt tot een verse GET in plaats
+        # van deze respons te vertrouwen voor de kaart.
+        json_response({
+            "id": record["id"],
+            "consent_talentpool_at": record["consent_talentpool_at"],
+            "consent_talentpool_until": record["consent_talentpool_until"],
+            "consent_scope": record["consent_scope"],
+            "consent_source": record["consent_source"],
+            "lawful_basis": record["lawful_basis"],
+        })
+        return
+    m = re.match(r"^/api/v1/admin/candidates/(\d+)/spec-presentation-consent$", path)
+    if m and method == "PATCH":
+        record = CANDIDATES_BY_ID.get(int(m.group(1)))
+        if record is None:
+            json_response({"detail": "Candidate not found"}, status=404)
+            return
+        body = json.loads(request.post_data or "{}")
+        CANDIDATE_STATE["presentation_calls"].append(body)
+        if body.get("consent"):
+            record.update({
+                "consent_spec_presentation_at": "2026-09-05T00:00:00Z",
+                "consent_spec_presentation_job_id": body.get("job_id"),
+            })
+        else:
+            record.update({
+                "consent_spec_presentation_at": None, "consent_spec_presentation_job_id": None,
+            })
+        json_response({
+            "id": record["id"],
+            "consent_spec_presentation_at": record["consent_spec_presentation_at"],
+            "consent_spec_presentation_job_id": record["consent_spec_presentation_job_id"],
+        })
+        return
+    if path == "/api/v1/admin/candidates/referral" and method == "POST":
+        body = json.loads(request.post_data or "{}")
+        CANDIDATE_STATE["referral_calls"].append(body)
+        mode = CANDIDATE_STATE["referral_mode"]
+        if mode == "suppressed":
+            json_response({"detail": {
+                "code": "referral_email_suppressed",
+                "message": "This e-mail address is on the suppression list.",
+            }}, status=409)
+            return
+        if mode == "exists":
+            json_response({"detail": {
+                "code": "referral_candidate_exists", "candidate_id": CANDIDATE_RECORD["id"],
+                "message": f"A candidate record already exists for this e-mail address (id {CANDIDATE_RECORD['id']}).",
+            }}, status=409)
+            return
+        if mode == "unknown":
+            json_response({"detail": {
+                "code": "referral_something_else",
+                "message": "Something else went wrong that this screen does not know a Dutch sentence for.",
+            }}, status=409)
+            return
+        json_response({
+            "id": 9001, "full_name": body.get("full_name"), "source": "referral",
+            "lawful_basis": "toestemming_referral", "date_found": "2026-09-10",
+            "referred_by": body.get("referred_by"), "confirmation_email_sent": True,
+        }, status=201)
         return
 
     json_response({"items": [], "total": 0})
 
 
-def click_or_fail(page, failures, selector, what):
-    """Klikken zonder dat een ontbrekend element de hele run in een
-    traceback laat eindigen: dan mist niet alleen deze assertie maar ook
-    alles wat erna komt. Een gemiste knop hoort in de failure-lijst, net
-    als de pagineerknop dat al deed."""
+def click_or_fail(page, failures, selector, what, timeout=6000):
+    """Klikken zonder dat een ontbrekend of onklikbaar element de hele run
+    in een traceback of een 30s-standaardtimeout laat eindigen: dan mist
+    niet alleen deze assertie maar ook alles wat erna komt, en een
+    mutatietest die zoiets veroorzaakt wordt pas na een halve minuut rood
+    in plaats van meteen. Een gemiste of onklikbare knop hoort in de
+    failure-lijst, net als de pagineerknop dat al deed. Geen "retention:"-
+    prefix meer: deze helper wordt inmiddels door meerdere secties
+    gebruikt, en `what` draagt zijn eigen context al."""
     if page.query_selector(selector) is None:
-        failures.append(f"retention: {what} niet gevonden ({selector})")
+        failures.append(f"{what} niet gevonden ({selector})")
         return False
-    page.click(selector)
+    try:
+        page.click(selector, timeout=timeout)
+    except Exception as exc:
+        failures.append(f"{what}: klikken op {selector} lukte niet binnen {timeout}ms ({exc})")
+        return False
     return True
 
 
@@ -615,11 +842,44 @@ def wait_for_calls(page, bucket, count, timeout=6000):
     return wait_until(page, lambda: len(bucket) >= count, timeout)
 
 
-def fill_or_fail(page, failures, selector, value, what):
+def fill_or_fail(page, failures, selector, value, what, timeout=6000):
     if page.query_selector(selector) is None:
-        failures.append(f"retention: {what} niet gevonden ({selector})")
+        failures.append(f"{what} niet gevonden ({selector})")
         return False
-    page.fill(selector, value)
+    try:
+        page.fill(selector, value, timeout=timeout)
+    except Exception as exc:
+        failures.append(f"{what}: invullen van {selector} lukte niet binnen {timeout}ms ({exc})")
+        return False
+    return True
+
+
+def select_or_fail(page, failures, selector, value, what, timeout=6000):
+    """code-reviewer op 2e47403: een kale page.select_option hangt de volle
+    30s als een mutant de modal voortijdig sluit, en de FAIL-regel die
+    zou zeggen welke stap dat was verdwijnt dan in een traceback in
+    plaats van in de failure-lijst te staan."""
+    if page.query_selector(selector) is None:
+        failures.append(f"{what} niet gevonden ({selector})")
+        return False
+    try:
+        page.select_option(selector, value, timeout=timeout)
+    except Exception as exc:
+        failures.append(f"{what}: selecteren in {selector} lukte niet binnen {timeout}ms ({exc})")
+        return False
+    return True
+
+
+def check_or_fail(page, failures, selector, what, timeout=6000):
+    """Zelfde reden als select_or_fail hierboven, voor page.check()."""
+    if page.query_selector(selector) is None:
+        failures.append(f"{what} niet gevonden ({selector})")
+        return False
+    try:
+        page.check(selector, timeout=timeout)
+    except Exception as exc:
+        failures.append(f"{what}: aanvinken van {selector} lukte niet binnen {timeout}ms ({exc})")
+        return False
     return True
 
 
@@ -1230,6 +1490,332 @@ def main():
         if new_errors:
             failures.append(f"retention (na retry): {len(new_errors)} console error(s): {new_errors[:3]}")
 
+        # ---- Kandidaatdrawer: tab Toestemmingen + referral-intake (§7.3.2) ----
+        errors_before = len(console_errors)
+        page.click('.nav-link[data-section="candidates"]')
+        wait_until(page, lambda: page.query_selector('#section-candidates table tbody tr [data-action="view-candidate"]') is not None)
+        click_or_fail(page, failures, '#section-candidates table tbody tr [data-action="view-candidate"]',
+                      "candidates: de bekijkknop van de kandidaatrij")
+        if not wait_until(page, lambda: page.query_selector('#candidateDrawerTabContent') is not None):
+            failures.append("candidates: de kandidaatdrawer ging niet open")
+        # code-reviewer op b9d5b21: de drawerkop moet de echte naam tonen
+        # zodra het profieldetail geladen is, niet alleen "Kandidaat".
+        if not wait_for_text(page, '#candidateDrawer__title', CANDIDATE_RECORD["full_name"]):
+            failures.append(f"candidates: de drawerkop toont niet de echte naam -- kreeg {text_of(page, '#candidateDrawer__title')!r}")
+        click_or_fail(page, failures, '#candidateDrawer [data-tab="toestemmingen"]', "candidates: de tab Toestemmingen")
+        if not wait_until(page, lambda: page.query_selector('[data-action="candidate-talentpool-edit"]') is not None):
+            failures.append("candidates: de tab Toestemmingen rendeerde niet")
+
+        # Talentpool vastleggen met lege evidence: inline fout, nul aanroepen.
+        click_or_fail(page, failures, '[data-action="candidate-talentpool-edit"]', "candidates: de knop Wijzigen (talentpool)")
+        if not wait_until(page, lambda: page.query_selector('#tpEvidence') is not None):
+            failures.append("candidates: de talentpoolmodal ging niet open")
+        # design-reviewer op b9d5b21, punt 1 (BLOKKEREND): de radiogroep
+        # Vastleggen/Intrekken rendert vóór de CSS-reparatie als twee
+        # liggende ellipsen van de volle modalbreedte. Een echte
+        # radioknop is nooit breder dan een tekstregel.
+        radio_width = page.eval_on_selector('#tpConsentGrant', "el => el.getBoundingClientRect().width")
+        if radio_width is None or radio_width >= 32:
+            failures.append(f"candidates: #tpConsentGrant is {radio_width}px breed op 1440, verwacht kleiner dan 32px")
+        if len(CANDIDATE_STATE["talentpool_calls"]) != 0:
+            failures.append("candidates: talentpool_calls stond al niet op nul vóór de eerste inzending")
+        click_or_fail(page, failures, '#candidateTalentpoolModal .btn-primary', "candidates: Opslaan (talentpool, leeg)")
+        if not wait_until(page, lambda: "Vul kort in" in text_of(page, '#tpEvidenceError')):
+            failures.append("candidates: lege evidence gaf geen inline fout in de talentpoolmodal")
+        if CANDIDATE_STATE["talentpool_calls"]:
+            failures.append("candidates: een talentpoolaanroep ging uit met lege evidence")
+
+        # Vastleggen zonder omvang: nul aanroepen. code-reviewer LOW 4 op
+        # b9d5b21: eerst de assertie op talentpool_calls, dan pas verder
+        # -- zo faalt een mutant die de omvangcontrole doorlaat meteen op
+        # deze regel in plaats van pas via een timeout verderop.
+        fill_or_fail(page, failures, '#tpEvidence', 'Ondertekend formulier van 2 september.',
+                     "candidates: bewijsveld (talentpool, zonder omvang)")
+        click_or_fail(page, failures, '#candidateTalentpoolModal .btn-primary', "candidates: Opslaan (talentpool, zonder omvang)")
+        if not wait_until(page, lambda: text_of(page, '#tpScopeError').strip() != ''):
+            failures.append("candidates: het ontbreken van een omvang gaf geen inline fout")
+        if CANDIDATE_STATE["talentpool_calls"]:
+            failures.append("candidates: een talentpoolaanroep ging uit zonder omvang")
+
+        # Vastleggen met omvang: één aanroep, consent=True plus scope.
+        select_or_fail(page, failures, '#tpScope', 'matching_and_contact', "candidates: omvang kiezen (talentpool, vastleggen)")
+        click_or_fail(page, failures, '#candidateTalentpoolModal .btn-primary', "candidates: Opslaan (talentpool, vastleggen)")
+        if not wait_for_calls(page, CANDIDATE_STATE["talentpool_calls"], 1):
+            failures.append("candidates: het vastleggen van talentpooltoestemming stuurde geen aanroep")
+        elif (CANDIDATE_STATE["talentpool_calls"][0].get("scope") != "matching_and_contact"
+              or CANDIDATE_STATE["talentpool_calls"][0].get("consent") is not True):
+            failures.append(f"candidates: talentpool-vastleggen stuurde de verkeerde payload -- {CANDIDATE_STATE['talentpool_calls'][0]!r}")
+        wait_until(page, lambda: page.query_selector('#candidateTalentpoolModal.show') is None)
+
+        # Presentatie vastleggen: stuurt job_id; intrekken stuurt het niet.
+        # Vóór de talentpool-intrekking hieronder: die zet
+        # consent_withdrawn_at, en dan hoort deze knop (security-auditor
+        # LOW 4) juist disabled te zijn.
+        click_or_fail(page, failures, '[data-action="candidate-presentation-edit"]', "candidates: Vastleggen (presentatie)")
+        if not wait_until(page, lambda: page.query_selector('#spJob') is not None and not is_disabled(page, '#spJob')):
+            failures.append("candidates: de vacaturekiezer laadde niet, of bleef disabled, in de presentatiemodal")
+        select_or_fail(page, failures, '#spJob', '201', "candidates: vacature kiezen (presentatie, vastleggen)")
+        fill_or_fail(page, failures, '#spEvidence', 'E-mail in het dossier van 5 september.',
+                     "candidates: bewijsveld (presentatie, vastleggen)")
+        click_or_fail(page, failures, '#candidatePresentationModal .btn-primary', "candidates: Opslaan (presentatie, vastleggen)")
+        if not wait_for_calls(page, CANDIDATE_STATE["presentation_calls"], 1):
+            failures.append("candidates: het vastleggen van presentatietoestemming stuurde geen aanroep")
+        elif CANDIDATE_STATE["presentation_calls"][0].get("job_id") != 201:
+            failures.append(f"candidates: presentatie-vastleggen stuurde niet job_id=201 -- {CANDIDATE_STATE['presentation_calls'][0]!r}")
+        wait_until(page, lambda: page.query_selector('#candidatePresentationModal.show') is None)
+
+        click_or_fail(page, failures, '[data-action="candidate-presentation-edit"]', "candidates: Vastleggen (presentatie, intrekken)")
+        wait_until(page, lambda: page.query_selector('#spConsentWithdraw') is not None)
+        check_or_fail(page, failures, '#spConsentWithdraw', "candidates: Intrekken kiezen (presentatie)")
+        fill_or_fail(page, failures, '#spEvidence', 'Telefonisch ingetrokken op 6 september.',
+                     "candidates: bewijsveld (presentatie, intrekken)")
+        click_or_fail(page, failures, '#candidatePresentationModal .btn-primary', "candidates: Opslaan (presentatie, intrekken)")
+        if not wait_for_calls(page, CANDIDATE_STATE["presentation_calls"], 2):
+            failures.append("candidates: het intrekken van presentatietoestemming stuurde geen aanroep")
+        else:
+            second_sp = CANDIDATE_STATE["presentation_calls"][1]
+            if second_sp.get("consent") is not False or "job_id" in second_sp:
+                failures.append(f"candidates: intrekken van presentatie stuurde toch een job_id mee -- {second_sp!r}")
+        wait_until(page, lambda: page.query_selector('#candidatePresentationModal.show') is None)
+
+        # ---- design-reviewer op b9d5b21, punt 3: 44px-tikdoel op 390 ----
+        # Vóór de talentpool-intrekking (die de presentatieknop disabled
+        # maakt): op dit moment staan beide kaartknoppen nog gewoon aan.
+        page.set_viewport_size({"width": 390, "height": 844})
+        page.wait_for_timeout(150)
+        for sel, label, minimum in (
+            ('[data-action="candidate-talentpool-edit"]', "Wijzigen (talentpool, tab)", 44),
+            ('[data-action="candidate-presentation-edit"]', "Vastleggen (presentatie, tab)", 44),
+        ):
+            h = page.eval_on_selector(sel, "el => el.getBoundingClientRect().height")
+            if h is None or h < minimum:
+                failures.append(f"candidates (390): knop {label} is {h}px hoog, verwacht minstens {minimum}px")
+        click_or_fail(page, failures, '[data-action="candidate-talentpool-edit"]', "candidates (390): Wijzigen (talentpool)")
+        wait_until(page, lambda: page.query_selector('#tpEvidence') is not None)
+        # design-reviewer op 2e47403, restpunt 1: de ellips-bug verborg dat
+        # de radiolabel zelf (.form-check-label, "Vastleggen"/"Intrekken")
+        # geen 44px-tikdoel had. Het tikdoel zit op de hele .form-check-rij
+        # (label plus radio), niet op de tekst alleen.
+        form_check_h = page.eval_on_selector(
+            '#tpConsentGrant', "el => el.closest('.form-check').getBoundingClientRect().height")
+        if form_check_h is None or form_check_h < 44:
+            failures.append(f"candidates (390): .form-check-rij (talentpool, Vastleggen) is {form_check_h}px hoog, verwacht minstens 44px")
+        for sel, label in (
+            ('#candidateTalentpoolModal .btn-primary', "Opslaan (talentpoolmodal)"),
+        ):
+            h = page.eval_on_selector(sel, "el => el.getBoundingClientRect().height")
+            if h is None or h < 44:
+                failures.append(f"candidates (390): knop {label} is {h}px hoog, verwacht minstens 44px")
+        click_or_fail(page, failures, '#candidateTalentpoolModal .btn-ghost-secondary', "candidates (390): Annuleren (talentpoolmodal)")
+        wait_until(page, lambda: page.query_selector('#candidateTalentpoolModal.show') is None)
+
+        click_or_fail(page, failures, '[data-action="candidate-presentation-edit"]', "candidates (390): Vastleggen (presentatie)")
+        if not wait_until(page, lambda: page.query_selector('#spJob') is not None and not is_disabled(page, '#spJob')):
+            failures.append("candidates (390): de vacaturekiezer laadde niet in de presentatiemodal")
+        for sel, label in (
+            ('#spJob', "vacaturekiezer (presentatiemodal)"),
+            ('#candidatePresentationModal .btn-primary', "Opslaan (presentatiemodal)"),
+        ):
+            h = page.eval_on_selector(sel, "el => el.getBoundingClientRect().height")
+            if h is None or h < 44:
+                failures.append(f"candidates (390): {label} is {h}px hoog, verwacht minstens 44px")
+        click_or_fail(page, failures, '#candidatePresentationModal .btn-ghost-secondary', "candidates (390): Annuleren (presentatiemodal)")
+        wait_until(page, lambda: page.query_selector('#candidatePresentationModal.show') is None)
+
+        # Intrekken: geen scope in de payload. Blijft op 390 staan (de
+        # modals zijn hier al gemeten); dit zet ook consent_withdrawn_at
+        # voor de MEDIUM-2-test en de LOW-4-assertie hieronder.
+        click_or_fail(page, failures, '[data-action="candidate-talentpool-edit"]', "candidates: Wijzigen (talentpool, intrekken)")
+        wait_until(page, lambda: page.query_selector('#tpConsentWithdraw') is not None)
+        check_or_fail(page, failures, '#tpConsentWithdraw', "candidates: Intrekken kiezen (talentpool)")
+        fill_or_fail(page, failures, '#tpEvidence', 'Telefonisch ingetrokken op 4 september.',
+                     "candidates: bewijsveld (talentpool, intrekken)")
+        click_or_fail(page, failures, '#candidateTalentpoolModal .btn-primary', "candidates: Opslaan (talentpool, intrekken)")
+        if not wait_for_calls(page, CANDIDATE_STATE["talentpool_calls"], 2):
+            failures.append("candidates: het intrekken van talentpooltoestemming stuurde geen aanroep")
+        else:
+            second_tp = CANDIDATE_STATE["talentpool_calls"][1]
+            if second_tp.get("consent") is not False or "scope" in second_tp:
+                failures.append(f"candidates: intrekken stuurde toch een omvang mee -- {second_tp!r}")
+        wait_until(page, lambda: page.query_selector('#candidateTalentpoolModal.show') is None)
+
+        # security-auditor LOW 4: de backend geeft hier gegarandeerd een
+        # 409 (admin.py:1171-1176) zodra consent_withdrawn_at staat; de
+        # knop meldt dat vooraf in het Nederlands in plaats van de
+        # aanroep te laten mislukken.
+        if not wait_until(page, lambda: is_disabled(page, '[data-action="candidate-presentation-edit"]')):
+            failures.append("candidates: de presentatieknop bleef aan nadat talentpool was ingetrokken")
+        presentation_title = page.eval_on_selector(
+            '[data-action="candidate-presentation-edit"]', "el => el.getAttribute('title') || ''")
+        if "ingetrokken" not in (presentation_title or ""):
+            failures.append(f"candidates: de disabled presentatieknop mist een Nederlandse reden -- kreeg {presentation_title!r}")
+        # chief-of-staff op 3c8f690: dezelfde reden hoort ook zichtbaar te
+        # staan, niet alleen als title (geen hover op 390), en de
+        # talentpoolkaart hoort "Ingetrokken op <datum>" te tonen.
+        tab_text_after_withdraw = text_of(page, '#candidateDrawerTabContent')
+        if "toestemming ingetrokken; presentatie kan niet worden vastgelegd" not in tab_text_after_withdraw.lower():
+            failures.append(
+                "candidates: de zichtbare reden onder de presentatieknop ontbreekt na intrekken -- "
+                f"kreeg {tab_text_after_withdraw[:400]!r}"
+            )
+        if "Ingetrokken op" not in tab_text_after_withdraw:
+            failures.append(
+                "candidates: de talentpoolkaart toont geen 'Ingetrokken op <datum>'-regel na intrekken -- "
+                f"kreeg {tab_text_after_withdraw[:400]!r}"
+            )
+
+        # security-auditor MEDIUM 2: opnieuw vastleggen ná een intrekking
+        # mag niet op de (nooit ververste) PATCH-respons vertrouwen. De
+        # stub zet consent_withdrawn_at alleen in de volgende GET, nooit in
+        # de PATCH-RETURNING -- precies het gat dat force:true dichtte. De
+        # vorige modal sloot al bij het intrekken (handle.close() op
+        # succes), dus opnieuw openen in plaats van hetzelfde paneel
+        # hergebruiken.
+        click_or_fail(page, failures, '[data-action="candidate-talentpool-edit"]', "candidates: Wijzigen (talentpool, opnieuw vastleggen)")
+        wait_until(page, lambda: page.query_selector('#tpConsentGrant') is not None)
+        check_or_fail(page, failures, '#tpConsentGrant', "candidates: Vastleggen kiezen (talentpool, opnieuw)")
+        select_or_fail(page, failures, '#tpScope', 'matching_and_contact', "candidates: omvang kiezen (talentpool, opnieuw vastleggen)")
+        fill_or_fail(page, failures, '#tpEvidence', 'Opnieuw ondertekend op 5 september.',
+                     "candidates: bewijsveld (talentpool, opnieuw vastleggen)")
+        click_or_fail(page, failures, '#candidateTalentpoolModal .btn-primary', "candidates: Opslaan (talentpool, opnieuw vastleggen)")
+        if not wait_for_calls(page, CANDIDATE_STATE["talentpool_calls"], 3):
+            failures.append("candidates: het opnieuw vastleggen van talentpooltoestemming stuurde geen aanroep")
+        if not wait_until(page, lambda: "Toestemming actief" in text_of(page, '#candidateDrawerTabContent')):
+            failures.append("candidates: de talentpoolkaart toont geen actieve toestemming na opnieuw vastleggen")
+        if not wait_for_text(page, '#candidateDrawerTabContent', 'toestemming ingetrokken'):
+            failures.append(
+                "candidates: job-alerts volgde niet het verse detail na opnieuw vastleggen -- "
+                f"kreeg {text_of(page, '#candidateDrawerTabContent')!r}"
+            )
+        eligible_row_after_regrant = page.eval_on_selector(
+            '#candidateDrawerTabContent',
+            "el => { const rows = [...el.querySelectorAll('.a-metric-row')]; "
+            "const row = rows.find(r => r.textContent.includes('Komt in aanmerking')); "
+            "return row ? row.textContent : null; }",
+        )
+        if not eligible_row_after_regrant or 'Nee' not in eligible_row_after_regrant:
+            failures.append(
+                "candidates: job-alerts toont geen Nee terwijl de backend consent_withdrawn_at nog draagt -- "
+                f"kreeg {eligible_row_after_regrant!r}"
+            )
+
+        # ---- Referral: twee eigen 409's op detail.code, val terug op
+        # detail.message. Blijft op 390 (design-reviewer punt 2). ----
+        click_or_fail(page, failures, '#candidateDrawer [data-action="close-modal"]', "candidates: sluitknop van de kandidaatdrawer")
+        wait_until(page, lambda: page.query_selector('#candidateDrawer.show') is None)
+
+        CANDIDATE_STATE["referral_mode"] = "suppressed"
+        click_or_fail(page, failures, '[data-action="open-referral-modal"]', "candidates: de knop Referral vastleggen")
+        if not wait_until(page, lambda: page.query_selector('#refFullName') is not None):
+            failures.append("candidates: de referralmodal ging niet open")
+        fill_or_fail(page, failures, '#refFullName', 'Voorbeeld Referral', "candidates: volledige naam (referral, suppressed)")
+        fill_or_fail(page, failures, '#refEmail', 'referral@example.invalid', "candidates: e-mailadres (referral, suppressed)")
+        # code-reviewer op b9d5b21, punt 3: infoName wordt bijgewerkt via
+        # textContent, niet innerHTML -- "<b>" moet dus als platte tekst
+        # verschijnen, nooit als een echt <b>-element. design-reviewer op
+        # 2e47403: een losse run zag deze twee asserties falen op een
+        # kennelijke race (de input-listener van #refReferredBy is
+        # synchroon, maar onder belasting bleek een directe lezing één
+        # keer te vroeg); een conditiewacht in plaats van een directe
+        # lezing lost dat op zonder een vaste sleep.
+        fill_or_fail(page, failures, '#refReferredBy', 'Jan <b>Voorbeeld</b>', "candidates: aangedragen door (referral, suppressed)")
+        if not wait_until(page, lambda: text_of(page, '#referralInfoName') == 'Jan <b>Voorbeeld</b>'):
+            failures.append(f"candidates: het informatieblok toont de naam niet live/letterlijk -- kreeg {text_of(page, '#referralInfoName')!r}")
+        elif page.query_selector('#referralInfoName b') is not None:
+            failures.append("candidates: het informatieblok interpreteert <b> als markup (innerHTML in plaats van textContent)")
+        fill_or_fail(page, failures, '#refEvidence', 'Mondeling bevestigd door Jan op 3 september.',
+                     "candidates: bewijsveld (referral, suppressed)")
+        click_or_fail(page, failures, '#candidateReferralModal .btn-primary', "candidates: Vastleggen (referral, suppressed)")
+        if not wait_for_calls(page, CANDIDATE_STATE["referral_calls"], 1):
+            failures.append("candidates: de referral-aanroep (suppressed) ging niet uit")
+        if not wait_for_text(page, '#candidateReferralAlert', 'suppressielijst'):
+            failures.append(f"candidates: de suppressielijst-melding verscheen niet -- kreeg {text_of(page, '#candidateReferralAlert')!r}")
+        if page.query_selector('#candidateReferralAlert [data-action]') is not None:
+            failures.append("candidates: de suppressielijst-melding toonde onterecht een knop")
+        # design-reviewer op b9d5b21, punt 2 (BLOKKEREND op mobiel): zonder
+        # scrollIntoView staat deze melding op 390 buiten beeld.
+        alert_top = page.eval_on_selector('#candidateReferralAlert .alert', "el => el.getBoundingClientRect().top")
+        if alert_top is None or alert_top < 0:
+            failures.append(f"candidates (390): de 409-melding staat buiten beeld (top={alert_top})")
+
+        CANDIDATE_STATE["referral_mode"] = "exists"
+        click_or_fail(page, failures, '#candidateReferralModal .btn-primary', "candidates: Vastleggen (referral, exists)")
+        if not wait_for_calls(page, CANDIDATE_STATE["referral_calls"], 2):
+            failures.append("candidates: de referral-aanroep (exists) ging niet uit")
+        if not wait_until(page, lambda: page.query_selector('[data-action="candidate-referral-open-existing"]') is not None):
+            failures.append("candidates: de knop Kandidaat openen verscheen niet bij referral_candidate_exists")
+        else:
+            click_or_fail(page, failures, '[data-action="candidate-referral-open-existing"]', "candidates: de knop Kandidaat openen")
+            if not wait_until(page, lambda: page.query_selector('#candidateDrawerTabContent') is not None
+                              and page.query_selector('#candidateReferralModal.show') is None):
+                failures.append("candidates: 'Kandidaat openen' opende de drawer niet (of sloot de referralmodal niet)")
+
+        CANDIDATE_STATE["referral_mode"] = "unknown"
+        click_or_fail(page, failures, '#candidateDrawer [data-action="close-modal"]',
+                      "candidates: sluitknop van de kandidaatdrawer (na Kandidaat openen)")
+        wait_until(page, lambda: page.query_selector('#candidateDrawer.show') is None)
+        click_or_fail(page, failures, '[data-action="open-referral-modal"]', "candidates: Referral vastleggen (opnieuw)")
+        wait_until(page, lambda: page.query_selector('#refFullName') is not None)
+        fill_or_fail(page, failures, '#refFullName', 'Voorbeeld Referral Twee', "candidates: volledige naam (referral, onbekende code)")
+        fill_or_fail(page, failures, '#refEmail', 'referral2@example.invalid', "candidates: e-mailadres (referral, onbekende code)")
+        fill_or_fail(page, failures, '#refReferredBy', 'Piet Voorbeeld', "candidates: aangedragen door (referral, onbekende code)")
+        fill_or_fail(page, failures, '#refEvidence', 'Mondeling bevestigd door Piet op 4 september.',
+                     "candidates: bewijsveld (referral, onbekende code)")
+        click_or_fail(page, failures, '#candidateReferralModal .btn-primary', "candidates: Vastleggen (referral, onbekende code)")
+        if not wait_for_calls(page, CANDIDATE_STATE["referral_calls"], 3):
+            failures.append("candidates: de referral-aanroep (onbekende code) ging niet uit")
+        if not wait_for_text(page, '#candidateReferralAlert', "does not know a Dutch sentence"):
+            failures.append(f"candidates: de onbekende 409-code viel niet terug op detail.message -- kreeg {text_of(page, '#candidateReferralAlert')!r}")
+        click_or_fail(page, failures, '#candidateReferralModal [data-action="close-modal"]', "candidates: sluitknop van de referralmodal")
+        wait_until(page, lambda: page.query_selector('#candidateReferralModal.show') is None)
+
+        # Terug naar de werkbreedte voor eventuele volgende secties.
+        page.set_viewport_size({"width": 1400, "height": 1000})
+        page.wait_for_timeout(150)
+
+        # ---- security-auditor HIGH 1: self-registered via de sourced-route ----
+        click_or_fail(page, failures, '.nav-link[data-section="candidates"]', "candidates: terug naar de kandidatenlijst")
+        if not wait_until(page, lambda: page.query_selector('#section-candidates table tbody [data-action="view-candidate"][data-kind="self-registered"]') is not None):
+            failures.append("candidates: de self-registered rij (kind self-registered) ontbreekt in de lijst")
+        else:
+            click_or_fail(page, failures, '#section-candidates table tbody [data-action="view-candidate"][data-kind="self-registered"]',
+                          "candidates: de bekijkknop van de self-registered rij")
+            wait_until(page, lambda: page.query_selector('#candidateDrawerTabContent') is not None)
+            click_or_fail(page, failures, '#candidateDrawer [data-tab="toestemmingen"]', "candidates: de tab Toestemmingen (self-registered)")
+            if not wait_until(page, lambda: 'Toestemming actief' in text_of(page, '#candidateDrawerTabContent')):
+                failures.append(
+                    "candidates: self-registered kandidaat met een gekoppelde candidates-rij toont geen "
+                    f"actieve toestemming -- kreeg {text_of(page, '#candidateDrawerTabContent')!r}. Dit is de "
+                    "HIGH-1-regressie: GET /candidates/self-registered/{id} draagt geen consentkolommen, dus "
+                    "de tab moet via kind sourced navragen."
+                )
+            self_reg_text = text_of(page, '#candidateDrawerTabContent')
+            if self_reg_text.count('Toestemming actief') < 2:
+                failures.append(
+                    f"candidates: self-registered kandidaat toont niet beide kaarten als actief -- kreeg {self_reg_text[:400]!r}"
+                )
+            if not wait_for_text(page, '#candidateDrawerTabContent', 'Aangezet'):
+                failures.append("candidates: de job-alerts-kaart rendeerde niet voor de self-registered kandidaat")
+            eligible_row = page.eval_on_selector(
+                '#candidateDrawerTabContent',
+                "el => { const rows = [...el.querySelectorAll('.a-metric-row')]; "
+                "const row = rows.find(r => r.textContent.includes('Komt in aanmerking')); "
+                "return row ? row.textContent : null; }",
+            )
+            if not eligible_row or 'Ja' not in eligible_row:
+                failures.append(f"candidates: job-alerts voor de self-registered kandidaat is niet Ja -- kreeg {eligible_row!r}")
+            click_or_fail(page, failures, '#candidateDrawer [data-action="close-modal"]',
+                          "candidates: sluitknop van de kandidaatdrawer (self-registered)")
+            wait_until(page, lambda: page.query_selector('#candidateDrawer.show') is None)
+
+        # De referral- en de talentpool-409's zijn opzettelijk en al op
+        # tekst getoetst hierboven; Chromium logt elke 409-respons zelf ook
+        # als console error, zoals bij de opzettelijke 500 van
+        # Bewaartermijnen.
+        new_errors = [e for e in console_errors[errors_before:] if "409 (Conflict)" not in e]
+        if new_errors:
+            failures.append(f"candidates: {len(new_errors)} console error(s): {new_errors[:3]}")
+
         browser.close()
 
     if failures:
@@ -1239,8 +1825,10 @@ def main():
         sys.exit(1)
 
     print("PASS: Opdrachtgevers (list + tabbed drawer), Leads (inbox + unread filter + PATCH), "
-          "Rapportage en Bewaartermijnen (lijst, generate, goedkeuren met getypte bevestiging, "
-          "afwijzen, categoriebrede bulk met 409-mismatch, droogloop en 500 met retry) "
+          "Rapportage, Bewaartermijnen (lijst, generate, goedkeuren met getypte bevestiging, "
+          "afwijzen, categoriebrede bulk met 409-mismatch, droogloop en 500 met retry) en "
+          "Toestemmingen/referral (§7.3.2: talentpool- en presentatiemodal met clientside-validatie "
+          "en de juiste payload per richting, plus de drie referral-409-uitkomsten) "
           "renderden allemaal correct, zonder console errors.")
     sys.exit(0)
 
