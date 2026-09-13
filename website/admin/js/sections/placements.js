@@ -669,11 +669,25 @@
      VERWIJDEREN (getypte bevestiging: het plaatsings-ID)
      ============================================================ */
   confirmDeletePlacement(placementId) {
+    // chief-of-staff op 09e99cc: de verwijdermodal toonde niet wát er
+    // verwijderd wordt (§7.2c: de body noemt exact wat er gebeurt). De
+    // rij komt uit de al geladen paginastate van de lijst -- verwijderen
+    // is alleen bereikbaar vanuit een lijstrij (zie de rijknop), dus die
+    // rij staat daar altijd in.
+    const row = this._placementsTable && this._placementsTable.state.items.find(p => p.id === placementId);
+    const summaryHtml = row
+      ? html`<div class="a-panel">
+          <div class="a-metric-row"><span class="a-soft">Kandidaat</span><span>Kandidaat #${row.candidate_id}</span></div>
+          <div class="a-metric-row"><span class="a-soft">Opdrachtgever</span><span>${this.placementClientLabel(row.client_id)}</span></div>
+          <div class="a-metric-row"><span class="a-soft">Type</span><span>${AdminLabels.label('plaatsingstype', row.placement_type)}</span></div>
+          <div class="a-metric-row"><span class="a-soft">Status</span><span class="${AdminLabels.badgeClass('plaatsingstatus', row.status)}">${AdminLabels.label('plaatsingstatus', row.status)}</span></div>
+        </div>`
+      : '';
     const handle = ui.modal({
       id: 'placementDeleteModal',
       title: 'Plaatsing verwijderen',
       subtitle: 'Dit haalt de plaatsing uit elk overzicht.',
-      body: html`<div id="placementDeleteAlert"></div>`,
+      body: html`${summaryHtml}<div id="placementDeleteAlert"></div>`,
       confirmText: String(placementId),
       secondary: { label: 'Annuleren' },
       danger: {

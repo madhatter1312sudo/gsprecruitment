@@ -1317,8 +1317,9 @@ def check_or_fail(page, failures, selector, what, timeout=6000):
 
 
 def element_from_point_is_self(page, selector):
-    """design-reviewer op ece9d6d: bewijst dat een sticky voettekst niet
-    over `selector` heen ligt. True wanneer het midden van het element
+    """chief-of-staff op 09e99cc: bewijst dat de paneelvoettekst (§7.2b/
+    §7.2c, buiten de scrollende inhoud sinds 09e99cc) niet over
+    `selector` heen ligt. True wanneer het midden van het element
     zichzelf teruggeeft via document.elementFromPoint; false wanneer iets
     ervoor ligt (klik-hijack -- typisch de voettekst zelf)."""
     return bool(page.eval_on_selector(selector,
@@ -1328,18 +1329,32 @@ def element_from_point_is_self(page, selector):
 
 
 def fields_behind_sticky_footer(page, container_selector):
-    """design-reviewer op ece9d6d: na scrollen naar onder mag geen enkel
-    formulierveld in `container_selector` binnen de band van zijn eigen
-    .a-sticky-footer liggen. Geeft de id's (of tagnamen) van de rest-
-    gevallen terug; een lege lijst is de geslaagde staat."""
+    """chief-of-staff op 09e99cc: bij scrollTop 0 mag het midden van geen
+    enkel formulierveld in `container_selector` binnen de band van zijn
+    eigen .a-panel-footer liggen (die footer staat sinds 09e99cc buiten
+    de scrollcontainer, dus dit hoeft niet pas na scrollen te kloppen --
+    het moet altijd kloppen). Middelpunt, niet de volle rect: een veld
+    dat aan de rand van de scrollcontainer precies het laatste stukje
+    over de vouw hangt (heel gewoon voor elk scrollbaar gebied, footer of
+    niet) telt anders ten onrechte mee als "overlapt", terwijl een klik
+    op zijn midden -- wat elementFromPoint ook toetst -- het veld zelf
+    raakt. Geeft de id's (of tagnamen) van de restgevallen terug; een
+    lege lijst is de geslaagde staat."""
     return page.eval_on_selector(container_selector,
-        "el => { const footer = el.querySelector('.a-sticky-footer'); "
-        "if (!footer) return []; "
+        "el => { const footer = el.querySelector('.a-panel-footer'); "
+        "const scrollBox = el.querySelector('.modal-body, .offcanvas-body'); "
+        "if (!footer || !scrollBox) return []; "
         "const fr = footer.getBoundingClientRect(); "
+        "const sr = scrollBox.getBoundingClientRect(); "
         "const fields = [...el.querySelectorAll('input, select, textarea, button')] "
         "  .filter(f => !footer.contains(f)); "
         "return fields.filter(f => { const r = f.getBoundingClientRect(); "
-        "  return r.width > 0 && r.height > 0 && !(r.bottom <= fr.top || r.top >= fr.bottom); }) "
+        "  if (r.width <= 0 || r.height <= 0) return false; "
+        "  const cy = r.top + r.height / 2; "
+        # Alleen een veld waarvan het midden ook echt zichtbaar is
+        # (binnen de scrollcontainer) telt mee.
+        "  if (cy < sr.top || cy > sr.bottom) return false; "
+        "  return cy >= fr.top && cy <= fr.bottom; }) "
         "  .map(f => f.id || f.tagName); }") or []
 
 
@@ -1763,6 +1778,27 @@ def main():
             failures.append(f"retention: de goedkeurmodal toont het adres niet gemaskeerd -- kreeg {modal_text[:200]!r}")
         if "kandidaat1@example.invalid" in modal_text:
             failures.append("retention: het volledige e-mailadres stond in de goedkeurmodal")
+
+        # chief-of-staff op 09e99cc: de footer moet BUITEN de scrollende
+        # inhoud staan (geen overlap bij scrollTop 0, geen sticky-hack).
+        # Op 1440 is de inhoud van deze modal kort genoeg dat er
+        # helemaal niet gescrold hoeft te worden.
+        body_dims = page.eval_on_selector('#retentionApproveModal .modal-body',
+                                           "el => ({scrollHeight: el.scrollHeight, clientHeight: el.clientHeight})")
+        if body_dims and body_dims["scrollHeight"] > body_dims["clientHeight"]:
+            failures.append(f"retention (1440): de goedkeurmodal is onnodig scrollbaar -- {body_dims}")
+        page.eval_on_selector('#retentionApproveModal .modal-body', "el => { el.scrollTop = 0; }")
+        if page.query_selector('#retentionApproveNote') is None:
+            failures.append("retention: het notitieveld van de goedkeurmodal ontbreekt voor de overlapcontrole")
+        elif not element_from_point_is_self(page, '#retentionApproveNote'):
+            failures.append("retention (1440): de footer overlapt het notitieveld bij scrollTop 0")
+        page.set_viewport_size({"width": 390, "height": 844})
+        page.wait_for_timeout(200)
+        if page.query_selector('#retentionApproveNote') is not None and not element_from_point_is_self(page, '#retentionApproveNote'):
+            failures.append("retention (390): de footer overlapt het notitieveld bij scrollTop 0")
+        page.set_viewport_size({"width": 1400, "height": 1000})
+        page.wait_for_timeout(200)
+
         danger = "#retentionApproveModal .btn-outline-danger"
         if not is_disabled(page, danger):
             failures.append("retention: de goedkeurknop stond meteen aan zonder getypte bevestiging")
@@ -2531,6 +2567,20 @@ def main():
         if page.query_selector('#placementStatusSelect') is None:
             failures.append("placements: overzichttab toonde geen statuswisselaar voor een concept-plaatsing")
 
+        # chief-of-staff op 09e99cc: op 390 (offcanvas-bottom, max-height
+        # 92vh) mag de "Bewerken"-voettekst #placementStatusSelect niet
+        # overlappen, bij scrollTop 0.
+        page.set_viewport_size({"width": 390, "height": 844})
+        page.wait_for_timeout(200)
+        page.eval_on_selector('#placementDrawer .offcanvas-body', "el => { el.scrollTop = 0; }")
+        if page.query_selector('#placementStatusSelect') is not None and not element_from_point_is_self(page, '#placementStatusSelect'):
+            failures.append("placements (390, drawer): de footer overlapt #placementStatusSelect bij scrollTop 0")
+        stuck_drawer_fields = fields_behind_sticky_footer(page, '#placementDrawer')
+        if stuck_drawer_fields:
+            failures.append(f"placements (390, drawer): velden liggen bij scrollTop 0 binnen de footerband -- {stuck_drawer_fields}")
+        page.set_viewport_size({"width": 1400, "height": 1000})
+        page.wait_for_timeout(200)
+
         select_or_fail(page, failures, '#placementStatusSelect', 'actief', "placements: status wijzigen naar actief")
         wait_until(page, lambda: page.query_selector('#placementStatusModal') is not None
                    and text_of(page, '#placementStatusModal').count('Concept') >= 1
@@ -2628,35 +2678,40 @@ def main():
         wait_until(page, lambda: page.query_selector('[data-oneoff-field="label"][data-oneoff-index="0"]') is not None)
         fill_or_fail(page, failures, '[data-oneoff-field="label"][data-oneoff-index="0"]', "Search fee", "placements: omschrijving eenmalige kost")
 
-        # design-reviewer op ece9d6d: de sticky voettekst mag geen enkel
-        # veld overlappen (klik-hijack). 1440x1000: "Regel toevoegen" zit
-        # vlak boven de footer in een lang formulier.
-        if page.query_selector('#placementFormOneOffAdd') is None:
-            failures.append("placements: 'Regel toevoegen' niet gevonden voor de klik-hijacktest")
-        elif not element_from_point_is_self(page, '#placementFormOneOffAdd'):
-            failures.append("placements (1440): de sticky voettekst overlapt 'Regel toevoegen' (klik-hijack)")
-        page.eval_on_selector('#placementFormModal .modal-body', "el => { el.scrollTop = el.scrollHeight; }")
-        page.wait_for_timeout(150)
+        # chief-of-staff op 09e99cc: de footer staat nu BUITEN de
+        # scrollende inhoud (broer van .modal-body), dus dit geldt al bij
+        # scrollTop 0 -- geen scroll-naar-onder meer nodig om het te
+        # bewijzen. scrollTop expliciet op 0 zetten: de voorgaande
+        # select_or_fail/fill_or_fail-aanroepen kunnen een veld via de
+        # browser's eigen scroll-into-view al buiten scrollTop 0 hebben
+        # gezet, en dat is wat we juist testen, geen toevallige stand.
+        # 1440x1000: Feebedrag is het gerapporteerde veld (chief-of-staff
+        # op 09e99cc) dat bij openen zichtbaar hoort te zijn zonder te
+        # scrollen -- "Regel toevoegen" staat verderop in het formulier en
+        # is bij scrollTop 0 legitiem (nog) buiten beeld, dat is geen
+        # footeroverlap maar gewoon een lang formulier.
+        page.eval_on_selector('#placementFormModal .modal-body', "el => { el.scrollTop = 0; }")
+        if page.query_selector('#placementFormFeeAmount') is None:
+            failures.append("placements: Feebedrag niet gevonden voor de overlapcontrole")
+        elif not element_from_point_is_self(page, '#placementFormFeeAmount'):
+            failures.append("placements (1440): de footer overlapt Feebedrag bij scrollTop 0")
         stuck_fields = fields_behind_sticky_footer(page, '#placementFormModal')
         if stuck_fields:
-            failures.append(f"placements (1440): velden liggen na scrollen naar onder binnen de footerband -- {stuck_fields}")
+            failures.append(f"placements (1440): velden liggen bij scrollTop 0 binnen de footerband -- {stuck_fields}")
 
         # Zelfde overlapcontrole op 390, waar de knoppen stapelen en de
-        # footer dus hoger wordt: Afrekenbasis staat er vlak boven.
+        # footer dus hoger wordt: Afrekenbasis staat er vlak boven
+        # (chief-of-staff op 09e99cc noemt Einddatum/Afrekenbasis op 390).
         page.set_viewport_size({"width": 390, "height": 844})
         page.wait_for_timeout(200)
+        page.eval_on_selector('#placementFormModal .modal-body', "el => { el.scrollTop = 0; }")
         if page.query_selector('#placementFormBillingBasis') is None:
-            failures.append("placements (390): #placementFormBillingBasis niet gevonden voor de klik-hijacktest")
+            failures.append("placements (390): #placementFormBillingBasis niet gevonden voor de overlapcontrole")
         elif not element_from_point_is_self(page, '#placementFormBillingBasis'):
-            failures.append("placements (390): de sticky voettekst overlapt Afrekenbasis (klik-hijack)")
-        # Zelfde scroll-naar-onder-controle als bij 1440: op 390 stapelen de
-        # knoppen (hogere footer), dus dit toetst een andere footerhoogte,
-        # niet dezelfde aanname nogmaals.
-        page.eval_on_selector('#placementFormModal .modal-body', "el => { el.scrollTop = el.scrollHeight; }")
-        page.wait_for_timeout(150)
+            failures.append("placements (390): de footer overlapt Afrekenbasis bij scrollTop 0")
         stuck_fields_390 = fields_behind_sticky_footer(page, '#placementFormModal')
         if stuck_fields_390:
-            failures.append(f"placements (390): velden liggen na scrollen naar onder binnen de footerband -- {stuck_fields_390}")
+            failures.append(f"placements (390): velden liggen bij scrollTop 0 binnen de footerband -- {stuck_fields_390}")
         page.set_viewport_size({"width": 1400, "height": 1000})
         page.wait_for_timeout(200)
 
@@ -2701,8 +2756,8 @@ def main():
         # knop in de tab Financieel naar de sticky drawervoettekst
         # (ui.drawer's `footer`-optie, §7.2b), want het bewerkmodal
         # wijzigt ook Overzicht-velden (start-/einddatum, notities).
-        wait_until(page, lambda: page.query_selector('#placementDrawer .a-sticky-footer .btn-primary') is not None)
-        click_or_fail(page, failures, '#placementDrawer .a-sticky-footer .btn-primary', "placements: 'Bewerken' (drawervoettekst)")
+        wait_until(page, lambda: page.query_selector('#placementDrawer .a-panel-footer .btn-primary') is not None)
+        click_or_fail(page, failures, '#placementDrawer .a-panel-footer .btn-primary', "placements: 'Bewerken' (drawervoettekst)")
         wait_until(page, lambda: page.query_selector('#placementFormNotes') is not None)
         if page.query_selector('#placementFormCandidate') is not None:
             failures.append("placements: het bewerkmodal toonde per ongeluk de kandidaatkiezer")
@@ -2731,6 +2786,11 @@ def main():
         wait_until(page, lambda: page.query_selector('[data-action="confirm-delete-placement"][data-id="4"]') is not None)
         click_or_fail(page, failures, '[data-action="confirm-delete-placement"][data-id="4"]', "placements: verwijderknop op plaatsing #4")
         wait_until(page, lambda: page.query_selector('#placementDeleteModal') is not None)
+        # chief-of-staff op 09e99cc: de modal moet tonen wát er verwijderd
+        # wordt (§7.2c), niet alleen het kale bevestigingsveld.
+        delete_summary = text_of(page, '#placementDeleteModal')
+        if "Kandidaat #1482" not in delete_summary:
+            failures.append(f"placements: verwijdermodal toont niet wat er verwijderd wordt -- kreeg {delete_summary[:300]!r}")
         fill_or_fail(page, failures, '#placementDeleteModal input[id^="confirm_"]', "44", "placements: verkeerde getypte bevestiging")
         if is_disabled(page, '#placementDeleteModal .btn-outline-danger') is not True:
             failures.append("placements: verwijderknop stond aan bij een foutieve getypte bevestiging")
