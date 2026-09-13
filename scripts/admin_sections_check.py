@@ -1649,6 +1649,20 @@ def main():
             '[data-action="candidate-presentation-edit"]', "el => el.getAttribute('title') || ''")
         if "ingetrokken" not in (presentation_title or ""):
             failures.append(f"candidates: de disabled presentatieknop mist een Nederlandse reden -- kreeg {presentation_title!r}")
+        # chief-of-staff op 3c8f690: dezelfde reden hoort ook zichtbaar te
+        # staan, niet alleen als title (geen hover op 390), en de
+        # talentpoolkaart hoort "Ingetrokken op <datum>" te tonen.
+        tab_text_after_withdraw = text_of(page, '#candidateDrawerTabContent')
+        if "toestemming ingetrokken; presentatie kan niet worden vastgelegd" not in tab_text_after_withdraw.lower():
+            failures.append(
+                "candidates: de zichtbare reden onder de presentatieknop ontbreekt na intrekken -- "
+                f"kreeg {tab_text_after_withdraw[:400]!r}"
+            )
+        if "Ingetrokken op" not in tab_text_after_withdraw:
+            failures.append(
+                "candidates: de talentpoolkaart toont geen 'Ingetrokken op <datum>'-regel na intrekken -- "
+                f"kreeg {tab_text_after_withdraw[:400]!r}"
+            )
 
         # security-auditor MEDIUM 2: opnieuw vastleggen ná een intrekking
         # mag niet op de (nooit ververste) PATCH-respons vertrouwen. De

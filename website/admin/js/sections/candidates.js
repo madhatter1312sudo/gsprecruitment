@@ -579,8 +579,14 @@
     // een 409 met een Engelse zin (admin.py:1171-1176) zodra
     // consent_withdrawn_at staat; de knop meldt dat vooraf, in het
     // Nederlands, in plaats van de aanroep te laten mislukken.
+    // chief-of-staff op 3c8f690: de eerdere tekst beloofde "pas na een
+    // nieuwe talentpooltoestemming", maar de vastleg-tak van
+    // talentpool-consent (admin.py:938-948) raakt consent_withdrawn_at
+    // nooit aan, dus die belofte kwam nooit uit. De juiste, blijvende
+    // reden staat er nu, en zichtbaar als .a-meta-regel naast de knop:
+    // op 390 is er geen hover, dus title alleen is niet genoeg.
     const presentationDisabledReason = withdrawn
-      ? 'Toestemming is ingetrokken; presentatie kan pas na een nieuwe talentpooltoestemming worden vastgelegd.'
+      ? 'Deze kandidaat heeft toestemming ingetrokken; presentatie kan niet worden vastgelegd.'
       : '';
 
     mount(el, html`
@@ -593,6 +599,7 @@
           <div class="a-metric-row"><span class="a-soft">Vastgelegd</span><span class="a-num--date">${this.retentionDate(detail.consent_talentpool_at)} · Geldig tot: ${this.retentionDate(detail.consent_talentpool_until)}</span></div>
           <div class="a-metric-row"><span class="a-soft">Bron</span><span>${detail.consent_source || '—'} · Grondslag: ${AdminLabels.label('grondslag', detail.lawful_basis, detail.lawful_basis || '—')}</span></div>
         ` : ''}
+        ${withdrawn ? html`<div class="a-meta mt-1">Ingetrokken op ${this.retentionDate(detail.consent_withdrawn_at)}</div>` : ''}
         <div class="a-actions mt-2">
           <button type="button" class="btn btn-sm btn-primary" data-action="candidate-talentpool-edit" data-kind="${kind}" data-id="${itemId}">Wijzigen</button>
         </div>
@@ -609,6 +616,7 @@
           <button type="button" class="btn btn-sm btn-primary" data-action="candidate-presentation-edit" data-kind="${kind}" data-id="${itemId}"
             ${raw(presentationDisabledReason ? `disabled title="${GSP.esc(presentationDisabledReason)}"` : '')}>Vastleggen</button>
         </div>
+        ${presentationDisabledReason ? html`<div class="a-meta mt-1">${presentationDisabledReason}</div>` : ''}
       </div>
 
       <div class="a-panel">
@@ -1015,11 +1023,19 @@
         <textarea class="a-textarea" id="refNote" rows="2" maxlength="2000"></textarea>
       </div>
       <div class="a-panel mb-0">
+        <!-- chief-of-staff op 3c8f690: deze tekst moet identiek zijn aan
+             wat _REFERRAL_ART14_NL (email_templates.py:524-535) en
+             _REFERRAL_TEXT (email_templates.py:558-568) daadwerkelijk
+             zeggen. De vorige versie noemde een opsomming van gegevens en
+             een doel die de mail niet geeft, en "vervalt na drie maanden"
+             terwijl de rij na drie maanden juist op de beoordelingslijst
+             komt (REFERRAL_NO_RESPONSE_SQL), niet verdwijnt. -->
         <p class="a-soft mb-0">Deze persoon ontvangt eenmalig een kennisgeving met een bevestigingslink, geldig 24 uur.
-          Daarin staat: dat wij zijn of haar gegevens hebben ontvangen via een aanbeveling van
-          <strong id="referralInfoName">(nog niet ingevuld)</strong>, welke gegevens dat zijn, waarvoor wij ze willen
-          gebruiken, hoe lang wij ze bewaren en hoe hij of zij bezwaar kan maken. De kennisgeving bevat geen vacature
-          en geen wervende tekst. Zonder bevestiging gebeurt er niets en vervalt de invoer na drie maanden.</p>
+          Daarin staat: dat wij zijn of haar gegevens op de datum van vandaag hebben ontvangen via een aanbeveling van
+          <strong id="referralInfoName">(nog niet ingevuld)</strong>, met toestemming; dat wij ze drie maanden bewaren
+          als er geen reactie komt; en het recht op inzage, bezwaar (art. 21) en afmelden met STOP. De kennisgeving
+          bevat geen vacature en geen wervende tekst. Zonder bevestiging doen wij niets met de gegevens; na drie
+          maanden komt de invoer op de beoordelingslijst in Bewaartermijnen.</p>
       </div>
     `;
   },
