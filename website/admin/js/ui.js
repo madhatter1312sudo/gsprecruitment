@@ -364,8 +364,14 @@
         </div>`
       : '';
     const buttonsHtml = buttons.length
+      // data-gsp-role: de rol blijft opvraagbaar ook nadat een aanroeper de
+      // klasse van een knop zelf heeft omgezet (§7.3.5: de tweede
+      // AVG-bevestigingsknop wisselt van .btn-primary naar
+      // .btn-outline-danger en deelt daarna zijn klasse met de eerste
+      // danger-knop; zonder dit attribuut zijn de twee dan niet meer
+      // los te selecteren).
       ? html`<div class="a-actions">${buttons.map((b, i) => html`
-          <button type="button" class="${b.cls}" id="${btnIds[i]}" ${raw(gated(b) ? 'disabled' : '')}>${b.label}</button>`)}
+          <button type="button" class="${b.cls}" id="${btnIds[i]}" data-gsp-role="${b.role}" ${raw(gated(b) ? 'disabled' : '')}>${b.label}</button>`)}
         </div>`
       : '';
     const tabsHtml = opts.tabs

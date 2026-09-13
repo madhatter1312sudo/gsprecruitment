@@ -200,6 +200,23 @@ def make_retention(n=RETENTION_ROWS):
     } for i in range(1, n + 1)]
 
 
+# AVG-suppressielijst (§7.3.5) pagineert op 100, niet op de 20 van de
+# andere secties (js/sections/gdpr.js SUPPRESSION_PAGE_SIZE) en de API
+# levert nooit een e-mailadres -- alleen hash, domein, reden en datum.
+GDPR_PAGE_SIZE = 100
+GDPR_ROWS = 120
+
+
+def make_gdpr_suppression(n=GDPR_ROWS):
+    return [{
+        "id": i,
+        "email_hash": f"{i:04d}" + ("0" * 30) + f"h{i % 1000:03d}",
+        "email_domain": f"voorbeeld{i}.nl",
+        "reason": "STOP" if i % 2 else "handmatig",
+        "created_at": f"2026-09-{(i % 27) + 1:02d}T00:00:00Z",
+    } for i in range(1, n + 1)]
+
+
 LIST_DATA = {
     "users": make_users(),
     "retention": make_retention(),
@@ -209,6 +226,7 @@ LIST_DATA = {
     "audit": make_audit(),
     "jobs": make_jobs(),
     "placements": make_placements(),
+    "gdpr": make_gdpr_suppression(),
 }
 
 # WS-B.2: id an admin_pagination_check DELETE request uses to exercise the
@@ -315,6 +333,9 @@ def route_admin_api(route, request):
         return
     if path == "/api/v1/admin/placements":
         json_response(paginate(LIST_DATA["placements"], qs))
+        return
+    if path == "/api/v1/admin/suppression" and request.method == "GET":
+        json_response(paginate(LIST_DATA["gdpr"], qs))
         return
     if path == "/api/v1/admin/analytics":
         json_response({"job_fill_rate": 0, "client_retention_rate": 0, "candidate_satisfaction": 0, "user_growth": {}})
@@ -498,6 +519,30 @@ def main():
         if new_errors:
             failures.append(f"retention: {len(new_errors)} console error(s): {new_errors[:3]}")
 
+        # ---- AVG: suppressielijst pagineert op 100 (§7.3.5), niet op 20 --
+        errors_before = len(console_errors)
+        page.click('.nav-link[data-section="gdpr"]')
+        page.wait_for_timeout(900)
+        rows_p1 = page.eval_on_selector_all('#gdprSuppressionBody tr', "els => els.length")
+        texts_p1 = page.eval_on_selector_all('#gdprSuppressionBody tr', "els => els.map(e => e.textContent.trim())")
+        if rows_p1 != GDPR_PAGE_SIZE:
+            failures.append(f"gdpr: pagina 1 gaf {rows_p1} rijen, verwacht {GDPR_PAGE_SIZE}")
+        btn = '#gdprSuppressionPagination [data-action="page"][data-page="2"]'
+        if page.query_selector(btn) is None:
+            failures.append("gdpr: geen pagineerknop voor pagina 2 gevonden")
+        else:
+            page.click(btn)
+            page.wait_for_timeout(800)
+            rows_p2 = page.eval_on_selector_all('#gdprSuppressionBody tr', "els => els.length")
+            texts_p2 = page.eval_on_selector_all('#gdprSuppressionBody tr', "els => els.map(e => e.textContent.trim())")
+            if rows_p2 != GDPR_ROWS - GDPR_PAGE_SIZE:
+                failures.append(f"gdpr: pagina 2 gaf {rows_p2} rijen, verwacht {GDPR_ROWS - GDPR_PAGE_SIZE}")
+            if texts_p1 and texts_p1 == texts_p2:
+                failures.append("gdpr: pagina 2 toonde dezelfde rijen als pagina 1")
+        new_errors = console_errors[errors_before:]
+        if new_errors:
+            failures.append(f"gdpr: {len(new_errors)} console error(s): {new_errors[:3]}")
+
         browser.close()
 
     if failures:
@@ -508,7 +553,7 @@ def main():
 
     print(f"PASS: page 2 rendered {PAGE_SIZE} rows with no console errors on all "
           f"{len(SECTIONS)} sections ({', '.join(s for s, _, _ in SECTIONS)}), "
-          f"plus retention at {RETENTION_PAGE_SIZE} rows per page.")
+          f"plus retention at {RETENTION_PAGE_SIZE} rows per page and gdpr at {GDPR_PAGE_SIZE} rows per page.")
     sys.exit(0)
 
 
