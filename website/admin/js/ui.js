@@ -215,8 +215,12 @@
   document.addEventListener('mousedown', (e) => {
     const p = topPanel();
     if (!p) return;
-    const content = p.el.querySelector('.modal-content, .offcanvas-body');
-    if (content && content.contains(e.target)) return;
+    // .a-panel-footer erbij: op een drawer staat die als broer van
+    // .offcanvas-body (chief-of-staff op 09e99cc), dus zonder deze
+    // uitbreiding zou een klik op "Bewerken" als klik-buiten gelden en de
+    // drawer meteen weer sluiten.
+    const content = p.el.querySelectorAll('.modal-content, .offcanvas-body, .a-panel-footer');
+    if (Array.prototype.some.call(content, (c) => c.contains(e.target))) return;
     const onBackdrop = e.target.classList
       && BACKDROP_CLASSES.some(c => e.target.classList.contains(c));
     if (p.el.contains(e.target) || onBackdrop) p.close();
@@ -346,14 +350,22 @@
       ? tabs({ tabs: opts.tabs, active: opts.activeTab, action: opts.tabAction, dataset: opts.dataset })
       : '';
     const bodyId = id + '__body';
-    // design-reviewer op 1212e07: het bevestigingsblok en de knoppenrij
-    // stonden aan het eind van de scrollende inhoud en vielen bij een
-    // lang formulier (de brede plaatsingenmodal, 1440x1000) buiten beeld.
-    // Eén sticky voettekst voor allebei, in dezelfde scrollcontainer
-    // (.modal-body respectievelijk .offcanvas-body hebben zelf al
-    // overflow-y), dus puur CSS: geen aparte scrollstate nodig.
+    // chief-of-staff op 09e99cc: een sticky footer die zelf in de
+    // scrollcontainer blijft staan, lost het probleem niet op -- bij
+    // scrollTop 0 ligt hij nog altijd over de eerste/onderste velden, en
+    // in rust laat hij een lege band vallen zodra padding en footerhoogte
+    // niet exact matchen (ze deden dat niet: de padding-toevoeging in
+    // ui.js werd vóór instance.show() gemeten en at wat resize- en
+    // tabwissel-timing betreft nooit helemaal in). De footer hoort
+    // daarom BUITEN de scrollcontainer: een broer van .modal-body
+    // (binnen .modal-content, dat Bootstraps eigen
+    // modal-dialog-scrollable al als flexkolom met max-height beheert)
+    // respectievelijk van .offcanvas-body (.offcanvas zelf is al een
+    // flexkolom). Geen position:sticky, geen gemeten padding, geen
+    // resize-listener meer nodig: flexbox houdt de footer vanzelf op zijn
+    // plek zonder overlap, in beide richtingen.
     const footerHtml = (confirmHtml || buttonsHtml)
-      ? html`<div class="a-sticky-footer">${confirmHtml}${buttonsHtml}</div>`
+      ? html`<div class="a-panel-footer">${confirmHtml}${buttonsHtml}</div>`
       : '';
 
     // Puur decoratief (aria-hidden): een sleepgreep hoort bij een van-
@@ -363,40 +375,35 @@
       ? raw('<div class="a-drawer__grip" aria-hidden="true"></div>')
       : '';
 
-    const inner = html`
+    // De scrollende inhoud (alles behalve de footer) blijft één stuk, of
+    // het paneel nu een modal of een drawer is.
+    const scrollableInner = html`
       ${gripHtml}
       <button type="button" class="a-modal__close" data-action="close-modal"
         aria-label="${opts.closeLabel || 'Sluiten'}"><i class="fa-solid fa-xmark"></i></button>
       ${titleHtml}
       ${subtitleHtml}
       ${tabsHtml}
-      <div id="${bodyId}">${opts.body || ''}</div>
-      ${footerHtml}`;
+      <div id="${bodyId}">${opts.body || ''}</div>`;
 
     mount(el, isDrawer
-      ? html`<div class="offcanvas-body">${inner}</div>`
+      // .offcanvas-body en .a-panel-footer zijn broers binnen .offcanvas
+      // (el zelf), dat al display:flex; flex-direction:column staat
+      // (Bootstrap): .offcanvas-body neemt de resterende ruimte
+      // (flex:1 1 auto; overflow-y:auto, ook van Bootstrap) en de footer
+      // krijgt zijn eigen, ongescheelde plek eronder.
+      ? html`<div class="offcanvas-body">${scrollableInner}</div>${footerHtml}`
       // modal-fullscreen-sm-down: op een telefoon vult het paneel het scherm
       // (§7.2c). Tabler levert die klasse; hij doet boven 576px niets.
+      // modal-dialog-scrollable maakt .modal-content zelf een flexkolom met
+      // een max-height op de viewport; .modal-body en de footer zijn
+      // broers daarbinnen, dus dezelfde flex-mechaniek als de drawer.
       : html`<div class="modal-dialog modal-dialog-centered modal-dialog-scrollable modal-fullscreen-sm-down">
-               <div class="modal-content"><div class="modal-body">${inner}</div></div>
+               <div class="modal-content">
+                 <div class="modal-body">${scrollableInner}</div>
+                 ${footerHtml}
+               </div>
              </div>`);
-
-    // design-reviewer op ece9d6d: de sticky voettekst nam geen ruimte in de
-    // scrollcontainer in beslag, dus zodra de inhoud hoger was dan de
-    // viewport lag de footer over de laatste velden (klik-hijack:
-    // elementFromPoint op zo'n veld gaf de knop terug). De footer krijgt
-    // zijn eigen, op dat moment gemeten hoogte terug als extra
-    // padding-bottom op de scrollcontainer, boven op de bestaande
-    // (--space-2xl/--space-xl); dat is de gemeten variant uit de twee die
-    // de review noemde, niet een vaste CSS-waarde, want de knoppen
-    // stapelen op 390px en maken de footer dan hoger. De meting zelf moet
-    // wachten tot na instance.show()/fallbackShow() hieronder: vóór dat
-    // moment staat het paneel nog op display:none (Bootstraps eigen
-    // .show()-toggle) en levert footerEl.offsetHeight altijd 0 op, wat de
-    // padding stilzwijgend op de kale basiswaarde liet staan.
-    let onFooterResize = null;
-    const scrollBody = el.querySelector(isDrawer ? '.offcanvas-body' : '.modal-body');
-    const footerEl = el.querySelector('.a-sticky-footer');
 
     let instance = null;
     let closed = false;
@@ -404,7 +411,6 @@
 
     function unwire() {
       if (releaseTrap) { releaseTrap(); releaseTrap = null; }
-      if (onFooterResize) { root.removeEventListener('resize', onFooterResize); onFooterResize = null; }
       el.removeEventListener(hiddenEvent, onHidden);
       const i = openPanels.indexOf(handle);
       if (i !== -1) openPanels.splice(i, 1);
@@ -502,17 +508,6 @@
       instance.show();
     } else {
       fallbackShow(el, isDrawer ? 'offcanvas-backdrop' : 'modal-backdrop');
-    }
-    // Nu pas zichtbaar (geen fade-klasse, dus geen overgangswachttijd
-    // nodig): footerEl.offsetHeight klopt nu wel.
-    if (scrollBody && footerEl) {
-      if (scrollBody.dataset.gspBasePad === undefined) {
-        scrollBody.dataset.gspBasePad = String(parseFloat(root.getComputedStyle(scrollBody).paddingBottom) || 0);
-      }
-      const basePad = parseFloat(scrollBody.dataset.gspBasePad) || 0;
-      onFooterResize = () => { scrollBody.style.paddingBottom = (basePad + footerEl.offsetHeight) + 'px'; };
-      onFooterResize();
-      root.addEventListener('resize', onFooterResize);
     }
     releaseTrap = attachFocusTrap(el);
     // Bij een getypte bevestiging is dat veld het eerste interactieve

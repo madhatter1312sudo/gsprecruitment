@@ -57,22 +57,31 @@
      .a-tap           label om een selectievakje, 44px tikdoel op een telefoon
      .a-confirm-mismatch  "Komt niet overeen" onder het bevestigingsveld
      .a-skel-block    vlak laadblok in een drawertab (§7.2b, §7.3.2), geen shimmer
+     .a-notes         vrije tekst met regeleindes in een detailpaneel (§7.3.3), zonder inline style=
+     .a-hide-cardlist verbergt een kolom of knop onder 768px (§7.3.3, sectie-eigen: alleen
+                      deze kaartlijst toont op 390px minder kolommen dan op desktop)
      .text-success-ink .text-danger-ink .text-warning-ink .text-info-ink
                       de vier semantische tekstkleuren uit §7.1.3, op de
                       --ink-*-tokens uit §7.1.2
      .a-accent        het goudaccent (geen semantische familie, §7.2e)
-   Panelen (ui.js): .a-modal (+ --wide, __title, __subtitle, __close), .a-drawer,
-   .a-backdrop, .a-confirm-hint, .a-sortable (kolomkop met aria-sort), .a-nav-caption (sidebarkopje).
-   Samen 44 klassenamen: de 29 uit §7.1.3, de veertien die de sectie
+   Panelen (ui.js): .a-modal (+ --wide, __title, __subtitle, __close), .a-drawer
+   (+ __grip, --bottom: sleepgreep en offcanvas-bottom-variant op 390px, §7.3.3),
+   .a-panel-footer (voettekst van een modal of drawer, buiten de scrollende
+   inhoud -- een broer van .modal-body/.offcanvas-body, §7.3.3), .a-backdrop,
+   .a-confirm-hint, .a-sortable (kolomkop met aria-sort), .a-nav-caption (sidebarkopje).
+   Samen 46 klassenamen: de 29 uit §7.1.3, de veertien die de sectie
    Bewaartermijnen (§7.3.1) nodig had (.a-eyebrow, .a-num, .a-wide-only,
    .a-bulkbar, .a-cardlist, .a-clamp, .a-disclosure, .a-col-check,
    .a-col-actions, .a-col-cat, .a-col-status, .a-row-selected, .a-tap,
-   .a-confirm-mismatch), en .a-skel-block die Toestemmingen (§7.3.2) als
+   .a-confirm-mismatch), .a-skel-block die Toestemmingen (§7.3.2) als
    eerste afnemer nodig had voor de "drie vlakke blokken"-laadstaat van een
-   drawertab (§7.2b) -- die staat stond nog nergens in dit bestand.
+   drawertab (§7.2b) -- die staat stond nog nergens in dit bestand -- en de
+   twee die Plaatsingen (§7.3.3) toevoegde: .a-notes en .a-hide-cardlist.
    Modifiers tellen niet als eigen naam: .a-num--xl,
-   --date en --loading, .a-clamp--open, .a-cardlist--compact,
+   --date, --loading en --tab, .a-clamp--open, .a-cardlist--compact,
    .a-scrollbox--rows en .a-modal__title--danger horen bij hun basisklasse.
+   De panelklassen (.a-modal, .a-drawer, .a-panel-footer, .a-backdrop, ...)
+   tellen apart mee, niet in de 46 -- dezelfde afspraak als hierboven.
    Die veertien horen bij de componenten van §7.2: .a-eyebrow en .a-num
    zijn de `gsp-eyebrow`/`gsp-num` uit §7.1.3 met de .a-prefix die
    diezelfde subsectie voorschrijft, .a-cardlist is de `gsp-cardlist` uit
@@ -534,34 +543,42 @@ h1, h2, h3, h4,
   margin: 0 auto var(--space-md);
 }
 
-/* §7.2b/§7.2c: het bevestigingsblok en de knoppenrij staan sticky
-   onderaan de scrollende inhoud (.modal-body / .offcanvas-body hebben
-   zelf al overflow-y), zodat ze bij een lang formulier niet buiten beeld
-   vallen (design-reviewer op 1212e07, gemeten op de brede plaatsingen-
-   modal op 1440x1000). Zelfde navy-900 als de rest van het paneel, dus
-   geen randeffect nodig om de inhoud erachter af te dekken.
-   Regressie op ece9d6d: zonder gereserveerde ruimte lag deze footer over
-   de laatste velden zodra de inhoud hoger was dan de viewport
-   (elementFromPoint gaf de knop terug in plaats van het veld eronder --
-   klik-hijack). ui.js meet de footerhoogte na het mounten en zet die als
-   extra padding-bottom op de scrollcontainer (boven op de padding
-   hieronder), herberekend bij resize omdat de knoppen op 390px stapelen
-   en de footer dan hoger wordt. */
-.a-sticky-footer {
-  position: sticky;
-  bottom: 0;
+/* §7.2b/§7.2c: het bevestigingsblok en de knoppenrij staan in een eigen
+   voettekst BUITEN de scrollende inhoud (chief-of-staff op 09e99cc): een
+   broer van .modal-body binnen .modal-content, respectievelijk van
+   .offcanvas-body binnen .offcanvas. Beide ouders zijn al een flexkolom
+   (Bootstrap: .modal-content en .offcanvas zetten zelf
+   display:flex;flex-direction:column, en modal-dialog-scrollable geeft
+   .modal-content een max-height terwijl .modal-body en .offcanvas-body
+   zelf al flex:1 1 auto/flex-grow:1 plus overflow-y:auto hebben), dus
+   flexbox houdt deze footer vanzelf op zijn plek: geen position:sticky,
+   geen gemeten padding, geen resize-listener. Twee eerdere pogingen
+   loste dit niet op (1212e07: sticky binnen de scrollcontainer bleef bij
+   scrollTop 0 over de eerste velden liggen; ece9d6d: een gemeten
+   padding-bottom raakte na tabwissels en resizes uit de pas, met een
+   lege band of alsnog overlap als gevolg). flex-shrink:0 voorkomt dat de
+   footer inkrimpt als de inhoud erboven veel ruimte claimt (zelfde
+   conventie als Bootstraps eigen .modal-footer). */
+.a-panel-footer {
+  flex-shrink: 0;
   background: var(--navy-900);
   border-top: 1px solid var(--navy-600);
-  padding-top: var(--space-md);
-  margin-top: var(--space-lg);
+  padding: var(--space-md) var(--space-2xl);
 }
-.a-sticky-footer .a-actions,
-.a-sticky-footer .a-panel { margin-top: 0; }
+.a-drawer .a-panel-footer { padding: var(--space-md) var(--space-xl); }
+.a-panel-footer .a-actions,
+.a-panel-footer .a-panel { margin-top: 0; }
 /* Drawervoettekst (ui.drawer's `footer`-optie): maximaal twee acties,
    secundair links en primair rechts, in plaats van naast elkaar
    geclusterd zoals een modal dat al deed en blijft doen (§7.2c-modals
-   veranderen hier bewust niet in uiterlijk, alleen in plakgedrag). */
-.a-drawer .a-sticky-footer .a-actions { justify-content: space-between; }
+   veranderen hier bewust niet in uiterlijk). Op 390px staan de acties
+   net als bij een modal gestapeld en op volle breedte (§7.2b, dezelfde
+   regel als hieronder voor .a-modal .a-actions). */
+.a-drawer .a-panel-footer .a-actions { justify-content: space-between; }
+@media (max-width: 576px) {
+  .a-drawer .a-panel-footer .a-actions { flex-direction: column-reverse; }
+  .a-drawer .a-panel-footer .a-actions .btn { width: 100%; }
+}
 
 /* Op een telefoon is de modal fullscreen (§7.2c) en staan de knoppen
    gestapeld en op volle breedte, met de primaire of destructieve knop
