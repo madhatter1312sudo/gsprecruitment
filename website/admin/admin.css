@@ -366,6 +366,14 @@ h1, h2, h3, h4,
 
 .a-metric-row { display: flex; justify-content: space-between; gap: var(--space-md); padding: 6px 0; border-bottom: 1px solid var(--admin-hairline); }
 
+/* §7.3.3 Plaatsingen: bedragen en andere tabelwaarden lijnen uit op hun
+   cijfers (.a-num zet al de mono lettertype; dit voegt alleen de
+   uitlijning toe, apart van .a-num--date dat een andere leesmaat is). */
+.a-num--tab { font-variant-numeric: tabular-nums; }
+/* Notities in de plaatsingsdrawer: vrije tekst met regeleindes, geen
+   opgemaakte HTML (html`` escapet de tekst toch al). */
+.a-notes { white-space: pre-wrap; }
+
 .a-listrow { display: flex; align-items: center; gap: var(--space-md); padding: var(--space-md) 0; border-bottom: 1px solid var(--admin-hairline); }
 .a-listrow:last-child { border-bottom: none; }
 
@@ -773,6 +781,16 @@ h1, h2, h3, h4,
     width: 100%;
     margin-top: var(--space-sm);
   }
+  /* §7.3.3 Plaatsingen, 390: de kaart toont alleen kandidaat, opdracht-
+     gever, type en status plus "Openen" (de spec noemt vacature/start/
+     einde niet en de rijverwijderknop niet). Eigen klasse in plaats van
+     retentie's data-label-aanpak: deze tabel heeft geen kolom met
+     meerdere regels tekst die op één kaartregel moet samenkomen.
+     ".a-cardlist td" hierboven zet zelf al display:block met dezelfde
+     specificiteit (1 klasse + 1 element); ".a-cardlist td.a-hide-cardlist"
+     moet daarom net zo specifiek zijn om te winnen. */
+  .a-cardlist td.a-hide-cardlist,
+  .a-hide-cardlist { display: none; }
 }
 
 /* 44px-tikdoel (§8.x.0). Sectiebreed voor #section-retention en
@@ -786,6 +804,7 @@ h1, h2, h3, h4,
 @media (max-width: 600px) {
   #section-retention .btn,
   #section-candidates .btn,
+  #section-placements .btn,
   .offcanvas .btn,
   .modal .btn,
   .modal .form-select,
