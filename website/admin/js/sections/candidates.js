@@ -28,12 +28,13 @@
        gekoppelde candidates-rij), dan toont de tab één zin in plaats van
        drie kaarten. Beide gevallen samen zijn as-built afwijking 1,
        SITE-DESIGN-SPEC.md §7.3.2.
-     - Matches en Activiteit zijn bestaande, gedeelde routes
-       (GET /admin/pipeline?candidate_id=, GET /admin/activities?
-       subject_type=candidate&subject_id=) hergebruikt achter deze twee
-       tabnamen: er is geen aparte "matches"-lijstroute voor een kandidaat,
-       en de pipeline-rijvorm is inhoudelijk hetzelfde ding (vacature, fase,
-       laatst gewijzigd). As-built afwijking 2.
+     - De tab Matches is vervangen door de tab Pipeline (§7.3.4): allebei
+       lazen GET /admin/pipeline?candidate_id=, dus twee tabs op dezelfde
+       gegevens was verwarrend. Pipeline voegt de fasewisselaar en de
+       historietijdlijn toe (Admin.loadPipelineTab() in admin.js, gedeeld
+       met de klantdrawer in clients.js); Activiteit blijft een eigen tab
+       op de bestaande, gedeelde route (GET /admin/activities?
+       subject_type=candidate&subject_id=). §7.3.4 as-built.
      - De titelweergave bij een actieve presentatietoestemming
        ("<titel> · Vacature #<id>") is best effort: er is geen admin-route
        voor één losse vacature, dus dit bestand haalt bij het openen van de
@@ -148,7 +149,7 @@
      ============================================================ */
   _candidateTabs: [
     { key: 'profiel', label: 'Profiel' },
-    { key: 'matches', label: 'Matches' },
+    { key: 'pipeline', label: 'Pipeline' },
     { key: 'activiteit', label: 'Activiteit' },
     { key: 'toestemmingen', label: 'Toestemmingen' },
   ],
@@ -189,7 +190,7 @@
     if (this._candidateDrawer) this._candidateDrawer.selectTab(tab);
     const loaders = {
       profiel: () => this.loadCandidateProfileTab(kind, itemId),
-      matches: () => this.loadCandidateMatchesTab(kind, itemId),
+      pipeline: () => this.loadCandidatePipelineTab(kind, itemId),
       activiteit: () => this.loadCandidateActivityTab(kind, itemId),
       toestemmingen: () => this.loadCandidateConsentTab(kind, itemId, opts),
     };
@@ -409,37 +410,23 @@
     `);
   },
 
-  /* ---- Tab: Matches (GET /admin/pipeline?candidate_id=, as-built 2) ---- */
-  async loadCandidateMatchesTab(kind, itemId) {
+  /* ---- Tab: Pipeline (§7.3.4, vervangt Matches) ---- */
+  async loadCandidatePipelineTab(kind, itemId) {
     const el = document.getElementById('candidateDrawerTabContent');
     if (!el) return;
-    mount(el, html`<div class="a-state-block"><i class="fa-solid fa-spinner fa-spin"></i> Laden…</div>`);
+    mount(el, html`${[0, 1, 2].map(() => html`<div class="a-skel-block"></div>`)}`);
     try {
       const detail = await this.ensureCandidateDetail(kind, itemId);
       const candidateId = this.candidateRecordId(detail, kind);
       if (!candidateId) {
-        mount(el, html`<div class="a-state-block">Deze kandidaat heeft nog geen kandidaatrecord; er zijn geen matches om te tonen.</div>`);
+        mount(el, html`<div class="a-state-block">Deze kandidaat heeft nog geen kandidaatrecord; er is geen pipeline om te tonen.</div>`);
         return;
       }
-      const res = await Auth.fetch(`/v1/admin/pipeline?candidate_id=${candidateId}&limit=50`);
-      if (!res) return;
-      const data = await res.json();
-      if (!res.ok) throw new Error();
-      const items = data.items || [];
-      mount(el, items.length ? html`
-        <div class="table-responsive">
-          <table class="table table-vcenter card-table">
-            <thead><tr><th>Vacature</th><th>Fase</th><th>Bijgewerkt</th></tr></thead>
-            <tbody>${items.map(m => html`
-              <tr>
-                <td class="a-cell-strong">${m.job_title || '—'}</td>
-                <td><span class="${this.badge(m.stage)}">${m.stage || '—'}</span></td>
-                <td class="a-soft">${this.retentionDate(m.updated_at)}</td>
-              </tr>`)}</tbody>
-          </table>
-        </div>` : html`<div class="a-state-block">Nog geen matches voor deze kandidaat.</div>`);
+      // showCandidateName: false -- deze drawer toont al één kandidaat, de
+      // eigen naam nog eens tonen voegt niets toe (§7.3.4 admin.js).
+      this.loadPipelineTab('candidateDrawerTabContent', 'candidate_id', candidateId, { showCandidateName: false });
     } catch {
-      this.setContainerLoadError(el, () => this.loadCandidateMatchesTab(kind, itemId));
+      this.setContainerLoadError(el, () => this.loadCandidatePipelineTab(kind, itemId));
     }
   },
 
