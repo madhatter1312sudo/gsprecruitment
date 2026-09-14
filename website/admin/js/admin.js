@@ -472,6 +472,14 @@ Admin.registerActions({
 const PIPELINE_STAGE_VALIDATED = false;
 
 Object.assign(Admin, {
+  // Ook op Admin gezet (niet alleen als losse const hierboven), zodat
+  // scripts/admin_sections_check.py de klep voor een onbekende, niet-lege
+  // fase kan testen alsof VALIDATE CONSTRAINT al gedraaid is: Admin.
+  // PIPELINE_STAGE_VALIDATED = true; in een page.evaluate() zonder het
+  // bestand zelf aan te raken. pipelineStageOptions() hieronder leest
+  // altijd deze eigenschap, nooit de const rechtstreeks.
+  PIPELINE_STAGE_VALIDATED,
+
   // filterKey is 'candidate_id' of 'client_id'; filterId het bijbehorende
   // id. opts.showCandidateName: de klantdrawer toont meerdere kandidaten
   // door elkaar (één client_id, veel candidate_id's), dus die zet dit aan;
@@ -507,12 +515,19 @@ Object.assign(Admin, {
   // browser koos zelf stil de eerste optie ('sourced') en "Fase wijzigen"
   // zou zonder enige keuze een PATCH sturen. Een lege waarde krijgt nu
   // dezelfde klep, met "(leeg)" in plaats van de rauwe waarde als label.
+  // code-reviewer LOW (herchecks op 3951578): dat geldt ook wanneer
+  // PIPELINE_STAGE_VALIDATED ooit op true gaat -- de CHECK-constraint uit
+  // migratie 043 laat NULL gewoon door (een CHECK slaat NULL altijd over,
+  // dat is SQL-standaardgedrag), dus VALIDATE CONSTRAINT bewijst niets
+  // over een lege `stage`. De klep voor een lege waarde blijft daarom
+  // onvoorwaardelijk aan, los van de vlag; alleen de klep voor een
+  // ONBEKENDE, niet-lege waarde vervalt na VALIDATE.
   pipelineStageOptions(currentStage) {
     const stages = AdminLabels.pipelineStages || [];
     const known = stages.includes(currentStage);
     const opts = stages.map(s => html`
       <option value="${s}" ${raw(s === currentStage ? 'selected' : '')}>${AdminLabels.label('pipelinefase', s)}</option>`);
-    if (!known && !PIPELINE_STAGE_VALIDATED) {
+    if (!known && (!this.PIPELINE_STAGE_VALIDATED || currentStage == null)) {
       const value = currentStage ?? '';
       const label = currentStage ?? '(leeg)';
       opts.push(html`<option value="${value}" selected>${label} (bestaande waarde)</option>`);
@@ -671,14 +686,25 @@ Object.assign(Admin, {
       </div>`);
   },
 
+  // security-auditor LOW op claude/admin-pipeline (herchecks op 3951578):
+  // twee aanroepen voor dezelfde entry kunnen overlappen (een trage
+  // initiële GET terwijl een geslaagde PATCH meteen zijn eigen herlading
+  // start), en zonder volgnummer wint welke respons dan ook het laatst
+  // binnenkomt -- een trage eerste GET zou de verse herlading na de PATCH
+  // zo kunnen overschrijven met de OUDE fase. `wrap._pipelineHistorySeq`
+  // is het volgnummer van de laatst GESTARTE aanroep voor deze wrap; een
+  // respons die niet meer de nieuwste aanroep is (seq komt niet meer
+  // overeen) wordt genegeerd, in zowel het succes- als het foutpad.
   async loadPipelineHistory(entryId, root) {
     const wrap = (root || document).querySelector(`#pipelineHistoryWrap_${entryId}`);
     if (!wrap) return;
+    const seq = wrap._pipelineHistorySeq = (wrap._pipelineHistorySeq || 0) + 1;
     mount(wrap, html`${[0, 1, 2].map(() => html`<div class="a-skel-block"></div>`)}`);
     try {
       const res = await Auth.fetch(`/v1/admin/pipeline/${entryId}/history`);
       if (!res) return;
       const data = await res.json();
+      if (seq !== wrap._pipelineHistorySeq) return; // een nieuwere aanroep won al
       if (!res.ok) throw new Error();
       // §7.3.4: de route sorteert ORDER BY h.changed_at (oplopend, append-
       // only logboek); de tijdlijn toont nieuwste boven, dus hier
@@ -689,6 +715,7 @@ Object.assign(Admin, {
       });
       this.renderPipelineHistory(entryId, false, root);
     } catch {
+      if (seq !== wrap._pipelineHistorySeq) return;
       this.setContainerLoadError(wrap, () => this.loadPipelineHistory(entryId, root));
     }
   },
