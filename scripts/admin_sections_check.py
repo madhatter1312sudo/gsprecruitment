@@ -268,6 +268,14 @@ PIPELINE_ENTRIES = [
      "notes": None, "created_at": "2026-08-30T00:00:00Z", "updated_at": "2026-08-30T00:00:00Z",
      "full_name": "Voorbeeld Kandidaat", "current_title": "Embedded Engineer", "current_company": None,
      "location": "Eindhoven", "skills": [], "job_title": "Null Stage Engineer"},
+    # Race-test (security-auditor LOW): een vertraagde eerste GET .../history
+    # die pas ná een geslaagde PATCH en zijn eigen (snelle) herlading
+    # binnenkomt, mag die herlading niet overschrijven. Zie
+    # PIPELINE_STATE["hold_next_history_for"] hieronder.
+    {"id": 697, "client_id": 1, "candidate_id": 1482, "job_id": 210, "stage": "new",
+     "notes": None, "created_at": "2026-08-29T00:00:00Z", "updated_at": "2026-08-29T00:00:00Z",
+     "full_name": "Voorbeeld Kandidaat", "current_title": "Embedded Engineer", "current_company": None,
+     "location": "Eindhoven", "skills": [], "job_title": "Race Test Engineer"},
 ]
 PIPELINE_ENTRIES_BY_ID = {e["id"]: e for e in PIPELINE_ENTRIES}
 
@@ -304,6 +312,15 @@ PIPELINE_HISTORY_BY_ENTRY = {
     # Leeg: bewijst dat "Bijgewerkt: <updated_at>" blijft staan zonder
     # historie om "Laatst gewijzigd" uit af te leiden (code-reviewer LOW).
     698: [],
+    # Twee items vóór de race-PATCH; de test telt de regels (2 -> 3) in
+    # plaats van op tekst te letten, want elk item hier draagt toch al
+    # dezelfde actor.
+    697: [
+        {"id": 1, "pipeline_entry_id": 697, "from_stage": None, "to_stage": "sourced",
+         "changed_by": 1, "changed_by_name": "Sections Check", "changed_at": "2026-08-01T00:00:00Z"},
+        {"id": 2, "pipeline_entry_id": 697, "from_stage": "sourced", "to_stage": "new",
+         "changed_by": 1, "changed_by_name": "Sections Check", "changed_at": "2026-08-15T00:00:00Z"},
+    ],
 }
 
 PIPELINE_STATE = {
@@ -1546,8 +1563,9 @@ def main():
             details_ids = page.eval_on_selector_all(
                 '#clientDrawerTabContent details.a-disclosure', "els => els.map(e => e.id)")
             if details_ids != ["pipelineEntry_604", "pipelineEntry_603", "pipelineEntry_602",
-                                "pipelineEntry_601", "pipelineEntry_600", "pipelineEntry_698"]:
-                failures.append(f"clients: pipeline-accordeon toont niet de verwachte zes entries in volgorde -- kreeg {details_ids!r}")
+                                "pipelineEntry_601", "pipelineEntry_600", "pipelineEntry_698",
+                                "pipelineEntry_697"]:
+                failures.append(f"clients: pipeline-accordeon toont niet de verwachte zeven entries in volgorde -- kreeg {details_ids!r}")
             open_ids = page.eval_on_selector_all(
                 '#clientDrawerTabContent details.a-disclosure[open]', "els => els.map(e => e.id)")
             if open_ids != ["pipelineEntry_604"]:
@@ -1837,12 +1855,22 @@ def main():
         if "903" not in first_subject:
             failures.append(f"retention: server-side sorteren gaf als eerste rij {first_subject.strip()!r}, verwacht kandidaat #903")
 
-        # Lijst genereren.
+        # Lijst genereren. RETENTION_STATE["generated"] gaat omhoog zodra de
+        # POST de Python-kant van de route-interceptor bereikt -- dat is
+        # eerder dan het moment waarop de browser klaar is met de eigen
+        # achtergrondherlading (generateRetentionList() await't na die POST
+        # nog refreshRetention(), twee extra GET's plus een her-render van
+        # #retentionBody). code-reviewer FIX FIRST (herchecks op 3951578,
+        # 2 van 6 runs): de knop zelf gaat pas na die hele keten weer aan
+        # (`btn.disabled = false` staat na de try/catch, in beide paden),
+        # dus dat is het signaal om op te wachten, niet de aanroepteller.
         click_or_fail(page, failures, '#section-retention [data-action="retention-generate"]', "de knop Lijst genereren")
         if not wait_until(page, lambda: RETENTION_STATE["generated"] >= 1):
             failures.append("retention: 'Lijst genereren' riep generate niet aan")
         if RETENTION_STATE["generated"] != 1:
             failures.append(f"retention: 'Lijst genereren' riep generate {RETENTION_STATE['generated']}x aan, verwacht 1")
+        if not wait_for_enabled(page, '[data-action="retention-generate"]'):
+            failures.append("retention: de knop Lijst genereren bleef uitgeschakeld (achtergrondherlading kwam niet klaar)")
 
         # Goedkeuren: getypte bevestiging, fout en goed.
         click_or_fail(page, failures, '#retentionBody [data-action="retention-approve"][data-id="1"]', "de goedkeurknop van item 1")
@@ -1858,11 +1886,20 @@ def main():
         # inhoud staan (geen overlap bij scrollTop 0, geen sticky-hack).
         # Op 1440 is de inhoud van deze modal kort genoeg dat er
         # helemaal niet gescrold hoeft te worden.
-        body_dims = page.eval_on_selector('#retentionApproveModal .modal-body',
-                                           "el => ({scrollHeight: el.scrollHeight, clientHeight: el.clientHeight})")
-        if body_dims and body_dims["scrollHeight"] > body_dims["clientHeight"]:
-            failures.append(f"retention (1440): de goedkeurmodal is onnodig scrollbaar -- {body_dims}")
-        page.eval_on_selector('#retentionApproveModal .modal-body', "el => { el.scrollTop = 0; }")
+        # code-reviewer FIX FIRST (herchecks op 3951578): een kale
+        # eval_on_selector op '.modal-body' na de wait_until hierboven --
+        # als die wait_until faalt (de modal ging niet open) bestaat het
+        # element niet en gooit Playwright, wat de hele run met een
+        # traceback laat sterven in plaats van één regel in failures te
+        # zetten. Alle metingen hieronder gaan achter dezelfde guard.
+        if page.query_selector('#retentionApproveModal .modal-body'):
+            body_dims = page.eval_on_selector('#retentionApproveModal .modal-body',
+                                               "el => ({scrollHeight: el.scrollHeight, clientHeight: el.clientHeight})")
+            if body_dims and body_dims["scrollHeight"] > body_dims["clientHeight"]:
+                failures.append(f"retention (1440): de goedkeurmodal is onnodig scrollbaar -- {body_dims}")
+            page.eval_on_selector('#retentionApproveModal .modal-body', "el => { el.scrollTop = 0; }")
+        else:
+            failures.append("retention: #retentionApproveModal .modal-body ontbreekt, kon de scroll-/overlapmeting niet doen")
         if page.query_selector('#retentionApproveNote') is None:
             failures.append("retention: het notitieveld van de goedkeurmodal ontbreekt voor de overlapcontrole")
         elif not element_from_point_is_self(page, '#retentionApproveNote'):
@@ -2102,9 +2139,22 @@ def main():
             failures.append(f"candidates: de drawerkop toont niet de echte naam -- kreeg {text_of(page, '#candidateDrawer__title')!r}")
 
         # ---- Tab Pipeline (§7.3.4), vervangt Matches ----
+        history_calls_before_tab = len(PIPELINE_STATE["history_calls"])
         click_or_fail(page, failures, '#candidateDrawer [data-tab="pipeline"]', "candidates: de tab Pipeline")
         if not wait_until(page, lambda: page.query_selector('#pipelineStage_604') is not None):
             failures.append("candidates: de tab Pipeline rendeerde niet (entry 604)")
+
+        # code-reviewer (herchecks op 3951578): lui laden rechtstreeks
+        # bewaakt, niet alleen via het gedrag ná een klik op een <details>
+        # verderop. Direct na het renderen van de tab hoort alleen de
+        # nieuwste (604) zijn historie te hebben opgehaald; de vier
+        # dichtgeklapte kaarten (603/602/601/698) nog geen enkele keer.
+        if not wait_until(page, lambda: PIPELINE_STATE["history_calls"][history_calls_before_tab:].count(604) == 1):
+            failures.append("candidates: entry 604 (nieuwste, open) haalde zijn historie niet precies één keer op bij het renderen van de tab")
+        fresh_calls = PIPELINE_STATE["history_calls"][history_calls_before_tab:]
+        for lazy_id in (603, 602, 601, 698, 697):
+            if fresh_calls.count(lazy_id) != 0:
+                failures.append(f"candidates: entry {lazy_id} (dichtgeklapt) haalde zijn historie al op vóór het openklappen -- kreeg {fresh_calls.count(lazy_id)}x")
 
         # Vijf entries voor candidate_id 1482 (604/603/602/601/698) ->
         # accordeon, alleen de nieuwste (604, eerst in de API-volgorde)
@@ -2112,8 +2162,8 @@ def main():
         details_ids = page.eval_on_selector_all(
             '#candidateDrawerTabContent details.a-disclosure', "els => els.map(e => e.id)")
         if details_ids != ["pipelineEntry_604", "pipelineEntry_603", "pipelineEntry_602",
-                            "pipelineEntry_601", "pipelineEntry_698"]:
-            failures.append(f"candidates: pipeline-accordeon toont niet de verwachte vijf entries in volgorde -- kreeg {details_ids!r}")
+                            "pipelineEntry_601", "pipelineEntry_698", "pipelineEntry_697"]:
+            failures.append(f"candidates: pipeline-accordeon toont niet de verwachte zes entries in volgorde -- kreeg {details_ids!r}")
         open_ids = page.eval_on_selector_all(
             '#candidateDrawerTabContent details.a-disclosure[open]', "els => els.map(e => e.id)")
         if open_ids != ["pipelineEntry_604"]:
@@ -2236,6 +2286,82 @@ def main():
         if len(PIPELINE_STATE["stage_calls"]) != calls_698_before:
             failures.append("candidates: de lege-fase-waarde werd toch verstuurd (security-auditor LOW-regressie)")
 
+        # code-reviewer LOW (herchecks op 3951578): ook mét
+        # PIPELINE_STAGE_VALIDATED op true (na VALIDATE CONSTRAINT) hoort
+        # een lege fase de ontsnappingsklep te houden -- een CHECK-
+        # constraint laat NULL altijd door (SQL-standaardgedrag), dus
+        # VALIDATE bewijst niets over stage: null. Unit-assert
+        # rechtstreeks op Admin.pipelineStageOptions(), vlag tijdelijk
+        # geforceerd en teruggezet, geen wijziging aan het bestand zelf.
+        validated_opts_html = page.evaluate(
+            """() => {
+                const prev = Admin.PIPELINE_STAGE_VALIDATED;
+                Admin.PIPELINE_STAGE_VALIDATED = true;
+                try {
+                    return Admin.pipelineStageOptions(null).map(o => o.toString()).join('');
+                } finally {
+                    Admin.PIPELINE_STAGE_VALIDATED = prev;
+                }
+            }"""
+        )
+        if 'value=""' not in validated_opts_html or "(leeg) (bestaande waarde)" not in validated_opts_html:
+            failures.append(f"candidates: pipelineStageOptions(null) liet de ontsnappingsklep vallen zodra PIPELINE_STAGE_VALIDATED true is -- kreeg {validated_opts_html!r}")
+        if page.evaluate("() => Admin.PIPELINE_STAGE_VALIDATED") is not False:
+            failures.append("candidates: PIPELINE_STAGE_VALIDATED stond na de test niet meer op zijn oorspronkelijke waarde (false)")
+
+        # Race (security-auditor LOW, herchecks op 3951578): een trage,
+        # verouderde eerste GET .../history mag een snellere, nieuwere
+        # herlading niet overschrijven. Playwrights routedispatch bleek in
+        # deze omgeving geserialiseerd (een vastgehouden of vertraagde
+        # respons hield ook de daaropvolgende, eigenlijk snelle aanroepen
+        # op, dus de daadwerkelijke uit-volgorde-aankomst was niet
+        # betrouwbaar te forceren via het netwerk): deze test bootst het
+        # daarom deterministisch na op Admin.loadPipelineHistory() zelf --
+        # Auth.fetch tijdelijk vervangen door een variant die de twee
+        # aanroepen elk hun eigen, met de hand op te lossen Promise geeft,
+        # de TWEEDE (nieuwste) aanroep eerst laten binnenkomen, wachten tot
+        # die gerenderd heeft, en dan pas de EERSTE (oudste, "trage")
+        # aanroep laten binnenkomen. Zonder het volgnummer in
+        # loadPipelineHistory() zou die laatste, verouderde respons de net
+        # gerenderde nieuwe regel overschrijven.
+        click_or_fail(page, failures, '#pipelineEntry_697 summary', "candidates: entry 697 openklappen (race-test)")
+        if not wait_until(page, lambda: page.query_selector('#pipelineHistoryWrap_697') is not None):
+            failures.append("candidates: entry 697 klapte niet open (race-test)")
+        race_result = page.evaluate(
+            """async () => {
+                const root = document.getElementById('candidateDrawerTabContent');
+                const originalFetch = Auth.fetch;
+                const resolvers = [];
+                Auth.fetch = (url) => {
+                    if (typeof url === 'string' && url.includes('/pipeline/697/history')) {
+                        return new Promise((resolve) => { resolvers.push(resolve); });
+                    }
+                    return originalFetch(url);
+                };
+                const oldResponse = { ok: true, json: async () => ({ items: [
+                    { id: 9001, pipeline_entry_id: 697, from_stage: null, to_stage: 'sourced',
+                      changed_by: 1, changed_by_name: 'OUDE RESPONS', changed_at: '2026-08-01T00:00:00Z' },
+                ] }) };
+                const newResponse = { ok: true, json: async () => ({ items: [
+                    { id: 9002, pipeline_entry_id: 697, from_stage: 'new', to_stage: 'screening',
+                      changed_by: 1, changed_by_name: 'NIEUWE RESPONS', changed_at: '2026-09-11T00:00:00Z' },
+                ] }) };
+                const p1 = Admin.loadPipelineHistory(697, root); // de trage, oudste aanroep
+                const p2 = Admin.loadPipelineHistory(697, root); // de snelle, nieuwste aanroep
+                resolvers[1](newResponse);
+                await p2;
+                resolvers[0](oldResponse);
+                await p1;
+                Auth.fetch = originalFetch;
+                const wrap = document.getElementById('pipelineHistoryWrap_697');
+                return wrap ? wrap.textContent : '';
+            }"""
+        )
+        if "NIEUWE RESPONS" not in race_result:
+            failures.append(f"candidates: de nieuwste historie-respons (697, race-test) staat niet op het scherm -- kreeg {race_result[:200]!r}")
+        if "OUDE RESPONS" in race_result:
+            failures.append(f"candidates: de verouderde, trage historie-respons overschreef de nieuwere (volgnummer werkte niet) -- kreeg {race_result[:200]!r}")
+
         # 422 dan 500 dan geslaagd (601), en meer dan tien historie-items
         # met "Toon alles".
         click_or_fail(page, failures, '#pipelineEntry_601 summary', "candidates: entry 601 openklappen")
@@ -2349,6 +2475,15 @@ def main():
         elif CANDIDATE_STATE["presentation_calls"][0].get("job_id") != 201:
             failures.append(f"candidates: presentatie-vastleggen stuurde niet job_id=201 -- {CANDIDATE_STATE['presentation_calls'][0]!r}")
         wait_until(page, lambda: page.query_selector('#candidatePresentationModal.show') is None)
+
+        # code-reviewer FIX FIRST (herchecks op 3951578): dezelfde
+        # race als bij talentpool hierboven -- de modal sluiten bewijst
+        # niet dat de achtergrondherlading (switchCandidateTab(...,
+        # {force: true})) na een geslaagde presentatie-PATCH ook klaar is.
+        # Drie van zes runs klikten hier op een knop die halverwege die
+        # herlading al uit de DOM verdween.
+        if not wait_until(page, lambda: "vastgelegd" in text_of(page, '#candidateDrawerTabContent')):
+            failures.append("candidates: de toestemmingentab herlaadde niet na het vastleggen van presentatietoestemming")
 
         click_or_fail(page, failures, '[data-action="candidate-presentation-edit"]', "candidates: Vastleggen (presentatie, intrekken)")
         wait_until(page, lambda: page.query_selector('#spConsentWithdraw') is not None)
