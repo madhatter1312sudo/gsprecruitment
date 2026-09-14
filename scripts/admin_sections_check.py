@@ -1278,6 +1278,25 @@ def element_from_point_is_self(page, selector):
         "return hit === el; }"))
 
 
+def panel_is_scrubbed(page, selector):
+    """security-auditor op a2ec6ed: ui.js' close() maakt het paneel-element
+    zelf leeg (mount(el, '')) zodra het verborgen is, in plaats van alleen
+    de show-klasse te verwijderen. Geeft True wanneer `selector` geen
+    tekst meer draagt en geen enkel invoerveld erbinnen nog een waarde
+    heeft -- de vorm waarin een getypt e-mailadres anders als tekst of als
+    .value in de verborgen DOM was blijven staan, ook na Annuleren en na
+    een geslaagde afhandeling. False (met de reden) wanneer het element
+    niet bestaat of nog iets draagt."""
+    if page.query_selector(selector) is None:
+        return False
+    return bool(page.eval_on_selector(
+        selector,
+        "el => (el.textContent || '').trim() === '' && "
+        "[...el.querySelectorAll('input, textarea')].every(f => !f.value)",
+    ))
+
+
+
 def fields_behind_sticky_footer(page, container_selector):
     """chief-of-staff op 09e99cc: bij scrollTop 0 mag het midden van geen
     enkel formulierveld in `container_selector` binnen de band van zijn
@@ -1376,16 +1395,27 @@ def main():
                        lambda route, request: route.abort())
 
         console_errors = []
+        # security-auditor op a2ec6ed: de lekcontrole in de gdpr-passage
+        # ("geen adres in de console, ook niet bij een fout") toetste alleen
+        # console_errors, en een adres dat per ongeluk via console.warn/log
+        # (bijvoorbeeld een debugregel die per abuis het adres meegeeft in
+        # plaats van alleen de foutcode, §7.2f) naar buiten komt, is geen
+        # console-error en viel dus buiten die controle. console_all vangt
+        # elk berichttype, ongeacht of de rest van de suite (die alleen op
+        # fouten toetst) er iets mee doet.
+        console_all = []
 
         def on_console(msg):
+            text = msg.text
+            console_all.append(text)
             if msg.type == "error":
-                text = msg.text
                 if "favicon" in text.lower() or "net::ERR_FAILED" in text:
                     return
                 console_errors.append(text)
 
         def on_pageerror(exc):
             console_errors.append(f"pageerror: {exc}")
+            console_all.append(f"pageerror: {exc}")
 
         page = context.new_page()
         page.on("console", on_console)
@@ -1705,8 +1735,9 @@ def main():
 
         # Goedkeuren: getypte bevestiging, fout en goed.
         click_or_fail(page, failures, '#retentionBody [data-action="retention-approve"][data-id="1"]', "de goedkeurknop van item 1")
-        if not wait_until(page, lambda: page.query_selector('#retentionApproveModal input[type=text]') is not None):
-            failures.append("retention: de goedkeurmodal ging niet open")
+        if not wait_until(page, lambda: page.query_selector('#retentionApproveModal input[type=text]') is not None
+                           and page.query_selector('#retentionApproveModal .modal-body') is not None):
+            failures.append("retention: de goedkeurmodal ging niet (volledig) open")
         modal_text = text_of(page, '#retentionApproveModal')
         if "k••••@example.invalid" not in modal_text:
             failures.append(f"retention: de goedkeurmodal toont het adres niet gemaskeerd -- kreeg {modal_text[:200]!r}")
@@ -1717,11 +1748,15 @@ def main():
         # inhoud staan (geen overlap bij scrollTop 0, geen sticky-hack).
         # Op 1440 is de inhoud van deze modal kort genoeg dat er
         # helemaal niet gescrold hoeft te worden.
-        body_dims = page.eval_on_selector('#retentionApproveModal .modal-body',
-                                           "el => ({scrollHeight: el.scrollHeight, clientHeight: el.clientHeight})")
-        if body_dims and body_dims["scrollHeight"] > body_dims["clientHeight"]:
-            failures.append(f"retention (1440): de goedkeurmodal is onnodig scrollbaar -- {body_dims}")
-        page.eval_on_selector('#retentionApproveModal .modal-body', "el => { el.scrollTop = 0; }")
+        body_dims = None
+        if page.query_selector('#retentionApproveModal .modal-body') is None:
+            failures.append("retention: #retentionApproveModal .modal-body niet gevonden (regel ~1750)")
+        else:
+            body_dims = page.eval_on_selector('#retentionApproveModal .modal-body',
+                                               "el => ({scrollHeight: el.scrollHeight, clientHeight: el.clientHeight})")
+            if body_dims and body_dims["scrollHeight"] > body_dims["clientHeight"]:
+                failures.append(f"retention (1440): de goedkeurmodal is onnodig scrollbaar -- {body_dims}")
+            page.eval_on_selector('#retentionApproveModal .modal-body', "el => { el.scrollTop = 0; }")
         if page.query_selector('#retentionApproveNote') is None:
             failures.append("retention: het notitieveld van de goedkeurmodal ontbreekt voor de overlapcontrole")
         elif not element_from_point_is_self(page, '#retentionApproveNote'):
@@ -2021,6 +2056,13 @@ def main():
             failures.append(f"candidates: presentatie-vastleggen stuurde niet job_id=201 -- {CANDIDATE_STATE['presentation_calls'][0]!r}")
         wait_until(page, lambda: page.query_selector('#candidatePresentationModal.show') is None)
 
+        # Dezelfde soort race als bij de retentionApproveModal-guard
+        # hierboven: switchCandidateTab() ververst de tabinhoud ASYNCHROON
+        # ná handle.close() (submitPresentationConsent in candidates.js),
+        # dus een tweede klik op deze knop mag niet eerder dan die
+        # ververste tab de knop weer teruggeeft -- anders is hij er
+        # eventjes niet, en faalt de klik met een verkeerde reden.
+        wait_until(page, lambda: page.query_selector('[data-action="candidate-presentation-edit"]') is not None)
         click_or_fail(page, failures, '[data-action="candidate-presentation-edit"]', "candidates: Vastleggen (presentatie, intrekken)")
         wait_until(page, lambda: page.query_selector('#spConsentWithdraw') is not None)
         check_or_fail(page, failures, '#spConsentWithdraw', "candidates: Intrekken kiezen (presentatie)")
@@ -2654,6 +2696,7 @@ def main():
 
         # ---- AVG: wissen en suppressielijst (§7.3.5) -----------------
         errors_before = len(console_errors)
+        all_before = len(console_all)
 
         # Eerste bezoek met een lege verzameling: de lege staat, niet een
         # generieke "geen resultaten".
@@ -2685,6 +2728,8 @@ def main():
             failures.append(f"gdpr: de POST-payload klopt niet -- kreeg {added!r}")
         if not wait_until(page, lambda: page.query_selector('#gdprSuppressionModal.show') is None):
             failures.append("gdpr: de toevoegmodal sloot niet na succes")
+        if not wait_until(page, lambda: panel_is_scrubbed(page, '#gdprSuppressionModal')):
+            failures.append("gdpr: de toevoegmodal draagt na sluiten nog tekst of een veldwaarde (ui.js close() moet het paneel leegmaken)")
         if not wait_until(page, lambda: len(page.query_selector_all('#gdprSuppressionBody tr')) == 100):
             failures.append(f"gdpr: de lijst herlaadde niet na het toevoegen (120 rijen naast de paginagrootte van 100) -- kreeg {len(page.query_selector_all('#gdprSuppressionBody tr'))}")
         if not wait_for_text(page, '#gdprSuppressionCount', '100 van 120'):
@@ -2829,6 +2874,8 @@ def main():
             failures.append("gdpr: de wisknop draagt geen data-gsp-lock na succes")
         page.keyboard.press('Escape')
         wait_until(page, lambda: page.query_selector('#gdprEraseModal.show') is None)
+        if not wait_until(page, lambda: panel_is_scrubbed(page, '#gdprEraseModal')):
+            failures.append("gdpr: de wismodal draagt na een geslaagde wissing nog tekst of een veldwaarde (ui.js close() moet het paneel leegmaken)")
 
         # Enter in het bevestigingsveld: ook precies één aanroep.
         fill_or_fail(page, failures, '#gdprEraseEmail', 'nog-een-adres@voorbeeld.invalid', "gdpr: tweede e-mailadres (Enter-test)")
@@ -2846,6 +2893,8 @@ def main():
         wait_for_text(page, '#gdprEraseModal', 'Volledig verwerkt')
         page.keyboard.press('Escape')
         wait_until(page, lambda: page.query_selector('#gdprEraseModal.show') is None)
+        if not wait_until(page, lambda: panel_is_scrubbed(page, '#gdprEraseModal')):
+            failures.append("gdpr: de wismodal draagt na de Enter-test nog tekst of een veldwaarde (ui.js close() moet het paneel leegmaken)")
 
         # 409 erase_admin_or_self_requires_confirm: de tweede stap, en pas na
         # de checkbox gaat de tweede aanroep uit.
@@ -2887,9 +2936,20 @@ def main():
             second_call = GDPR_STATE["erase_calls"][admin_calls_before + 1]
             if second_call.get("confirm_admin_or_self") is not True:
                 failures.append(f"gdpr: de tweede aanroep stuurde confirm_admin_or_self niet als true -- kreeg {second_call!r}")
+            # security-auditor op a2ec6ed: het bevestigingsveld staat na de
+            # 409 op slot, juist om te voorkomen dat de tweede aanroep een
+            # ander adres of een andere confirm draagt dan de eerste.
+            first_call = GDPR_STATE["erase_calls"][admin_calls_before]
+            if second_call.get("email") != first_call.get("email") or second_call.get("confirm") != first_call.get("confirm"):
+                failures.append(
+                    "gdpr: de eerste en de tweede aanroep (voor hetzelfde beheerdersadres) dragen niet "
+                    f"dezelfde email/confirm -- eerste {first_call!r}, tweede {second_call!r}"
+                )
         wait_for_text(page, '#gdprEraseModal', 'Volledig verwerkt')
         page.keyboard.press('Escape')
         wait_until(page, lambda: page.query_selector('#gdprEraseModal.show') is None)
+        if not wait_until(page, lambda: panel_is_scrubbed(page, '#gdprEraseModal')):
+            failures.append("gdpr: de wismodal draagt na de tweede-stapafhandeling nog tekst of een veldwaarde (ui.js close() moet het paneel leegmaken)")
 
         # 422 erase_confirm_must_match_email als vangnet: de vaste
         # Nederlandse zin, ook al matchte de client-side confirm zelf.
@@ -2905,9 +2965,14 @@ def main():
             failures.append(f"gdpr: de 422-vangnetmelding toont niet de vaste zin -- kreeg {text_of(page, '#gdprEraseAlert')!r}")
         page.keyboard.press('Escape')
         wait_until(page, lambda: page.query_selector('#gdprEraseModal.show') is None)
+        if not wait_until(page, lambda: panel_is_scrubbed(page, '#gdprEraseModal')):
+            failures.append("gdpr: de wismodal draagt na Annuleren (422-vangnet) nog tekst of een veldwaarde (ui.js close() moet het paneel leegmaken)")
 
-        # Geen adres lekte naar de console, ook niet in een foutmelding.
-        leaked = [e for e in console_errors[errors_before:] if "voorbeeld.invalid" in e]
+        # Geen adres lekte naar de console, ook niet in een foutmelding, en
+        # ook niet via console.warn/log/info/debug (security-auditor op
+        # a2ec6ed: alleen console_errors toetsen ziet een adres in een
+        # gewone log- of waarschuwingsregel niet).
+        leaked = [e for e in console_all[all_before:] if "voorbeeld.invalid" in e]
         if leaked:
             failures.append(f"gdpr: een e-mailadres lekte naar de console: {leaked[:3]}")
         new_errors = [e for e in console_errors[errors_before:]

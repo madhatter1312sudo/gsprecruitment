@@ -199,6 +199,14 @@
       primaryBtn.classList.remove('btn-primary');
       primaryBtn.classList.add('btn-outline-danger');
     }
+    // security-auditor op a2ec6ed: het bevestigingsveld bleef na de 409
+    // bewerkbaar, dus confirm kon bij de tweede aanroep (confirm_admin_or_self:
+    // true) een andere tekenreeks dragen dan bij de eerste. Op slot, zodat
+    // een tweede klik onmogelijk een ander adres bevestigt dan de eerste
+    // aanroep al deed; submitGdprErase() leest de waarde bovendien maar
+    // eenmaal in (state.confirmSent), niet opnieuw per aanroep.
+    const confirmField = document.querySelector('#gdprEraseModal input[type="email"]');
+    if (confirmField) confirmField.disabled = true;
     if (cb) {
       cb.addEventListener('change', () => {
         this._gdpr.erase.adminConfirmChecked = cb.checked;
@@ -224,9 +232,16 @@
     state.submitting = true;
     this.gdprAlert('gdprEraseAlert', '');
     handle.setBusy(true);
+    // security-auditor op a2ec6ed: ingelezen bij de EERSTE aanroep en
+    // daarna hergebruikt, niet bij elke aanroep opnieuw van het (na de 409
+    // toch al vergrendelde) veld gelezen -- zo dragen de eerste aanroep
+    // (confirm_admin_or_self weggelaten) en de tweede (na de checkbox)
+    // gegarandeerd hetzelfde `confirm`, ongeacht of het veld op enig moment
+    // toch nog bewerkbaar zou zijn.
+    if (state.confirmSent === undefined) state.confirmSent = handle.confirmValue();
     const payload = {
       email: state.email,
-      confirm: handle.confirmValue(),
+      confirm: state.confirmSent,
       confirm_admin_or_self: !!confirmAdminOrSelf,
     };
     try {

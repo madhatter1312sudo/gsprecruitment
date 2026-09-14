@@ -460,6 +460,21 @@
       unwire();
       el._gspDetach = null;
       if (instance) instance.hide(); else fallbackHide(el);
+      // security-auditor op a2ec6ed: close() verborg het paneel alleen --
+      // el zelf bleef gevuld, dus een getypt e-mailadres (§7.3.5: het
+      // adres zelf als bevestiging, of het adres in het formulier "Adres
+      // toevoegen") bleef als tekst en als input.value in de verborgen DOM
+      // staan, ook na Annuleren en na een geslaagde afhandeling. Geen van
+      // beide hide-paden hierboven is bij ons geanimeerd (geen .fade-
+      // klasse, zie de toelichting bovenaan dit bestand), dus instance.hide()
+      // heeft de 'hidden.bs.modal'/'hidden.bs.offcanvas'-afhandeling van
+      // Bootstrap zelf -- en daarmee alles wat die intern aan el's eigen
+      // attributen doet -- al synchroon afgerond tegen de tijd dat deze
+      // regel loopt; leegmaken hierna raakt dat niet. Elke volgende opening
+      // van dit el gaat weer door panel() hierboven, dat vóór instance.show()
+      // altijd eerst een volledig nieuwe mount(el, ...) doet, dus dit maakt
+      // een latere hervulling nooit onvolledig.
+      mount(el, '');
       if (returnTo && typeof returnTo.focus === 'function' && document.contains(returnTo)) {
         makeFocusable(returnTo).focus();
       }
