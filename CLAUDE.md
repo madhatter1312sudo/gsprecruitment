@@ -24,7 +24,7 @@ GSP is geen IND-erkend referent; sponsorschap van kennismigranten loopt via een 
 - Secrets stay in env vars — never commit or print them.
 
 ## The agent team (`.claude/agents/`)
-Delegate work to the specialist, don't do it inline: `backend-dev`, `frontend-dev`, `mobile-dev`, `devops-engineer`, `qa-engineer`, `security-auditor`, `code-reviewer`, `ui-designer`, `design-reviewer`, `growth-marketer`, `chief-of-staff`.
+Delegate work to the specialist, don't do it inline: `backend-dev`, `frontend-dev`, `mobile-dev`, `devops-engineer`, `qa-engineer`, `security-auditor`, `code-reviewer`, `ui-designer`, `design-reviewer`, `growth-marketer`, `chief-of-staff`, `agent-architect` (builds and reviews the agents, skills, hooks and workflows themselves — use it before adding a specialist or when one misroutes).
 
 Company workflow — scale the review chain to the risk of the change:
 - **Small, low-risk changes** (a bugfix of a few lines, copy tweaks, config, docs — nothing touching auth, personal data, payments, or outreach): one code-reviewer pass (design-reviewer for visual tweaks) is enough; skip chief-of-staff.
