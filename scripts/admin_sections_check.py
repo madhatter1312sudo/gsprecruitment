@@ -6,17 +6,38 @@ tot eind in een echte browser tegen gestubde routes (example.com/
 example.invalid, geen echte PII, geen echt netwerk).
 
 Covers:
+  - Users (SITE-DESIGN-SPEC.md §7.3.6(a)): een gebruiker met een
+    toekomstige locked_until toont de badge "Vergrendeld" plus "tot
+    <tijdstip>", een lege of verlopen locked_until toont geen van beide;
+    "Deblokkeren" is uitgeschakeld voor een niet-vergrendelde gebruiker en
+    ingeschakeld voor een vergrendelde; bevestigen is een gewone modal
+    (geen getypte bevestiging) met de letterlijke zin "Dit reset geen
+    wachtwoord..."; een geslaagde POST .../unlock geeft een toast en
+    verwijdert de badge na een lijstherlading; een mislukte aanroep (500)
+    geeft een foutmelding en laat de badge staan.
   - Opdrachtgevers: list renders (name, domain, open-jobs count, primary
     contact, "onbekend" erkend-referent column), row click opens the
     tabbed detail drawer (WS5 stap 3: een echte Offcanvas met id
     #clientDrawer in plaats van de gedeelde #adminModalOverlay -- vandaar
     dat de sluitknoppen hieronder per paneel gescoped zijn), and each of its four tabs (contacten, vacatures,
-    notities/activiteit, prospects) renders without a console error. The
-    activiteit tab has no backing endpoint on main (see js/admin.js) so
-    this only checks its empty-state text, never a network call.
+    notities/activiteit, prospects) renders without a console error.
+  - Activiteitentab (§7.3.6(b), gedeeld tussen de kandidaat- en
+    klantdrawer via Admin.loadActivityTab()/renderActivityTab() in
+    admin.js): de zes typechips in het Nederlands, een taak toont zijn
+    afgerond-staat als checkbox die na een tik en een tabherlading
+    aangevinkt blijft, het formulier "Activiteit toevoegen" staat niet
+    permanent open en een POST vanuit BEIDE drawers (candidate- resp.
+    client-subject) verschijnt in de tijdlijn zonder paginaherlading.
   - Leads: unified inbox renders rows from both sources (contact/quiz
     badges), the unread toggle re-fetches, and a row click PATCHes the
     read state.
+  - Prospects (§7.3.6(c), zelfde sectie #leads): de bewerkmodal opent met
+    een <datalist> die uitsluitend de statuswaarden uit de geladen lijst
+    bevat, lawful_basis heeft geen lege optie, een niet-http(s)
+    source_url wordt clientside geblokkeerd met de letterlijke foutregel
+    en zonder netwerkaanroep, en het opslaan van alleen `status` stuurt
+    uitsluitend dat veld mee in de PUT (en stempelt last_contacted_at
+    server-side bij).
   - Rapportage: the section renders its KPI cards and two breakdown
     tables from stubbed /jobs and /leads data, with no invented numbers
     (every value traces to a stubbed API field).
@@ -123,6 +144,37 @@ CLIENTS = [
      "created_at": "2026-01-01T00:00:00Z", "updated_at": "2026-01-01T00:00:00Z"},
 ]
 
+# ---- Users (§7.3.6(a), deblokkeren) -------------------------------------
+# 90: locked_until in de toekomst -- moet de badge "Vergrendeld" tonen en
+#     een ingeschakelde "Deblokkeren"-rijactie. 91: locked_until null --
+#     geen badge, actie uitgeschakeld. 92: locked_until in het VERLEDEN --
+#     bewijst dat een verlopen venster ook geen badge/actie krijgt (GET
+#     /admin/users reset het veld zelf niet, dus dit komt in de praktijk
+#     voor).
+USERS = [
+    # De namen bevatten opzettelijk NIET de tekenreeks "Vergrendeld" --
+    # anders zou "Vergrendeld" not in row_text() ook slagen op de naam in
+    # plaats van op de afwezigheid van de badge (dat kostte een echte
+    # debugsessie: "Vergrendelde Gebruiker" bevat "Vergrendeld" als
+    # deelstring en verstopte zo een geslaagde badgeverwijdering).
+    {"id": 90, "full_name": "Locked Test Account", "email": "locked@example.invalid",
+     "role": "candidate", "is_verified": True, "created_at": "2026-01-01T00:00:00Z",
+     "failed_login_count": 5, "locked_until": "2099-01-01T00:00:00Z"},
+    {"id": 91, "full_name": "Gewone Gebruiker", "email": "normal@example.invalid",
+     "role": "candidate", "is_verified": True, "created_at": "2026-01-01T00:00:00Z",
+     "failed_login_count": 0, "locked_until": None},
+    {"id": 92, "full_name": "Verlopen Slot Account", "email": "expired@example.invalid",
+     "role": "client", "is_verified": True, "created_at": "2026-01-01T00:00:00Z",
+     "failed_login_count": 3, "locked_until": "2020-01-01T00:00:00Z"},
+    # Vergrendeld, maar unlock geeft altijd 500 terug -- bewijst de
+    # foutafhandeling (toast, geen lijstherlading, badge blijft staan).
+    {"id": 93, "full_name": "Unlock Faalt Account", "email": "unlock-fails@example.invalid",
+     "role": "candidate", "is_verified": True, "created_at": "2026-01-01T00:00:00Z",
+     "failed_login_count": 5, "locked_until": "2099-01-01T00:00:00Z"},
+]
+USERS_BY_ID = {u["id"]: u for u in USERS}
+USER_STATE = {"unlock_calls": [], "list_calls": 0}
+
 CONTACTS_BY_CLIENT = {
     1: [
         {"id": 11, "client_id": 1, "full_name": "Primary Contact", "email": "primary@example.com",
@@ -146,15 +198,51 @@ JOBS_BY_CLIENT = {
 PROSPECTS = [
     {"id": 301, "company_name": "Example Engineering B.V.", "domain": "example-engineering.example.com",
      "contact_name": "Prospect Contact", "contact_title": "CTO", "status": "new", "source": "manual",
+     "intent_signal": "Zocht via LinkedIn naar embedded engineers.",
+     "source_url": "https://example.invalid/vacatures/embedded",
+     "lawful_basis": "zakelijk_functioneel_adres",
      "created_at": "2026-01-01T00:00:00Z"},
+    # Tweede rij met een AFWIJKENDE status ("contacted"): bewijst dat de
+    # <datalist> beide waarden uit de geladen lijst aanbiedt en geen
+    # ingebouwde/canonieke lijst (§7.3.6(c): de kolom kent geen CHECK).
+    {"id": 302, "company_name": "Example Mechatronics B.V.", "domain": "example-mechatronics.example.com",
+     "contact_name": "Andere Prospect Contact", "contact_title": "COO", "status": "contacted", "source": "manual",
+     "intent_signal": "", "source_url": None, "lawful_basis": "opt_in",
+     "created_at": "2026-01-02T00:00:00Z"},
 ]
+PROSPECTS_BY_ID = {p["id"]: p for p in PROSPECTS}
+PROSPECT_STATE = {"update_calls": []}
 
 ACTIVITIES_BY_CLIENT = {
     1: [{"id": 401, "subject_type": "client", "subject_id": 1, "type": "call",
          "body": "Belde over nieuwe vacature", "due_at": None, "completed_at": None,
-         "created_at": "2026-01-01T00:00:00Z"}],
+         "created_by": None, "created_at": "2026-01-01T00:00:00Z"}],
     2: [],
 }
+
+# ---- Activiteitentab (§7.3.6(b), gedeeld tussen candidates.js/clients.js
+#      via Admin.loadActivityTab()/renderActivityTab() in admin.js) ------
+# Eén generieke opslag op (subject_type, subject_id) i.p.v. losse dicts per
+# subject_type, zodat GET/POST/PATCH /v1/admin/activities hieronder één
+# implementatie kan delen voor 'candidate' EN 'client' -- de echte route
+# maakt dat onderscheid ook niet (routers/activities.py: subject_type is
+# gewoon een kolom, geen aparte tabel). ACTIVITIES_BY_CLIENT hierboven
+# blijft bestaan (de bestaande Opdrachtgevers-test hieronder leest hem nog
+# rechtstreeks uit); deze dict is de nieuwe, generieke bron die de
+# GET-route bedient en die POST/PATCH muteren.
+ACTIVITIES_STORE = {
+    ("client", 1): list(ACTIVITIES_BY_CLIENT[1]),
+    ("client", 2): [],
+    # candidate_id 1482 = CANDIDATE_RECORD hieronder. Eén taak (open, geen
+    # completed_at) om de checkbox-tik te bewijzen, en één notitie om het
+    # gewone pad te tonen.
+    ("candidate", 1482): [
+        {"id": 402, "subject_type": "candidate", "subject_id": 1482, "type": "task",
+         "body": "Bel terug over contractvoorstel", "due_at": "2026-09-25T00:00:00Z",
+         "completed_at": None, "created_by": 1, "created_at": "2026-09-01T00:00:00Z"},
+    ],
+}
+ACTIVITY_STATE = {"next_id": 500, "create_calls": [], "patch_calls": []}
 
 # ---- Kandidaatdrawer: tab Toestemmingen + referral-intake (§7.3.2) -------
 # Twee kandidaten. CANDIDATE_RECORD (kind sourced, candidates.id 1482, geen
@@ -668,15 +756,32 @@ def route_admin_api(route, request):
         })
         return
 
-    # ---- Users list / detail (unrelated to the Opdrachtgevers roster
-    #      since routers/clients_admin.py replaced the /users?role=client
-    #      derivation -- kept only in case another section/check needs it) --
+    # ---- Users list / detail (§7.3.6(a): deblokkeren) ----
     if path == "/api/v1/admin/users" and method == "GET":
-        json_response({"items": [], "total": 0})
+        USER_STATE["list_calls"] += 1
+        json_response({"items": USERS, "total": len(USERS), "limit": qint(qs, "limit", 20), "offset": qint(qs, "offset", 0)})
         return
     m = re.match(r"^/api/v1/admin/users/(\d+)$", path)
     if m and method == "GET":
         json_response({"detail": "Not found"}, status=404)
+        return
+    m = re.match(r"^/api/v1/admin/users/(\d+)/unlock$", path)
+    if m and method == "POST":
+        user_id = int(m.group(1))
+        USER_STATE["unlock_calls"].append(user_id)
+        if user_id == 93:
+            json_response({"detail": "Server error"}, status=500)
+            return
+        user = USERS_BY_ID.get(user_id)
+        if user is None:
+            # De echte route (admin.py:387) geeft 404, geen 409 -- er is
+            # hier geen "al gedeblokkeerd"-conflict, unlock reset de
+            # velden onvoorwaardelijk.
+            json_response({"detail": "User not found"}, status=404)
+            return
+        user["failed_login_count"] = 0
+        user["locked_until"] = None
+        json_response({"message": f"User '{user['email']}' unlocked successfully"})
         return
 
     # ---- Clients (Opdrachtgevers roster + detail drawer's Info tab,
@@ -746,22 +851,82 @@ def route_admin_api(route, request):
         json_response({"items": items, "total": len(items)})
         return
 
-    # ---- Activities (WS-C.6, notities/activiteit tab) ----
+    # ---- Activities (WS-C.6 + §7.3.6(b), gedeelde Activiteitentab) ----
     if path == "/api/v1/admin/activities" and method == "GET":
         subject_type = qs.get("subject_type", [None])[0]
         subject_id = qs.get("subject_id", [None])[0]
-        if subject_type == "client" and subject_id is not None:
-            items = ACTIVITIES_BY_CLIENT.get(int(subject_id), [])
+        if subject_type is not None and subject_id is not None:
+            items = ACTIVITIES_STORE.get((subject_type, int(subject_id)), [])
             json_response({"items": items, "total": len(items)})
             return
         json_response({"items": [], "total": 0})
         return
+    if path == "/api/v1/admin/activities" and method == "POST":
+        body = json.loads(request.post_data or "{}")
+        ACTIVITY_STATE["create_calls"].append(body)
+        subject_type = body.get("subject_type")
+        subject_id = body.get("subject_id")
+        ACTIVITY_STATE["next_id"] += 1
+        row = {
+            "id": ACTIVITY_STATE["next_id"], "subject_type": subject_type, "subject_id": subject_id,
+            "type": body.get("type"), "body": body.get("body"), "due_at": body.get("due_at"),
+            "completed_at": body.get("completed_at"), "created_by": 1,
+            "created_at": "2026-09-22T12:00:00Z",
+        }
+        key = (subject_type, subject_id)
+        ACTIVITIES_STORE.setdefault(key, []).insert(0, row)
+        json_response(row, status=201)
+        return
+    m = re.match(r"^/api/v1/admin/activities/(\d+)$", path)
+    if m and method == "PATCH":
+        activity_id = int(m.group(1))
+        body = json.loads(request.post_data or "{}")
+        ACTIVITY_STATE["patch_calls"].append({"id": activity_id, "body": body})
+        found = None
+        for items in ACTIVITIES_STORE.values():
+            for it in items:
+                if it["id"] == activity_id:
+                    found = it
+                    break
+            if found:
+                break
+        if found is None:
+            json_response({"detail": "Activity not found"}, status=404)
+            return
+        if "completed_at" in body:
+            found["completed_at"] = body["completed_at"]
+        if "body" in body:
+            found["body"] = body["body"]
+        json_response(found)
+        return
 
-    # ---- Prospects (client drawer's prospects tab) ----
+    # ---- Prospects (client drawer's prospects tab + §7.3.6(c) Leads-sectie) ----
     if path == "/api/v1/admin/prospects" and method == "GET":
         search = (qs.get("search", [""])[0] or "").lower()
         items = [p for p in PROSPECTS if search in p["company_name"].lower()] if search else PROSPECTS
         json_response({"items": items, "total": len(items)})
+        return
+    m = re.match(r"^/api/v1/admin/prospects/(\d+)$", path)
+    if m and method == "PUT":
+        prospect_id = int(m.group(1))
+        body = json.loads(request.post_data or "{}")
+        PROSPECT_STATE["update_calls"].append({"id": prospect_id, "body": body})
+        prospect = PROSPECTS_BY_ID.get(prospect_id)
+        if prospect is None:
+            json_response({"detail": "Prospect not found"}, status=404)
+            return
+        if not body:
+            # routers/prospects.py: model_dump(exclude_none=True) op een
+            # leeg formulier geeft 400 "No fields to update".
+            json_response({"detail": "No fields to update"}, status=400)
+            return
+        if "status" in body:
+            prospect["last_contacted_at"] = "2026-09-22T12:00:00Z"
+        # routers/prospects.py column_map: notes -> intent_signal (er is
+        # geen aparte notitiekolom).
+        for key, val in body.items():
+            prospect["intent_signal" if key == "notes" else key] = val
+        json_response(prospect)
         return
 
     # ---- Leads (WS-C.10) ----
@@ -1623,6 +1788,86 @@ def main():
         if "(status, role)" not in activity_text:
             failures.append(f"dashboard: recent activity did not render changeKeys — got: {activity_text[:200]!r}")
 
+        # ---- Users: deblokkeren (§7.3.6(a)) ----
+        errors_before = len(console_errors)
+        page.click('.nav-link[data-section="users"]')
+        page.wait_for_timeout(600)
+        if not wait_until(page, lambda: page.eval_on_selector_all('#section-users table tbody tr', "els => els.length") == len(USERS)):
+            failures.append(f"users: list did not render {len(USERS)} rows")
+
+        def _row_text(user_id):
+            return text_of(page, f'#section-users table tbody tr:has([data-id="{user_id}"])')
+
+        # 90 (locked_until in de toekomst): badge + "tot <tijdstip>".
+        row90 = _row_text(90)
+        if "Vergrendeld" not in row90:
+            failures.append(f"users: locked user 90 mist de badge 'Vergrendeld' -- kreeg {row90!r}")
+        if "tot " not in row90:
+            failures.append(f"users: locked user 90 mist de 'tot <tijdstip>'-regel -- kreeg {row90!r}")
+
+        # 91 (locked_until null) en 92 (locked_until in het verleden):
+        # allebei geen badge.
+        for uid in (91, 92):
+            row = _row_text(uid)
+            if "Vergrendeld" in row:
+                failures.append(f"users: user {uid} toont de badge 'Vergrendeld' terwijl de vergrendeling niet actief is -- kreeg {row!r}")
+
+        click_or_fail(page, failures, '[data-action="toggle-user-menu"][data-id="91"]', "users: menu openen (91, niet vergrendeld)")
+        if not is_disabled(page, '[data-action="unlock-user"][data-id="91"]', default=False):
+            failures.append("users: 'Deblokkeren' is niet uitgeschakeld voor een niet-vergrendelde gebruiker (91)")
+        page.click('body')
+        page.wait_for_timeout(200)
+
+        click_or_fail(page, failures, '[data-action="toggle-user-menu"][data-id="90"]', "users: menu openen (90, vergrendeld)")
+        if is_disabled(page, '[data-action="unlock-user"][data-id="90"]', default=True):
+            failures.append("users: 'Deblokkeren' is uitgeschakeld voor een vergrendelde gebruiker (90)")
+        unlock_calls_before = len(USER_STATE["unlock_calls"])
+        click_or_fail(page, failures, '[data-action="unlock-user"][data-id="90"]', "users: 'Deblokkeren' klikken (90)")
+        if not wait_until(page, lambda: "Dit reset geen wachtwoord" in (text_of(page, '#adminConfirmModal') or '')):
+            failures.append(f"users: de bevestigingsmodal toont niet 'Dit reset geen wachtwoord...' -- kreeg {text_of(page, '#adminConfirmModal')!r}")
+        # Gewone bevestiging, geen getypte bevestiging: geen tekstveld in de modal.
+        if page.query_selector('#adminConfirmModal input[type="text"], #adminConfirmModal input[type="email"]') is not None:
+            failures.append("users: de deblokkeer-modal vraagt een getypte bevestiging, terwijl dit een gewone bevestiging hoort te zijn")
+        list_calls_before = USER_STATE["list_calls"]
+        click_or_fail(page, failures, '#adminConfirmModal .btn-primary', "users: deblokkeren bevestigen (90)")
+        if not wait_for_calls(page, USER_STATE["unlock_calls"], unlock_calls_before + 1):
+            failures.append("users: bevestigen stuurde geen POST /v1/admin/users/{id}/unlock")
+        elif USER_STATE["unlock_calls"][-1] != 90:
+            failures.append(f"users: de unlock-aanroep ging niet naar user 90 -- kreeg {USER_STATE['unlock_calls'][-1]!r}")
+        def _toast_texts():
+            return page.eval_on_selector_all(".toast-container .toast span:last-child", "els => els.map(e => e.textContent)")
+
+        if not wait_until(page, lambda: any("gedeblokkeerd" in t.lower() for t in _toast_texts())):
+            failures.append(f"users: geen succes-toast na deblokkeren -- kreeg {_toast_texts()!r}")
+        # Wacht op de HERLADING zelf (de tweede GET /v1/admin/users die
+        # confirmUnlockUser() na succes doet), niet blind op de DOM-tekst:
+        # dat maakt de check onafhankelijk van hoe lang de mount() na die
+        # respons precies duurt.
+        if not wait_until(page, lambda: USER_STATE["list_calls"] > list_calls_before, timeout=10000):
+            failures.append("users: geen lijstherlading (tweede GET /v1/admin/users) na een geslaagde deblokkering")
+        if not wait_until(page, lambda: "Vergrendeld" not in _row_text(90)):
+            failures.append("users: de badge 'Vergrendeld' staat na een geslaagde deblokkering nog steeds bij user 90")
+
+        # 93: unlock geeft altijd 500 -- error-pad, geen lijstherlading die
+        # de badge stilzwijgend zou wegpoetsen.
+        click_or_fail(page, failures, '[data-action="toggle-user-menu"][data-id="93"]', "users: menu openen (93, deblokkeren mislukt)")
+        unlock_calls_before = len(USER_STATE["unlock_calls"])
+        click_or_fail(page, failures, '[data-action="unlock-user"][data-id="93"]', "users: 'Deblokkeren' klikken (93)")
+        click_or_fail(page, failures, '#adminConfirmModal .btn-primary', "users: deblokkeren bevestigen (93, verwacht 500)")
+        if not wait_for_calls(page, USER_STATE["unlock_calls"], unlock_calls_before + 1):
+            failures.append("users: bevestigen (93) stuurde geen POST")
+        if not wait_until(page, lambda: any("server error" in t.lower() or "mislukt" in t.lower() for t in _toast_texts())):
+            failures.append(f"users: geen foutmelding na een mislukte deblokkering (93) -- kreeg {_toast_texts()!r}")
+        if not wait_until(page, lambda: "Vergrendeld" in _row_text(93)):
+            failures.append("users: de badge 'Vergrendeld' verdween bij user 93 ondanks de mislukte deblokkering")
+
+        # De opzettelijke 500 (93) logt zijn eigen console error; de grens
+        # gaat er daarom hierna overheen, zoals bij retention/analytics.
+        console_errors[:] = [e for e in console_errors if "500 (Internal Server Error)" not in e]
+        new_errors = console_errors[errors_before:]
+        if new_errors:
+            failures.append(f"users: {len(new_errors)} console error(s): {new_errors[:3]}")
+
         # ---- Opdrachtgevers ----
         errors_before = len(console_errors)
         page.click('.nav-link[data-section="clients"]')
@@ -1694,6 +1939,31 @@ def main():
                         failures.append(f"clients: jobs tab missing translated dienstlijn label — got: {text[:120]!r}")
                     if "werving_selectie" in text:
                         failures.append("clients: raw employment_type value leaked into the jobs tab")
+
+            # ---- Tab Notities/Activiteit (§7.3.6(b)): zelfde gedeelde
+            # component als de kandidaatdrawer (Admin.loadActivityTab(),
+            # hier op subject_type='client') -- bewijst dat het toevoegen
+            # ook vanuit DEZE drawer werkt, niet alleen vanuit de
+            # kandidaatdrawer hierboven. ----
+            click_or_fail(page, failures, '[data-action="client-tab"][data-tab="activity"]', "clients: de tab Notities/Activiteit")
+            if not wait_until(page, lambda: page.query_selector('#clientDrawerTabContent [data-action="activity-toggle-form"]') is not None):
+                failures.append("clients: de tab Notities/Activiteit rendeerde niet")
+            create_calls_before = len(ACTIVITY_STATE["create_calls"])
+            click_or_fail(page, failures, '#clientDrawerTabContent [data-action="activity-toggle-form"]', "clients: 'Activiteit toevoegen' openklappen")
+            select_or_fail(page, failures, '#clientDrawerTabContent [id$="_activityType"]', 'meeting', "clients: activiteitstype kiezen")
+            fill_or_fail(page, failures, '#clientDrawerTabContent [id$="_activityBody"]', 'Playwright-notitie op de opdrachtgever', "clients: notitie invullen")
+            click_or_fail(page, failures, '#clientDrawerTabContent [data-action="activity-submit"]', "clients: activiteit vastleggen")
+            if not wait_for_calls(page, ACTIVITY_STATE["create_calls"], create_calls_before + 1):
+                failures.append("clients: 'Vastleggen' stuurde geen POST /v1/admin/activities")
+            else:
+                sent = ACTIVITY_STATE["create_calls"][-1]
+                if sent.get("subject_type") != "client" or sent.get("subject_id") != 1 or sent.get("type") != "meeting":
+                    failures.append(f"clients: POST-payload voor de nieuwe activiteit klopt niet -- kreeg {sent!r}")
+            if not wait_for_text(page, '#clientDrawerTabContent', "Playwright-notitie op de opdrachtgever"):
+                failures.append("clients: de nieuwe activiteit verscheen niet in de tijdlijn na het opslaan")
+            act_client_text = text_of(page, '#clientDrawerTabContent')
+            if "Afspraak" not in act_client_text:
+                failures.append(f"clients: de tab Notities/Activiteit toont niet de Nederlandse typechip 'Afspraak' -- kreeg {act_client_text[:200]!r}")
 
             # ---- Tab Pipeline (§7.3.4): client_id=1 levert vijf entries
             # (604/603/602/601/600) -- accordeon, alleen de nieuwste open,
@@ -1786,30 +2056,30 @@ def main():
         errors_before = len(console_errors)
         page.click('.nav-link[data-section="leads"]')
         page.wait_for_timeout(600)
-        rows = page.eval_on_selector_all('#section-leads table tbody tr', "els => els.length")
+        rows = page.eval_on_selector_all('#leadsTable tbody tr', "els => els.length")
         if rows != len(LEADS):
             failures.append(f"leads: list rendered {rows} rows, expected {len(LEADS)}")
-        badges = page.eval_on_selector_all('#section-leads table tbody tr td:first-child', "els => els.map(e => e.textContent.trim())")
+        badges = page.eval_on_selector_all('#leadsTable tbody tr td:first-child', "els => els.map(e => e.textContent.trim())")
         if "Contact" not in badges or "Quiz" not in badges:
             failures.append(f"leads: expected both Contact and Quiz source badges — got {badges}")
 
         page.check('#leadUnreadFilter')
         page.wait_for_timeout(500)
-        rows_unread = page.eval_on_selector_all('#section-leads table tbody tr', "els => els.length")
+        rows_unread = page.eval_on_selector_all('#leadsTable tbody tr', "els => els.length")
         expected_unread = len([l for l in LEADS if not l["is_read"]])
         if rows_unread != expected_unread:
             failures.append(f"leads: unread filter rendered {rows_unread} rows, expected {expected_unread}")
         page.uncheck('#leadUnreadFilter')
         page.wait_for_timeout(500)
 
-        badges2 = page.eval_on_selector_all('#section-leads table tbody tr td:nth-child(5)', "els => els.map(e => e.textContent.trim())")
+        badges2 = page.eval_on_selector_all('#leadsTable tbody tr td:nth-child(5)', "els => els.map(e => e.textContent.trim())")
         if not any("example-referrer.invalid" in b for b in badges2):
             failures.append(f"leads: Herkomst column missing referrer_host — got {badges2}")
 
         # Row click opens the detail modal (GET /v1/admin/leads/{source}/{id})
         # rather than toggling read state directly — that accidental
         # toggle-on-click was the WS2 defect.
-        page.click('#section-leads table tbody tr')
+        page.click('#leadsTable tbody tr')
         page.wait_for_timeout(500)
         modal_text = page.eval_on_selector('#adminModalOverlay', "el => el.textContent") or ""
         if "Example Engineering B.V." not in modal_text or "Op zoek naar een embedded engineer" not in modal_text:
@@ -1831,7 +2101,7 @@ def main():
 
         # A quiz_submissions row's detail must show score/tier, not the
         # contact-form fields it has none of.
-        page.click('#section-leads table tbody tr:nth-child(3)')
+        page.click('#leadsTable tbody tr:nth-child(3)')
         page.wait_for_timeout(500)
         quiz_modal_text = page.eval_on_selector('#adminModalOverlay', "el => el.textContent") or ""
         if "8 / 10" not in quiz_modal_text or "senior" not in quiz_modal_text:
@@ -1842,6 +2112,64 @@ def main():
         new_errors = console_errors[errors_before:]
         if new_errors:
             failures.append(f"leads: {len(new_errors)} console error(s): {new_errors[:3]}")
+
+        # ---- Prospects (§7.3.6(c), zelfde sectie #leads) ----
+        errors_before = len(console_errors)
+        prospect_rows = page.eval_on_selector_all('#prospectsTable tbody tr', "els => els.length")
+        if prospect_rows != len(PROSPECTS):
+            failures.append(f"prospects: list rendered {prospect_rows} rows, expected {len(PROSPECTS)}")
+        click_or_fail(page, failures, '#prospectsTable tbody tr [data-action="edit-prospect"]', "prospects: bewerkactie op de eerste rij")
+        if not wait_until(page, lambda: page.query_selector('#prospectStatus') is not None):
+            failures.append("prospects: de bewerkmodal opende niet")
+        else:
+            # <datalist> bevat uitsluitend de waarden uit de geladen lijst
+            # (PROSPECTS: 'new' en 'contacted'), geen canonieke, ingebouwde
+            # lijst (§7.3.6(c)).
+            datalist_values = page.eval_on_selector_all('#prospectStatusList option', "els => els.map(e => e.value)")
+            if sorted(datalist_values) != ["contacted", "new"]:
+                failures.append(f"prospects: <datalist> bevat niet precies de statuswaarden uit de geladen lijst -- kreeg {datalist_values!r}")
+
+            # lawful_basis heeft geen lege optie.
+            lawful_values = page.eval_on_selector_all('#prospectLawfulBasis option', "els => els.map(e => e.value)")
+            if "" in lawful_values or sorted(lawful_values) != ["bestaande_relatie", "opt_in", "zakelijk_functioneel_adres"]:
+                failures.append(f"prospects: select lawful_basis heeft een lege optie of niet precies de drie gevalideerde waarden -- kreeg {lawful_values!r}")
+
+            fixed_sentence = text_of(page, '#adminModalOverlay')
+            if "Een statuswijziging legt vast dat er vandaag contact was" not in fixed_sentence:
+                failures.append("prospects: de vaste zin over de bewaartermijn ontbreekt onder het statusveld")
+            if "Zonder vastgelegde grondslag mag er geen outreach" not in fixed_sentence:
+                failures.append("prospects: de hint over de Telecommunicatiewet ontbreekt bij lawful_basis")
+
+            # Ongeldige source_url wordt client-side geblokkeerd, met de
+            # exacte foutregel, en zonder netwerkaanroep.
+            update_calls_before = len(PROSPECT_STATE["update_calls"])
+            fill_or_fail(page, failures, '#prospectSourceUrl', 'ftp://not-http.example.invalid', "prospects: ongeldige source_url invullen")
+            click_or_fail(page, failures, '[data-action="save-prospect"]', "prospects: opslaan met een ongeldige source_url")
+            if not wait_until(page, lambda: text_of(page, '#prospectSourceUrlError').strip() == 'Vul een publieke http- of https-URL in'):
+                failures.append(f"prospects: geen (of een andere) foutregel bij een niet-http(s) source_url -- kreeg {text_of(page, '#prospectSourceUrlError')!r}")
+            if len(PROSPECT_STATE["update_calls"]) != update_calls_before:
+                failures.append("prospects: een ongeldige source_url werd toch naar de server gestuurd")
+
+            # Alleen status wijzigen: alleen 'status' gaat mee in de PUT
+            # (§7.3.6(c): "alleen de velden die daadwerkelijk zijn
+            # gewijzigd"), en de rij toont de nieuwe waarde na herladen.
+            fill_or_fail(page, failures, '#prospectSourceUrl', PROSPECTS[0]["source_url"] or '', "prospects: source_url terugzetten")
+            fill_or_fail(page, failures, '#prospectStatus', 'qualified', "prospects: status wijzigen")
+            update_calls_before = len(PROSPECT_STATE["update_calls"])
+            click_or_fail(page, failures, '[data-action="save-prospect"]', "prospects: opslaan (alleen status gewijzigd)")
+            if not wait_for_calls(page, PROSPECT_STATE["update_calls"], update_calls_before + 1):
+                failures.append("prospects: opslaan stuurde geen PUT /v1/admin/prospects/{id}")
+            else:
+                sent = PROSPECT_STATE["update_calls"][-1]
+                if sent["body"] != {"status": "qualified"}:
+                    failures.append(f"prospects: de PUT stuurde niet uitsluitend het gewijzigde veld 'status' mee -- kreeg {sent['body']!r}")
+            if PROSPECTS_BY_ID[301].get("last_contacted_at") != "2026-09-22T12:00:00Z":
+                failures.append("prospects: een statuswijziging stempelde last_contacted_at niet bij")
+            if not wait_until(page, lambda: text_of(page, '#prospectsTable tbody tr:first-child').find("qualified") != -1):
+                failures.append(f"prospects: de rij toont niet de nieuwe status na het opslaan -- kreeg {text_of(page, '#prospectsTable tbody tr:first-child')!r}")
+        new_errors = console_errors[errors_before:]
+        if new_errors:
+            failures.append(f"prospects: {len(new_errors)} console error(s): {new_errors[:3]}")
 
         # ---- Analytics ----
         errors_before = len(console_errors)
@@ -2549,6 +2877,60 @@ def main():
             failures.append("candidates: historie van 601 herlaadde niet na de geslaagde derde poging")
         if PIPELINE_ENTRIES_BY_ID[601]["stage"] != "rejected":
             failures.append(f"candidates: de server-fixture van entry 601 bleef op {PIPELINE_ENTRIES_BY_ID[601]['stage']!r} na een geslaagde PATCH")
+
+        # ---- Tab Activiteit (§7.3.6(b), gedeelde Admin.loadActivityTab()/
+        # renderActivityTab() -- ook afgenomen door de klantdrawer
+        # hieronder). candidate_id 1482 heeft één bestaande taak
+        # (ACTIVITIES_STORE, id 402, open). ----
+        click_or_fail(page, failures, '#candidateDrawer [data-tab="activiteit"]', "candidates: de tab Activiteit")
+        if not wait_for_text(page, '#candidateDrawerTabContent', "Bel terug over contractvoorstel"):
+            failures.append(f"candidates: de tab Activiteit toont niet de bestaande taak -- kreeg {text_of(page, '#candidateDrawerTabContent')[:200]!r}")
+        act_text = text_of(page, '#candidateDrawerTabContent')
+        if "Taak" not in act_text:
+            failures.append(f"candidates: de tab Activiteit toont niet de Nederlandse typechip 'Taak' -- kreeg {act_text[:200]!r}")
+        task_checkbox = page.query_selector('#candidateDrawerTabContent [data-action="activity-toggle-task"]')
+        if task_checkbox is None:
+            failures.append("candidates: de open taak (402) toont geen checkbox")
+        elif task_checkbox.is_checked():
+            failures.append("candidates: de open taak (402) staat al aangevinkt (completed_at is null in de fixture)")
+
+        # Formulier staat niet permanent open (§7.3.6(b)).
+        if page.query_selector('#candidateDrawerTabContent [id$="_activityType"]') is not None:
+            failures.append("candidates: het formulier 'Activiteit toevoegen' staat open zonder op de knop te klikken")
+        click_or_fail(page, failures, '#candidateDrawerTabContent [data-action="activity-toggle-form"]', "candidates: 'Activiteit toevoegen' openklappen")
+        if not wait_until(page, lambda: page.query_selector('#candidateDrawerTabContent [id$="_activityType"]') is not None):
+            failures.append("candidates: het formulier klapte niet open na de klik op 'Activiteit toevoegen'")
+
+        create_calls_before = len(ACTIVITY_STATE["create_calls"])
+        select_or_fail(page, failures, '#candidateDrawerTabContent [id$="_activityType"]', 'note', "candidates: activiteitstype kiezen")
+        fill_or_fail(page, failures, '#candidateDrawerTabContent [id$="_activityBody"]', 'Playwright-notitie op de kandidaat', "candidates: notitie invullen")
+        click_or_fail(page, failures, '#candidateDrawerTabContent [data-action="activity-submit"]', "candidates: activiteit vastleggen")
+        if not wait_for_calls(page, ACTIVITY_STATE["create_calls"], create_calls_before + 1):
+            failures.append("candidates: 'Vastleggen' stuurde geen POST /v1/admin/activities")
+        else:
+            sent = ACTIVITY_STATE["create_calls"][-1]
+            if sent.get("subject_type") != "candidate" or sent.get("subject_id") != 1482 or sent.get("type") != "note":
+                failures.append(f"candidates: POST-payload voor de nieuwe activiteit klopt niet -- kreeg {sent!r}")
+        if not wait_for_text(page, '#candidateDrawerTabContent', "Playwright-notitie op de kandidaat"):
+            failures.append("candidates: de nieuwe activiteit verscheen niet in de tijdlijn na het opslaan (geen paginaherlading verwacht, wel een herladen tab)")
+
+        # Taak aanvinken: PATCH /activities/402, en het vinkje blijft staan
+        # na een herlading van de tab (niet alleen visueel in de browser).
+        patch_calls_before = len(ACTIVITY_STATE["patch_calls"])
+        check_or_fail(page, failures, '#candidateDrawerTabContent [data-action="activity-toggle-task"][data-id="402"]', "candidates: taak 402 aanvinken")
+        if not wait_for_calls(page, ACTIVITY_STATE["patch_calls"], patch_calls_before + 1):
+            failures.append("candidates: het aanvinken van taak 402 stuurde geen PATCH")
+        elif ACTIVITY_STATE["patch_calls"][-1]["id"] != 402 or not ACTIVITY_STATE["patch_calls"][-1]["body"].get("completed_at"):
+            failures.append(f"candidates: PATCH-payload voor taak 402 klopt niet -- kreeg {ACTIVITY_STATE['patch_calls'][-1]!r}")
+        click_or_fail(page, failures, '#candidateDrawer [data-tab="pipeline"]', "candidates: wegklikken naar Pipeline (voor de Activiteit-herlading)")
+        click_or_fail(page, failures, '#candidateDrawer [data-tab="activiteit"]', "candidates: terug naar de tab Activiteit (herlading)")
+
+        def _task_402_checked():
+            el = page.query_selector('#candidateDrawerTabContent [data-action="activity-toggle-task"][data-id="402"]')
+            return el is not None and el.is_checked()
+
+        if not wait_until(page, _task_402_checked):
+            failures.append("candidates: taak 402 stond na een herlading van de tab niet meer aangevinkt")
 
         click_or_fail(page, failures, '#candidateDrawer [data-tab="toestemmingen"]', "candidates: de tab Toestemmingen")
         if not wait_until(page, lambda: page.query_selector('[data-action="candidate-talentpool-edit"]') is not None):
@@ -3567,7 +3949,12 @@ def main():
             print(f"  - {f}")
         sys.exit(1)
 
-    print("PASS: Opdrachtgevers (list + tabbed drawer), Leads (inbox + unread filter + PATCH), "
+    print("PASS: Users (§7.3.6(a): badge Vergrendeld, rijactie Deblokkeren, POST unlock met "
+          "200- en 500-uitkomst), Opdrachtgevers (list + tabbed drawer), Activiteitentab "
+          "(§7.3.6(b), gedeeld tussen kandidaat- en klantdrawer: typechips, taakcheckbox, "
+          "activiteit toevoegen vanuit beide drawers), Leads (inbox + unread filter + PATCH), "
+          "Prospects (§7.3.6(c): datalist, lawful_basis zonder lege optie, source_url-validatie, "
+          "PUT met alleen de gewijzigde velden), "
           "Rapportage, Bewaartermijnen (lijst, generate, goedkeuren met getypte bevestiging, "
           "afwijzen, categoriebrede bulk met 409-mismatch, droogloop en 500 met retry), "
           "Toestemmingen/referral (§7.3.2: talentpool- en presentatiemodal met clientside-validatie "

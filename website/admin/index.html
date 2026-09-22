@@ -364,7 +364,7 @@
               </div>
             </div>
             <div class="table-responsive">
-              <table class="table table-vcenter card-table">
+              <table class="table table-vcenter card-table" id="leadsTable">
                 <thead>
                   <tr>
                     <th>Bron</th>
@@ -381,6 +381,29 @@
             </div>
             <div class="card-footer d-flex justify-content-center">
               <div class="pagination-wrap" id="leadsPagination"></div>
+            </div>
+          </div>
+
+          <!-- Prospects (§7.3.6(c)): bedrijfsprospects los van de
+               leads-inbox hierboven, zelfde sectie ("Leads: Binnengekomen
+               leads en prospects", SITE-DESIGN-SPEC.md §7.8). -->
+          <div class="card mt-4">
+            <div class="card-header">
+              <h3 class="card-title">Prospects</h3>
+            </div>
+            <div class="table-responsive">
+              <table class="table table-vcenter card-table" id="prospectsTable">
+                <thead>
+                  <tr>
+                    <th>Bedrijf</th>
+                    <th>Contact</th>
+                    <th>Status</th>
+                    <th>Grondslag</th>
+                    <th style="width:60px;"></th>
+                  </tr>
+                </thead>
+                <tbody><tr><td colspan="5" class="text-center text-secondary py-4"><i class="fa-solid fa-spinner fa-spin"></i></td></tr></tbody>
+              </table>
             </div>
           </div>
         </section>

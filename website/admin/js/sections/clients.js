@@ -2,7 +2,9 @@
    GSP Recruitment — admin/js/sections/clients.js
    Opdrachtgevers: lijst en het detailpaneel met zes tabbladen (de tab
    Pipeline kwam er met §7.3.4 bij, op dezelfde gedeelde
-   Admin.loadPipelineTab() als de kandidaatdrawer in candidates.js).
+   Admin.loadPipelineTab() als de kandidaatdrawer in candidates.js; de tab
+   Notities/Activiteit gebruikt sinds §7.3.6(b) op dezelfde manier
+   Admin.loadActivityTab()/renderActivityTab()).
 
    Registreert zichzelf via Admin.registerSection(). Geladen na admin.js
    (kern) en voor nav.js, dat de registry uitleest. Geen ES-module: de
@@ -340,36 +342,12 @@
     this.loadPipelineTab('clientDrawerTabContent', 'client_id', clientId, { showCandidateName: true });
   },
 
-  /* ---- Notities/Activiteit tab (WS-C.6) --
-     GET /v1/admin/activities?subject_type=client&subject_id=.. landed on
-     main after this feature was first built (migrations/028_activities.py,
-     routers/activities.py) -- read-only here, matching the task spec. */
-  async loadClientActivityTab(clientId) {
-    const el = document.getElementById('clientDrawerTabContent');
-    if (!el) return;
-    mount(el, html`<i class="fa-solid fa-spinner fa-spin"></i>`);
-    try {
-      const res = await Auth.fetch(`/v1/admin/activities?subject_type=client&subject_id=${clientId}&limit=50`);
-      if (!res) return;
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.detail);
-      const items = data.items || [];
-      mount(el, items.length ? html`
-        <div class="table-responsive">
-          <table class="table table-vcenter card-table">
-            <thead><tr><th>Type</th><th>Notitie</th><th>Datum</th><th>Status</th></tr></thead>
-            <tbody>${items.map(a => html`
-              <tr>
-                <td class="a-cell-strong">${this.activityTypeLabel(a.type)}</td>
-                <td class="a-soft">${a.body || '—'}</td>
-                <td class="a-soft">${this.formatDate(a.created_at)}</td>
-                <td>${a.completed_at ? html`<span class="badge bg-secondary-lt">Afgerond</span>` : (a.due_at ? html`<span class="badge bg-blue-lt">Open</span>` : '—')}</td>
-              </tr>`)}</tbody>
-          </table>
-        </div>` : html`<div class="a-state-block">Nog geen notities of activiteit voor deze opdrachtgever.</div>`);
-    } catch {
-      this.setContainerLoadError(el, () => this.loadClientActivityTab(clientId));
-    }
+  /* ---- Notities/Activiteit tab (§7.3.6(b), gedeelde tab -- Admin.
+     loadActivityTab() in admin.js, dezelfde implementatie als de
+     kandidaatdrawer in candidates.js). Was read-only (WS-C.6); §7.3.6(b)
+     voegt het formulier en de taakcheckbox toe. */
+  loadClientActivityTab(clientId) {
+    this.loadActivityTab('clientDrawerTabContent', 'client', clientId);
   },
 
   /* ---- Prospects tab (existing global prospects router, best-effort

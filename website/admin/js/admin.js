@@ -825,6 +825,189 @@ Object.assign(Admin, {
   },
 });
 
+/* ============================================================
+   ACTIVITEITENTAB (§7.3.6(b)): "Activiteit" in de kandidaat- (candidates.js,
+   verving daar de eigen platte tabel) en de klantdrawer (clients.js,
+   verving daar "Notities/Activiteit"). Eén gedeelde implementatie, net als
+   de tab Pipeline hierboven: `loadActivityTab()`/`renderActivityTab()`
+   lezen en schrijven altijd via `containerId`
+   (`candidateDrawerTabContent` / `clientDrawerTabContent`), niet via een
+   losstaand element-id, dus er is geen kans op de kruisdrawer-botsing die
+   de Pipeline-tab wel kende (elke pipeline-entry kan in beide drawers
+   voorkomen met hetzelfde id; een activiteit hoort altijd bij precies één
+   subject, dus dat risico bestaat hier niet, maar de state leeft toch aan
+   het containerelement zelf -- `el._activity*` -- in plaats van in een
+   module-brede variabele, om twee gelijktijdig geopende drawers met
+   allebei een open formulier niet met elkaar te laten overschrijven).
+
+   GET/POST /api/v1/admin/activities geven geen naam bij `created_by`
+   (alleen het user-id, anders dan BV7's `changed_by_name` voor de
+   pipeline-historie): `activityActorLabel()` valt daarom terug op
+   "Gebruiker #<id>", dezelfde vorm als `pipelineActorLabel()` zonder
+   naam.
+   ============================================================ */
+Object.assign(Admin, {
+  activityActorLabel(a) {
+    if (a.created_by != null) return `Gebruiker #${a.created_by}`;
+    return 'Onbekend';
+  },
+
+  async loadActivityTab(containerId, subjectType, subjectId) {
+    const el = document.getElementById(containerId);
+    if (!el) return;
+    mount(el, html`${[0, 1, 2].map(() => html`<div class="a-skel-block"></div>`)}`);
+    try {
+      const qs = new URLSearchParams({ subject_type: subjectType, subject_id: subjectId, limit: 50 });
+      const res = await Auth.fetch(`/v1/admin/activities?${qs}`);
+      if (!res) return;
+      const data = await res.json();
+      if (!res.ok) throw new Error();
+      el._activitySubjectType = subjectType;
+      el._activitySubjectId = subjectId;
+      el._activityItems = (data.items || []).slice().sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+      el._activityFormOpen = false;
+      this.renderActivityTab(containerId);
+    } catch {
+      this.setContainerLoadError(el, () => this.loadActivityTab(containerId, subjectType, subjectId));
+    }
+  },
+
+  toggleActivityForm(containerId) {
+    const el = document.getElementById(containerId);
+    if (!el) return;
+    el._activityFormOpen = !el._activityFormOpen;
+    this.renderActivityTab(containerId);
+  },
+
+  renderActivityTab(containerId) {
+    const el = document.getElementById(containerId);
+    if (!el) return;
+    const items = el._activityItems || [];
+    const formOpen = !!el._activityFormOpen;
+    const subjectType = el._activitySubjectType;
+    const subjectId = el._activitySubjectId;
+    const types = Object.keys(AdminLabels.maps.activiteit);
+
+    const list = items.length ? html`
+      <ul class="a-timeline">
+        ${items.map(a => html`
+          <li class="a-timeline__item">
+            <div class="d-flex align-items-center gap-2 flex-wrap">
+              <span class="${this.badge(a.type)}">${this.activityTypeLabel(a.type)}</span>
+              <span class="a-num fs-xs">${this.pipelineDateTime(a.created_at)}</span>
+            </div>
+            ${a.type === 'task' ? html`
+              <label class="form-check mt-1 mb-0">
+                <input class="form-check-input" type="checkbox" data-action="activity-toggle-task"
+                  data-id="${a.id}" data-container="${containerId}" ${raw(a.completed_at ? 'checked' : '')}>
+                <span class="form-check-label">${a.body || '—'}</span>
+              </label>
+            ` : html`<div class="mt-1">${a.body || '—'}</div>`}
+            <div class="a-soft fs-xs mt-1">${this.activityActorLabel(a)}</div>
+          </li>`)}
+      </ul>` : html`<div class="a-state-block">Nog geen activiteiten vastgelegd.</div>`;
+
+    mount(el, html`
+      <div class="mb-3">
+        <button type="button" class="btn btn-sm btn-ghost-secondary" data-action="activity-toggle-form" data-container="${containerId}">
+          <i class="fa-solid fa-plus me-1" aria-hidden="true"></i>Activiteit toevoegen
+        </button>
+      </div>
+      ${formOpen ? html`
+        <div class="a-panel mb-3">
+          <div class="form-group mb-2">
+            <label class="form-label" for="${containerId}_activityType">Type</label>
+            <select class="form-select" id="${containerId}_activityType">
+              ${types.map(t => html`<option value="${t}">${AdminLabels.label('activiteit', t)}</option>`)}
+            </select>
+          </div>
+          <div class="form-group mb-2">
+            <label class="form-label" for="${containerId}_activityBody">Notitie</label>
+            <textarea class="a-textarea" id="${containerId}_activityBody" rows="3"></textarea>
+          </div>
+          <div id="${containerId}_activityAlert"></div>
+          <button type="button" class="btn btn-primary btn-sm" data-action="activity-submit"
+            data-container="${containerId}" data-subject-type="${subjectType}" data-subject-id="${subjectId}">Vastleggen</button>
+        </div>
+      ` : ''}
+      ${list}
+    `);
+  },
+
+  activityAlert(elId, text) {
+    const el = document.getElementById(elId);
+    if (!el) return;
+    if (!text) { mount(el, ''); return; }
+    mount(el, html`
+      <div class="alert alert-danger" role="alert">
+        <i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i>
+        <span>${text}</span>
+      </div>`);
+  },
+
+  async submitActivity(containerId, subjectType, subjectId) {
+    const alertId = `${containerId}_activityAlert`;
+    this.activityAlert(alertId, '');
+    const typeEl = document.getElementById(`${containerId}_activityType`);
+    const bodyEl = document.getElementById(`${containerId}_activityBody`);
+    const type = typeEl?.value;
+    if (!type) return;
+    const body = (bodyEl?.value || '').trim();
+    const btn = document.querySelector(`[data-action="activity-submit"][data-container="${containerId}"]`);
+    if (btn) btn.disabled = true;
+    try {
+      const res = await Auth.fetch('/v1/admin/activities', {
+        method: 'POST',
+        body: JSON.stringify({ subject_type: subjectType, subject_id: Number(subjectId), type, body: body || null }),
+      });
+      const data = res ? await res.json().catch(() => null) : null;
+      if (res && res.ok) {
+        Auth.toast('Activiteit vastgelegd', 'success');
+        await this.loadActivityTab(containerId, subjectType, Number(subjectId));
+        return;
+      }
+      this.activityAlert(alertId, this.errorDetail(data).message || 'Vastleggen mislukt, probeer het opnieuw.');
+    } catch {
+      this.activityAlert(alertId, 'Netwerkfout, probeer het opnieuw.');
+    }
+    if (btn) btn.disabled = false;
+  },
+
+  // Optimistisch: de checkbox staat al om (het click-event vuurt na de
+  // browsereigen toggle), dus alleen bij een mislukte PATCH draait dit
+  // terug. Geen volledige herrender: dat zou een tegelijk openstaand
+  // formulier of een andere aangevinkte taak resetten.
+  async toggleActivityTask(containerId, activityId, nowChecked) {
+    const el = document.getElementById(containerId);
+    const checkboxEl = document.querySelector(
+      `[data-action="activity-toggle-task"][data-id="${activityId}"][data-container="${containerId}"]`);
+    try {
+      const res = await Auth.fetch(`/v1/admin/activities/${activityId}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ completed_at: nowChecked ? new Date().toISOString() : null }),
+      });
+      const data = res ? await res.json().catch(() => null) : null;
+      if (res && res.ok) {
+        const item = (el?._activityItems || []).find(a => a.id === activityId);
+        if (item) item.completed_at = (data && 'completed_at' in data) ? data.completed_at : (nowChecked ? new Date().toISOString() : null);
+        Auth.toast('Taak bijgewerkt', 'success');
+        return;
+      }
+      if (checkboxEl) checkboxEl.checked = !nowChecked;
+      Auth.toast('Bijwerken mislukt', 'error');
+    } catch {
+      if (checkboxEl) checkboxEl.checked = !nowChecked;
+      Auth.toast('Netwerkfout', 'error');
+    }
+  },
+});
+
+Admin.registerActions({
+  'activity-toggle-form': (el) => Admin.toggleActivityForm(el.dataset.container),
+  'activity-submit': (el) => Admin.submitActivity(el.dataset.container, el.dataset.subjectType, el.dataset.subjectId),
+  'activity-toggle-task': (el) => Admin.toggleActivityTask(el.dataset.container, Number(el.dataset.id), el.checked),
+});
+
 /* Het dashboard blijft in de kern (Admin.init() laadt het zelf al), maar
    staat wel in dezelfde registry zodat nav.js één bron heeft. */
 Admin.registerSection({

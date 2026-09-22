@@ -40,17 +40,35 @@
     }
   },
 
+  // §7.3.6(a): een gebruiker is vergrendeld zolang locked_until in de
+  // toekomst ligt. null (nooit vergrendeld geweest) en een verlopen
+  // locked_until (het venster liep af, GET /admin/users reset het veld
+  // niet zelf) tonen allebei geen badge en een uitgeschakelde rijactie.
+  isUserLocked(u) {
+    if (!u.locked_until) return false;
+    const dt = new Date(u.locked_until);
+    return !isNaN(dt.getTime()) && dt.getTime() > Date.now();
+  },
+
   renderUsers(data) {
     const tbody = document.querySelector('#section-users table tbody');
     if (!tbody) return;
     const items = data.items || [];
     if (!items.length) { this.setEmpty('#section-users table tbody', 6, 'Geen gebruikers gevonden voor deze filters.'); return; }
-    mount(tbody, html`${items.map(u => html`
+    mount(tbody, html`${items.map(u => {
+      const locked = this.isUserLocked(u);
+      return html`
       <tr>
         <td class="a-cell-name">${u.full_name || '—'}</td>
         <td class="a-meta">${u.email}</td>
         <td><span class="${this.badge(u.role)}">${u.role}</span></td>
-        <td><span class="${u.is_verified ? 'badge bg-green-lt' : 'badge bg-blue-lt'}">${u.is_verified ? 'Verified' : 'Pending'}</span></td>
+        <td>
+          <span class="${u.is_verified ? 'badge bg-green-lt' : 'badge bg-blue-lt'}">${u.is_verified ? 'Verified' : 'Pending'}</span>
+          ${locked ? html`
+            <span class="badge bg-red-lt">Vergrendeld</span>
+            <div class="fs-xs a-soft">tot ${this.pipelineDateTime(u.locked_until)}</div>
+          ` : ''}
+        </td>
         <td class="a-meta">${this.timeAgo(u.created_at)}</td>
         <td>
           <div class="action-menu-wrap">
@@ -60,12 +78,37 @@
             <div class="action-menu" id="user-menu-${u.id}" style="display:none;">
               ${!u.is_verified ? html`<button data-action="verify-user" data-id="${u.id}"><i class="fa-regular fa-circle-check"></i> Verify</button>` : ''}
               <button data-action="edit-user" data-id="${u.id}"><i class="fa-solid fa-pen"></i> Edit Role</button>
+              <button data-action="unlock-user" data-id="${u.id}" data-email="${u.email}" ${raw(locked ? '' : 'disabled')}><i class="fa-solid fa-lock-open"></i> Deblokkeren</button>
               <button data-action="impersonate-user" data-id="${u.id}" data-email="${u.email}"><i class="fa-solid fa-mask"></i> Impersonate</button>
               <button data-action="delete-user" data-id="${u.id}" data-email="${u.email}" class="text-danger-ink"><i class="fa-solid fa-trash"></i> Delete</button>
             </div>
           </div>
         </td>
-      </tr>`)}`);
+      </tr>`;
+    })}`);
+  },
+
+  // §7.3.6(a): gewone bevestigingsmodal (geen getypte bevestiging -- dit
+  // is een herstellende handeling, geen destructieve). De modaltekst zegt
+  // er wel bij wat deblokkeren niet doet. Bij succes: Nederlandse toast en
+  // een lijstherlading, zodat de badge verdwijnt zonder de rij lokaal te
+  // hoeven bijwerken.
+  async confirmUnlockUser(userId, email) {
+    const ok = await ui.confirm(
+      'Dit reset geen wachtwoord en beëindigt geen bestaande sessie. De vergrendeling van dit account wordt opgeheven.',
+      { title: `Deblokkeren: ${email}`, confirmLabel: 'Deblokkeren', danger: false },
+    );
+    if (!ok) return;
+    try {
+      const res = await Auth.fetch(`/v1/admin/users/${userId}/unlock`, { method: 'POST' });
+      if (res?.ok) {
+        Auth.toast('Account gedeblokkeerd', 'success');
+        await this.loadUsers();
+      } else {
+        const d = await res?.json().catch(() => null);
+        Auth.toast(this.errorDetail(d).message || 'Deblokkeren mislukt', 'error');
+      }
+    } catch { Auth.toast('Netwerkfout', 'error'); }
   },
 
   toggleUserMenu(id) {
@@ -193,6 +236,11 @@
       'verify-user': (el) => { Admin.verifyUser(Number(el.dataset.id), el); Admin.closeMenus(); },
       'toggle-user-menu': (el) => Admin.toggleUserMenu(Number(el.dataset.id)),
       'edit-user': (el) => { Admin.openEditUserModal(Number(el.dataset.id)); Admin.closeMenus(); },
+      'unlock-user': (el) => {
+        Admin.closeMenus();
+        if (el.disabled) return;
+        Admin.confirmUnlockUser(Number(el.dataset.id), el.dataset.email || '');
+      },
       'save-user-edit': (el) => Admin.saveUserEdit(Number(el.dataset.id)),
       'impersonate-user': (el) => { Admin.impersonateUser(Number(el.dataset.id), el.dataset.email || ''); Admin.closeMenus(); },
       'delete-user': (el) => { Admin.confirmDeleteUser(Number(el.dataset.id), el.dataset.email || ''); Admin.closeMenus(); },
