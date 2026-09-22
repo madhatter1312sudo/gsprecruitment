@@ -46,7 +46,7 @@ import sys
 sys.path.insert(0, os.path.dirname(__file__))
 from _runner import run_migration  # noqa: E402
 
-VERSION = "044_candidates_email_unique_excludes_deleted"
+VERSION = "045_candidates_email_unique_excludes_deleted"
 
 MIGRATION_SQL = """
 ALTER TABLE candidates DROP CONSTRAINT IF EXISTS uq_candidates_email;
