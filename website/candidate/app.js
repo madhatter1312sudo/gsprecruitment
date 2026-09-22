@@ -520,7 +520,10 @@
         }
         msgContainer.innerHTML = data.messages.map(m => {
           const isUnread = !m.opened_at && m.status !== 'draft';
-          const time = m.created_at ? new Date(m.created_at).toLocaleDateString() : '';
+          const isNl = document.documentElement.getAttribute('data-lang') === 'nl';
+          const time = m.created_at
+            ? new Date(m.created_at).toLocaleDateString(isNl ? 'nl-NL' : 'en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
+            : '';
           return `<div class="message-item ${isUnread ? 'unread' : ''}">
             <div class="avatar avatar-navy avatar-sm">${GSP.esc((m.sender_name || 'GS').slice(0,2).toUpperCase())}</div>
             <div style="flex:1;min-width:0;">
@@ -555,8 +558,11 @@
           </p>`;
           return;
         }
+        const isNl = document.documentElement.getAttribute('data-lang') === 'nl';
         list.innerHTML = data.items.map(j => {
-          const date = j.created_at ? new Date(j.created_at).toLocaleDateString() : '';
+          const date = j.created_at
+            ? new Date(j.created_at).toLocaleDateString(isNl ? 'nl-NL' : 'en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
+            : '';
           const location = [j.city, j.location_type].filter(Boolean).join(' · ');
           const companyLine = j.anonymous_client === true ? '' : GSP.esc(j.company_name || '');
           return `<div class="match-card">
@@ -721,8 +727,19 @@
     // switch shows after the rollback) never disagree.
     let jaDesired = null;
 
+    // Monotonic counter guarding against a double-toggle race: if the
+    // candidate flips the switch again (or hits retry) before the first
+    // PUT's response arrives, that first response is now stale and must
+    // not apply its state or its rollback over the second, newer toggle
+    // -- only the response whose seq still matches jaRequestSeq when it
+    // resolves is allowed to touch the switch. The switch itself is
+    // still never `disabled` (only `aria-busy`), so a candidate really
+    // can fire a second toggle while the first is in flight.
+    let jaRequestSeq = 0;
+
     async function saveJobAlerts(desired) {
       jaDesired = desired;
+      const seq = ++jaRequestSeq;
       const isNl = document.documentElement.getAttribute('data-lang') === 'nl';
       if (jaError) jaError.style.display = 'none';
       jaSwitch.setAttribute('aria-busy', 'true');
@@ -731,8 +748,10 @@
           method: 'PUT',
           body: JSON.stringify({ enabled: desired }),
         });
+        if (seq !== jaRequestSeq) return; // superseded by a newer toggle -- ignore this stale response
         if (res && res.ok) {
           const row = await res.json();
+          if (seq !== jaRequestSeq) return; // superseded while awaiting res.json()
           applyJobAlertsState(row.enabled, row.eligible, row.job_alert_optin_at, jaLastProfile || {});
           Auth.toast(isNl ? 'Opgeslagen' : 'Saved');
         } else {
@@ -740,10 +759,11 @@
           if (jaError) jaError.style.display = 'block';
         }
       } catch (err) {
+        if (seq !== jaRequestSeq) return;
         jaSwitch.checked = !desired;
         if (jaError) jaError.style.display = 'block';
       } finally {
-        jaSwitch.removeAttribute('aria-busy');
+        if (seq === jaRequestSeq) jaSwitch.removeAttribute('aria-busy');
       }
     }
 

@@ -281,6 +281,90 @@ def test_profile_get_has_no_consent_when_never_recorded(patch_profile_router):
     assert result["consent_talentpool_until"] is None
 
 
+# ── WS5 issue #136: GET /profile carries the job-alert switch's state ────
+# The switch (§7.3.7) can only ever be safe to show on page load if it
+# comes from a GET, since PUT /v1/candidate/job-alerts is a write and
+# would risk flipping real consent if used as a "read". These three
+# fields ride the same _attach_talentpool_consent SELECT tested above.
+
+def test_profile_get_includes_job_alert_fields(patch_profile_router):
+    optin_at = datetime(2026, 9, 3, tzinfo=timezone.utc)
+    db = _ProfileDB(
+        profile_row=_profile_row(), candidate_id=42,
+        consent_row={
+            "consent_talentpool_at": None, "consent_talentpool_until": None,
+            "consent_scope": None, "consent_source": None,
+            "consent_withdrawn_at": None, "lawful_basis": "portal_registratie",
+            "job_alert_optin_at": optin_at, "job_alert_unsubscribed_at": None,
+            "job_alert_eligible": True,
+        },
+    )
+    router = patch_profile_router(db)
+    result = asyncio.run(router.get_candidate_profile(current_user=_user()))
+    assert result["job_alert_optin_at"] == optin_at
+    assert result["job_alert_unsubscribed_at"] is None
+    assert result["job_alert_eligible"] is True
+
+
+def test_profile_get_job_alert_fields_default_when_never_set(patch_profile_router):
+    """No candidates row (or one that never touched job-alerts) must
+    default to the same "off, not eligible" state the switch's HTML
+    treats as its unloaded/unknown baseline -- never a guessed True."""
+    db = _ProfileDB(profile_row=_profile_row(), candidate_id=42, consent_row=None)
+    router = patch_profile_router(db)
+    result = asyncio.run(router.get_candidate_profile(current_user=_user()))
+    assert result["job_alert_optin_at"] is None
+    assert result["job_alert_unsubscribed_at"] is None
+    assert result["job_alert_eligible"] is False
+
+
+def test_profile_get_and_job_alerts_put_agree_on_eligibility(patch_profile_router, monkeypatch):
+    """The GET's job_alert_eligible and the PUT's `eligible` must never
+    disagree for the same underlying state -- both are computed from the
+    exact same JOB_ALERT_ELIGIBILITY_SQL constant (core/retention.py),
+    so a candidate who reloads the page never sees the switch's warning
+    flicker between two different answers to the same question."""
+    from models.schemas import CandidateJobAlertsUpdate
+    import routers.candidate as candidate_router
+
+    for eligible in (True, False):
+        get_db = _ProfileDB(
+            profile_row=_profile_row(), candidate_id=42,
+            consent_row={
+                "consent_talentpool_at": None, "consent_talentpool_until": None,
+                "consent_scope": None, "consent_source": None,
+                "consent_withdrawn_at": None, "lawful_basis": "portal_registratie",
+                "job_alert_optin_at": "now", "job_alert_unsubscribed_at": None,
+                "job_alert_eligible": eligible,
+            },
+        )
+        get_router = patch_profile_router(get_db)
+        get_result = asyncio.run(get_router.get_candidate_profile(current_user=_user()))
+
+        async def _fake_get_candidate_id(user_id):
+            return 42
+
+        async def _fake_fetch_one(sql, *args, _eligible=eligible):
+            return {
+                "id": 42, "job_alert_optin_at": "now",
+                "job_alert_unsubscribed_at": None, "eligible": _eligible,
+            }
+
+        async def _fake_execute(sql, *args):
+            return "INSERT 1"
+
+        monkeypatch.setattr(candidate_router, "_get_candidate_id", _fake_get_candidate_id)
+        monkeypatch.setattr(candidate_router, "fetch_one", _fake_fetch_one)
+        monkeypatch.setattr(candidate_router, "execute", _fake_execute)
+        put_result = asyncio.run(
+            candidate_router.update_job_alerts(
+                CandidateJobAlertsUpdate(enabled=True),
+                current_user={"id": 1, "role": "candidate", "email": "k@example.com"},
+            )
+        )
+        assert get_result["job_alert_eligible"] == put_result["eligible"] == eligible
+
+
 # ── Public: POST /api/public/talentpool-optin + /talentpool-confirm ──────
 
 class _PublicDB:

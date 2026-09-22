@@ -51,6 +51,22 @@ body {
   border-color: rgba(74, 111, 159, 0.4);
 }
 
+/* ---- .btn-outline: same problem as .btn-ghost above -- styles.css:738
+   sets `color: var(--navy)` (dark navy text) on a light `--border`,
+   meant for the light public site. On the dark portal shell that reads
+   as unreadable navy-on-navy. Affects talentpoolConsentSaveBtn
+   (candidate/index.html), jobAlertsRetryBtn and the saved-jobs
+   "Verwijderen"/"Remove" button. ---- */
+.btn-outline {
+  color: var(--white, #FFFFFF);
+  border-color: var(--navy-400, #2A4A75);
+}
+.btn-outline:hover {
+  color: var(--white, #FFFFFF);
+  background: rgba(74, 111, 159, 0.12);
+  border-color: rgba(74, 111, 159, 0.5);
+}
+
 /* ---- Badges ---- */
 .badge {
   display: inline-flex;
