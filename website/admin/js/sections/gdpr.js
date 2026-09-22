@@ -187,6 +187,14 @@
         <input class="form-check-input" type="checkbox" id="gdprEraseAdminConfirm">
         <label class="form-check-label" for="gdprEraseAdminConfirm">Ik begrijp dat hiermee beheerderstoegang verdwijnt</label>
       </div>`);
+    // design-review: de modalbody draagt al de opsomming van ERASE_EFFECTS
+    // boven dit blok, dus op een korter scherm (of nadat de opsomming de
+    // ruimte al vult) verschijnt de tweede stap -- waarschuwing, checkbox,
+    // tweede knop -- buiten beeld en lijkt de klik op de eerste knop niets
+    // te doen. Zelfde patroon en dezelfde optie als candidates.js
+    // gdprAlert()/placementAlert(): scrollIntoView op het element zelf, niet
+    // op de modal.
+    el.scrollIntoView({ block: 'start' });
     const cb = document.getElementById('gdprEraseAdminConfirm');
     const primaryBtn = handle.button('primary');
     if (primaryBtn) {
@@ -249,6 +257,14 @@
       const data = res ? await res.json().catch(() => null) : null;
       if (res && res.ok) {
         state.done = true;
+        // design-review: setBusy(true) hierboven had de knop al op de
+        // spinner-opmaak gezet (§7.2c); zonder deze regel bleef die spinner
+        // na een geslaagde wissing eeuwig draaien, want gdprRenderEraseResult()
+        // hieronder zet de knoppen alleen disabled + gspLock, het herstelt
+        // de labeltekst niet. setBusy(false) zet eerst de eigen tekst
+        // terug; de disabled/gspLock-staat die op slot moet, zet
+        // gdprRenderEraseResult() daarna zelf, net als vóór deze fix.
+        handle.setBusy(false);
         this.gdprRenderEraseResult(handle, data);
         Auth.toast('Persoon gewist', 'success');
         document.getElementById('gdprEraseEmail').value = '';
