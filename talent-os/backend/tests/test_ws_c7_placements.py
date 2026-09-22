@@ -539,6 +539,57 @@ def test_placement_create_accepts_valid_one_off_costs():
     assert p.one_off_costs == [OneOffCost(label="Visa fee", amount="350.00")]
 
 
+# ── Issue #150: OneOffCost.amount capped like _money_field() ─────────────
+
+def test_one_off_cost_rejects_amount_over_the_column_cap():
+    with pytest.raises(ValidationError):
+        OneOffCost(label="Visa fee", amount="100000000.00")
+
+
+def test_one_off_cost_accepts_amount_at_the_column_cap():
+    c = OneOffCost(label="Visa fee", amount="99999999.99")
+    assert c.amount == Decimal("99999999.99")
+
+
+def test_placement_create_rejects_one_off_cost_amount_over_the_cap():
+    with pytest.raises(ValidationError):
+        PlacementCreate(
+            candidate_id=1, job_id=1, client_id=1, placement_type="detachering",
+            one_off_costs=[{"label": "Visa fee", "amount": "100000000.00"}],
+        )
+
+
+def test_placement_create_accepts_one_off_cost_amount_at_the_cap():
+    p = PlacementCreate(
+        candidate_id=1, job_id=1, client_id=1, placement_type="detachering",
+        one_off_costs=[{"label": "Visa fee", "amount": "99999999.99"}],
+    )
+    assert p.one_off_costs[0].amount == Decimal("99999999.99")
+
+
+def test_placement_create_rejects_one_off_cost_negative_amount():
+    with pytest.raises(ValidationError):
+        PlacementCreate(
+            candidate_id=1, job_id=1, client_id=1, placement_type="detachering",
+            one_off_costs=[{"label": "Visa fee", "amount": "-0.01"}],
+        )
+
+
+def test_placement_update_rejects_one_off_cost_amount_over_the_cap():
+    with pytest.raises(ValidationError):
+        PlacementUpdate(one_off_costs=[{"label": "Visa fee", "amount": "100000000.00"}])
+
+
+def test_placement_update_accepts_one_off_cost_amount_at_the_cap():
+    u = PlacementUpdate(one_off_costs=[{"label": "Visa fee", "amount": "99999999.99"}])
+    assert u.one_off_costs[0].amount == Decimal("99999999.99")
+
+
+def test_placement_update_rejects_one_off_cost_negative_amount():
+    with pytest.raises(ValidationError):
+        PlacementUpdate(one_off_costs=[{"label": "Visa fee", "amount": "-1"}])
+
+
 # ── Every placements route requires admin (require_role dependency) ──────
 
 def test_every_placements_route_requires_admin():
