@@ -3026,7 +3026,10 @@ def main():
         if not wait_for_calls(page, PLACEMENTS_STATE["status_calls"], calls_before + 1):
             failures.append("placements: statuswissel naar geannuleerd riep de status-route niet aan")
         wait_until(page, lambda: "Geannuleerd" in text_of(page, '#placementDrawerTabContent'))
-        if "definitief" not in text_of(page, '#placementDrawerTabContent').lower():
+        # The "definitief" line renders in the same async tab refresh as the
+        # status badge but can land a tick later; a bare read right after the
+        # badge appeared failed once in CI. Wait for it like everything else.
+        if not wait_until(page, lambda: "definitief" in text_of(page, '#placementDrawerTabContent').lower()):
             failures.append("placements: een terminale status toonde geen 'geen overgang meer mogelijk'-tekst")
 
         # ---- Drawer: Financieel ----
