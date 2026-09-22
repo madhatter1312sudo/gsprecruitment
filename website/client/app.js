@@ -632,8 +632,18 @@
       return Number(value).toFixed(digits).replace('.', ',');
     }
 
+    // Currency with a thousands separator, house style (STYLE.md): Dutch
+    // view "€1.234,56" (dot thousands, comma decimal), English view
+    // "€1,234.56" (comma thousands, dot decimal). No rounding beyond the
+    // two decimals the API already returns.
     function formatEuro(value) {
-      return '€' + formatDutchDecimal(value, 2);
+      const num = Number(value);
+      const isNl = document.documentElement.getAttribute('data-lang') !== 'en';
+      const negative = num < 0;
+      const [intPart, decPart] = Math.abs(num).toFixed(2).split('.');
+      const grouped = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, isNl ? '.' : ',');
+      const decimalSep = isNl ? ',' : '.';
+      return (negative ? '-' : '') + '€' + grouped + decimalSep + decPart;
     }
 
     // Horizontal bar rows for pipeline_funnel/source_breakdown -- exactly
@@ -903,13 +913,19 @@
 
     /* ================================================================
        WS5 #141: Contacten (Settings)
-       GET /v1/client/contacts is the only client-facing route for this
-       resource (talent-os/backend/routers/client_contacts.py) -- add,
-       edit and delete only exist on the admin side
-       (/v1/admin/clients/{client_id}/contacts). This card is therefore
-       read-only until a client-facing write route exists; it is not
-       silently limited, see the report for this PR.
+       GET/POST /v1/client/contacts, PATCH/DELETE
+       /v1/client/contacts/{contact_id} (talent-os/backend/routers/
+       client_contacts.py) -- scoped server-side to the caller's own
+       client via the user_clients join, same as every other
+       client-portal route. Role labels match the admin panel's
+       website/admin/js/labels.js exactly.
        ================================================================ */
+    const CONTACT_ROLE_LABELS = {
+      hiring_manager: 'Hiring manager', finance: 'Financiën',
+      tekenbevoegd: 'Tekenbevoegd', overig: 'Overig',
+    };
+    let contactsCache = [];
+
     async function loadContacts() {
       const el = document.getElementById('contactsList');
       if (!el) return;
@@ -920,6 +936,7 @@
         if (!res.ok) throw new Error();
         const data = await res.json();
         const items = data.items || [];
+        contactsCache = items;
         if (!items.length) {
           el.innerHTML = '<div style="text-align:center;color:var(--navy-200);font-size:var(--font-size-sm);padding:var(--space-lg) 0;"><span class="lang-en">No contacts recorded yet.</span><span class="lang-nl">Nog geen contacten vastgelegd.</span></div>';
           return;
@@ -929,8 +946,16 @@
             <div class="activity-icon" style="background:rgba(250,200,0,0.12);color:var(--gold-500);"><i class="fa-regular fa-address-card"></i></div>
             <div class="activity-content">
               <div class="activity-text" style="font-weight:600;color:var(--white);">${GSP.esc(c.full_name || '—')}</div>
-              <div class="activity-text a-soft">${GSP.esc(c.role || '')}</div>
+              <div class="activity-text a-soft">${GSP.esc(CONTACT_ROLE_LABELS[c.role] || c.role || '')}</div>
               <div class="activity-text fs-xs a-soft">${GSP.esc(c.email || '')}${c.email && c.phone ? ' · ' : ''}${GSP.esc(c.phone || '')}</div>
+            </div>
+            <div style="display:flex;gap:var(--space-xs);flex-shrink:0;">
+              <button type="button" class="btn btn-sm btn-ghost" data-action="edit-contact" data-id="${Number(c.id) || 0}" title="Bewerken">
+                <i class="fa-regular fa-pen"></i>
+              </button>
+              <button type="button" class="btn btn-sm btn-ghost" data-action="delete-contact" data-id="${Number(c.id) || 0}" title="Verwijderen">
+                <i class="fa-regular fa-trash"></i>
+              </button>
             </div>
           </div>`).join('');
       } catch (err) {
@@ -938,6 +963,108 @@
         Auth.renderLoadError(el, () => loadContacts());
       }
     }
+
+    /* ---- Add/edit contact modal ---- */
+    window.showContactModal = function(contact = null) {
+      const isEdit = !!contact;
+      const existing = document.getElementById('contactModalOverlay');
+      if (existing) existing.remove();
+
+      const overlay = document.createElement('div');
+      overlay.id = 'contactModalOverlay';
+      overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:1000;display:flex;align-items:center;justify-content:center;padding:var(--space-lg);';
+      overlay.innerHTML = `
+        <div style="background:var(--navy-800);border:1px solid var(--navy-600);border-radius:12px;padding:var(--space-2xl);width:100%;max-width:480px;max-height:90vh;overflow-y:auto;">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:var(--space-xl);">
+            <h3 style="font-size:var(--font-size-lg);font-weight:600;color:var(--white);">
+              <span class="lang-en">${isEdit ? 'Edit Contact' : 'Add Contact'}</span>
+              <span class="lang-nl">${isEdit ? 'Contact Bewerken' : 'Contact Toevoegen'}</span>
+            </h3>
+            <button type="button" id="contactModalClose" class="btn btn-sm btn-ghost"><i class="fa-regular fa-xmark"></i></button>
+          </div>
+          <form id="contactModalForm">
+            <div class="form-group">
+              <label class="lang-en">Name *</label><label class="lang-nl">Naam *</label>
+              <input type="text" name="full_name" required maxlength="255" value="${GSP.esc(contact?.full_name || '')}">
+            </div>
+            <div class="form-group">
+              <label class="lang-en">Role</label><label class="lang-nl">Rol</label>
+              <select name="role">
+                <option value="">Select…</option>
+                ${Object.entries(CONTACT_ROLE_LABELS).map(([v, label]) =>
+                  `<option value="${v}" ${contact?.role === v ? 'selected' : ''}>${GSP.esc(label)}</option>`).join('')}
+              </select>
+            </div>
+            <div class="form-group">
+              <label>Email</label>
+              <input type="email" name="email" value="${GSP.esc(contact?.email || '')}">
+            </div>
+            <div class="form-group">
+              <label class="lang-en">Phone</label><label class="lang-nl">Telefoon</label>
+              <input type="text" name="phone" maxlength="50" value="${GSP.esc(contact?.phone || '')}">
+            </div>
+            <div style="display:flex;gap:var(--space-md);justify-content:flex-end;margin-top:var(--space-xl);">
+              <button type="button" id="contactModalCancelBtn" class="btn btn-outline">
+                <span class="lang-en">Cancel</span><span class="lang-nl">Annuleren</span>
+              </button>
+              <button type="submit" class="btn btn-primary">
+                <i class="fa-regular fa-floppy-disk"></i>
+                <span class="lang-en">${isEdit ? 'Save Changes' : 'Add Contact'}</span>
+                <span class="lang-nl">${isEdit ? 'Opslaan' : 'Toevoegen'}</span>
+              </button>
+            </div>
+          </form>
+        </div>
+      `;
+      document.body.appendChild(overlay);
+
+      overlay.querySelector('#contactModalClose').addEventListener('click', () => overlay.remove());
+      overlay.querySelector('#contactModalCancelBtn').addEventListener('click', () => overlay.remove());
+      overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+
+      overlay.querySelector('#contactModalForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const fd = new FormData(e.target);
+        const payload = {};
+        for (const [k, v] of fd.entries()) { if (v !== '') payload[k] = v; }
+        try {
+          const url = isEdit ? `/v1/client/contacts/${contact.id}` : '/v1/client/contacts';
+          const method = isEdit ? 'PATCH' : 'POST';
+          const res = await Auth.fetch(url, { method, body: JSON.stringify(payload) });
+          if (res && (res.ok || res.status === 201)) {
+            Auth.toast(isEdit ? 'Contact bijgewerkt' : 'Contact toegevoegd', 'success');
+            overlay.remove();
+            loadContacts();
+          } else {
+            const err = res ? await res.json().catch(() => ({})) : {};
+            Auth.toast(err.detail || 'Opslaan van contact is mislukt', 'error');
+          }
+        } catch (err) {
+          Auth.toast('Netwerkfout, probeer het opnieuw.', 'error');
+        }
+      });
+    };
+
+    window.editContact = function(contactId) {
+      const contact = contactsCache.find(c => Number(c.id) === Number(contactId));
+      if (!contact) { Auth.toast('Contact niet gevonden', 'error'); return; }
+      window.showContactModal(contact);
+    };
+
+    window.deleteContact = async function(contactId) {
+      if (!confirm('Dit contact verwijderen?')) return;
+      try {
+        const res = await Auth.fetch(`/v1/client/contacts/${contactId}`, { method: 'DELETE' });
+        if (res && (res.ok || res.status === 204)) {
+          Auth.toast('Contact verwijderd', 'success');
+          loadContacts();
+        } else {
+          Auth.toast('Verwijderen van contact is mislukt', 'error');
+        }
+      } catch (err) {
+        Auth.toast('Netwerkfout, probeer het opnieuw.', 'error');
+      }
+    };
 
     /* ================================================================
        WS5 #141: Activiteiten (Settings)
@@ -1065,6 +1192,9 @@
         case 'show-invite-modal': showInviteModal(); break;
         case 'edit-job': editJob(Number(id) || 0); break;
         case 'delete-job': deleteJob(Number(id) || 0); break;
+        case 'add-contact': window.showContactModal(); break;
+        case 'edit-contact': window.editContact(Number(id) || 0); break;
+        case 'delete-contact': window.deleteContact(Number(id) || 0); break;
         case 'toast-deactivate-client':
           Auth.toast('Contact info@gsprecruitment.nl for account deactivation', 'warning');
           break;

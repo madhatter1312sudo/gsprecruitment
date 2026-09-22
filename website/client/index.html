@@ -455,17 +455,21 @@
             </div>
           </div>
 
-          <!-- WS5 #141: Contacten (read-only -- GET /v1/client/contacts is
-               the only client-facing route for this resource today; there
-               is no client-side write route to add/edit/delete a contact,
-               only the admin-side CRUD) and Activiteiten (GET/POST
-               /v1/client/activities). ---- -->
+          <!-- WS5 #141: Contacten (GET/POST /v1/client/contacts,
+               PATCH/DELETE /v1/client/contacts/{contact_id}, scoped
+               server-side to the caller's own client) and Activiteiten
+               (GET/POST /v1/client/activities). ---- -->
           <div class="dashboard-grid-wide" style="margin-top:var(--space-xl);">
             <div class="card">
-              <h3 style="font-size:var(--font-size-lg);font-weight:600;color:var(--white);margin-bottom:var(--space-lg);">
-                <span class="lang-en">Contacts</span>
-                <span class="lang-nl">Contacten</span>
-              </h3>
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:var(--space-lg);">
+                <h3 style="font-size:var(--font-size-lg);font-weight:600;color:var(--white);margin:0;">
+                  <span class="lang-en">Contacts</span>
+                  <span class="lang-nl">Contacten</span>
+                </h3>
+                <button type="button" class="btn btn-sm btn-primary" data-action="add-contact">
+                  <i class="fa-regular fa-plus"></i> <span class="lang-en">Add</span><span class="lang-nl">Toevoegen</span>
+                </button>
+              </div>
               <div id="contactsList">
                 <div style="text-align:center;color:var(--navy-200);font-size:var(--font-size-sm);padding:var(--space-lg) 0;">
                   <i class="fa-solid fa-spinner fa-spin"></i>
