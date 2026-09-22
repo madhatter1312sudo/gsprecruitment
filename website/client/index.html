@@ -454,6 +454,77 @@
               </div>
             </div>
           </div>
+
+          <!-- WS5 #141: Contacten (read-only -- GET /v1/client/contacts is
+               the only client-facing route for this resource today; there
+               is no client-side write route to add/edit/delete a contact,
+               only the admin-side CRUD) and Activiteiten (GET/POST
+               /v1/client/activities). ---- -->
+          <div class="dashboard-grid-wide" style="margin-top:var(--space-xl);">
+            <div class="card">
+              <h3 style="font-size:var(--font-size-lg);font-weight:600;color:var(--white);margin-bottom:var(--space-lg);">
+                <span class="lang-en">Contacts</span>
+                <span class="lang-nl">Contacten</span>
+              </h3>
+              <div id="contactsList">
+                <div style="text-align:center;color:var(--navy-200);font-size:var(--font-size-sm);padding:var(--space-lg) 0;">
+                  <i class="fa-solid fa-spinner fa-spin"></i>
+                </div>
+              </div>
+            </div>
+            <div class="card">
+              <h3 style="font-size:var(--font-size-lg);font-weight:600;color:var(--white);margin-bottom:var(--space-lg);">
+                <span class="lang-en">Activity</span>
+                <span class="lang-nl">Activiteiten</span>
+              </h3>
+              <form id="activityAddForm" style="margin-bottom:var(--space-lg);padding-bottom:var(--space-lg);border-bottom:1px solid rgba(74,111,159,0.12);">
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:var(--space-sm);">
+                  <div class="form-group" style="margin-bottom:var(--space-sm);">
+                    <label for="activitySubjectType" class="lang-en">Subject</label>
+                    <label for="activitySubjectType" class="lang-nl">Onderwerp</label>
+                    <select name="subject_type" id="activitySubjectType" required>
+                      <option value="job">Vacature</option>
+                      <option value="candidate">Kandidaat</option>
+                    </select>
+                  </div>
+                  <div class="form-group" style="margin-bottom:var(--space-sm);">
+                    <label for="activitySubject" class="lang-en">Which one</label>
+                    <label for="activitySubject" class="lang-nl">Welke</label>
+                    <select name="subject_id" id="activitySubject" required>
+                      <option value="">Laden…</option>
+                    </select>
+                  </div>
+                </div>
+                <div style="display:grid;grid-template-columns:1fr 2fr;gap:var(--space-sm);">
+                  <div class="form-group" style="margin-bottom:var(--space-sm);">
+                    <label for="activityType" class="lang-en">Type</label>
+                    <label for="activityType" class="lang-nl">Type</label>
+                    <select name="type" id="activityType" required>
+                      <option value="note">Notitie</option>
+                      <option value="call">Telefoongesprek</option>
+                      <option value="email">E-mail</option>
+                      <option value="meeting">Afspraak</option>
+                      <option value="task">Taak</option>
+                      <option value="status_change">Statuswijziging</option>
+                    </select>
+                  </div>
+                  <div class="form-group" style="margin-bottom:var(--space-sm);">
+                    <label for="activityBody" class="lang-en">Note</label>
+                    <label for="activityBody" class="lang-nl">Notitie</label>
+                    <textarea name="body" id="activityBody" rows="1" placeholder="Notitie…" style="width:100%;resize:vertical;"></textarea>
+                  </div>
+                </div>
+                <button type="submit" class="btn btn-sm btn-primary">
+                  <i class="fa-regular fa-plus"></i> <span class="lang-en">Add activity</span><span class="lang-nl">Activiteit toevoegen</span>
+                </button>
+              </form>
+              <div id="activitiesList">
+                <div style="text-align:center;color:var(--navy-200);font-size:var(--font-size-sm);padding:var(--space-lg) 0;">
+                  <i class="fa-solid fa-spinner fa-spin"></i>
+                </div>
+              </div>
+            </div>
+          </div>
         </section>
 
       </div>

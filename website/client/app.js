@@ -64,14 +64,15 @@
     }
 
     /* ================================================================
-       WS5 #139: shared pipeline-stage label map. Mirrors website/admin/
-       js/labels.js's `pipelinefase` map verbatim (same seven stages, same
-       seven Dutch labels) so "Screening" reads the same word in both the
-       client portal and the admin panel -- but as its own copy, not an
-       import, because the portal does not load admin/js/*.js (§7.5.6,
-       admin bundle stays admin-only). The seven values themselves come
-       from migration 043 (BV8) via models/schemas.py's PipelineStage
-       literal.
+       WS5 #139/#140: shared pipeline-stage and source-family label maps.
+       Mirrors website/admin/js/labels.js's `pipelinefase` map and
+       SITE-DESIGN-SPEC.md §7.2e's source table verbatim (same seven
+       stages, same seven Dutch labels, same source labels) so "Screening"
+       and "Apollo" read the same word in both the client portal and the
+       admin panel -- but as its own copy, not an import, because the
+       portal does not load admin/js/*.js (§7.5.6, admin bundle stays
+       admin-only). The seven values themselves come from migration 043
+       (BV8) via models/schemas.py's PipelineStage literal.
        ================================================================ */
     const CANONICAL_STAGES = ['sourced', 'new', 'screening', 'interview', 'offer', 'placed', 'rejected'];
     const STAGE_LABELS = {
@@ -82,11 +83,9 @@
       if (stage == null || stage === '') return '(leeg)';
       return STAGE_LABELS[stage] || String(stage);
     }
-
-    // WS5 #140: SOURCE_FAMILY (core/sources.py) already folds apollo_bulk
-    // into 'apollo' server-side, so the client only ever sees these four
-    // keys plus, per SITE-DESIGN-SPEC.md §7.2e, a free-form value passed
-    // unchanged.
+    // SOURCE_FAMILY (core/sources.py) already folds apollo_bulk into
+    // 'apollo' server-side, so the client only ever sees these four keys
+    // plus, per §7.2e, a free-form value passed unchanged.
     const SOURCE_LABELS = {
       portal_registration: 'Zelf geregistreerd',
       talentpool_optin: 'Talentpool-aanmelding',
@@ -96,6 +95,17 @@
     function sourceLabel(source) {
       if (source == null || source === '') return '(onbekend)';
       return SOURCE_LABELS[source] || String(source);
+    }
+
+    // ACTIVITY_TYPES (routers/activities.py) -- own copy of
+    // admin/js/labels.js's `activiteit` map, same six Dutch labels
+    // (SITE-DESIGN-SPEC.md §7.3.6b, reused by #141 per §7.3.8c).
+    const ACTIVITY_TYPE_LABELS = {
+      note: 'Notitie', call: 'Telefoongesprek', email: 'E-mail',
+      meeting: 'Afspraak', task: 'Taak', status_change: 'Statuswijziging',
+    };
+    function activityTypeLabel(type) {
+      return ACTIVITY_TYPE_LABELS[type] || String(type || '—');
     }
 
     const sectionTitles = {
@@ -126,7 +136,12 @@
       else if (section === 'jobs') loadJobs();
       else if (section === 'analytics') loadAnalytics();
       else if (section === 'team') loadTeam();
-      else if (section === 'settings') loadClientProfile();
+      else if (section === 'settings') {
+        loadClientProfile();
+        loadContacts();
+        loadActivitySubjects();
+        loadActivities();
+      }
     }
 
     document.querySelectorAll('.sidebar-nav-item').forEach(item => {
@@ -885,6 +900,146 @@
         }
       });
     }
+
+    /* ================================================================
+       WS5 #141: Contacten (Settings)
+       GET /v1/client/contacts is the only client-facing route for this
+       resource (talent-os/backend/routers/client_contacts.py) -- add,
+       edit and delete only exist on the admin side
+       (/v1/admin/clients/{client_id}/contacts). This card is therefore
+       read-only until a client-facing write route exists; it is not
+       silently limited, see the report for this PR.
+       ================================================================ */
+    async function loadContacts() {
+      const el = document.getElementById('contactsList');
+      if (!el) return;
+      el.innerHTML = '<div style="text-align:center;color:var(--navy-200);font-size:var(--font-size-sm);padding:var(--space-lg) 0;"><i class="fa-solid fa-spinner fa-spin"></i></div>';
+      try {
+        const res = await Auth.fetch('/v1/client/contacts');
+        if (!res) return;
+        if (!res.ok) throw new Error();
+        const data = await res.json();
+        const items = data.items || [];
+        if (!items.length) {
+          el.innerHTML = '<div style="text-align:center;color:var(--navy-200);font-size:var(--font-size-sm);padding:var(--space-lg) 0;"><span class="lang-en">No contacts recorded yet.</span><span class="lang-nl">Nog geen contacten vastgelegd.</span></div>';
+          return;
+        }
+        el.innerHTML = items.map(c => `
+          <div class="activity-item">
+            <div class="activity-icon" style="background:rgba(250,200,0,0.12);color:var(--gold-500);"><i class="fa-regular fa-address-card"></i></div>
+            <div class="activity-content">
+              <div class="activity-text" style="font-weight:600;color:var(--white);">${GSP.esc(c.full_name || '—')}</div>
+              <div class="activity-text a-soft">${GSP.esc(c.role || '')}</div>
+              <div class="activity-text fs-xs a-soft">${GSP.esc(c.email || '')}${c.email && c.phone ? ' · ' : ''}${GSP.esc(c.phone || '')}</div>
+            </div>
+          </div>`).join('');
+      } catch (err) {
+        console.error('Contacts load error:', err);
+        Auth.renderLoadError(el, () => loadContacts());
+      }
+    }
+
+    /* ================================================================
+       WS5 #141: Activiteiten (Settings)
+       GET/POST /v1/client/activities, scoped server-side to the caller's
+       own organisation. A new activity needs a subject (a job the client
+       posted, or a candidate in its own pipeline) -- loadActivitySubjects()
+       fills #activitySubject from the same two lists the rest of this
+       portal already fetches.
+       ================================================================ */
+    async function loadActivitySubjects() {
+      const typeEl = document.getElementById('activitySubjectType');
+      const subjectEl = document.getElementById('activitySubject');
+      if (!typeEl || !subjectEl) return;
+      subjectEl.innerHTML = '<option value="">Laden…</option>';
+      try {
+        if (typeEl.value === 'candidate') {
+          const res = await Auth.fetch('/v1/client/pipeline?limit=200');
+          const data = res && res.ok ? await res.json() : { items: [] };
+          const seen = new Set();
+          const options = (data.items || []).filter((pe) => {
+            if (seen.has(pe.candidate_id)) return false;
+            seen.add(pe.candidate_id);
+            return true;
+          }).map((pe) => {
+            const label = pe.full_name || `Kandidaat #${pe.candidate_id}`;
+            return `<option value="${Number(pe.candidate_id) || 0}">${GSP.esc(label)}</option>`;
+          });
+          subjectEl.innerHTML = options.length ? options.join('') : '<option value="">Geen kandidaten in de pipeline</option>';
+        } else {
+          const res = await Auth.fetch('/v1/client/jobs?limit=50');
+          const data = res && res.ok ? await res.json() : { items: [] };
+          const options = (data.items || []).map((j) => `<option value="${Number(j.id) || 0}">${GSP.esc(j.title || 'Vacature #' + j.id)}</option>`);
+          subjectEl.innerHTML = options.length ? options.join('') : '<option value="">Geen vacatures</option>';
+        }
+      } catch (err) {
+        console.error('Activity subjects load error:', err);
+        subjectEl.innerHTML = '<option value="">Kon niet laden</option>';
+      }
+    }
+
+    document.getElementById('activitySubjectType')?.addEventListener('change', () => loadActivitySubjects());
+
+    async function loadActivities() {
+      const el = document.getElementById('activitiesList');
+      if (!el) return;
+      el.innerHTML = '<div style="text-align:center;color:var(--navy-200);font-size:var(--font-size-sm);padding:var(--space-lg) 0;"><i class="fa-solid fa-spinner fa-spin"></i></div>';
+      try {
+        const res = await Auth.fetch('/v1/client/activities?limit=50');
+        if (!res) return;
+        if (!res.ok) throw new Error();
+        const data = await res.json();
+        const items = data.items || [];
+        if (!items.length) {
+          el.innerHTML = '<div style="text-align:center;color:var(--navy-200);font-size:var(--font-size-sm);padding:var(--space-lg) 0;"><span class="lang-en">No activities recorded yet.</span><span class="lang-nl">Nog geen activiteiten vastgelegd.</span></div>';
+          return;
+        }
+        el.innerHTML = items.map(a => {
+          const time = a.created_at ? new Date(a.created_at).toLocaleDateString() : '';
+          return `<div class="activity-item">
+            <div class="activity-icon" style="background:rgba(74,111,159,0.15);color:var(--navy-100);"><i class="fa-regular fa-note-sticky"></i></div>
+            <div class="activity-content">
+              <span class="badge badge-blue fs-xs">${GSP.esc(activityTypeLabel(a.type))}</span>
+              <div class="activity-text">${GSP.esc(a.body || '')}</div>
+              <div class="activity-time">${GSP.esc(time)}</div>
+            </div>
+          </div>`;
+        }).join('');
+      } catch (err) {
+        console.error('Activities load error:', err);
+        Auth.renderLoadError(el, () => loadActivities());
+      }
+    }
+
+    document.getElementById('activityAddForm')?.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const form = e.target;
+      const fd = new FormData(form);
+      const subjectId = Number(fd.get('subject_id'));
+      if (!subjectId) { Auth.toast('Kies eerst een vacature of kandidaat', 'warning'); return; }
+      const payload = {
+        subject_type: fd.get('subject_type'),
+        subject_id: subjectId,
+        type: fd.get('type'),
+        body: (fd.get('body') || '').toString().trim() || null,
+      };
+      const submitBtn = form.querySelector('button[type="submit"]');
+      if (submitBtn) submitBtn.disabled = true;
+      try {
+        const res = await Auth.fetch('/v1/client/activities', { method: 'POST', body: JSON.stringify(payload) });
+        if (res && (res.ok || res.status === 201)) {
+          Auth.toast('Activiteit toegevoegd', 'success');
+          form.reset();
+          loadActivities();
+        } else {
+          Auth.toast('Activiteit opslaan is mislukt', 'error');
+        }
+      } catch (err) {
+        Auth.toast('Netwerkfout, probeer het opnieuw.', 'error');
+      } finally {
+        if (submitBtn) submitBtn.disabled = false;
+      }
+    });
 
     /* ================================================================
        Initial load
