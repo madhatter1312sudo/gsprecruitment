@@ -1303,7 +1303,12 @@ class OneOffCost(BaseModel):
     model_config = {"extra": "forbid"}
 
     label: str = Field(..., min_length=1, max_length=120)
-    amount: Decimal = Field(..., ge=0, decimal_places=2, allow_inf_nan=False)
+    # Same NUMERIC(10,2) cap as _money_field() (99999999.99): a one-off
+    # cost is a placement money field like the rest, so a typo with one
+    # extra integer digit is rejected at the API boundary, not stored.
+    amount: Decimal = Field(
+        ..., ge=0, le=Decimal("99999999.99"), decimal_places=2, allow_inf_nan=False,
+    )
 
 
 class PlacementCreate(BaseModel):
