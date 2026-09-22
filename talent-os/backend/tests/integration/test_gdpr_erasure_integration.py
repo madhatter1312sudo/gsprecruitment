@@ -366,6 +366,165 @@ def test_scoped_erasure_does_not_follow_a_users_row_to_an_unrelated_fk_linked_ca
     assert linked_row["deleted_at"] is None
 
 
+def test_erase_person_forced_failure_on_last_statement_leaves_every_table_unchanged(db_run, monkeypatch):
+    """WS-E.7 follow-up (issue #148) -- erase_person() now runs its whole
+    write phase (every anonymising UPDATE/DELETE, the suppression_list
+    insert, the audit_log insert) inside ONE database transaction (see
+    erase_person()'s own comment on why). This is the acceptance test for
+    that: force the LAST statement the routine issues (_log_request()'s
+    INSERT INTO data_subject_requests, called after every other write
+    including the audit_log insert) to raise, then re-read every table the
+    same seed in test_erase_person_scrubs_pii_from_every_registered_table
+    touches and assert none of them moved -- proving the ROLLBACK undid
+    the candidates/users/candidate_profiles/... writes that ran earlier in
+    the same transaction, not just skipped the one that failed."""
+    import routers.gdpr as gdpr
+    from core import privacy
+    from core.database import execute, fetch_all, fetch_one
+
+    email = f"erasure-rollback-{uuid.uuid4().hex[:10]}@example.com"
+
+    user = db_run(
+        fetch_one,
+        """INSERT INTO users (email, password_hash, full_name, role, is_verified, password_changed_at)
+           VALUES ($1, 'x', 'Rollback Me', 'candidate', TRUE, NOW())
+           RETURNING id""",
+        email,
+    )
+    db_run(
+        execute,
+        "INSERT INTO candidate_profiles (user_id, phone, linkedin_url) VALUES ($1, '+31600000010', $2)",
+        user["id"], "https://linkedin.com/in/rollback-me",
+    )
+    db_run(
+        execute,
+        "INSERT INTO push_tokens (user_id, token, platform) VALUES ($1, $2, 'ios')",
+        user["id"], f"tok-{uuid.uuid4().hex}",
+    )
+    candidate = db_run(
+        fetch_one,
+        "INSERT INTO candidates (full_name, email, phone, updated_at) VALUES ('Rollback Me', $1, '+31600000011', NOW()) RETURNING id",
+        email,
+    )
+    client_row = db_run(
+        fetch_one,
+        "INSERT INTO clients (company_name, domain) VALUES ('Rollback Test Client', 'example.com') RETURNING id",
+    )
+    job = db_run(
+        fetch_one,
+        "INSERT INTO job_orders (client_id, title) VALUES ($1, 'Embedded Engineer') RETURNING id",
+        client_row["id"],
+    )
+    db_run(
+        execute,
+        "INSERT INTO pipeline_entries (client_id, candidate_id, job_id, notes) VALUES ($1, $2, $3, $4)",
+        client_row["id"], candidate["id"], job["id"], f"Notes mentioning {email} directly",
+    )
+    db_run(
+        execute,
+        "INSERT INTO quiz_submissions (email, answers) VALUES ($1, '{}'::jsonb)",
+        email,
+    )
+    db_run(
+        execute,
+        "INSERT INTO contact_submissions (name, email, message) VALUES ('Rollback Me', $1, 'hello')",
+        email,
+    )
+    db_run(
+        execute,
+        "INSERT INTO outreach_drafts (target_type, target_email, target_name) VALUES ('candidate', $1, 'Rollback Me')",
+        email,
+    )
+    db_run(
+        execute,
+        "INSERT INTO outreach_messages (recipient_email, subject, body) VALUES ($1, 'hi', 'body')",
+        email,
+    )
+    db_run(
+        execute,
+        "INSERT INTO client_prospects (company_name, contact_name, contact_email) VALUES ($1, 'Rollback Me', $2)",
+        f"Rollback Prospect Co {uuid.uuid4().hex[:6]}", email,
+    )
+    db_run(
+        execute,
+        "INSERT INTO data_subject_requests (request_type, request_email) VALUES ('access', $1)",
+        email,
+    )
+    db_run(
+        execute,
+        "INSERT INTO audit_log (action, target_type, changes) VALUES ('unit_test_seed', 'person', $1::jsonb)",
+        json.dumps({"target_email": email}),
+    )
+
+    # Force the LAST statement erase_person() issues (_log_request(), which
+    # runs strictly after the audit_log insert, the suppression_list
+    # insert, and every anonymising UPDATE/DELETE above them) to blow up.
+    class _BoomOnLastStatement(Exception):
+        pass
+
+    async def _boom(*args, **kwargs):
+        raise _BoomOnLastStatement("forced failure on the last statement")
+
+    monkeypatch.setattr(gdpr, "_log_request", _boom)
+
+    with pytest.raises(_BoomOnLastStatement):
+        db_run(gdpr.erase_person, email, None, "WS-E.7 follow-up: forced-failure rollback test")
+
+    email_hash = privacy.email_hash(email)
+
+    # Every table the routine would otherwise have written to must be back
+    # to exactly what it was seeded as -- the ROLLBACK from conn.transaction()
+    # undid the whole write phase, not just the failing statement.
+    candidate_row = db_run(fetch_one, "SELECT full_name, email, phone, deleted_at FROM candidates WHERE id = $1", candidate["id"])
+    assert candidate_row["email"] == email
+    assert candidate_row["full_name"] == "Rollback Me"
+    assert candidate_row["phone"] == "+31600000011"
+    assert candidate_row["deleted_at"] is None
+
+    profile = db_run(fetch_one, "SELECT phone, linkedin_url FROM candidate_profiles WHERE user_id = $1", user["id"])
+    assert profile["phone"] == "+31600000010"
+    assert profile["linkedin_url"] == "https://linkedin.com/in/rollback-me"
+
+    user_row = db_run(fetch_one, "SELECT full_name, email, deleted_at FROM users WHERE id = $1", user["id"])
+    assert user_row["email"] == email
+    assert user_row["full_name"] == "Rollback Me"
+    assert user_row["deleted_at"] is None
+
+    tokens = db_run(fetch_all, "SELECT id FROM push_tokens WHERE user_id = $1", user["id"])
+    assert len(tokens) == 1
+
+    pipeline = db_run(fetch_one, "SELECT notes FROM pipeline_entries WHERE candidate_id = $1", candidate["id"])
+    assert pipeline["notes"] == f"Notes mentioning {email} directly"
+
+    quiz = db_run(fetch_one, "SELECT email FROM quiz_submissions WHERE email ILIKE $1", f"%{email}%")
+    assert quiz is not None, "quiz_submissions row must still carry the plaintext address -- rollback failed"
+
+    contact = db_run(fetch_one, "SELECT name, email FROM contact_submissions WHERE email ILIKE $1", f"%{email}%")
+    assert contact is not None, "contact_submissions row must still carry the plaintext address -- rollback failed"
+
+    draft = db_run(fetch_one, "SELECT target_email, target_name FROM outreach_drafts WHERE target_email ILIKE $1", f"%{email}%")
+    assert draft is not None, "outreach_drafts row must still carry the plaintext address -- rollback failed"
+
+    message = db_run(fetch_one, "SELECT recipient_email FROM outreach_messages WHERE recipient_email ILIKE $1", f"%{email}%")
+    assert message is not None, "outreach_messages row must still carry the plaintext address -- rollback failed"
+
+    prospect = db_run(fetch_one, "SELECT contact_name, contact_email FROM client_prospects WHERE contact_email ILIKE $1", f"%{email}%")
+    assert prospect is not None, "client_prospects row must still carry the plaintext address -- rollback failed"
+
+    dsr_rows = db_run(fetch_all, "SELECT request_email FROM data_subject_requests WHERE request_email ILIKE $1", f"%{email}%")
+    # The original 'access' seed row survives, and no 'erasure' row was
+    # added -- _log_request() (the failing statement itself) never
+    # committed anything.
+    assert len(dsr_rows) == 1
+
+    audit_rows = db_run(fetch_all, "SELECT action, changes FROM audit_log WHERE changes::text ILIKE $1", f"%{email}%")
+    assert len(audit_rows) == 1, f"expected only the unit_test_seed row, got: {audit_rows}"
+    assert audit_rows[0]["action"] == "unit_test_seed"
+
+    suppression = db_run(fetch_one, "SELECT email_hash FROM suppression_list WHERE email_hash = $1", email_hash)
+    assert suppression is None, "suppression_list insert must have rolled back too"
+
+
 def test_scoped_erasure_erases_the_subject_despite_a_padded_stored_address(db_run):
     """Round 6 re-check (security-auditor + code-reviewer, WS-E.10
     approval queue): the subject row's own stored address can carry
