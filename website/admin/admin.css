@@ -911,6 +911,18 @@ h1, h2, h3, h4,
   }
   .a-cardlist td[data-label="Ontbrekend signaal"]::before { display: none; }
 
+  /* AVG-suppressielijst (§7.3.5): .a-num--date is de leesmaat voor een
+     datum die de kaart draagt als enige inhoud van die cel (font-size-lg,
+     zie hierboven) -- naast het domein en de reden op dezelfde kaart oogt
+     dat te zwaar. Andere kolommen met een datum verbergen zich onder
+     768px (.a-hide-cardlist, Plaatsingen) of staan alleen als stat-tile
+     (Bewaartermijnen); de suppressielijst toont deze datum juist wel op de
+     kaart, dus dit verkleint hem in plaats van hem te verbergen. */
+  .a-cardlist td[data-label="Toegevoegd op"] {
+    font-size: var(--font-size-sm);
+    font-weight: 400;
+  }
+
   /* Variant voor een tabel die alleen tellingen draagt (de categoriekaart):
      label en waarde op één regel naast elkaar, anders wordt elke categorie
      een kaart van vier regels en staat de lijst eronder van het scherm af. */
@@ -960,6 +972,7 @@ h1, h2, h3, h4,
   #section-retention .btn,
   #section-candidates .btn,
   #section-placements .btn,
+  #section-gdpr .btn,
   .offcanvas .btn,
   .modal .btn,
   .offcanvas .form-select,

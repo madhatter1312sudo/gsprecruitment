@@ -14,15 +14,29 @@
 
    API
      ui.modal({ id, title, subtitle, body, primary, secondary, danger,
-                confirmText, wide, closeLabel, onClose }) -> handle
+                confirmText, confirmCaseInsensitive, confirmInputType,
+                wide, closeLabel, onClose }) -> handle
        primary/secondary/danger: { label, onClick, keepOpen } of weggelaten.
        confirmText: de gebruiker moet die tekst letterlijk overtypen
        voordat de primaire of destructieve knop actief wordt.
+       confirmCaseInsensitive: vergelijkt na trim() en toLowerCase() in
+       plaats van een letterlijke match. De enige afnemer is het
+       AVG-wisformulier (§7.3.5): het over te typen e-mailadres mag met een
+       andere hoofdlettering terugkomen dan het adres waarmee de modal is
+       geopend. Elke andere destructieve modal in dit paneel typt een vaste
+       tekenreeks (APPROVE, een ID) en blijft hoofdlettergevoelig.
+       confirmInputType: 'text' (standaard) of 'email' -- §7.3.5 zet dit
+       veld op 'email' zodat een mobiel toetsenbord het @-teken toont;
+       elke andere destructieve modal laat dit weg.
        handle: { el, close(), setBody(html), selectTab(key),
-                 button(role), setBusy(on), syncGate() }
+                 button(role), setBusy(on), syncGate(), confirmValue() }
        button('primary'|'secondary'|'danger') geeft het knopelement, en
        setBusy(true) zet alle knoppen op disabled met een spinner op de
        handelende knop (§7.2c: laden houdt het paneel staan).
+       confirmValue() geeft de actuele, getrimde inhoud van het
+       bevestigingsveld -- de enige manier voor een aanroeper om bij het
+       bevestigen te lezen wat er precies getypt is (het bevestigingsveld
+       heeft geen eigen, door de aanroeper gekozen id).
 
      ui.drawer({ id, title, subtitle, tabs, tabAction, activeTab, dataset,
                  body, footer, onSelect, onClose }) -> handle
@@ -293,6 +307,14 @@
     const confirmId = opts.confirmText ? uid('confirm') : null;
     const hintId = confirmId ? confirmId + '_hint' : null;
     const mismatchId = confirmId ? confirmId + '_mismatch' : null;
+    // §7.3.5: het AVG-wisformulier vergelijkt het over te typen adres
+    // hoofdletterongevoelig na trim(); elke andere getypte bevestiging
+    // (APPROVE, een plaatsings-ID) blijft een letterlijke match.
+    const confirmMatch = (value) => {
+      const v = (value || '').trim();
+      const target = (opts.confirmText || '').trim();
+      return opts.confirmCaseInsensitive ? v.toLowerCase() === target.toLowerCase() : v === target;
+    };
     // opts.footer ({ primary, secondary }): het drawerpatroon uit §7.2b --
     // maximaal twee acties, geen getypte bevestiging en geen destructieve
     // variant (die hoort bij een modal, niet bij een blijvend geopende
@@ -335,15 +357,21 @@
           <p class="a-confirm-hint" id="${hintId}">Typ <code>${opts.confirmText}</code> om te bevestigen.</p>
           <div class="form-group mb-0">
             <label for="${confirmId}">Bevestiging</label>
-            <input type="text" id="${confirmId}" autocomplete="off" aria-describedby="${hintId} ${mismatchId}"
-              inputmode="text" autocapitalize="off" spellcheck="false">
+            <input type="${opts.confirmInputType || 'text'}" id="${confirmId}" autocomplete="off" aria-describedby="${hintId} ${mismatchId}"
+              inputmode="text" autocapitalize="off" autocorrect="off" spellcheck="false">
             <div class="a-confirm-mismatch text-danger-ink" id="${mismatchId}" aria-live="polite"></div>
           </div>
         </div>`
       : '';
     const buttonsHtml = buttons.length
+      // data-gsp-role: de rol blijft opvraagbaar ook nadat een aanroeper de
+      // klasse van een knop zelf heeft omgezet (§7.3.5: de tweede
+      // AVG-bevestigingsknop wisselt van .btn-primary naar
+      // .btn-outline-danger en deelt daarna zijn klasse met de eerste
+      // danger-knop; zonder dit attribuut zijn de twee dan niet meer
+      // los te selecteren).
       ? html`<div class="a-actions">${buttons.map((b, i) => html`
-          <button type="button" class="${b.cls}" id="${btnIds[i]}" ${raw(gated(b) ? 'disabled' : '')}>${b.label}</button>`)}
+          <button type="button" class="${b.cls}" id="${btnIds[i]}" data-gsp-role="${b.role}" ${raw(gated(b) ? 'disabled' : '')}>${b.label}</button>`)}
         </div>`
       : '';
     const tabsHtml = opts.tabs
@@ -432,6 +460,21 @@
       unwire();
       el._gspDetach = null;
       if (instance) instance.hide(); else fallbackHide(el);
+      // security-auditor op a2ec6ed: close() verborg het paneel alleen --
+      // el zelf bleef gevuld, dus een getypt e-mailadres (§7.3.5: het
+      // adres zelf als bevestiging, of het adres in het formulier "Adres
+      // toevoegen") bleef als tekst en als input.value in de verborgen DOM
+      // staan, ook na Annuleren en na een geslaagde afhandeling. Geen van
+      // beide hide-paden hierboven is bij ons geanimeerd (geen .fade-
+      // klasse, zie de toelichting bovenaan dit bestand), dus instance.hide()
+      // heeft de 'hidden.bs.modal'/'hidden.bs.offcanvas'-afhandeling van
+      // Bootstrap zelf -- en daarmee alles wat die intern aan el's eigen
+      // attributen doet -- al synchroon afgerond tegen de tijd dat deze
+      // regel loopt; leegmaken hierna raakt dat niet. Elke volgende opening
+      // van dit el gaat weer door panel() hierboven, dat vóór instance.show()
+      // altijd eerst een volledig nieuwe mount(el, ...) doet, dus dit maakt
+      // een latere hervulling nooit onvolledig.
+      mount(el, '');
       if (returnTo && typeof returnTo.focus === 'function' && document.contains(returnTo)) {
         makeFocusable(returnTo).focus();
       }
@@ -474,7 +517,7 @@
             }
             node.disabled = node.dataset.gspLock === '1'
               || !!(confirmId && gated(b) && confirmInput
-                && confirmInput.value.trim() !== opts.confirmText);
+                && !confirmMatch(confirmInput.value));
           }
         });
       },
@@ -486,8 +529,16 @@
           const node = document.getElementById(btnIds[i]);
           if (!node || !gated(b)) return;
           node.disabled = node.dataset.gspLock === '1'
-            || !!(confirmInput && confirmInput.value.trim() !== opts.confirmText);
+            || !!(confirmInput && !confirmMatch(confirmInput.value));
         });
+      },
+      // De actuele, getrimde inhoud van het bevestigingsveld. Nodig omdat
+      // dat veld geen door de aanroeper gekozen id heeft (uid() hierboven)
+      // -- de enige manier om te lezen wat er precies getypt is, bijvoorbeeld
+      // om het als `confirm` in een payload mee te sturen (§7.3.5: dat moet
+      // wat getypt is zijn, niet een ander veld op het scherm).
+      confirmValue() {
+        return confirmInput ? confirmInput.value.trim() : '';
       },
       setBody(newBody) { mount(document.getElementById(bodyId), newBody); },
       selectTab(key) {
@@ -522,7 +573,7 @@
       .filter(({ b }) => gated(b));
     if (confirmInput) {
       confirmInput.addEventListener('input', () => {
-        const ok = confirmInput.value.trim() === opts.confirmText;
+        const ok = confirmMatch(confirmInput.value);
         // data-gsp-lock: een knop die de aanroeper bewust heeft
         // uitgeschakeld (een cap die overschreden is, een bulk die al
         // verwerkt is, een lijst die niet geladen kon worden) mag door de

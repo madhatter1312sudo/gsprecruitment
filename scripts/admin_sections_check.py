@@ -410,6 +410,49 @@ PLACEMENTS_STATE = {
     "delete_conflict_once": True,
 }
 
+# ---- AVG: wissen en suppressielijst (§7.3.5) -----------------------------
+# GDPR_STATE["erase_calls"] legt elke POST-payload vast, zodat de test op de
+# aanroep zelf kan toetsen (confirm = wat getypt is, confirm_admin_or_self
+# nooit standaard true) en niet alleen op wat het scherm toont.
+GDPR_STATE = {
+    "erase_calls": [],
+    # Precies één adres triggert de 409 erase_admin_or_self_requires_confirm
+    # -- elk ander adres slaagt in één ronde.
+    "admin_or_self_emails": {"beheerder@voorbeeld.invalid"},
+    # Eén geforceerde 422 erase_confirm_must_match_email, ook al stuurde de
+    # UI zelf een kloppende confirm: het vangnet uit §7.3.5 moet de vaste
+    # Nederlandse zin tonen ongeacht wat de client meende te hebben
+    # gecontroleerd.
+    "force_422_once": False,
+}
+
+# 120 rijen naast de paginagrootte van 100 (SUPPRESSION_PAGE_SIZE in
+# js/sections/gdpr.js), zodat paginering bewezen kan worden. Drie rijen op
+# pagina 1 delen het domein "gefilterd.nl" (domeinfilter, meerdere
+# treffers); rij 105 (alleen op pagina 2) heeft een domein dat op pagina 1
+# nergens voorkomt (domeinfilter is client-side per pagina, geen aanroep
+# over de hele verzameling).
+SUPPRESSION_TOTAL = 120
+
+
+def _suppression_item(i):
+    if i in (1, 2, 3):
+        domain = "gefilterd.nl"
+    elif i == 105:
+        domain = "alleen-pagina-twee.nl"
+    else:
+        domain = f"voorbeeld{i}.nl"
+    email_hash = f"{i:04d}" + ("0" * 30) + f"h{i % 1000:03d}"
+    return {
+        "id": i, "email_hash": email_hash, "email_domain": domain,
+        "reason": "STOP" if i % 2 else "handmatig",
+        "created_at": f"2026-09-{(i % 27) + 1:02d}T00:00:00Z",
+    }
+
+
+SUPPRESSION_ITEMS = [_suppression_item(i) for i in range(1, SUPPRESSION_TOTAL + 1)]
+SUPPRESSION_STATE = {"mode": "ok", "adds": []}  # mode: "ok" | "empty" | "error"
+
 
 def candidate_roster_item():
     r = CANDIDATE_RECORD
@@ -1181,6 +1224,65 @@ def route_admin_api(route, request):
         route.fulfill(status=204, content_type="application/json", body="")
         return
 
+    # ---- AVG: wissen (§7.3.5, talent-os/backend/routers/gdpr.py 771-856) --
+    if path == "/api/v1/admin/gdpr/erase" and method == "POST":
+        body = json.loads(request.post_data or "{}")
+        GDPR_STATE["erase_calls"].append(body)
+        if GDPR_STATE["force_422_once"]:
+            GDPR_STATE["force_422_once"] = False
+            json_response({"detail": {
+                "code": "erase_confirm_must_match_email",
+                "message": "confirm must repeat the e-mail address in `email` exactly. "
+                           "Case and surrounding whitespace are ignored; nothing else is.",
+            }}, status=422)
+            return
+        email_norm = (body.get("email") or "").strip().lower()
+        confirm_norm = (body.get("confirm") or "").strip().lower()
+        if confirm_norm != email_norm:
+            json_response({"detail": {
+                "code": "erase_confirm_must_match_email",
+                "message": "confirm must repeat the e-mail address in `email` exactly.",
+            }}, status=422)
+            return
+        if email_norm in GDPR_STATE["admin_or_self_emails"] and not body.get("confirm_admin_or_self"):
+            json_response({"detail": {
+                "code": "erase_admin_or_self_requires_confirm",
+                "message": "This e-mail matches an admin account or your own account. "
+                           "Resend with confirm_admin_or_self: true to proceed.",
+            }}, status=409)
+            return
+        json_response({
+            "status": "complete", "email_hash": "stubhash0000000000000000000000abc",
+            "cv_files_deleted": ["cv/501/old.pdf"], "cv_files_failed": [],
+        })
+        return
+
+    # ---- Suppressielijst (§7.3.5, gdpr.py 861-923) --------------------
+    if path == "/api/v1/admin/suppression" and method == "GET":
+        if SUPPRESSION_STATE["mode"] == "error":
+            json_response({"detail": "Internal error"}, status=500)
+            return
+        if SUPPRESSION_STATE["mode"] == "empty":
+            json_response({"items": [], "total": 0, "limit": qint(qs, "limit", 100), "offset": qint(qs, "offset", 0)})
+            return
+        limit = qint(qs, "limit", 100)
+        offset = qint(qs, "offset", 0)
+        json_response({
+            "items": SUPPRESSION_ITEMS[offset:offset + limit],
+            "total": len(SUPPRESSION_ITEMS), "limit": limit, "offset": offset,
+        })
+        return
+    if path == "/api/v1/admin/suppression" and method == "POST":
+        body = json.loads(request.post_data or "{}")
+        SUPPRESSION_STATE["adds"].append(body)
+        email = body.get("email") or ""
+        domain = email.split("@")[-1] if "@" in email else "voorbeeld.nl"
+        json_response({
+            "id": 9999, "email_domain": domain, "reason": body.get("reason") or "STOP",
+            "created_at": "2026-09-12T00:00:00Z",
+        }, status=201)
+        return
+
     json_response({"items": [], "total": 0})
 
 
@@ -1367,6 +1469,25 @@ def element_from_point_is_self(page, selector):
         "return hit === el; }"))
 
 
+def panel_is_scrubbed(page, selector):
+    """security-auditor op a2ec6ed: ui.js' close() maakt het paneel-element
+    zelf leeg (mount(el, '')) zodra het verborgen is, in plaats van alleen
+    de show-klasse te verwijderen. Geeft True wanneer `selector` geen
+    tekst meer draagt en geen enkel invoerveld erbinnen nog een waarde
+    heeft -- de vorm waarin een getypt e-mailadres anders als tekst of als
+    .value in de verborgen DOM was blijven staan, ook na Annuleren en na
+    een geslaagde afhandeling. False (met de reden) wanneer het element
+    niet bestaat of nog iets draagt."""
+    if page.query_selector(selector) is None:
+        return False
+    return bool(page.eval_on_selector(
+        selector,
+        "el => (el.textContent || '').trim() === '' && "
+        "[...el.querySelectorAll('input, textarea')].every(f => !f.value)",
+    ))
+
+
+
 def fields_behind_sticky_footer(page, container_selector):
     """chief-of-staff op 09e99cc: bij scrollTop 0 mag het midden van geen
     enkel formulierveld in `container_selector` binnen de band van zijn
@@ -1449,21 +1570,43 @@ def main():
             """
         )
 
+        # §7.3.5: de kopieerknop op de suppressietabel gebruikt
+        # navigator.clipboard.writeText -- een headless context heeft geen
+        # echte clipboardtoegang (en zou een OS-permissieprompt nodig
+        # hebben), dus die ene methode wordt hier vervangen door een stub
+        # die wegschrijft naar window.__copiedText.
+        context.add_init_script(
+            "try { Object.defineProperty(navigator, 'clipboard', { value: "
+            "{ writeText: (t) => { window.__copiedText = t; return Promise.resolve(); } }, "
+            "configurable: true }); } catch (e) {}"
+        )
+
         context.route(re.compile(r"^https://api\.gsprecruitment\.nl/api/"), route_admin_api)
         context.route(re.compile(r"^https://(fonts\.googleapis\.com|fonts\.gstatic\.com|cdnjs\.cloudflare\.com|cdn\.jsdelivr\.net)/"),
                        lambda route, request: route.abort())
 
         console_errors = []
+        # security-auditor op a2ec6ed: de lekcontrole in de gdpr-passage
+        # ("geen adres in de console, ook niet bij een fout") toetste alleen
+        # console_errors, en een adres dat per ongeluk via console.warn/log
+        # (bijvoorbeeld een debugregel die per abuis het adres meegeeft in
+        # plaats van alleen de foutcode, §7.2f) naar buiten komt, is geen
+        # console-error en viel dus buiten die controle. console_all vangt
+        # elk berichttype, ongeacht of de rest van de suite (die alleen op
+        # fouten toetst) er iets mee doet.
+        console_all = []
 
         def on_console(msg):
+            text = msg.text
+            console_all.append(text)
             if msg.type == "error":
-                text = msg.text
                 if "favicon" in text.lower() or "net::ERR_FAILED" in text:
                     return
                 console_errors.append(text)
 
         def on_pageerror(exc):
             console_errors.append(f"pageerror: {exc}")
+            console_all.append(f"pageerror: {exc}")
 
         page = context.new_page()
         page.on("console", on_console)
@@ -1874,8 +2017,9 @@ def main():
 
         # Goedkeuren: getypte bevestiging, fout en goed.
         click_or_fail(page, failures, '#retentionBody [data-action="retention-approve"][data-id="1"]', "de goedkeurknop van item 1")
-        if not wait_until(page, lambda: page.query_selector('#retentionApproveModal input[type=text]') is not None):
-            failures.append("retention: de goedkeurmodal ging niet open")
+        if not wait_until(page, lambda: page.query_selector('#retentionApproveModal input[type=text]') is not None
+                           and page.query_selector('#retentionApproveModal .modal-body') is not None):
+            failures.append("retention: de goedkeurmodal ging niet (volledig) open")
         modal_text = text_of(page, '#retentionApproveModal')
         if "k••••@example.invalid" not in modal_text:
             failures.append(f"retention: de goedkeurmodal toont het adres niet gemaskeerd -- kreeg {modal_text[:200]!r}")
@@ -2485,6 +2629,13 @@ def main():
         if not wait_until(page, lambda: "vastgelegd" in text_of(page, '#candidateDrawerTabContent')):
             failures.append("candidates: de toestemmingentab herlaadde niet na het vastleggen van presentatietoestemming")
 
+        # Dezelfde soort race als bij de retentionApproveModal-guard
+        # hierboven: switchCandidateTab() ververst de tabinhoud ASYNCHROON
+        # ná handle.close() (submitPresentationConsent in candidates.js),
+        # dus een tweede klik op deze knop mag niet eerder dan die
+        # ververste tab de knop weer teruggeeft -- anders is hij er
+        # eventjes niet, en faalt de klik met een verkeerde reden.
+        wait_until(page, lambda: page.query_selector('[data-action="candidate-presentation-edit"]') is not None)
         click_or_fail(page, failures, '[data-action="candidate-presentation-edit"]', "candidates: Vastleggen (presentatie, intrekken)")
         wait_until(page, lambda: page.query_selector('#spConsentWithdraw') is not None)
         check_or_fail(page, failures, '#spConsentWithdraw', "candidates: Intrekken kiezen (presentatie)")
@@ -3119,6 +3270,292 @@ def main():
         if new_errors:
             failures.append(f"placements: {len(new_errors)} console error(s): {new_errors[:3]}")
 
+        # ---- AVG: wissen en suppressielijst (§7.3.5) -----------------
+        errors_before = len(console_errors)
+        all_before = len(console_all)
+
+        # Eerste bezoek met een lege verzameling: de lege staat, niet een
+        # generieke "geen resultaten".
+        SUPPRESSION_STATE["mode"] = "empty"
+        page.click('.nav-link[data-section="gdpr"]')
+        if not wait_for_text(page, '#gdprSuppressionBody', 'Nog geen adressen op de suppressielijst.'):
+            failures.append(f"gdpr: lege staat toont niet de juiste tekst -- kreeg {text_of(page, '#gdprSuppressionBody')!r}")
+
+        # Toevoegen: lege invoer geeft nul aanroepen.
+        click_or_fail(page, failures, '[data-action="gdpr-open-suppression-add"]', "gdpr: 'Adres toevoegen'")
+        wait_until(page, lambda: page.query_selector('#gdprSuppressionModal.show') is not None)
+        adds_before = len(SUPPRESSION_STATE["adds"])
+        click_or_fail(page, failures, '#gdprSuppressionModal .btn-primary', "gdpr: 'Toevoegen' (leeg e-mailadres)")
+        if not wait_for_text(page, '#gdprSuppressionEmailError', 'verplicht'):
+            failures.append(f"gdpr: leeg e-mailadres in de toevoegmodal toont geen inline fout -- kreeg {text_of(page, '#gdprSuppressionEmailError')!r}")
+        if len(SUPPRESSION_STATE["adds"]) != adds_before:
+            failures.append("gdpr: een leeg e-mailadres riep toch de suppressieroute aan")
+
+        # Geldig: POST met reden, en de lijst herlaadt (nu gevuld, mode is
+        # inmiddels "ok" -- de POST zelf hangt niet van de GET-mode af).
+        SUPPRESSION_STATE["mode"] = "ok"
+        fill_or_fail(page, failures, '#gdprSuppressionEmail', 'stop@voorbeeld.invalid', "gdpr: e-mailadres invullen (toevoegen)")
+        fill_or_fail(page, failures, '#gdprSuppressionReason', 'Telefonisch STOP ontvangen', "gdpr: reden invullen (toevoegen)")
+        click_or_fail(page, failures, '#gdprSuppressionModal .btn-primary', "gdpr: 'Toevoegen' (geldig)")
+        if not wait_for_calls(page, SUPPRESSION_STATE["adds"], adds_before + 1):
+            failures.append("gdpr: een geldig adres riep de suppressieroute niet aan")
+        added = SUPPRESSION_STATE["adds"][adds_before]
+        if added.get("email") != "stop@voorbeeld.invalid" or added.get("reason") != "Telefonisch STOP ontvangen":
+            failures.append(f"gdpr: de POST-payload klopt niet -- kreeg {added!r}")
+        if not wait_until(page, lambda: page.query_selector('#gdprSuppressionModal.show') is None):
+            failures.append("gdpr: de toevoegmodal sloot niet na succes")
+        if not wait_until(page, lambda: panel_is_scrubbed(page, '#gdprSuppressionModal')):
+            failures.append("gdpr: de toevoegmodal draagt na sluiten nog tekst of een veldwaarde (ui.js close() moet het paneel leegmaken)")
+        if not wait_until(page, lambda: len(page.query_selector_all('#gdprSuppressionBody tr')) == 100):
+            failures.append(f"gdpr: de lijst herlaadde niet na het toevoegen (120 rijen naast de paginagrootte van 100) -- kreeg {len(page.query_selector_all('#gdprSuppressionBody tr'))}")
+        if not wait_for_text(page, '#gdprSuppressionCount', '100 van 120'):
+            failures.append(f"gdpr: telling boven de tabel toont niet '100 van 120' -- kreeg {text_of(page, '#gdprSuppressionCount')!r}")
+        if page.query_selector('#gdprSuppressionPagination button[data-page="2"]') is None:
+            failures.append("gdpr: paginering met 120 rijen toonde geen pagina 2")
+
+        # Domeinfilter: meerdere treffers op de geladen pagina.
+        fill_or_fail(page, failures, '#gdprSuppressionSearch', 'gefilterd', "gdpr: domeinfilter (meerdere treffers)")
+        if not wait_until(page, lambda: len(page.query_selector_all('#gdprSuppressionBody tr')) == 3):
+            failures.append(f"gdpr: domeinfilter 'gefilterd' gaf niet 3 rijen -- kreeg {len(page.query_selector_all('#gdprSuppressionBody tr'))}")
+
+        # Domeinfilter: een domein dat alleen op pagina 2 voorkomt -- de
+        # tekst zegt dat expliciet in plaats van een lege staat te tonen
+        # die op de hele verzameling lijkt te gelden.
+        fill_or_fail(page, failures, '#gdprSuppressionSearch', 'alleen-pagina-twee', "gdpr: domeinfilter (geen treffer op deze pagina)")
+        if not wait_for_text(page, '#gdprSuppressionBody', 'Geen adressen op deze pagina met dit domein'):
+            failures.append(f"gdpr: domeinfilter zonder treffer op de pagina toont niet de juiste toelichting -- kreeg {text_of(page, '#gdprSuppressionBody')!r}")
+
+        fill_or_fail(page, failures, '#gdprSuppressionSearch', '', "gdpr: domeinfilter wissen")
+        if not wait_until(page, lambda: len(page.query_selector_all('#gdprSuppressionBody tr')) == 100):
+            failures.append("gdpr: het wissen van het domeinfilter herstelde de volledige pagina niet")
+
+        # Pagina 2: de ingekorte hash (eerste vier, laatste drie tekens, in
+        # title= de volledige hash) en de kopieerknop.
+        click_or_fail(page, failures, '#gdprSuppressionPagination button[data-page="2"]', "gdpr: paginaknop 2")
+        if not wait_until(page, lambda: len(page.query_selector_all('#gdprSuppressionBody tr')) == 20):
+            failures.append(f"gdpr: pagina 2 toont niet 20 rijen -- kreeg {len(page.query_selector_all('#gdprSuppressionBody tr'))}")
+        if not wait_for_text(page, '#gdprSuppressionCount', '20 van 120'):
+            failures.append(f"gdpr: telling op pagina 2 toont niet '20 van 120' -- kreeg {text_of(page, '#gdprSuppressionCount')!r}")
+        expected_hash = _suppression_item(105)["email_hash"]
+        expected_short = expected_hash[:4] + "…" + expected_hash[-3:]
+        find_row105 = (
+            "els => { const row = els.find(tr => tr.textContent.includes('alleen-pagina-twee.nl')); "
+            "if (!row) return null; const el = row.querySelector('[title]'); "
+            "return el ? { short: el.textContent.trim(), title: el.getAttribute('title'), "
+            "btnId: (row.querySelector('[data-action=\"gdpr-copy-hash\"]') || {}).id || null } : null; }"
+        )
+        row105 = page.eval_on_selector_all('#gdprSuppressionBody tr', find_row105)
+        if not row105:
+            failures.append("gdpr: rij 105 (alleen op pagina 2) niet gevonden")
+        else:
+            if row105.get("short") != expected_short:
+                failures.append(f"gdpr: ingekorte hash klopt niet -- verwacht {expected_short!r}, kreeg {row105.get('short')!r}")
+            if row105.get("title") != expected_hash:
+                failures.append(f"gdpr: title= draagt niet de volledige hash -- verwacht {expected_hash!r}, kreeg {row105.get('title')!r}")
+            if not row105.get("btnId"):
+                failures.append("gdpr: kopieerknop voor rij 105 niet gevonden")
+            else:
+                click_or_fail(page, failures, f"#{row105['btnId']}", "gdpr: kopieerknop")
+                if not wait_until(page, lambda: page.evaluate("() => window.__copiedText") == expected_hash):
+                    failures.append(f"gdpr: kopieerknop kopieerde niet de volledige hash -- kreeg {page.evaluate('() => window.__copiedText')!r}")
+
+        # 500 met retry, terug op pagina 1.
+        SUPPRESSION_STATE["mode"] = "error"
+        click_or_fail(page, failures, '#gdprSuppressionPagination button[data-page="1"]', "gdpr: paginaknop 1 (voor de 500-test)")
+        if not wait_for_text(page, '#gdprSuppressionBody', 'probeer opnieuw'):
+            failures.append(f"gdpr: 500 toont geen foutstaat met retrylink -- kreeg {text_of(page, '#gdprSuppressionBody')!r}")
+        SUPPRESSION_STATE["mode"] = "ok"
+        retry = page.query_selector('#gdprSuppressionBody a')
+        if retry is None:
+            failures.append("gdpr: geen retrylink gevonden om van de 500 te herstellen")
+        else:
+            try:
+                retry.click(timeout=6000)
+            except Exception as exc:
+                failures.append(f"gdpr: retrylink niet klikbaar binnen 6000ms ({exc})")
+            else:
+                if not wait_until(page, lambda: len(page.query_selector_all('#gdprSuppressionBody tr')) == 100):
+                    failures.append("gdpr: herstelde niet na de retry")
+
+        # ---- Persoon wissen (art. 17) --------------------------------
+        # Leeg adres: inline fout, geen aanroep.
+        click_or_fail(page, failures, '[data-action="gdpr-open-erase"]', "gdpr: 'Zoeken en wissen' (leeg adres)")
+        if not wait_for_text(page, '#gdprEraseEmailError', 'verplicht'):
+            failures.append(f"gdpr: leeg adres toont geen inline fout -- kreeg {text_of(page, '#gdprEraseEmailError')!r}")
+        if GDPR_STATE["erase_calls"]:
+            failures.append("gdpr: een leeg adres riep toch de wisroute aan")
+
+        # Ongeldig adres: inline fout, geen aanroep, geen modal.
+        fill_or_fail(page, failures, '#gdprEraseEmail', 'niet-een-adres', "gdpr: ongeldig e-mailadres invullen")
+        click_or_fail(page, failures, '[data-action="gdpr-open-erase"]', "gdpr: 'Zoeken en wissen' (ongeldig adres)")
+        if not wait_for_text(page, '#gdprEraseEmailError', 'geldig'):
+            failures.append(f"gdpr: ongeldig adres toont geen inline fout -- kreeg {text_of(page, '#gdprEraseEmailError')!r}")
+        if page.query_selector('#gdprEraseModal.show') is not None:
+            failures.append("gdpr: de wismodal opende ondanks een ongeldig adres")
+        if GDPR_STATE["erase_calls"]:
+            failures.append("gdpr: een ongeldig adres riep toch de wisroute aan")
+
+        danger_sel = '#gdprEraseModal [data-gsp-role="danger"]'
+        primary_sel = '#gdprEraseModal [data-gsp-role="primary"]'
+        confirm_sel = '#gdprEraseModal input[type="email"]'
+
+        # Geldig adres: de modal opent met het adres en de opsomming.
+        fill_or_fail(page, failures, '#gdprEraseEmail', 'Kandidaat@Voorbeeld.invalid', "gdpr: geldig e-mailadres invullen")
+        click_or_fail(page, failures, '[data-action="gdpr-open-erase"]', "gdpr: 'Zoeken en wissen'")
+        if not wait_until(page, lambda: page.query_selector('#gdprEraseModal.show') is not None):
+            failures.append("gdpr: de wismodal opende niet bij een geldig adres")
+        modal_text = text_of(page, '#gdprEraseModal')
+        if "Kandidaat@Voorbeeld.invalid" not in modal_text:
+            failures.append(f"gdpr: de modal toont niet het ingevoerde adres -- kreeg {modal_text[:200]!r}")
+        if "Geanonimiseerd" not in modal_text or "Verwijderd" not in modal_text:
+            failures.append("gdpr: de modal toont niet de opsomming van wat er gebeurt")
+
+        # Verkeerde bevestiging: een ander adres.
+        fill_or_fail(page, failures, confirm_sel, 'iemand-anders@voorbeeld.invalid', "gdpr: verkeerde bevestiging (ander adres)")
+        if is_disabled(page, danger_sel) is not True:
+            failures.append("gdpr: wisknop stond aan bij een ander adres als bevestiging")
+
+        # Verkeerde bevestiging: hetzelfde adres met een letter erbij.
+        fill_or_fail(page, failures, confirm_sel, 'Kandidaat@Voorbeeld.invalidx', "gdpr: verkeerde bevestiging (adres plus letter)")
+        if is_disabled(page, danger_sel) is not True:
+            failures.append("gdpr: wisknop stond aan bij een adres met een letter erbij")
+
+        # Juiste bevestiging: andere hoofdlettering en spaties, geaccepteerd.
+        fill_or_fail(page, failures, confirm_sel, '  kandidaat@voorbeeld.INVALID  ', "gdpr: juiste bevestiging (andere hoofdlettering)")
+        if not wait_for_enabled(page, danger_sel, True):
+            failures.append("gdpr: wisknop bleef uit bij een hoofdletter/spaties-variant van hetzelfde adres")
+
+        # Dubbelklik: precies één aanroep.
+        erase_calls_before = len(GDPR_STATE["erase_calls"])
+        try:
+            page.dblclick(danger_sel, timeout=6000)
+        except Exception as exc:
+            failures.append(f"gdpr: dubbelklik op 'Wissen (definitief)' lukte niet binnen 6000ms ({exc})")
+        if not wait_for_calls(page, GDPR_STATE["erase_calls"], erase_calls_before + 1):
+            failures.append("gdpr: dubbelklik riep de wisroute niet aan")
+        if wait_until(page, lambda: len(GDPR_STATE["erase_calls"]) > erase_calls_before + 1, timeout=500):
+            failures.append(f"gdpr: dubbelklik gaf {len(GDPR_STATE['erase_calls']) - erase_calls_before} aanroepen in plaats van 1")
+        first_call = GDPR_STATE["erase_calls"][erase_calls_before]
+        if first_call.get("confirm_admin_or_self") is not False:
+            failures.append(f"gdpr: eerste aanroep stuurde confirm_admin_or_self niet als false -- kreeg {first_call!r}")
+        if (first_call.get("confirm") or "").strip().lower() != "kandidaat@voorbeeld.invalid":
+            failures.append(f"gdpr: confirm bevatte niet het getypte adres -- kreeg {first_call.get('confirm')!r}")
+
+        # Succes: resultaatblok, en de knop op slot.
+        if not wait_for_text(page, '#gdprEraseModal', 'Volledig verwerkt'):
+            failures.append(f"gdpr: geen resultaatblok na een geslaagde wissing -- kreeg {text_of(page, '#gdprEraseModal')[:300]!r}")
+        if is_disabled(page, danger_sel) is not True:
+            failures.append("gdpr: de wisknop is na succes niet op slot gezet")
+        if page.get_attribute(danger_sel, 'data-gsp-lock') != '1':
+            failures.append("gdpr: de wisknop draagt geen data-gsp-lock na succes")
+        page.keyboard.press('Escape')
+        wait_until(page, lambda: page.query_selector('#gdprEraseModal.show') is None)
+        if not wait_until(page, lambda: panel_is_scrubbed(page, '#gdprEraseModal')):
+            failures.append("gdpr: de wismodal draagt na een geslaagde wissing nog tekst of een veldwaarde (ui.js close() moet het paneel leegmaken)")
+
+        # Enter in het bevestigingsveld: ook precies één aanroep.
+        fill_or_fail(page, failures, '#gdprEraseEmail', 'nog-een-adres@voorbeeld.invalid', "gdpr: tweede e-mailadres (Enter-test)")
+        click_or_fail(page, failures, '[data-action="gdpr-open-erase"]', "gdpr: 'Zoeken en wissen' (Enter-test)")
+        wait_until(page, lambda: page.query_selector('#gdprEraseModal.show') is not None)
+        enter_calls_before = len(GDPR_STATE["erase_calls"])
+        fill_or_fail(page, failures, confirm_sel, 'nog-een-adres@voorbeeld.invalid', "gdpr: bevestiging invullen (Enter-test)")
+        if not wait_for_enabled(page, danger_sel, True):
+            failures.append("gdpr: wisknop bleef uit voor de Enter-test")
+        page.keyboard.press('Enter')
+        if not wait_for_calls(page, GDPR_STATE["erase_calls"], enter_calls_before + 1):
+            failures.append("gdpr: Enter in het bevestigingsveld riep de wisroute niet aan")
+        if wait_until(page, lambda: len(GDPR_STATE["erase_calls"]) > enter_calls_before + 1, timeout=500):
+            failures.append("gdpr: Enter gaf meer dan één aanroep")
+        wait_for_text(page, '#gdprEraseModal', 'Volledig verwerkt')
+        page.keyboard.press('Escape')
+        wait_until(page, lambda: page.query_selector('#gdprEraseModal.show') is None)
+        if not wait_until(page, lambda: panel_is_scrubbed(page, '#gdprEraseModal')):
+            failures.append("gdpr: de wismodal draagt na de Enter-test nog tekst of een veldwaarde (ui.js close() moet het paneel leegmaken)")
+
+        # 409 erase_admin_or_self_requires_confirm: de tweede stap, en pas na
+        # de checkbox gaat de tweede aanroep uit.
+        fill_or_fail(page, failures, '#gdprEraseEmail', 'Beheerder@Voorbeeld.invalid', "gdpr: beheerdersadres invullen")
+        click_or_fail(page, failures, '[data-action="gdpr-open-erase"]', "gdpr: 'Zoeken en wissen' (beheerdersadres)")
+        wait_until(page, lambda: page.query_selector('#gdprEraseModal.show') is not None)
+        fill_or_fail(page, failures, confirm_sel, 'Beheerder@Voorbeeld.invalid', "gdpr: bevestiging invullen (beheerdersadres)")
+        if not wait_for_enabled(page, danger_sel, True):
+            failures.append("gdpr: wisknop bleef uit voor het beheerdersadres")
+        admin_calls_before = len(GDPR_STATE["erase_calls"])
+        click_or_fail(page, failures, danger_sel, "gdpr: 'Wissen (definitief)' (beheerdersadres, verwacht 409)")
+        if not wait_for_calls(page, GDPR_STATE["erase_calls"], admin_calls_before + 1):
+            failures.append("gdpr: de eerste aanroep voor het beheerdersadres ging niet uit")
+        if GDPR_STATE["erase_calls"][admin_calls_before].get("confirm_admin_or_self") is not False:
+            failures.append("gdpr: de eerste aanroep stuurde confirm_admin_or_self niet als false, ook voor het beheerdersadres")
+        if not wait_for_text(page, '#gdprEraseModal', 'beheerderstoegang'):
+            failures.append(f"gdpr: geen tweede-stapmelding na de 409 -- kreeg {text_of(page, '#gdprEraseModal')[:300]!r}")
+        if not wait_until(page, lambda: page.query_selector(primary_sel) is not None and page.get_attribute(primary_sel, 'hidden') is None):
+            failures.append("gdpr: de tweede knop verscheen niet na de 409")
+        if is_disabled(page, primary_sel) is not True:
+            failures.append("gdpr: de tweede knop stond al aan vóór het aanvinken van de checkbox")
+
+        # Zonder de checkbox: forceren van een klik mag geen aanroep opleveren
+        # (de knop is zowel visueel als in de handler zelf geblokkeerd).
+        try:
+            page.click(primary_sel, force=True, timeout=2000)
+        except Exception:
+            pass
+        if len(GDPR_STATE["erase_calls"]) != admin_calls_before + 1:
+            failures.append("gdpr: de tweede knop riep de wisroute aan zonder dat de checkbox was aangevinkt")
+
+        check_or_fail(page, failures, '#gdprEraseAdminConfirm', "gdpr: checkbox 'Ik begrijp dat hiermee beheerderstoegang verdwijnt'")
+        if not wait_for_enabled(page, primary_sel, True):
+            failures.append("gdpr: de tweede knop bleef uit na het aanvinken van de checkbox")
+        click_or_fail(page, failures, primary_sel, "gdpr: de tweede knop (confirm_admin_or_self)")
+        if not wait_for_calls(page, GDPR_STATE["erase_calls"], admin_calls_before + 2):
+            failures.append("gdpr: de tweede aanroep (confirm_admin_or_self) ging niet uit")
+        else:
+            second_call = GDPR_STATE["erase_calls"][admin_calls_before + 1]
+            if second_call.get("confirm_admin_or_self") is not True:
+                failures.append(f"gdpr: de tweede aanroep stuurde confirm_admin_or_self niet als true -- kreeg {second_call!r}")
+            # security-auditor op a2ec6ed: het bevestigingsveld staat na de
+            # 409 op slot, juist om te voorkomen dat de tweede aanroep een
+            # ander adres of een andere confirm draagt dan de eerste.
+            first_call = GDPR_STATE["erase_calls"][admin_calls_before]
+            if second_call.get("email") != first_call.get("email") or second_call.get("confirm") != first_call.get("confirm"):
+                failures.append(
+                    "gdpr: de eerste en de tweede aanroep (voor hetzelfde beheerdersadres) dragen niet "
+                    f"dezelfde email/confirm -- eerste {first_call!r}, tweede {second_call!r}"
+                )
+        wait_for_text(page, '#gdprEraseModal', 'Volledig verwerkt')
+        page.keyboard.press('Escape')
+        wait_until(page, lambda: page.query_selector('#gdprEraseModal.show') is None)
+        if not wait_until(page, lambda: panel_is_scrubbed(page, '#gdprEraseModal')):
+            failures.append("gdpr: de wismodal draagt na de tweede-stapafhandeling nog tekst of een veldwaarde (ui.js close() moet het paneel leegmaken)")
+
+        # 422 erase_confirm_must_match_email als vangnet: de vaste
+        # Nederlandse zin, ook al matchte de client-side confirm zelf.
+        fill_or_fail(page, failures, '#gdprEraseEmail', 'derde@voorbeeld.invalid', "gdpr: derde e-mailadres (422-vangnet)")
+        click_or_fail(page, failures, '[data-action="gdpr-open-erase"]', "gdpr: 'Zoeken en wissen' (422-vangnet)")
+        wait_until(page, lambda: page.query_selector('#gdprEraseModal.show') is not None)
+        fill_or_fail(page, failures, confirm_sel, 'derde@voorbeeld.invalid', "gdpr: bevestiging invullen (422-vangnet)")
+        if not wait_for_enabled(page, danger_sel, True):
+            failures.append("gdpr: wisknop bleef uit voor de 422-vangnettest")
+        GDPR_STATE["force_422_once"] = True
+        click_or_fail(page, failures, danger_sel, "gdpr: 'Wissen (definitief)' (422-vangnet)")
+        if not wait_for_text(page, '#gdprEraseAlert', 'Typ het adres opnieuw'):
+            failures.append(f"gdpr: de 422-vangnetmelding toont niet de vaste zin -- kreeg {text_of(page, '#gdprEraseAlert')!r}")
+        page.keyboard.press('Escape')
+        wait_until(page, lambda: page.query_selector('#gdprEraseModal.show') is None)
+        if not wait_until(page, lambda: panel_is_scrubbed(page, '#gdprEraseModal')):
+            failures.append("gdpr: de wismodal draagt na Annuleren (422-vangnet) nog tekst of een veldwaarde (ui.js close() moet het paneel leegmaken)")
+
+        # Geen adres lekte naar de console, ook niet in een foutmelding, en
+        # ook niet via console.warn/log/info/debug (security-auditor op
+        # a2ec6ed: alleen console_errors toetsen ziet een adres in een
+        # gewone log- of waarschuwingsregel niet).
+        leaked = [e for e in console_all[all_before:] if "voorbeeld.invalid" in e]
+        if leaked:
+            failures.append(f"gdpr: een e-mailadres lekte naar de console: {leaked[:3]}")
+        new_errors = [e for e in console_errors[errors_before:]
+                      if "409 (Conflict)" not in e and "422" not in e and "500 (Internal Server Error)" not in e]
+        if new_errors:
+            failures.append(f"gdpr: {len(new_errors)} console error(s): {new_errors[:3]}")
+
         browser.close()
 
     if failures:
@@ -3136,7 +3573,11 @@ def main():
           "filters, drawer met Overzicht/Financieel/Marge, statuswissel gewoon en destructief naar "
           "geannuleerd, marge met null-invoer/herberekenen/ongeldig bedrag, aanmaken en bewerken met "
           "komma-decimalen en een onwijzigbare FK-set, verwijderen met een 409 en het juiste ID, en "
-          "500 met retry) renderden allemaal correct, zonder console errors.")
+          "500 met retry) en AVG (§7.3.5: suppressielijst met 120 rijen naast de paginagrootte, "
+          "paginering, domeinfilter op de geladen pagina, ingekorte hash met kopieerknop en 500 met "
+          "retry; wissen met getypte bevestiging op het adres zelf hoofdletterongevoelig, precies één "
+          "aanroep bij dubbelklik en Enter, de 409- en 422-vangnetten) renderden allemaal correct, "
+          "zonder console errors.")
     sys.exit(0)
 
 
