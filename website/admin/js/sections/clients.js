@@ -1,6 +1,8 @@
 /* ============================================================
    GSP Recruitment — admin/js/sections/clients.js
-   Opdrachtgevers: lijst en het detailpaneel met vijf tabbladen.
+   Opdrachtgevers: lijst en het detailpaneel met zes tabbladen (de tab
+   Pipeline kwam er met §7.3.4 bij, op dezelfde gedeelde
+   Admin.loadPipelineTab() als de kandidaatdrawer in candidates.js).
 
    Registreert zichzelf via Admin.registerSection(). Geladen na admin.js
    (kern) en voor nav.js, dat de registry uitleest. Geen ES-module: de
@@ -60,7 +62,7 @@
       </tr>`)}`);
   },
 
-  // De vijf tabbladen van het detailpaneel. Sinds WS5 stap 3 is dit een
+  // De zes tabbladen van het detailpaneel. Sinds WS5 stap 3 is dit een
   // ui.drawer (Bootstrap Offcanvas) met ui.tabs in plaats van een brede
   // modal met een handgerolde tabstrip: de tabstrip krijgt daarmee
   // role="tablist" en aria-selected, en het paneel schuift in vanaf rechts
@@ -70,6 +72,7 @@
     { key: 'info', label: 'Info' },
     { key: 'contacts', label: 'Contacten' },
     { key: 'jobs', label: 'Vacatures' },
+    { key: 'pipeline', label: 'Pipeline' },
     { key: 'activity', label: 'Notities/Activiteit' },
     { key: 'prospects', label: 'Prospects' },
   ],
@@ -96,6 +99,7 @@
       info: () => this.loadClientInfoTab(clientId),
       contacts: () => this.loadClientContacts(clientId),
       jobs: () => this.loadClientJobsTab(clientId),
+      pipeline: () => this.loadClientPipelineTab(clientId),
       activity: () => this.loadClientActivityTab(clientId),
       prospects: () => this.loadClientProspectsTab(clientId),
     };
@@ -324,6 +328,16 @@
     } catch {
       this.setContainerLoadError(el, () => this.loadClientJobsTab(clientId));
     }
+  },
+
+  /* ---- Pipeline tab (§7.3.4): GET /admin/pipeline?client_id=, dezelfde
+     tab-inhoud als de kandidaatdrawer (Admin.loadPipelineTab(), admin.js),
+     met showCandidateName aan -- één client_id kan meerdere kandidaten
+     dekken (elk over een eigen vacature), dus de kaart moet er hier bij
+     zeggen om wie het gaat; de kandidaatdrawer laat dat weg omdat daar
+     al maar één kandidaat in beeld is. ---- */
+  loadClientPipelineTab(clientId) {
+    this.loadPipelineTab('clientDrawerTabContent', 'client_id', clientId, { showCandidateName: true });
   },
 
   /* ---- Notities/Activiteit tab (WS-C.6) --
