@@ -222,9 +222,9 @@ const Admin = {
       : html`<span class="status-dot bg-secondary me-2" aria-hidden="true"></span><span class="a-soft">Onbekend</span>`;
 
     mount(el, html`
-      <div class="d-flex align-items-center mb-2">${dot(dbOk)}<span>Database — ${raw(dbOk ? 'verbonden' : 'niet verbonden')}</span></div>
-      <div class="d-flex align-items-center mb-2">${dot(orOk)}<span>OpenRouter — ${raw(orOk ? 'geconfigureerd' : 'niet geconfigureerd')}</span></div>
-      <div class="d-flex align-items-center mb-2">${dot(apOk)}<span>Apollo — ${raw(apOk ? 'geconfigureerd' : 'niet geconfigureerd')}</span></div>
+      <div class="d-flex align-items-center mb-2">${dot(dbOk)}<span>Database: ${raw(dbOk ? 'verbonden' : 'niet verbonden')}</span></div>
+      <div class="d-flex align-items-center mb-2">${dot(orOk)}<span>OpenRouter: ${raw(orOk ? 'geconfigureerd' : 'niet geconfigureerd')}</span></div>
+      <div class="d-flex align-items-center mb-2">${dot(apOk)}<span>Apollo: ${raw(apOk ? 'geconfigureerd' : 'niet geconfigureerd')}</span></div>
       <div class="d-flex align-items-center">${dupLine}</div>`);
   },
 
