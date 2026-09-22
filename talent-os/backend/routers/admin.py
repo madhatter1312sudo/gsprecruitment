@@ -20,10 +20,11 @@ from models.schemas import (
     AuditLogEntry, ContentItem, ContentUpdate, SystemSettings, SystemSettingsUpdate,
     HealthResponse, PipelineStageUpdate, LeadReadUpdate, LEAD_INTEREST_TYPES,
     AdminTalentpoolConsentUpdate, AdminSpecPresentationConsentUpdate,
-    AdminReferralCreate,
+    AdminReferralCreate, RoutineHealth, RoutineHealthResponse, SchedulerHealthResponse,
 )
 from routers.health import get_health_detail
 from routers.client import _record_stage_change
+from services import scheduler as scheduler_service
 from services.email_service import email_service
 from typing import Optional, List
 from datetime import timedelta, timezone, datetime
@@ -44,6 +45,72 @@ async def get_admin_health(current_user: dict = Depends(require_role("admin"))):
     """Detailed health: database, OpenRouter/Apollo config status, and live
     row counts (candidates_count, open_jobs). Read-only, so not audit-logged."""
     return await get_health_detail()
+
+
+# ── Health (routines + scheduler) — issue #127 ───────────────────────────
+# Platform-side heartbeat so the platform lead reads routine health from
+# one admin route instead of scraping logs. Both routes are read-only
+# (not audit-logged, same as GET /health above) and return no personal
+# data: routine names, timestamps and Python exception class names only
+# -- never an exception message, which could carry an interpolated
+# candidate/client detail (see migrations/044_routine_runs.py).
+
+@router.get("/health/routines", response_model=RoutineHealthResponse)
+async def get_routine_health(current_user: dict = Depends(require_role("admin"))):
+    """Per-routine last success timestamp and last error class, from
+    routine_runs (services/scheduler.py's _tracked() wrapper writes one
+    row per scheduler tick). Lists every routine in
+    services/scheduler.ROUTINE_NAMES, including one that has never run --
+    it just reports None fields rather than being omitted."""
+    success_rows = await fetch_all(
+        """SELECT DISTINCT ON (routine_name) routine_name, ran_at
+           FROM routine_runs WHERE status = 'success'
+           ORDER BY routine_name, ran_at DESC"""
+    )
+    error_rows = await fetch_all(
+        """SELECT DISTINCT ON (routine_name) routine_name, ran_at, error_class
+           FROM routine_runs WHERE status = 'error'
+           ORDER BY routine_name, ran_at DESC"""
+    )
+    last_success = {r["routine_name"]: r["ran_at"] for r in success_rows}
+    last_error = {r["routine_name"]: (r["ran_at"], r["error_class"]) for r in error_rows}
+
+    routines = []
+    for name in scheduler_service.ROUTINE_NAMES:
+        error_at, error_class = last_error.get(name, (None, None))
+        routines.append(RoutineHealth(
+            name=name,
+            last_success_at=last_success.get(name),
+            last_error_at=error_at,
+            last_error_class=error_class,
+        ))
+    return RoutineHealthResponse(routines=routines)
+
+
+@router.get("/health/scheduler", response_model=SchedulerHealthResponse)
+async def get_scheduler_health(current_user: dict = Depends(require_role("admin"))):
+    """Whether the in-process APScheduler is running somewhere in this
+    app's worker pool, plus its registered routine names. `running` reads
+    the cross-worker Postgres advisory lock
+    (services/scheduler.SCHEDULER_LOCK_KEY) rather than this worker's own
+    `scheduler.running` flag -- uvicorn runs 4 workers and only the one
+    that won the lock ever calls scheduler.start() (services/scheduler.py
+    start_scheduler), so this request may well be answered by a worker
+    that never touched the scheduler at all. A single bigint advisory
+    lock key below 2^31 is stored in pg_locks with classid=0 and objid
+    equal to the key (Postgres splits the 64-bit key into the two
+    32-bit columns for the single-argument pg_try_advisory_lock form)."""
+    lock_held = await fetch_val(
+        "SELECT EXISTS (SELECT 1 FROM pg_locks WHERE locktype = 'advisory' "
+        "AND classid = 0 AND objid = $1 AND objsubid = 1)",
+        scheduler_service.SCHEDULER_LOCK_KEY,
+    )
+    return SchedulerHealthResponse(
+        running=bool(lock_held),
+        timezone=scheduler_service.TIMEZONE,
+        registered_routines=list(scheduler_service.ROUTINE_NAMES),
+        apollo_jobs_enabled=settings.apollo_sync_enabled,
+    )
 
 
 # ── Dashboard ───────────────────────────────────────────────────────────

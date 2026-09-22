@@ -49,6 +49,9 @@ NON_TABLE_NAMES = {
     "onto",              # false-positive match: prose in services/harvest.py comments
                           # ("a LEFT JOIN onto matches") -- capitalized "JOIN" as an English
                           # word inside a code comment, not SQL.
+    "pg_locks",          # routers/admin.py's GET /health/scheduler (issue #127): a
+                          # built-in Postgres system catalog view, not a project table
+                          # any migration creates or ever should.
 }
 
 

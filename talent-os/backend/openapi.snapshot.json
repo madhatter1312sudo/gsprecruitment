@@ -5380,6 +5380,72 @@
         "title": "ReviewDecisionRequest",
         "type": "object"
       },
+      "RoutineHealth": {
+        "description": "One row per known scheduled routine (services/scheduler.ROUTINE_NAMES) --\nGET /api/v1/admin/health/routines. Sourced from routine_runs\n(migrations/044_routine_runs.py); a routine that has never run (or\nnever failed) reports None for the field(s) it has no row for yet.\nNo personal data -- a routine name, two timestamps and an exception\nclass name, nothing about a candidate/client/prospect.",
+        "properties": {
+          "last_error_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Error At"
+          },
+          "last_error_class": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Error Class"
+          },
+          "last_success_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Success At"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "RoutineHealth",
+        "type": "object"
+      },
+      "RoutineHealthResponse": {
+        "description": "GET /api/v1/admin/health/routines -- admin-JWT only.",
+        "properties": {
+          "routines": {
+            "items": {
+              "$ref": "#/components/schemas/RoutineHealth"
+            },
+            "title": "Routines",
+            "type": "array"
+          }
+        },
+        "required": [
+          "routines"
+        ],
+        "title": "RoutineHealthResponse",
+        "type": "object"
+      },
       "SalaryBenchmarkResponse": {
         "properties": {
           "currency": {
@@ -5462,6 +5528,38 @@
           "job_id"
         ],
         "title": "SavedJobCreate",
+        "type": "object"
+      },
+      "SchedulerHealthResponse": {
+        "description": "GET /api/v1/admin/health/scheduler -- admin-JWT only. `running`\nreflects the cross-worker Postgres advisory lock\n(services/scheduler.SCHEDULER_LOCK_KEY), not this particular uvicorn\nworker's own in-process state -- the app runs 4 workers and only the\none that won the lock actually starts APScheduler (see\nservices/scheduler.start_scheduler's docstring), so a request answered\nby a different worker would otherwise misreport \"not running\" even\nwhile the scheduler is alive elsewhere in the same process group.",
+        "properties": {
+          "apollo_jobs_enabled": {
+            "title": "Apollo Jobs Enabled",
+            "type": "boolean"
+          },
+          "registered_routines": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Registered Routines",
+            "type": "array"
+          },
+          "running": {
+            "title": "Running",
+            "type": "boolean"
+          },
+          "timezone": {
+            "title": "Timezone",
+            "type": "string"
+          }
+        },
+        "required": [
+          "running",
+          "timezone",
+          "registered_routines",
+          "apollo_jobs_enabled"
+        ],
+        "title": "SchedulerHealthResponse",
         "type": "object"
       },
       "SetPasswordRequest": {
@@ -9686,6 +9784,60 @@
           }
         ],
         "summary": "Get Admin Health",
+        "tags": [
+          "admin-portal"
+        ]
+      }
+    },
+    "/api/v1/admin/health/routines": {
+      "get": {
+        "description": "Per-routine last success timestamp and last error class, from\nroutine_runs (services/scheduler.py's _tracked() wrapper writes one\nrow per scheduler tick). Lists every routine in\nservices/scheduler.ROUTINE_NAMES, including one that has never run --\nit just reports None fields rather than being omitted.",
+        "operationId": "get_routine_health_api_v1_admin_health_routines_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RoutineHealthResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Routine Health",
+        "tags": [
+          "admin-portal"
+        ]
+      }
+    },
+    "/api/v1/admin/health/scheduler": {
+      "get": {
+        "description": "Whether the in-process APScheduler is running somewhere in this\napp's worker pool, plus its registered routine names. `running` reads\nthe cross-worker Postgres advisory lock\n(services/scheduler.SCHEDULER_LOCK_KEY) rather than this worker's own\n`scheduler.running` flag -- uvicorn runs 4 workers and only the one\nthat won the lock ever calls scheduler.start() (services/scheduler.py\nstart_scheduler), so this request may well be answered by a worker\nthat never touched the scheduler at all. A single bigint advisory\nlock key below 2^31 is stored in pg_locks with classid=0 and objid\nequal to the key (Postgres splits the 64-bit key into the two\n32-bit columns for the single-argument pg_try_advisory_lock form).",
+        "operationId": "get_scheduler_health_api_v1_admin_health_scheduler_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SchedulerHealthResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Scheduler Health",
         "tags": [
           "admin-portal"
         ]
