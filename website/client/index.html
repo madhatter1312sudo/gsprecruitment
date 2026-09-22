@@ -318,33 +318,45 @@
           </div>
         </section>
 
-        <!-- ==================== ANALYTICS ==================== -->
+        <!-- ==================== ANALYTICS ====================
+             WS5 #140: exactly the five fields GET /v1/client/analytics
+             returns, nothing derived or estimated client-side. Values are
+             written by app.js (loadAnalytics()); the markup below is only
+             the initial "n.v.t." rest state so a slow/failed load never
+             shows a stale zero. -->
         <section class="portal-section" id="section-analytics">
           <div class="stats-grid" style="margin-bottom:var(--space-xl);">
-            <div class="stat-card"><div class="stat-value">N/A</div><div class="stat-label lang-en">Avg Time-to-Hire</div><div class="stat-label lang-nl">Gem. Time-to-Hire</div></div>
-            <div class="stat-card"><div class="stat-value">N/A</div><div class="stat-label lang-en">Offer Rate</div><div class="stat-label lang-nl">Aanbod Rate</div></div>
-            <div class="stat-card"><div class="stat-value">N/A</div><div class="stat-label lang-en">Applicant per Job</div><div class="stat-label lang-nl">Sollicitaties per Vacature</div></div>
-            <div class="stat-card"><div class="stat-value">N/A</div><div class="stat-label lang-en">Cost per Hire</div><div class="stat-label lang-nl">Kosten per Plaatsing</div></div>
+            <div class="stat-card">
+              <div class="stat-value" id="analyticsTimeToHire">n.v.t.</div>
+              <div class="stat-label lang-en">Avg. time-to-hire</div>
+              <div class="stat-label lang-nl">Gem. time-to-hire</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-value" id="analyticsOfferRate">n.v.t.</div>
+              <div class="stat-label lang-en">Offer rate</div>
+              <div class="stat-label lang-nl">Aanbod rate</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-value" id="analyticsCostPerHire">n.v.t.</div>
+              <div class="stat-label lang-en">Cost per hire</div>
+              <div class="stat-label lang-nl">Kosten per plaatsing</div>
+              <div class="fs-xs a-soft" id="analyticsCostPerHireNote" style="margin-top:4px;display:none;">
+                <span class="lang-en">Shown once cost data per placement is recorded.</span>
+                <span class="lang-nl">Wordt pas getoond zodra er kostengegevens per plaatsing zijn vastgelegd.</span>
+              </div>
+            </div>
           </div>
           <div class="dashboard-grid-wide">
             <div class="card">
-              <h3 style="font-size:var(--font-size-lg);font-weight:600;color:var(--white);margin-bottom:var(--space-lg);"><span class="lang-en">Time-to-Hire Trend</span><span class="lang-nl">Time-to-Hire Trend</span></h3>
-              <div class="chart-placeholder" style="height:200px;">
-                <div style="text-align:center;color:var(--navy-200);font-size:var(--font-size-sm);">
-                  <i class="fa-regular fa-chart-line" style="font-size:2rem;margin-bottom:var(--space-md);display:block;"></i>
-                  <span class="lang-en">Chart: Avg days to hire per quarter</span>
-                  <span class="lang-nl">Grafiek: Gemiddelde dagen per kwartaal</span>
-                </div>
+              <h3 style="font-size:var(--font-size-lg);font-weight:600;color:var(--white);margin-bottom:var(--space-lg);"><span class="lang-en">Pipeline funnel</span><span class="lang-nl">Pipeline trechter</span></h3>
+              <div id="analyticsFunnel">
+                <div style="text-align:center;color:var(--navy-200);font-size:var(--font-size-sm);padding:var(--space-lg) 0;">…</div>
               </div>
             </div>
             <div class="card">
-              <h3 style="font-size:var(--font-size-lg);font-weight:600;color:var(--white);margin-bottom:var(--space-lg);"><span class="lang-en">Pipeline Funnel</span><span class="lang-nl">Pipeline Trechter</span></h3>
-              <div class="chart-placeholder" style="height:200px;">
-                <div style="text-align:center;color:var(--navy-200);font-size:var(--font-size-sm);">
-                  <i class="fa-regular fa-chart-bar" style="font-size:2rem;margin-bottom:var(--space-md);display:block;"></i>
-                  <span class="lang-en">Chart: Application → Screening → Interview → Offer</span>
-                  <span class="lang-nl">Grafiek: Sollicitatie → Screening → Gesprek → Aanbod</span>
-                </div>
+              <h3 style="font-size:var(--font-size-lg);font-weight:600;color:var(--white);margin-bottom:var(--space-lg);"><span class="lang-en">Source breakdown</span><span class="lang-nl">Herkomst</span></h3>
+              <div id="analyticsSources">
+                <div style="text-align:center;color:var(--navy-200);font-size:var(--font-size-sm);padding:var(--space-lg) 0;">…</div>
               </div>
             </div>
           </div>

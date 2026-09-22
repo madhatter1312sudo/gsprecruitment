@@ -83,6 +83,21 @@
       return STAGE_LABELS[stage] || String(stage);
     }
 
+    // WS5 #140: SOURCE_FAMILY (core/sources.py) already folds apollo_bulk
+    // into 'apollo' server-side, so the client only ever sees these four
+    // keys plus, per SITE-DESIGN-SPEC.md §7.2e, a free-form value passed
+    // unchanged.
+    const SOURCE_LABELS = {
+      portal_registration: 'Zelf geregistreerd',
+      talentpool_optin: 'Talentpool-aanmelding',
+      apollo: 'Apollo',
+      agent: 'Externe agent',
+    };
+    function sourceLabel(source) {
+      if (source == null || source === '') return '(onbekend)';
+      return SOURCE_LABELS[source] || String(source);
+    }
+
     const sectionTitles = {
       dashboard: { en: 'Dashboard', nl: 'Dashboard' },
       jobs: { en: 'Job Management', nl: 'Vacatures' },
@@ -596,51 +611,80 @@
     /* ================================================================
        API: Load Analytics
        ================================================================ */
+    // Dutch decimal comma, house style (SITE-DESIGN-SPEC.md §7.3.8b's
+    // "NN,N dagen"/"NN,N%").
+    function formatDutchDecimal(value, digits) {
+      return Number(value).toFixed(digits).replace('.', ',');
+    }
+
+    function formatEuro(value) {
+      return '€' + formatDutchDecimal(value, 2);
+    }
+
+    // Horizontal bar rows for pipeline_funnel/source_breakdown -- exactly
+    // the values the API returned, nothing computed beyond a bar-width
+    // percentage relative to the largest bucket (a layout detail, not a
+    // derived figure the screen presents as data).
+    function renderBarRows(el, dataObj, labelFn, emptyHtml) {
+      if (!el) return;
+      const entries = Object.entries(dataObj || {});
+      if (!entries.length) { el.innerHTML = emptyHtml; return; }
+      const max = Math.max(...entries.map(([, n]) => Number(n) || 0), 1);
+      el.innerHTML = entries.map(([key, count]) => {
+        const pct = Math.round((Number(count) || 0) / max * 100);
+        return `<div style="display:flex;align-items:center;gap:var(--space-sm);margin-bottom:var(--space-sm);">
+          <span class="fs-xs a-soft" style="width:120px;flex-shrink:0;">${GSP.esc(labelFn(key))}</span>
+          <div style="flex:1;background:rgba(74,111,159,0.15);border-radius:4px;height:10px;overflow:hidden;">
+            <div style="width:${pct}%;height:100%;background:var(--gold-500);"></div>
+          </div>
+          <span class="gsp-num fs-xs" style="width:28px;text-align:right;">${GSP.esc(count)}</span>
+        </div>`;
+      }).join('');
+    }
+
+    // WS5 #140: exactly the five fields GET /v1/client/analytics returns,
+    // nothing derived, nothing estimated -- see SITE-DESIGN-SPEC.md
+    // §7.3.8(b) for the fallback text per field.
     async function loadAnalytics() {
+      const ttdEl = document.getElementById('analyticsTimeToHire');
+      const offerEl = document.getElementById('analyticsOfferRate');
+      const costEl = document.getElementById('analyticsCostPerHire');
+      const costNoteEl = document.getElementById('analyticsCostPerHireNote');
+      const funnelEl = document.getElementById('analyticsFunnel');
+      const sourcesEl = document.getElementById('analyticsSources');
       try {
-        const [analyticsRes, jobsRes] = await Promise.all([
-          Auth.fetch('/v1/client/analytics'),
-          Auth.fetch('/v1/client/jobs?limit=50'),
-        ]);
-        const analytics = analyticsRes ? await analyticsRes.json() : {};
-        const jobsData = jobsRes ? await jobsRes.json() : { items: [] };
+        const res = await Auth.fetch('/v1/client/analytics');
+        if (!res) return;
+        const analytics = await res.json();
+        if (!res.ok) throw new Error();
 
-        // Stats
-        const statValues = document.querySelectorAll('#section-analytics .stat-card .stat-value');
-        if (statValues.length >= 4) {
-          statValues[0].textContent = analytics.time_to_hire_avg_days
-            ? analytics.time_to_hire_avg_days + ' days'
-            : 'N/A';
-          statValues[1].textContent = analytics.offer_rate != null
-            ? analytics.offer_rate + '%'
-            : 'N/A';
-          const totalJobs = jobsData.total || jobsData.items?.length || 0;
-          const totalApps = jobsData.items ? jobsData.items.reduce((sum, j) => sum + (j.applicant_count || 0), 0) : 0;
-          statValues[2].textContent = totalJobs > 0
-            ? (totalApps / totalJobs).toFixed(1) + ':1'
-            : 'N/A';
-          statValues[3].textContent = analytics.cost_per_hire_avg
-            ? '€' + analytics.cost_per_hire_avg.toFixed(0)
-            : 'N/A';
+        if (ttdEl) {
+          ttdEl.textContent = analytics.time_to_hire_avg_days != null
+            ? formatDutchDecimal(analytics.time_to_hire_avg_days, 1) + ' dagen'
+            : 'n.v.t.';
         }
-
-        // Pipeline funnel
-        const funnel = analytics.pipeline_funnel || {};
-        const stages = Object.entries(funnel);
-        if (stages.length > 0) {
-          const chartEls = document.querySelectorAll('#section-analytics .chart-placeholder');
-          if (chartEls.length >= 2) {
-            chartEls[1].innerHTML = `<div style="padding:var(--space-md);">
-              ${stages.map(([stage, count]) =>
-                `<div style="display:flex;justify-content:space-between;padding:4px 0;color:var(--navy-200);font-size:var(--font-size-sm);">
-                  <span>${GSP.esc(stage)}</span><span style="font-weight:600;color:var(--gold-500);">${GSP.esc(count)}</span>
-                </div>`
-              ).join('')}
-            </div>`;
-          }
+        // 0% uit nul sollicitaties is geen percentage (§7.3.8b) -- de
+        // backend geeft in dat geval al 0, niet null, dus die waarde
+        // krijgt hier dezelfde "n.v.t."-behandeling als null.
+        if (offerEl) {
+          offerEl.textContent = (analytics.offer_rate != null && analytics.offer_rate !== 0)
+            ? formatDutchDecimal(analytics.offer_rate, 1) + '%'
+            : 'n.v.t.';
         }
+        if (costEl) {
+          const hasCost = analytics.cost_per_hire_avg != null;
+          costEl.textContent = hasCost ? formatEuro(analytics.cost_per_hire_avg) : 'n.v.t.';
+          if (costNoteEl) costNoteEl.style.display = hasCost ? 'none' : 'block';
+        }
+        renderBarRows(funnelEl, analytics.pipeline_funnel, stageLabel,
+          '<div style="text-align:center;color:var(--navy-200);font-size:var(--font-size-sm);padding:var(--space-lg) 0;"><span class="lang-en">No candidates in the pipeline yet</span><span class="lang-nl">Nog geen kandidaten in de pipeline</span></div>');
+        renderBarRows(sourcesEl, analytics.source_breakdown, sourceLabel,
+          '<div style="text-align:center;color:var(--navy-200);font-size:var(--font-size-sm);padding:var(--space-lg) 0;"><span class="lang-en">No source data yet</span><span class="lang-nl">Nog geen herkomstgegevens</span></div>');
       } catch (err) {
         console.error('Analytics load error:', err);
+        [ttdEl, offerEl, costEl].forEach(el => { if (el) el.textContent = 'n.v.t.'; });
+        if (funnelEl) Auth.renderLoadError(funnelEl, () => loadAnalytics());
+        if (sourcesEl) Auth.renderLoadError(sourcesEl, () => loadAnalytics());
       }
     }
 
