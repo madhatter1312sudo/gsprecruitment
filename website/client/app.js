@@ -63,6 +63,26 @@
       throw new Error('unverified'); // stop the rest of this script block (dashboard fetches, listeners)
     }
 
+    /* ================================================================
+       WS5 #139: shared pipeline-stage label map. Mirrors website/admin/
+       js/labels.js's `pipelinefase` map verbatim (same seven stages, same
+       seven Dutch labels) so "Screening" reads the same word in both the
+       client portal and the admin panel -- but as its own copy, not an
+       import, because the portal does not load admin/js/*.js (§7.5.6,
+       admin bundle stays admin-only). The seven values themselves come
+       from migration 043 (BV8) via models/schemas.py's PipelineStage
+       literal.
+       ================================================================ */
+    const CANONICAL_STAGES = ['sourced', 'new', 'screening', 'interview', 'offer', 'placed', 'rejected'];
+    const STAGE_LABELS = {
+      sourced: 'Gesourced', new: 'Nieuw', screening: 'Screening',
+      interview: 'Gesprek', offer: 'Aanbod', placed: 'Geplaatst', rejected: 'Afgewezen',
+    };
+    function stageLabel(stage) {
+      if (stage == null || stage === '') return '(leeg)';
+      return STAGE_LABELS[stage] || String(stage);
+    }
+
     const sectionTitles = {
       dashboard: { en: 'Dashboard', nl: 'Dashboard' },
       jobs: { en: 'Job Management', nl: 'Vacatures' },
@@ -104,7 +124,20 @@
     const mobileBtn = document.getElementById('mobileMenuBtn');
     const sidebar = document.getElementById('sidebar');
     if (window.innerWidth <= 768) mobileBtn.style.display = '';
-    window.addEventListener('resize', () => { mobileBtn.style.display = window.innerWidth <= 768 ? '' : 'none'; });
+    window.addEventListener('resize', () => {
+      mobileBtn.style.display = window.innerWidth <= 768 ? '' : 'none';
+      syncKanbanAria();
+    });
+
+    // Boven 600px tonen alle kolommen hun kaarten altijd (CSS), ongeacht
+    // .active -- aria-expanded volgt dat zichtbare gedrag in plaats van de
+    // accordeontoestand die er onder 600px wel toe doet.
+    function syncKanbanAria() {
+      const wide = window.innerWidth > 600;
+      document.querySelectorAll('#kanbanBoard .kanban-column h4 button').forEach((btn) => {
+        btn.setAttribute('aria-expanded', wide || btn.closest('.kanban-column').classList.contains('active') ? 'true' : 'false');
+      });
+    }
     mobileBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
 
     /* ---- Populate sidebar user ---- */
@@ -122,13 +155,11 @@
        ================================================================ */
     async function loadDashboard() {
       try {
-        const [dashRes, jobsRes, pipelineRes] = await Promise.all([
+        const [dashRes, pipelineRes] = await Promise.all([
           Auth.fetch('/v1/client/dashboard'),
-          Auth.fetch('/v1/client/jobs?limit=5'),
           Auth.fetch('/v1/client/pipeline?limit=10'),
         ]);
         const dash = dashRes ? await dashRes.json() : {};
-        const jobsData = jobsRes ? await jobsRes.json() : { items: [] };
         const pipelineData = pipelineRes ? await pipelineRes.json() : { items: [] };
 
         // Stats
@@ -137,48 +168,19 @@
         document.querySelectorAll('#section-dashboard .stats-grid .stat-card .stat-value')[2].textContent = dash.candidates_in_pipeline ?? 0;
         document.querySelectorAll('#section-dashboard .stats-grid .stat-card .stat-value')[3].textContent = dash.placements ?? 0;
 
-        // Pipeline kanban columns
-        const stages = { 'new': [], 'screening': [], 'interview': [], 'offer': [] };
-        (pipelineData.items || []).forEach(pe => {
-          const stage = (pe.stage || 'new').toLowerCase();
-          if (stages[stage]) stages[stage].push(pe);
-          else stages['new'].push(pe);
-        });
-
-        // Rebuild kanban columns from real pipeline data (counts + cards)
-        document.querySelectorAll('.kanban-column').forEach((col) => {
-          const stageName = col.dataset.stage;
-          const items = stages[stageName] || [];
-          const countEl = col.querySelector('h4 span');
-          if (countEl) countEl.textContent = items.length;
-          const cardsHtml = items.map(item => {
-            const nameNl = GSP.esc(item.full_name || item.name || 'Kandidaat');
-            const nameEn = GSP.esc(item.full_name || item.name || 'Candidate');
-            const role = GSP.esc(item.current_title || item.job_title || '');
-            return `<div class="kanban-card">
-              <h5 class="lang-en">${nameEn}</h5><h5 class="lang-nl">${nameNl}</h5>
-              <p>${role}</p>
-            </div>`;
-          }).join('');
-          col.querySelectorAll('.kanban-card, .kanban-empty').forEach(el => el.remove());
-          if (cardsHtml) {
-            col.insertAdjacentHTML('beforeend', cardsHtml);
-          } else {
-            col.insertAdjacentHTML('beforeend', '<div class="kanban-empty"><span class="lang-en">No candidates yet</span><span class="lang-nl">Nog geen kandidaten</span></div>');
-          }
-        });
-
-        // Recent activity
+        // Recent activity (dashboard widget -- separate from the WS5 #141
+        // "Activiteiten" settings card, which reads GET /v1/client/activities)
         const activityContainer = document.getElementById('clientActivity');
         if (activityContainer && pipelineData.items?.length > 0) {
           const recent = pipelineData.items.slice(0, 3);
           activityContainer.innerHTML = recent.map(pe => {
             const time = pe.created_at ? new Date(pe.created_at).toLocaleDateString() : '';
+            const name = pe.full_name || null; // gated by presentation consent, see loadKanban()
             return `<div class="activity-item">
               <div class="activity-icon" style="background:rgba(34,197,94,0.1);color:#4ade80;"><i class="fa-regular fa-user-plus"></i></div>
               <div class="activity-content">
-                <div class="activity-text lang-en">${GSP.esc(pe.full_name || 'Candidate')} added to ${GSP.esc(pe.job_title || 'pipeline')}</div>
-                <div class="activity-text lang-nl">${GSP.esc(pe.full_name || 'Kandidaat')} toegevoegd aan ${GSP.esc(pe.job_title || 'pipeline')}</div>
+                <div class="activity-text lang-en">${GSP.esc(name || 'Candidate #' + pe.candidate_id)} added to ${GSP.esc(pe.job_title || 'pipeline')}</div>
+                <div class="activity-text lang-nl">${GSP.esc(name || 'Kandidaat #' + pe.candidate_id)} toegevoegd aan ${GSP.esc(pe.job_title || 'pipeline')}</div>
                 <div class="activity-time">${GSP.esc(time)}</div>
               </div>
             </div>`;
@@ -186,6 +188,214 @@
         }
       } catch (err) {
         console.error('Dashboard load error:', err);
+      }
+      loadKanban();
+    }
+
+    /* ================================================================
+       WS5 #139: Kanban pipeline -- seven canonical stages plus a trailing
+       column for a stage outside that list. See SITE-DESIGN-SPEC.md
+       §7.3.8(a). Stage change is a <select> per card, optimistic with
+       rollback on failure; PATCH /v1/client/pipeline/{id}/stage is the
+       only write, exactly the same route the old four-column build
+       already called for reads.
+       ================================================================ */
+    const kanbanBoardEl = () => document.getElementById('kanbanBoard');
+
+    function kanbanLoadingHtml() {
+      // "zeven kolomkoppen met elk twee vlakke kaartblokken" -- flat,
+      // content-free card blocks, not a shimmer (house rule: no shimmer
+      // skeletons, §7.4 rule 6).
+      return CANONICAL_STAGES.map(stage => `
+        <div class="kanban-column">
+          <h4><button type="button" tabindex="-1"><span>${GSP.esc(stageLabel(stage))}</span></button></h4>
+          <div class="kanban-card kanban-card--loading"></div>
+          <div class="kanban-card kanban-card--loading"></div>
+        </div>`).join('');
+    }
+
+    function kanbanCardHtml(entry) {
+      const hasName = !!entry.full_name;
+      const nameNl = hasName ? GSP.esc(entry.full_name) : `Kandidaat #${Number(entry.candidate_id) || 0}`;
+      const nameEn = hasName ? GSP.esc(entry.full_name) : `Candidate #${Number(entry.candidate_id) || 0}`;
+      const jobTitle = GSP.esc(entry.job_title || '');
+      const changed = entry.updated_at ? new Date(entry.updated_at).toLocaleDateString() : '';
+      return `<div class="kanban-card" data-entry-id="${Number(entry.id) || 0}" data-candidate-id="${Number(entry.candidate_id) || 0}">
+        <h5 class="lang-en">${nameEn}</h5><h5 class="lang-nl">${nameNl}</h5>
+        <p class="fs-xs a-soft">${jobTitle}</p>
+        <p class="fs-xs a-soft">${GSP.esc(changed)}</p>
+        <select aria-label="Fase" data-original-stage="${GSP.esc(entry.stage ?? '')}">${kanbanStageOptions(entry.stage)}</select>
+      </div>`;
+    }
+
+    // Zeven canonieke opties plus, wanneer de huidige fase daarbuiten valt
+    // (of leeg is -- de kolom heeft geen NOT NULL), een achtste,
+    // geselecteerde optie met de ruwe waarde: dezelfde ontsnappingsklep als
+    // de admin-select (website/admin/js/admin.js pipelineStageOptions()),
+    // eigen kopie, geen import. Die achtste optie wordt nooit verzonden
+    // (zie handleStageChange).
+    function kanbanStageOptions(currentStage) {
+      const known = CANONICAL_STAGES.includes(currentStage);
+      let html = CANONICAL_STAGES.map(s =>
+        `<option value="${s}" ${s === currentStage ? 'selected' : ''}>${GSP.esc(stageLabel(s))}</option>`
+      ).join('');
+      if (!known) {
+        const value = currentStage ?? '';
+        html += `<option value="${GSP.esc(value)}" selected>${GSP.esc(stageLabel(currentStage))} (bestaande waarde)</option>`;
+      }
+      return html;
+    }
+
+    function kanbanColumnHtml(stage, items, opts = {}) {
+      const label = opts.rawLabel ? GSP.esc(stage) : GSP.esc(stageLabel(stage));
+      const title = opts.rawLabel ? ' title="Fase buiten het standaardoverzicht"' : '';
+      const cards = items.map(kanbanCardHtml).join('');
+      const empty = items.length
+        ? ''
+        : '<div class="kanban-empty"><span class="lang-en">No candidates in this stage</span><span class="lang-nl">Geen kandidaten in deze fase</span></div>';
+      return `<div class="kanban-column" data-stage="${GSP.esc(stage)}"${title}>
+        <h4><button type="button" data-action="toggle-kanban-column" aria-expanded="true"><span>${label}</span><span class="gsp-num">${items.length}</span></button></h4>
+        ${cards}${empty}
+      </div>`;
+    }
+
+    function renderKanbanEmptyState() {
+      const el = kanbanBoardEl();
+      if (!el) return;
+      el.innerHTML = `<div class="kanban-card" style="flex:1;text-align:center;">
+        <p><span class="lang-en">There are no candidates in the pipeline yet.</span><span class="lang-nl">Er staan nog geen kandidaten in de pipeline.</span></p>
+        <button type="button" class="btn btn-primary" data-action="goto-create-job">
+          <span class="lang-en">Post a job</span><span class="lang-nl">Vacature plaatsen</span>
+        </button>
+      </div>`;
+    }
+
+    function renderKanban(items) {
+      const el = kanbanBoardEl();
+      if (!el) return;
+      if (!items.length) { renderKanbanEmptyState(); return; }
+
+      const byStage = {};
+      CANONICAL_STAGES.forEach(s => { byStage[s] = []; });
+      const extra = []; // [rawStage, items[]] in first-seen order, for a stage outside the seven
+      const extraIndex = {};
+      items.forEach(entry => {
+        const stage = entry.stage;
+        if (CANONICAL_STAGES.includes(stage)) {
+          byStage[stage].push(entry);
+          return;
+        }
+        const key = stage ?? '';
+        if (!(key in extraIndex)) {
+          extraIndex[key] = extra.length;
+          extra.push([stage, []]);
+        }
+        extra[extraIndex[key]][1].push(entry);
+      });
+
+      let html = CANONICAL_STAGES.map(s => kanbanColumnHtml(s, byStage[s])).join('');
+      html += extra.map(([stage, list]) => kanbanColumnHtml(stage, list, { rawLabel: true })).join('');
+      el.innerHTML = html;
+
+      // §7.3.8(a) 390px: verticale accordeon, eerste fase met inhoud open.
+      const firstNonEmpty = el.querySelector('.kanban-column:not(:has(.kanban-empty))')
+        || el.querySelector('.kanban-column');
+      if (firstNonEmpty) setKanbanColumnOpen(firstNonEmpty, true);
+      syncKanbanAria();
+    }
+
+    function setKanbanColumnOpen(columnEl, open) {
+      columnEl.classList.toggle('active', open);
+      const btn = columnEl.querySelector('h4 button');
+      if (btn) btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+    }
+
+    async function loadKanban() {
+      const el = kanbanBoardEl();
+      if (!el) return;
+      el.innerHTML = kanbanLoadingHtml();
+      try {
+        const res = await Auth.fetch('/v1/client/pipeline?limit=200');
+        if (!res) return;
+        const data = await res.json();
+        if (!res.ok) throw new Error();
+        renderKanban(data.items || []);
+      } catch (err) {
+        console.error('Kanban load error:', err);
+        Auth.renderLoadError(el, () => loadKanban());
+      }
+    }
+
+    function kanbanStageErrorText(status) {
+      if (status === 401 || status === 403) return 'Je hebt geen rechten voor deze wijziging.';
+      if (status === 404) return 'Deze kandidaat staat niet meer in de pipeline. Ververs de pagina.';
+      if (status === 422) return 'Deze fase is ongeldig. Kies een van de zeven fasen.';
+      return 'Er ging iets mis, probeer het opnieuw.';
+    }
+
+    // Stagewijziging (§7.3.8a): de <select> zelf is de optimistische
+    // update -- de kaart verhuist meteen naar de gekozen kolom, de PATCH
+    // gaat op de achtergrond mee. Bij een 4xx/5xx verhuist de kaart terug
+    // en toont Auth.toast de foutmelding; bij succes blijft hij staan.
+    async function handleStageChange(selectEl) {
+      const cardEl = selectEl.closest('.kanban-card');
+      const oldColumnEl = selectEl.closest('.kanban-column');
+      if (!cardEl || !oldColumnEl) return;
+      const entryId = cardEl.dataset.entryId;
+      const newStage = selectEl.value;
+      const originalStage = selectEl.dataset.originalStage;
+      if (!CANONICAL_STAGES.includes(newStage) || newStage === originalStage) {
+        // De ontsnappingsklep-optie mag nooit verzonden worden (§7.3.8a:
+        // "niets wordt stilzwijgend verplaatst"); zonder wijziging is er
+        // ook niets te bewaren.
+        selectEl.value = originalStage;
+        return;
+      }
+
+      let newColumnEl = kanbanBoardEl()?.querySelector(`.kanban-column[data-stage="${CSS.escape(newStage)}"]`);
+      if (!newColumnEl) return; // one of the seven canonical columns always exists
+      selectEl.disabled = true;
+      moveKanbanCard(cardEl, oldColumnEl, newColumnEl);
+
+      try {
+        const res = await Auth.fetch(`/v1/client/pipeline/${entryId}/stage`, {
+          method: 'PATCH', body: JSON.stringify({ stage: newStage }),
+        });
+        if (res && res.ok) {
+          selectEl.dataset.originalStage = newStage;
+          selectEl.disabled = false;
+          Auth.toast('Fase bijgewerkt', 'success');
+          return;
+        }
+        moveKanbanCard(cardEl, newColumnEl, oldColumnEl);
+        selectEl.value = originalStage;
+        selectEl.disabled = false;
+        Auth.toast(kanbanStageErrorText(res && res.status), 'error');
+      } catch {
+        moveKanbanCard(cardEl, newColumnEl, oldColumnEl);
+        selectEl.value = originalStage;
+        selectEl.disabled = false;
+        Auth.toast('Netwerkfout, probeer het opnieuw.', 'error');
+      }
+    }
+
+    function moveKanbanCard(cardEl, fromColumnEl, toColumnEl) {
+      const select = cardEl.querySelector('select');
+      toColumnEl.insertBefore(cardEl, toColumnEl.querySelector('.kanban-empty') || null);
+      refreshKanbanColumn(fromColumnEl);
+      refreshKanbanColumn(toColumnEl);
+      if (select) select.focus();
+    }
+
+    function refreshKanbanColumn(columnEl) {
+      const count = columnEl.querySelectorAll('.kanban-card').length;
+      const countEl = columnEl.querySelector('h4 .gsp-num');
+      if (countEl) countEl.textContent = count;
+      let emptyEl = columnEl.querySelector('.kanban-empty');
+      if (count === 0 && !emptyEl) {
+        columnEl.insertAdjacentHTML('beforeend', '<div class="kanban-empty"><span class="lang-en">No candidates in this stage</span><span class="lang-nl">Geen kandidaten in deze fase</span></div>');
+      } else if (count > 0 && emptyEl) {
+        emptyEl.remove();
       }
     }
 
@@ -659,5 +869,25 @@
         case 'toast-deactivate-client':
           Auth.toast('Contact info@gsprecruitment.nl for account deactivation', 'warning');
           break;
+        case 'goto-create-job':
+          navigateTo('jobs');
+          document.getElementById('createJobBtn')?.click();
+          break;
+        case 'toggle-kanban-column': {
+          // Accordion only at <=600px (§7.3.8a); at desktop width every
+          // column already shows its cards regardless of .active, so a
+          // click here is a no-op there.
+          if (window.innerWidth > 600) break;
+          const columnEl = el.closest('.kanban-column');
+          if (columnEl) setKanbanColumnOpen(columnEl, !columnEl.classList.contains('active'));
+          break;
+        }
       }
+    });
+
+    // Stagewijziging via de <select> op elke kanban-kaart (§7.3.8a):
+    // gedelegeerd, want de kaarten worden dynamisch opgebouwd.
+    document.addEventListener('change', (e) => {
+      const el = e.target.closest('#kanbanBoard select');
+      if (el) handleStageChange(el);
     });

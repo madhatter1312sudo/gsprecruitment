@@ -43,16 +43,34 @@
     .portal-section { display: none; }
     .portal-section.active { display: block; }
 
-    /* ---- Kanban pipeline ---- */
-    .kanban-board { display: grid; grid-template-columns: repeat(4,1fr); gap: var(--space-md); margin-top: var(--space-lg); }
-    .kanban-column { background: rgba(6,13,26,0.3); border-radius: var(--radius-lg); padding: var(--space-md); }
-    .kanban-column h4 { font-size: var(--font-size-sm); font-weight: 600; color: var(--white); margin-bottom: var(--space-md); padding: 0 var(--space-sm); display: flex; align-items: center; justify-content: space-between; }
+    /* ---- Kanban pipeline (SITE-DESIGN-SPEC.md §7.3.8a): seven canonical
+       columns plus, when present, a trailing column for a stage outside
+       the list. Desktop: one horizontal scroll row, 260px columns,
+       scroll-snap, sticky heads -- the one deliberate horizontal-scroll
+       spot in the design system, because seven columns cannot fit at
+       1440 without becoming unreadable. <=600px: a vertical accordion,
+       toggled via the existing .active class (no new class name), first
+       non-empty column open by default. ---- */
+    .kanban-board { display: flex; gap: var(--space-md); margin-top: var(--space-lg); overflow-x: auto; scroll-snap-type: x proximity; padding-bottom: var(--space-sm); }
+    .kanban-column { background: rgba(6,13,26,0.3); border-radius: var(--radius-lg); padding: var(--space-md); flex: 0 0 260px; scroll-snap-align: start; }
+    .kanban-column h4 { font-size: var(--font-size-sm); font-weight: 600; color: var(--white); margin-bottom: var(--space-md); padding: 0 var(--space-sm); display: flex; align-items: center; justify-content: space-between; position: sticky; top: 0; background: inherit; }
+    .kanban-column h4 button { display: flex; align-items: center; gap: var(--space-sm); width: 100%; background: none; border: none; color: inherit; font: inherit; font-weight: inherit; text-align: left; cursor: default; padding: 0; }
     .kanban-column h4 span { font-size: var(--font-size-xs); color: var(--navy-200); background: rgba(74,111,159,0.15); padding: 2px 8px; border-radius: var(--radius-full); }
-    .kanban-card { background: linear-gradient(145deg,rgba(21,43,74,0.5),rgba(15,29,53,0.7)); border: 1px solid rgba(74,111,159,0.12); border-radius: var(--radius-md); padding: var(--space-md); margin-bottom: var(--space-sm); cursor: pointer; transition: all var(--transition-fast); }
+    .kanban-card { background: linear-gradient(145deg,rgba(21,43,74,0.5),rgba(15,29,53,0.7)); border: 1px solid rgba(74,111,159,0.12); border-radius: var(--radius-md); padding: var(--space-md); margin-bottom: var(--space-sm); transition: all var(--transition-fast); }
     .kanban-card:hover { border-color: rgba(250,200,0,0.2); }
     .kanban-card h5 { font-size: var(--font-size-sm); font-weight: 600; color: var(--white); margin-bottom: 2px; }
     .kanban-card p { font-size: var(--font-size-xs); color: var(--navy-200); }
+    .kanban-card select { width: 100%; margin-top: var(--space-sm); padding: 0.4rem 0.6rem; background: rgba(6,13,26,0.5); border: 1px solid rgba(74,111,159,0.25); border-radius: var(--radius-sm,6px); color: var(--white); font-family: var(--font-primary); font-size: var(--font-size-xs); outline: none; min-height: 32px; }
+    .kanban-card select:focus-visible { border-color: var(--gold-500); box-shadow: 0 0 0 3px rgba(250,200,0,0.1); }
+    .kanban-card--loading { min-height: 64px; background: rgba(74,111,159,0.08); border-style: dashed; }
     .kanban-empty { font-size: var(--font-size-xs); color: var(--navy-200); text-align: center; padding: var(--space-lg) var(--space-sm); border: 1px dashed rgba(74,111,159,0.2); border-radius: var(--radius-md); }
+    @media (max-width:600px) {
+      .kanban-board { flex-direction: column; overflow-x: visible; scroll-snap-type: none; }
+      .kanban-column { flex-basis: auto; }
+      .kanban-column h4 button { cursor: pointer; }
+      .kanban-column:not(.active) .kanban-card,
+      .kanban-column:not(.active) .kanban-empty { display: none; }
+    }
 
     /* ---- Candidate search ---- */
     .candidate-result { display: flex; align-items: center; gap: var(--space-lg); padding: var(--space-lg); background: linear-gradient(145deg,rgba(21,43,74,0.4),rgba(15,29,53,0.6)); border: 1px solid rgba(74,111,159,0.12); border-radius: var(--radius-lg); margin-bottom: var(--space-md); transition: all var(--transition-fast); }
@@ -78,8 +96,8 @@
     .activity-text { font-size: var(--font-size-sm); color: var(--navy-100); }
     .activity-time { font-size: var(--font-size-xs); color: var(--navy-200); margin-top: 2px; }
 
-    @media (max-width:1024px){ .stats-grid { grid-template-columns: repeat(2,1fr); } .dashboard-grid, .dashboard-grid-wide { grid-template-columns: 1fr; } .kanban-board { grid-template-columns: repeat(2,1fr); } }
-    @media (max-width:768px){ .sidebar { width: 100%; position: fixed; left: -100%; transition: left var(--transition-base); } .sidebar.open { left: 0; } .main-content { margin-left: 0; } .stats-grid { grid-template-columns: 1fr 1fr; } .portal-content { padding: var(--space-lg); } .kanban-board { grid-template-columns: 1fr; } }
+    @media (max-width:1024px){ .stats-grid { grid-template-columns: repeat(2,1fr); } .dashboard-grid, .dashboard-grid-wide { grid-template-columns: 1fr; } }
+    @media (max-width:768px){ .sidebar { width: 100%; position: fixed; left: -100%; transition: left var(--transition-base); } .sidebar.open { left: 0; } .main-content { margin-left: 0; } .stats-grid { grid-template-columns: 1fr 1fr; } .portal-content { padding: var(--space-lg); } }
   </style>
 </head>
 <body class="portal">
@@ -173,24 +191,10 @@
                   <span class="badge badge-gold lang-en">Live</span>
                   <span class="badge badge-gold lang-nl">Actief</span>
                 </div>
-                <div class="kanban-board">
-                  <div class="kanban-column" data-stage="new">
-                    <h4><span class="lang-en">New</span><span class="lang-nl">Nieuw</span> <span>0</span></h4>
-                    <div class="kanban-empty"><span class="lang-en">No candidates yet</span><span class="lang-nl">Nog geen kandidaten</span></div>
-                  </div>
-                  <div class="kanban-column" data-stage="screening">
-                    <h4><span class="lang-en">Screening</span><span class="lang-nl">Screening</span> <span>0</span></h4>
-                    <div class="kanban-empty"><span class="lang-en">No candidates yet</span><span class="lang-nl">Nog geen kandidaten</span></div>
-                  </div>
-                  <div class="kanban-column" data-stage="interview">
-                    <h4><span class="lang-en">Interview</span><span class="lang-nl">Gesprek</span> <span>0</span></h4>
-                    <div class="kanban-empty"><span class="lang-en">No candidates yet</span><span class="lang-nl">Nog geen kandidaten</span></div>
-                  </div>
-                  <div class="kanban-column" data-stage="offer">
-                    <h4><span class="lang-en">Offer</span><span class="lang-nl">Aanbod</span> <span>0</span></h4>
-                    <div class="kanban-empty"><span class="lang-en">No candidates yet</span><span class="lang-nl">Nog geen kandidaten</span></div>
-                  </div>
-                </div>
+                <!-- WS5 #139: fully rendered by app.js (loadKanban()) --
+                     seven canonical stage columns plus an optional
+                     trailing column for a stage outside the list. -->
+                <div class="kanban-board" id="kanbanBoard"></div>
               </div>
             </div>
             <div>
