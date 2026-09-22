@@ -6,6 +6,15 @@ tot eind in een echte browser tegen gestubde routes (example.com/
 example.invalid, geen echte PII, geen echt netwerk).
 
 Covers:
+  - Users (SITE-DESIGN-SPEC.md §7.3.6(a)): een gebruiker met een
+    toekomstige locked_until toont de badge "Vergrendeld" plus "tot
+    <tijdstip>", een lege of verlopen locked_until toont geen van beide;
+    "Deblokkeren" is uitgeschakeld voor een niet-vergrendelde gebruiker en
+    ingeschakeld voor een vergrendelde; bevestigen is een gewone modal
+    (geen getypte bevestiging) met de letterlijke zin "Dit reset geen
+    wachtwoord..."; een geslaagde POST .../unlock geeft een toast en
+    verwijdert de badge na een lijstherlading; een mislukte aanroep (500)
+    geeft een foutmelding en laat de badge staan.
   - Opdrachtgevers: list renders (name, domain, open-jobs count, primary
     contact, "onbekend" erkend-referent column), row click opens the
     tabbed detail drawer (WS5 stap 3: een echte Offcanvas met id
@@ -122,6 +131,37 @@ CLIENTS = [
      "open_job_count": 0, "primary_contact": None,
      "created_at": "2026-01-01T00:00:00Z", "updated_at": "2026-01-01T00:00:00Z"},
 ]
+
+# ---- Users (§7.3.6(a), deblokkeren) -------------------------------------
+# 90: locked_until in de toekomst -- moet de badge "Vergrendeld" tonen en
+#     een ingeschakelde "Deblokkeren"-rijactie. 91: locked_until null --
+#     geen badge, actie uitgeschakeld. 92: locked_until in het VERLEDEN --
+#     bewijst dat een verlopen venster ook geen badge/actie krijgt (GET
+#     /admin/users reset het veld zelf niet, dus dit komt in de praktijk
+#     voor).
+USERS = [
+    # De namen bevatten opzettelijk NIET de tekenreeks "Vergrendeld" --
+    # anders zou "Vergrendeld" not in row_text() ook slagen op de naam in
+    # plaats van op de afwezigheid van de badge (dat kostte een echte
+    # debugsessie: "Vergrendelde Gebruiker" bevat "Vergrendeld" als
+    # deelstring en verstopte zo een geslaagde badgeverwijdering).
+    {"id": 90, "full_name": "Locked Test Account", "email": "locked@example.invalid",
+     "role": "candidate", "is_verified": True, "created_at": "2026-01-01T00:00:00Z",
+     "failed_login_count": 5, "locked_until": "2099-01-01T00:00:00Z"},
+    {"id": 91, "full_name": "Gewone Gebruiker", "email": "normal@example.invalid",
+     "role": "candidate", "is_verified": True, "created_at": "2026-01-01T00:00:00Z",
+     "failed_login_count": 0, "locked_until": None},
+    {"id": 92, "full_name": "Verlopen Slot Account", "email": "expired@example.invalid",
+     "role": "client", "is_verified": True, "created_at": "2026-01-01T00:00:00Z",
+     "failed_login_count": 3, "locked_until": "2020-01-01T00:00:00Z"},
+    # Vergrendeld, maar unlock geeft altijd 500 terug -- bewijst de
+    # foutafhandeling (toast, geen lijstherlading, badge blijft staan).
+    {"id": 93, "full_name": "Unlock Faalt Account", "email": "unlock-fails@example.invalid",
+     "role": "candidate", "is_verified": True, "created_at": "2026-01-01T00:00:00Z",
+     "failed_login_count": 5, "locked_until": "2099-01-01T00:00:00Z"},
+]
+USERS_BY_ID = {u["id"]: u for u in USERS}
+USER_STATE = {"unlock_calls": [], "list_calls": 0}
 
 CONTACTS_BY_CLIENT = {
     1: [
@@ -668,15 +708,32 @@ def route_admin_api(route, request):
         })
         return
 
-    # ---- Users list / detail (unrelated to the Opdrachtgevers roster
-    #      since routers/clients_admin.py replaced the /users?role=client
-    #      derivation -- kept only in case another section/check needs it) --
+    # ---- Users list / detail (§7.3.6(a): deblokkeren) ----
     if path == "/api/v1/admin/users" and method == "GET":
-        json_response({"items": [], "total": 0})
+        USER_STATE["list_calls"] += 1
+        json_response({"items": USERS, "total": len(USERS), "limit": qint(qs, "limit", 20), "offset": qint(qs, "offset", 0)})
         return
     m = re.match(r"^/api/v1/admin/users/(\d+)$", path)
     if m and method == "GET":
         json_response({"detail": "Not found"}, status=404)
+        return
+    m = re.match(r"^/api/v1/admin/users/(\d+)/unlock$", path)
+    if m and method == "POST":
+        user_id = int(m.group(1))
+        USER_STATE["unlock_calls"].append(user_id)
+        if user_id == 93:
+            json_response({"detail": "Server error"}, status=500)
+            return
+        user = USERS_BY_ID.get(user_id)
+        if user is None:
+            # De echte route (admin.py:387) geeft 404, geen 409 -- er is
+            # hier geen "al gedeblokkeerd"-conflict, unlock reset de
+            # velden onvoorwaardelijk.
+            json_response({"detail": "User not found"}, status=404)
+            return
+        user["failed_login_count"] = 0
+        user["locked_until"] = None
+        json_response({"message": f"User '{user['email']}' unlocked successfully"})
         return
 
     # ---- Clients (Opdrachtgevers roster + detail drawer's Info tab,
@@ -1622,6 +1679,86 @@ def main():
         activity_text = page.eval_on_selector('#recentActivityList', "el => el.textContent") or ""
         if "(status, role)" not in activity_text:
             failures.append(f"dashboard: recent activity did not render changeKeys — got: {activity_text[:200]!r}")
+
+        # ---- Users: deblokkeren (§7.3.6(a)) ----
+        errors_before = len(console_errors)
+        page.click('.nav-link[data-section="users"]')
+        page.wait_for_timeout(600)
+        if not wait_until(page, lambda: page.eval_on_selector_all('#section-users table tbody tr', "els => els.length") == len(USERS)):
+            failures.append(f"users: list did not render {len(USERS)} rows")
+
+        def _row_text(user_id):
+            return text_of(page, f'#section-users table tbody tr:has([data-id="{user_id}"])')
+
+        # 90 (locked_until in de toekomst): badge + "tot <tijdstip>".
+        row90 = _row_text(90)
+        if "Vergrendeld" not in row90:
+            failures.append(f"users: locked user 90 mist de badge 'Vergrendeld' -- kreeg {row90!r}")
+        if "tot " not in row90:
+            failures.append(f"users: locked user 90 mist de 'tot <tijdstip>'-regel -- kreeg {row90!r}")
+
+        # 91 (locked_until null) en 92 (locked_until in het verleden):
+        # allebei geen badge.
+        for uid in (91, 92):
+            row = _row_text(uid)
+            if "Vergrendeld" in row:
+                failures.append(f"users: user {uid} toont de badge 'Vergrendeld' terwijl de vergrendeling niet actief is -- kreeg {row!r}")
+
+        click_or_fail(page, failures, '[data-action="toggle-user-menu"][data-id="91"]', "users: menu openen (91, niet vergrendeld)")
+        if not is_disabled(page, '[data-action="unlock-user"][data-id="91"]', default=False):
+            failures.append("users: 'Deblokkeren' is niet uitgeschakeld voor een niet-vergrendelde gebruiker (91)")
+        page.click('body')
+        page.wait_for_timeout(200)
+
+        click_or_fail(page, failures, '[data-action="toggle-user-menu"][data-id="90"]', "users: menu openen (90, vergrendeld)")
+        if is_disabled(page, '[data-action="unlock-user"][data-id="90"]', default=True):
+            failures.append("users: 'Deblokkeren' is uitgeschakeld voor een vergrendelde gebruiker (90)")
+        unlock_calls_before = len(USER_STATE["unlock_calls"])
+        click_or_fail(page, failures, '[data-action="unlock-user"][data-id="90"]', "users: 'Deblokkeren' klikken (90)")
+        if not wait_until(page, lambda: "Dit reset geen wachtwoord" in (text_of(page, '#adminConfirmModal') or '')):
+            failures.append(f"users: de bevestigingsmodal toont niet 'Dit reset geen wachtwoord...' -- kreeg {text_of(page, '#adminConfirmModal')!r}")
+        # Gewone bevestiging, geen getypte bevestiging: geen tekstveld in de modal.
+        if page.query_selector('#adminConfirmModal input[type="text"], #adminConfirmModal input[type="email"]') is not None:
+            failures.append("users: de deblokkeer-modal vraagt een getypte bevestiging, terwijl dit een gewone bevestiging hoort te zijn")
+        list_calls_before = USER_STATE["list_calls"]
+        click_or_fail(page, failures, '#adminConfirmModal .btn-primary', "users: deblokkeren bevestigen (90)")
+        if not wait_for_calls(page, USER_STATE["unlock_calls"], unlock_calls_before + 1):
+            failures.append("users: bevestigen stuurde geen POST /v1/admin/users/{id}/unlock")
+        elif USER_STATE["unlock_calls"][-1] != 90:
+            failures.append(f"users: de unlock-aanroep ging niet naar user 90 -- kreeg {USER_STATE['unlock_calls'][-1]!r}")
+        def _toast_texts():
+            return page.eval_on_selector_all(".toast-container .toast span:last-child", "els => els.map(e => e.textContent)")
+
+        if not wait_until(page, lambda: any("gedeblokkeerd" in t.lower() for t in _toast_texts())):
+            failures.append(f"users: geen succes-toast na deblokkeren -- kreeg {_toast_texts()!r}")
+        # Wacht op de HERLADING zelf (de tweede GET /v1/admin/users die
+        # confirmUnlockUser() na succes doet), niet blind op de DOM-tekst:
+        # dat maakt de check onafhankelijk van hoe lang de mount() na die
+        # respons precies duurt.
+        if not wait_until(page, lambda: USER_STATE["list_calls"] > list_calls_before, timeout=10000):
+            failures.append("users: geen lijstherlading (tweede GET /v1/admin/users) na een geslaagde deblokkering")
+        if not wait_until(page, lambda: "Vergrendeld" not in _row_text(90)):
+            failures.append("users: de badge 'Vergrendeld' staat na een geslaagde deblokkering nog steeds bij user 90")
+
+        # 93: unlock geeft altijd 500 -- error-pad, geen lijstherlading die
+        # de badge stilzwijgend zou wegpoetsen.
+        click_or_fail(page, failures, '[data-action="toggle-user-menu"][data-id="93"]', "users: menu openen (93, deblokkeren mislukt)")
+        unlock_calls_before = len(USER_STATE["unlock_calls"])
+        click_or_fail(page, failures, '[data-action="unlock-user"][data-id="93"]', "users: 'Deblokkeren' klikken (93)")
+        click_or_fail(page, failures, '#adminConfirmModal .btn-primary', "users: deblokkeren bevestigen (93, verwacht 500)")
+        if not wait_for_calls(page, USER_STATE["unlock_calls"], unlock_calls_before + 1):
+            failures.append("users: bevestigen (93) stuurde geen POST")
+        if not wait_until(page, lambda: any("server error" in t.lower() or "mislukt" in t.lower() for t in _toast_texts())):
+            failures.append(f"users: geen foutmelding na een mislukte deblokkering (93) -- kreeg {_toast_texts()!r}")
+        if not wait_until(page, lambda: "Vergrendeld" in _row_text(93)):
+            failures.append("users: de badge 'Vergrendeld' verdween bij user 93 ondanks de mislukte deblokkering")
+
+        # De opzettelijke 500 (93) logt zijn eigen console error; de grens
+        # gaat er daarom hierna overheen, zoals bij retention/analytics.
+        console_errors[:] = [e for e in console_errors if "500 (Internal Server Error)" not in e]
+        new_errors = console_errors[errors_before:]
+        if new_errors:
+            failures.append(f"users: {len(new_errors)} console error(s): {new_errors[:3]}")
 
         # ---- Opdrachtgevers ----
         errors_before = len(console_errors)
@@ -3564,7 +3701,9 @@ def main():
             print(f"  - {f}")
         sys.exit(1)
 
-    print("PASS: Opdrachtgevers (list + tabbed drawer), Leads (inbox + unread filter + PATCH), "
+    print("PASS: Users (§7.3.6(a): badge Vergrendeld, rijactie Deblokkeren, POST unlock met "
+          "200- en 500-uitkomst), "
+          "Opdrachtgevers (list + tabbed drawer), Leads (inbox + unread filter + PATCH), "
           "Rapportage, Bewaartermijnen (lijst, generate, goedkeuren met getypte bevestiging, "
           "afwijzen, categoriebrede bulk met 409-mismatch, droogloop en 500 met retry), "
           "Toestemmingen/referral (§7.3.2: talentpool- en presentatiemodal met clientside-validatie "
