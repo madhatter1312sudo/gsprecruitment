@@ -31,6 +31,13 @@ Covers:
   - Leads: unified inbox renders rows from both sources (contact/quiz
     badges), the unread toggle re-fetches, and a row click PATCHes the
     read state.
+  - Prospects (§7.3.6(c), zelfde sectie #leads): de bewerkmodal opent met
+    een <datalist> die uitsluitend de statuswaarden uit de geladen lijst
+    bevat, lawful_basis heeft geen lege optie, een niet-http(s)
+    source_url wordt clientside geblokkeerd met de letterlijke foutregel
+    en zonder netwerkaanroep, en het opslaan van alleen `status` stuurt
+    uitsluitend dat veld mee in de PUT (en stempelt last_contacted_at
+    server-side bij).
   - Rapportage: the section renders its KPI cards and two breakdown
     tables from stubbed /jobs and /leads data, with no invented numbers
     (every value traces to a stubbed API field).
@@ -191,8 +198,20 @@ JOBS_BY_CLIENT = {
 PROSPECTS = [
     {"id": 301, "company_name": "Example Engineering B.V.", "domain": "example-engineering.example.com",
      "contact_name": "Prospect Contact", "contact_title": "CTO", "status": "new", "source": "manual",
+     "intent_signal": "Zocht via LinkedIn naar embedded engineers.",
+     "source_url": "https://example.invalid/vacatures/embedded",
+     "lawful_basis": "zakelijk_functioneel_adres",
      "created_at": "2026-01-01T00:00:00Z"},
+    # Tweede rij met een AFWIJKENDE status ("contacted"): bewijst dat de
+    # <datalist> beide waarden uit de geladen lijst aanbiedt en geen
+    # ingebouwde/canonieke lijst (§7.3.6(c): de kolom kent geen CHECK).
+    {"id": 302, "company_name": "Example Mechatronics B.V.", "domain": "example-mechatronics.example.com",
+     "contact_name": "Andere Prospect Contact", "contact_title": "COO", "status": "contacted", "source": "manual",
+     "intent_signal": "", "source_url": None, "lawful_basis": "opt_in",
+     "created_at": "2026-01-02T00:00:00Z"},
 ]
+PROSPECTS_BY_ID = {p["id"]: p for p in PROSPECTS}
+PROSPECT_STATE = {"update_calls": []}
 
 ACTIVITIES_BY_CLIENT = {
     1: [{"id": 401, "subject_type": "client", "subject_id": 1, "type": "call",
@@ -881,11 +900,33 @@ def route_admin_api(route, request):
         json_response(found)
         return
 
-    # ---- Prospects (client drawer's prospects tab) ----
+    # ---- Prospects (client drawer's prospects tab + §7.3.6(c) Leads-sectie) ----
     if path == "/api/v1/admin/prospects" and method == "GET":
         search = (qs.get("search", [""])[0] or "").lower()
         items = [p for p in PROSPECTS if search in p["company_name"].lower()] if search else PROSPECTS
         json_response({"items": items, "total": len(items)})
+        return
+    m = re.match(r"^/api/v1/admin/prospects/(\d+)$", path)
+    if m and method == "PUT":
+        prospect_id = int(m.group(1))
+        body = json.loads(request.post_data or "{}")
+        PROSPECT_STATE["update_calls"].append({"id": prospect_id, "body": body})
+        prospect = PROSPECTS_BY_ID.get(prospect_id)
+        if prospect is None:
+            json_response({"detail": "Prospect not found"}, status=404)
+            return
+        if not body:
+            # routers/prospects.py: model_dump(exclude_none=True) op een
+            # leeg formulier geeft 400 "No fields to update".
+            json_response({"detail": "No fields to update"}, status=400)
+            return
+        if "status" in body:
+            prospect["last_contacted_at"] = "2026-09-22T12:00:00Z"
+        # routers/prospects.py column_map: notes -> intent_signal (er is
+        # geen aparte notitiekolom).
+        for key, val in body.items():
+            prospect["intent_signal" if key == "notes" else key] = val
+        json_response(prospect)
         return
 
     # ---- Leads (WS-C.10) ----
@@ -2015,30 +2056,30 @@ def main():
         errors_before = len(console_errors)
         page.click('.nav-link[data-section="leads"]')
         page.wait_for_timeout(600)
-        rows = page.eval_on_selector_all('#section-leads table tbody tr', "els => els.length")
+        rows = page.eval_on_selector_all('#leadsTable tbody tr', "els => els.length")
         if rows != len(LEADS):
             failures.append(f"leads: list rendered {rows} rows, expected {len(LEADS)}")
-        badges = page.eval_on_selector_all('#section-leads table tbody tr td:first-child', "els => els.map(e => e.textContent.trim())")
+        badges = page.eval_on_selector_all('#leadsTable tbody tr td:first-child', "els => els.map(e => e.textContent.trim())")
         if "Contact" not in badges or "Quiz" not in badges:
             failures.append(f"leads: expected both Contact and Quiz source badges — got {badges}")
 
         page.check('#leadUnreadFilter')
         page.wait_for_timeout(500)
-        rows_unread = page.eval_on_selector_all('#section-leads table tbody tr', "els => els.length")
+        rows_unread = page.eval_on_selector_all('#leadsTable tbody tr', "els => els.length")
         expected_unread = len([l for l in LEADS if not l["is_read"]])
         if rows_unread != expected_unread:
             failures.append(f"leads: unread filter rendered {rows_unread} rows, expected {expected_unread}")
         page.uncheck('#leadUnreadFilter')
         page.wait_for_timeout(500)
 
-        badges2 = page.eval_on_selector_all('#section-leads table tbody tr td:nth-child(5)', "els => els.map(e => e.textContent.trim())")
+        badges2 = page.eval_on_selector_all('#leadsTable tbody tr td:nth-child(5)', "els => els.map(e => e.textContent.trim())")
         if not any("example-referrer.invalid" in b for b in badges2):
             failures.append(f"leads: Herkomst column missing referrer_host — got {badges2}")
 
         # Row click opens the detail modal (GET /v1/admin/leads/{source}/{id})
         # rather than toggling read state directly — that accidental
         # toggle-on-click was the WS2 defect.
-        page.click('#section-leads table tbody tr')
+        page.click('#leadsTable tbody tr')
         page.wait_for_timeout(500)
         modal_text = page.eval_on_selector('#adminModalOverlay', "el => el.textContent") or ""
         if "Example Engineering B.V." not in modal_text or "Op zoek naar een embedded engineer" not in modal_text:
@@ -2060,7 +2101,7 @@ def main():
 
         # A quiz_submissions row's detail must show score/tier, not the
         # contact-form fields it has none of.
-        page.click('#section-leads table tbody tr:nth-child(3)')
+        page.click('#leadsTable tbody tr:nth-child(3)')
         page.wait_for_timeout(500)
         quiz_modal_text = page.eval_on_selector('#adminModalOverlay', "el => el.textContent") or ""
         if "8 / 10" not in quiz_modal_text or "senior" not in quiz_modal_text:
@@ -2071,6 +2112,64 @@ def main():
         new_errors = console_errors[errors_before:]
         if new_errors:
             failures.append(f"leads: {len(new_errors)} console error(s): {new_errors[:3]}")
+
+        # ---- Prospects (§7.3.6(c), zelfde sectie #leads) ----
+        errors_before = len(console_errors)
+        prospect_rows = page.eval_on_selector_all('#prospectsTable tbody tr', "els => els.length")
+        if prospect_rows != len(PROSPECTS):
+            failures.append(f"prospects: list rendered {prospect_rows} rows, expected {len(PROSPECTS)}")
+        click_or_fail(page, failures, '#prospectsTable tbody tr [data-action="edit-prospect"]', "prospects: bewerkactie op de eerste rij")
+        if not wait_until(page, lambda: page.query_selector('#prospectStatus') is not None):
+            failures.append("prospects: de bewerkmodal opende niet")
+        else:
+            # <datalist> bevat uitsluitend de waarden uit de geladen lijst
+            # (PROSPECTS: 'new' en 'contacted'), geen canonieke, ingebouwde
+            # lijst (§7.3.6(c)).
+            datalist_values = page.eval_on_selector_all('#prospectStatusList option', "els => els.map(e => e.value)")
+            if sorted(datalist_values) != ["contacted", "new"]:
+                failures.append(f"prospects: <datalist> bevat niet precies de statuswaarden uit de geladen lijst -- kreeg {datalist_values!r}")
+
+            # lawful_basis heeft geen lege optie.
+            lawful_values = page.eval_on_selector_all('#prospectLawfulBasis option', "els => els.map(e => e.value)")
+            if "" in lawful_values or sorted(lawful_values) != ["bestaande_relatie", "opt_in", "zakelijk_functioneel_adres"]:
+                failures.append(f"prospects: select lawful_basis heeft een lege optie of niet precies de drie gevalideerde waarden -- kreeg {lawful_values!r}")
+
+            fixed_sentence = text_of(page, '#adminModalOverlay')
+            if "Een statuswijziging legt vast dat er vandaag contact was" not in fixed_sentence:
+                failures.append("prospects: de vaste zin over de bewaartermijn ontbreekt onder het statusveld")
+            if "Zonder vastgelegde grondslag mag er geen outreach" not in fixed_sentence:
+                failures.append("prospects: de hint over de Telecommunicatiewet ontbreekt bij lawful_basis")
+
+            # Ongeldige source_url wordt client-side geblokkeerd, met de
+            # exacte foutregel, en zonder netwerkaanroep.
+            update_calls_before = len(PROSPECT_STATE["update_calls"])
+            fill_or_fail(page, failures, '#prospectSourceUrl', 'ftp://not-http.example.invalid', "prospects: ongeldige source_url invullen")
+            click_or_fail(page, failures, '[data-action="save-prospect"]', "prospects: opslaan met een ongeldige source_url")
+            if not wait_until(page, lambda: text_of(page, '#prospectSourceUrlError').strip() == 'Vul een publieke http- of https-URL in'):
+                failures.append(f"prospects: geen (of een andere) foutregel bij een niet-http(s) source_url -- kreeg {text_of(page, '#prospectSourceUrlError')!r}")
+            if len(PROSPECT_STATE["update_calls"]) != update_calls_before:
+                failures.append("prospects: een ongeldige source_url werd toch naar de server gestuurd")
+
+            # Alleen status wijzigen: alleen 'status' gaat mee in de PUT
+            # (§7.3.6(c): "alleen de velden die daadwerkelijk zijn
+            # gewijzigd"), en de rij toont de nieuwe waarde na herladen.
+            fill_or_fail(page, failures, '#prospectSourceUrl', PROSPECTS[0]["source_url"] or '', "prospects: source_url terugzetten")
+            fill_or_fail(page, failures, '#prospectStatus', 'qualified', "prospects: status wijzigen")
+            update_calls_before = len(PROSPECT_STATE["update_calls"])
+            click_or_fail(page, failures, '[data-action="save-prospect"]', "prospects: opslaan (alleen status gewijzigd)")
+            if not wait_for_calls(page, PROSPECT_STATE["update_calls"], update_calls_before + 1):
+                failures.append("prospects: opslaan stuurde geen PUT /v1/admin/prospects/{id}")
+            else:
+                sent = PROSPECT_STATE["update_calls"][-1]
+                if sent["body"] != {"status": "qualified"}:
+                    failures.append(f"prospects: de PUT stuurde niet uitsluitend het gewijzigde veld 'status' mee -- kreeg {sent['body']!r}")
+            if PROSPECTS_BY_ID[301].get("last_contacted_at") != "2026-09-22T12:00:00Z":
+                failures.append("prospects: een statuswijziging stempelde last_contacted_at niet bij")
+            if not wait_until(page, lambda: text_of(page, '#prospectsTable tbody tr:first-child').find("qualified") != -1):
+                failures.append(f"prospects: de rij toont niet de nieuwe status na het opslaan -- kreeg {text_of(page, '#prospectsTable tbody tr:first-child')!r}")
+        new_errors = console_errors[errors_before:]
+        if new_errors:
+            failures.append(f"prospects: {len(new_errors)} console error(s): {new_errors[:3]}")
 
         # ---- Analytics ----
         errors_before = len(console_errors)
@@ -3848,10 +3947,11 @@ def main():
         sys.exit(1)
 
     print("PASS: Users (§7.3.6(a): badge Vergrendeld, rijactie Deblokkeren, POST unlock met "
-          "200- en 500-uitkomst), "
-          "Opdrachtgevers (list + tabbed drawer), Activiteitentab "
+          "200- en 500-uitkomst), Opdrachtgevers (list + tabbed drawer), Activiteitentab "
           "(§7.3.6(b), gedeeld tussen kandidaat- en klantdrawer: typechips, taakcheckbox, "
           "activiteit toevoegen vanuit beide drawers), Leads (inbox + unread filter + PATCH), "
+          "Prospects (§7.3.6(c): datalist, lawful_basis zonder lege optie, source_url-validatie, "
+          "PUT met alleen de gewijzigde velden), "
           "Rapportage, Bewaartermijnen (lijst, generate, goedkeuren met getypte bevestiging, "
           "afwijzen, categoriebrede bulk met 409-mismatch, droogloop en 500 met retry), "
           "Toestemmingen/referral (§7.3.2: talentpool- en presentatiemodal met clientside-validatie "
