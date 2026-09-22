@@ -502,15 +502,20 @@
 
     /* ================================================================
        API: Load Messages
+       WS5 #138: read-only, one-way notice lives in the section markup
+       (index.html); this only ever renders the list, never a composer.
        ================================================================ */
     async function loadMessages() {
+      const msgContainer = document.getElementById('messagesList');
       try {
         const res = await Auth.fetch('/v1/candidate/messages?limit=50');
         if (!res) return;
         const data = await res.json();
-        const msgContainer = document.querySelector('#section-messages .dashboard-grid > div:first-child');
         if (!data.messages || data.messages.length === 0) {
-          msgContainer.innerHTML = '<p style="color:var(--navy-200);text-align:center;padding:var(--space-2xl);">No messages yet.</p>';
+          msgContainer.innerHTML = `<p style="color:var(--navy-200);text-align:center;padding:var(--space-2xl);">
+            <span class="lang-nl">Hier verschijnen berichten van GSP.</span>
+            <span class="lang-en">Messages from GSP appear here.</span>
+          </p>`;
           return;
         }
         msgContainer.innerHTML = data.messages.map(m => {
@@ -530,11 +535,9 @@
         }).join('');
       } catch (err) {
         console.error('Messages load error:', err);
-        const msgContainer = document.querySelector('#section-messages .dashboard-grid > div:first-child');
         Auth.renderLoadError(msgContainer, loadMessages);
       }
     }
-
 
     /* ================================================================
        API: Saved Jobs (WS5 #137, SITE-DESIGN-SPEC.md §5 + §7.2a)
@@ -602,7 +605,6 @@
         Auth.toast(isNl ? 'Fout bij verwijderen' : 'Error removing', 'error');
       }
     };
-
 
     /* ================================================================
        API: Job alerts (WS5 #136, SITE-DESIGN-SPEC.md §7.3.7)
@@ -754,7 +756,6 @@
         if (jaDesired !== null) saveJobAlerts(jaDesired);
       });
     }
-
 
     /* ================================================================
        API: Salary Benchmark

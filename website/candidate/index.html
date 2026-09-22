@@ -981,26 +981,22 @@
 
         <!-- ==================== MESSAGES ==================== -->
         <section class="portal-section" id="section-messages">
-          <div class="dashboard-grid">
-            <div>
-              <p style="color:var(--navy-200);text-align:center;padding:var(--space-2xl);">
-                <span class="lang-nl">Nog geen berichten.</span>
-                <span class="lang-en">No messages yet.</span>
-              </p>
-            </div>
-            <div class="card">
-              <div style="text-align:center;padding:var(--space-2xl) 0;">
-                <i class="fa-regular fa-message" style="font-size:2.5rem;color:var(--navy-400);margin-bottom:var(--space-lg);display:block;"></i>
-                <h4 style="color:var(--white);font-size:var(--font-size-lg);margin-bottom:var(--space-sm);">
-                  <span class="lang-en">Select a conversation</span>
-                  <span class="lang-nl">Selecteer een gesprek</span>
-                </h4>
-                <p style="color:var(--navy-200);font-size:var(--font-size-sm);">
-                  <span class="lang-en">Choose a message to read the full conversation</span>
-                  <span class="lang-nl">Kies een bericht om het hele gesprek te lezen</span>
-                </p>
-              </div>
-            </div>
+          <!-- WS5 #138 (SITE-DESIGN-SPEC.md §5): messages from GSP are
+               one-way -- no reply endpoint exists, so the section says so
+               up front instead of inviting a reply nothing can carry. No
+               composer, no input that looks like one. -->
+          <div class="card" style="margin-bottom:var(--space-xl);background:rgba(74,111,159,0.06);">
+            <p style="color:var(--navy-200);font-size:var(--font-size-sm);margin:0;">
+              <i class="fa-regular fa-circle-info" aria-hidden="true"></i>
+              <span class="lang-nl">Dit is een eenrichtingskanaal: je kunt hier niet antwoorden. Reageren kan via de <a href="../contact.html">contactpagina</a>.</span>
+              <span class="lang-en">This is a one-way channel: you cannot reply here. To respond, use the <a href="../contact.html">contact page</a>.</span>
+            </p>
+          </div>
+          <div id="messagesList">
+            <p style="color:var(--navy-200);text-align:center;padding:var(--space-2xl);">
+              <span class="lang-nl">Berichten worden geladen…</span>
+              <span class="lang-en">Loading messages…</span>
+            </p>
           </div>
         </section>
 
