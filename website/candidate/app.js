@@ -68,6 +68,7 @@
       salary: { en: 'Salary Tool', nl: 'Salaristool' },
       matches: { en: 'My Matches', nl: 'Mijn Matches' },
       applications: { en: 'Applications', nl: 'Sollicitaties' },
+      'saved-jobs': { en: 'Saved', nl: 'Bewaard' },
       messages: { en: 'Messages', nl: 'Berichten' },
       settings: { en: 'Settings', nl: 'Instellingen' }
     };
@@ -534,6 +535,75 @@
       }
     }
 
+
+    /* ================================================================
+       API: Saved Jobs (WS5 #137, SITE-DESIGN-SPEC.md §5 + §7.2a)
+       ================================================================ */
+    async function loadSavedJobs() {
+      const list = document.getElementById('savedJobsList');
+      try {
+        const res = await Auth.fetch('/v1/candidate/saved-jobs?limit=50');
+        if (!res) return;
+        const data = await res.json();
+        if (!data.items || data.items.length === 0) {
+          list.innerHTML = `<p style="color:var(--navy-200);text-align:center;padding:var(--space-2xl);">
+            <span class="lang-nl">Je hebt nog geen vacatures bewaard.</span>
+            <span class="lang-en">You haven't saved any vacancies yet.</span>
+          </p>`;
+          return;
+        }
+        list.innerHTML = data.items.map(j => {
+          const date = j.created_at ? new Date(j.created_at).toLocaleDateString() : '';
+          const location = [j.city, j.location_type].filter(Boolean).join(' · ');
+          const companyLine = j.anonymous_client === true ? '' : GSP.esc(j.company_name || '');
+          return `<div class="match-card">
+            <div class="match-info">
+              <h4><a href="../vacature.html?id=${encodeURIComponent(j.job_id)}" style="color:var(--white);text-decoration:none;">${GSP.esc(j.job_title || 'Job')}</a></h4>
+              ${companyLine ? `<p class="match-company">${companyLine}</p>` : ''}
+              <p>${GSP.esc(location)}</p>
+              <p style="font-size:var(--font-size-xs);color:var(--navy-400);">
+                <span class="lang-nl">Bewaard op ${GSP.esc(date)}</span>
+                <span class="lang-en">Saved on ${GSP.esc(date)}</span>
+              </p>
+            </div>
+            <button class="btn btn-sm btn-outline" data-action="unsave-job" data-id="${Number(j.job_id) || 0}">
+              <span class="lang-en">Remove</span>
+              <span class="lang-nl">Verwijderen</span>
+            </button>
+          </div>`;
+        }).join('');
+      } catch (err) {
+        console.error('Saved jobs load error:', err);
+        Auth.renderLoadError(list, loadSavedJobs);
+      }
+    }
+
+    window.unsaveJob = async function(jobId) {
+      const isNl = document.documentElement.getAttribute('data-lang') === 'nl';
+      const confirmMsg = isNl
+        ? 'Deze vacature verwijderen uit Bewaard?'
+        : 'Remove this vacancy from Saved?';
+      if (!window.confirm(confirmMsg)) return;
+      try {
+        const res = await Auth.fetch(`/v1/candidate/saved-jobs/${jobId}`, { method: 'DELETE' });
+        if (res && res.ok) {
+          Auth.toast(isNl ? 'Verwijderd' : 'Removed');
+          await loadSavedJobs();
+          // Dashboard counter drops by one without a full reload (WS5 #137 AC2).
+          const statEl = document.getElementById('statSaved');
+          if (statEl) {
+            const current = parseInt(statEl.textContent, 10) || 0;
+            statEl.textContent = Math.max(0, current - 1);
+          }
+        } else {
+          Auth.toast(isNl ? 'Verwijderen mislukt' : 'Failed to remove', 'error');
+        }
+      } catch (err) {
+        Auth.toast(isNl ? 'Fout bij verwijderen' : 'Error removing', 'error');
+      }
+    };
+
+
     /* ================================================================
        API: Job alerts (WS5 #136, SITE-DESIGN-SPEC.md §7.3.7)
        `enabled` is what the candidate asked for; `eligible` is whether we
@@ -757,6 +827,7 @@
       loadDashboard();
       loadMatches();
       loadApplications();
+      loadSavedJobs();
       loadMessages();
     });
 
@@ -779,6 +850,7 @@
       switch (el.dataset.action) {
         case 'navigate': navigateTo(el.dataset.section); break;
         case 'apply-job': applyToJob(Number(id) || 0); break;
+        case 'unsave-job': unsaveJob(Number(id) || 0); break;
         case 'toast-details-soon': Auth.toast('Details coming soon'); break;
         case 'toast-delete-account':
           Auth.toast('Contact info@gsprecruitment.nl to delete your account', 'warning');

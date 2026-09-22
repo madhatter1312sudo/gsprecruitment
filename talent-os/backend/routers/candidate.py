@@ -600,7 +600,8 @@ async def get_saved_jobs(
     )
     rows = await fetch_all(
         """SELECT sj.*, j.title AS job_title, j.description, j.salary_min, j.salary_max,
-                  j.salary_currency, j.location_type, c.company_name
+                  j.salary_currency, j.location_type, j.city, c.company_name,
+                  COALESCE(c.is_internal, false) AS anonymous_client
            FROM saved_jobs sj
            JOIN job_orders j ON j.id = sj.job_id
            JOIN clients c ON c.id = j.client_id
