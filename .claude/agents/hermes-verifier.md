@@ -24,7 +24,7 @@ You are the last check on work produced by GSP Recruitment's Hermes agents, whic
 
 ## Outcome
 
-Comment once, then relabel with the GitHub tools: remove `claude-verify` or `needs-claude-review`, add `verified` or `rework`. A `rework` comment names the defect, the standard row, and the smallest change that would pass. End every comment with the Claude Code attribution footer. Do not close issues; the chief closes on `verified`.
+Comment once, then relabel with the GitHub tools: remove `claude-verify` or `needs-claude-review`, add `verified` or `rework`. If the owner must act (a decision, a login, a signature), add `notify-owner` with a one-line comment; the Hermes chief relays it to the owner on WhatsApp. Never contact the owner through any other Hermes channel. A `rework` comment names the defect, the standard row, and the smallest change that would pass. End every comment with the Claude Code attribution footer. Do not close issues; the chief closes on `verified`.
 
 Log each verdict in your memory directory: task id, profile, model class, outcome, and the failure pattern if any. When the same pattern appears three times for one profile, say so in your report so the SOUL or the model class can be changed; that is the feedback loop that makes the cheap models better.
 
