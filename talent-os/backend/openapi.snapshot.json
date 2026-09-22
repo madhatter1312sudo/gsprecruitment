@@ -4192,6 +4192,7 @@
           "amount": {
             "anyOf": [
               {
+                "maximum": 99999999.99,
                 "minimum": 0.0,
                 "type": "number"
               },

@@ -320,6 +320,35 @@ def test_bv3_existing_candidate_returns_a_code_and_the_id(client, db_run, make_a
     assert detail["candidate_id"] == existing["id"], "the panel opens the candidate from this id"
 
 
+def test_referral_ignores_a_soft_deleted_candidate_row(client, db_run, make_admin, make_email):
+    """Issue #147: a soft-deleted candidate (deleted_at set, e.g. by erase_person())
+    must not block a fresh referral for the same address -- the suppression list,
+    not a dead row, is what should stop contact after an opt-out."""
+    from core.database import execute, fetch_one
+
+    admin = make_admin()
+    email = make_email("ws5-referral-soft-deleted")
+    db_run(
+        execute,
+        """INSERT INTO candidates (full_name, email, source, lawful_basis, deleted_at)
+           VALUES ('Gewist', $1, 'portal_registration', 'portal_registratie', NOW())""",
+        email,
+    )
+
+    res = client.post(
+        "/api/v1/admin/candidates/referral",
+        json={"full_name": "Referral", "email": email, "referred_by": "Piet",
+              "evidence": "mondeling bevestigd"},
+        headers=admin["headers"],
+    )
+    assert res.status_code == 201, res.text
+    new_id = res.json()["id"]
+
+    row = db_run(fetch_one, "SELECT id, deleted_at FROM candidates WHERE id = $1", new_id)
+    assert row is not None
+    assert row["deleted_at"] is None, "the new candidate row is not itself soft-deleted"
+
+
 # ── BV4: consent fields on the candidate portal profile ──────────────────
 
 def test_bv4_profile_reports_withdrawal_and_lawful_basis(client, db_run, make_candidate_user):

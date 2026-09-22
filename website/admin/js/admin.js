@@ -415,6 +415,368 @@ Admin.registerActions({
   navigate: (el) => { if (typeof navigateTo === 'function') navigateTo(el.dataset.section); },
   'close-modal': () => ui.closeTop(),
   page: (el) => Admin.goToPage(el.dataset.section, Number(el.dataset.page)),
+  // §7.3.4: gedeeld tussen de tab Pipeline in de kandidaat- (candidates.js)
+  // en de klantdrawer (clients.js), dus hier geregistreerd in plaats van
+  // in een van beide sectiebestanden -- een tweede, identieke registratie
+  // vanuit de andere sectie zou hetzelfde effect hebben (Admin._actions is
+  // één globale kaart per data-action-waarde, geen per-sectie schil), maar
+  // dan staat dezelfde functie op twee plekken gedefinieerd.
+  'pipeline-change-stage': (el) => Admin.changePipelineStage(Number(el.dataset.entryId), el.closest('.a-tabpane')),
+  'pipeline-history-show-all': (el) => Admin.renderPipelineHistory(Number(el.dataset.entryId), true, el.closest('.a-tabpane')),
+});
+
+/* ============================================================
+   PIPELINE-TAB (§7.3.4): "Pipeline" in de kandidaat- en klantdrawer.
+   Vervangt de tab Matches in de kandidaatdrawer (§7.3.2 afwijking 4), die
+   dezelfde route (GET /admin/pipeline?candidate_id=) alleen liet zien; met
+   deze tab is er nog maar één plek die pipeline-entries toont.
+
+   Elke DOM-lookup hieronder gaat via een `root` (de `.a-tabpane` van de
+   drawer die de aanroep deed), nooit via het kale `document`: de
+   kandidaat- en de klantdrawer staan allebei permanent in de DOM (een
+   dichte drawer wordt verborgen, niet verwijderd, §7.2b), en een
+   pipeline-entry die in beide drawers voorkomt geeft dan twee elementen
+   met hetzelfde id (`pipelineStage_604` bijvoorbeeld). `document.
+   getElementById()` vindt dan de eerste, niet per se de zichtbare: na
+   "klantdrawer > Pipeline > sluiten > kandidaatdrawer > Pipeline" werkte
+   "Fase wijzigen" op de verborgen kopie in de klantdrawer, en de
+   kandidaatdrawer bleef op zijn onopgeslagen select-waarde staan
+   (code-reviewer, HIGH, claude/admin-pipeline). De twee panen zelf
+   (`#candidateDrawerTabContent`, `#clientDrawerTabContent`) hebben wel
+   allebei hun eigen, unieke id, dus `loadPipelineTab()`/`renderPipelineTab()`
+   mogen die nog via `document.getElementById(containerId)` opzoeken; alles
+   daaronder (`pipelineStage_<id>`, `pipelineHistoryWrap_<id>`,
+   `pipelineEntryAlert_<id>`) niet meer.
+
+   §7.6 besluit 2 / migratie 043 (BV8): de zeven canonieke fasen krijgen
+   pas een gesloten CHECK-constraint nadat VALIDATE CONSTRAINT op productie
+   is gedraaid. Migratie 043 zelf normaliseert echter al bij de deploy (elke
+   bestaande rij krijgt daar een van de zeven waarden, met een vangnet naar
+   'sourced'), en de CHECK staat vanaf diezelfde deploy als NOT VALID: dat
+   slaat alleen de eenmalige tabelscan over, niet de handhaving zelf, dus
+   elke INSERT en elke UPDATE op `stage` wordt al vanaf migratie 043
+   geweigerd als de waarde buiten de zeven valt (zie het bestand zelf voor
+   die redenering). Na migratie 043 kan `stage` op een bestaande rij dus
+   normaal gesproken geen onbekende waarde meer dragen -- de
+   "(bestaande waarde)"-klep in dit bestand is een vangnet, niet de
+   verwachte hoofdroute: hij vangt `stage: null` op (de kolom heeft geen
+   NOT NULL, dus een rij die nooit een schrijfactie via de geldige paden
+   doorliep kan hem nog missen) en een rij die buiten de applicatie om is
+   gewijzigd (een handmatige UPDATE, een toekomstige migratie die de
+   constraint weer aanpast). PIPELINE_STAGE_VALIDATED is de vlag die dat
+   vangnet aan of uit zet: false (nu) houdt de klep open, true (na
+   VALIDATE CONSTRAINT, handmatig om te zetten -- zie het draaiboek
+   onderaan migrations/043_pipeline_stage_check.py) sluit de select tot
+   precies de zeven opties.
+   ============================================================ */
+const PIPELINE_STAGE_VALIDATED = false;
+
+Object.assign(Admin, {
+  // Ook op Admin gezet (niet alleen als losse const hierboven), zodat
+  // scripts/admin_sections_check.py de klep voor een onbekende, niet-lege
+  // fase kan testen alsof VALIDATE CONSTRAINT al gedraaid is: Admin.
+  // PIPELINE_STAGE_VALIDATED = true; in een page.evaluate() zonder het
+  // bestand zelf aan te raken. pipelineStageOptions() hieronder leest
+  // altijd deze eigenschap, nooit de const rechtstreeks.
+  PIPELINE_STAGE_VALIDATED,
+
+  // filterKey is 'candidate_id' of 'client_id'; filterId het bijbehorende
+  // id. opts.showCandidateName: de klantdrawer toont meerdere kandidaten
+  // door elkaar (één client_id, veel candidate_id's), dus die zet dit aan;
+  // de kandidaatdrawer laat het weg -- de kaart staat al in het dossier
+  // van die ene kandidaat, dus de eigen naam nog eens tonen voegt niets
+  // toe (§7.3.4 zelf noemt de naam alleen in de context van de
+  // dataherkomst, niet als vast onderdeel van de kaart).
+  async loadPipelineTab(containerId, filterKey, filterId, opts = {}) {
+    const el = document.getElementById(containerId);
+    if (!el) return;
+    mount(el, html`${[0, 1, 2].map(() => html`<div class="a-skel-block"></div>`)}`);
+    try {
+      const qs = new URLSearchParams();
+      qs.set(filterKey, filterId);
+      qs.set('limit', 200);
+      const res = await Auth.fetch(`/v1/admin/pipeline?${qs}`);
+      if (!res) return;
+      const data = await res.json();
+      if (!res.ok) throw new Error();
+      this.renderPipelineTab(containerId, data.items || [], opts);
+    } catch {
+      this.setContainerLoadError(el, () => this.loadPipelineTab(containerId, filterKey, filterId, opts));
+    }
+  },
+
+  // De <select> biedt de zeven canonieke fasen aan, in spec-volgorde
+  // (AdminLabels.pipelineStages). Een fase daarbuiten (mogelijk zolang
+  // PIPELINE_STAGE_VALIDATED false is) komt er als achtste, geselecteerde
+  // optie bij, met het achtervoegsel "(bestaande waarde)": de select
+  // verbergt hem niet en kiest ook niet in zijn plaats een van de zeven.
+  // security-auditor LOW op claude/admin-pipeline: currentStage null (de
+  // kolom heeft geen NOT NULL) sloeg deze klep vroeger over, dus de
+  // browser koos zelf stil de eerste optie ('sourced') en "Fase wijzigen"
+  // zou zonder enige keuze een PATCH sturen. Een lege waarde krijgt nu
+  // dezelfde klep, met "(leeg)" in plaats van de rauwe waarde als label.
+  // code-reviewer LOW (herchecks op 3951578): dat geldt ook wanneer
+  // PIPELINE_STAGE_VALIDATED ooit op true gaat -- de CHECK-constraint uit
+  // migratie 043 laat NULL gewoon door (een CHECK slaat NULL altijd over,
+  // dat is SQL-standaardgedrag), dus VALIDATE CONSTRAINT bewijst niets
+  // over een lege `stage`. De klep voor een lege waarde blijft daarom
+  // onvoorwaardelijk aan, los van de vlag; alleen de klep voor een
+  // ONBEKENDE, niet-lege waarde vervalt na VALIDATE.
+  pipelineStageOptions(currentStage) {
+    const stages = AdminLabels.pipelineStages || [];
+    const known = stages.includes(currentStage);
+    const opts = stages.map(s => html`
+      <option value="${s}" ${raw(s === currentStage ? 'selected' : '')}>${AdminLabels.label('pipelinefase', s)}</option>`);
+    if (!known && (!this.PIPELINE_STAGE_VALIDATED || currentStage == null)) {
+      const value = currentStage ?? '';
+      const label = currentStage ?? '(leeg)';
+      opts.push(html`<option value="${value}" selected>${label} (bestaande waarde)</option>`);
+    }
+    return opts;
+  },
+
+  renderPipelineTab(containerId, items, opts = {}) {
+    const el = document.getElementById(containerId);
+    if (!el) return;
+    if (!items.length) {
+      mount(el, html`<div class="a-state-block">Nog geen pipeline-entries.</div>`);
+      return;
+    }
+    // §7.3.4: "bij meer dan drie entries een accordeon met alleen de
+    // nieuwste opengeklapt". GET /admin/pipeline sorteert al
+    // ORDER BY pe.created_at DESC, pe.id DESC (routers/admin.py), dus
+    // items[0] is de nieuwste zonder dat dit bestand opnieuw hoeft te
+    // sorteren.
+    const useAccordion = items.length > 3;
+    mount(el, html`${items.map((entry, i) => {
+      const jobLabel = entry.job_title
+        ? html`${entry.job_title} <span class="a-soft">(#${entry.job_id})</span>`
+        : html`Vacature #${entry.job_id}`;
+      const heading = opts.showCandidateName
+        ? html`${entry.full_name || 'Onbekende kandidaat'} <span class="a-soft">· ${jobLabel}</span>`
+        : html`Vacature: ${jobLabel}`;
+      const body = this.pipelineEntryBody(entry);
+      if (useAccordion) {
+        return html`<details class="card mb-3 a-disclosure" id="pipelineEntry_${entry.id}" ${raw(i === 0 ? 'open' : '')}>
+          <summary>${heading}</summary>
+          <div class="card-body">${body}</div>
+        </details>`;
+      }
+      return html`<div class="a-panel mb-3" id="pipelineEntry_${entry.id}"><h4 class="a-cell-strong mb-2">${heading}</h4>${body}</div>`;
+    })}`);
+    if (useAccordion) {
+      // code-reviewer LOW op claude/admin-pipeline: een dichtgeklapte kaart
+      // hoeft zijn historie niet meteen op te halen. De nieuwste (open bij
+      // render, i === 0 hierboven) laadt meteen; de rest pas op het eigen
+      // toggle-event van zijn <details>, één keer (zoals
+      // #retentionTableDetails in retention.js dat al doet).
+      this.loadPipelineHistory(items[0].id, el);
+      items.slice(1).forEach((entry) => {
+        const node = el.querySelector(`#pipelineEntry_${entry.id}`);
+        if (!node) return;
+        node.addEventListener('toggle', () => {
+          if (node.open && node.dataset.gspHistoryLoaded !== '1') {
+            node.dataset.gspHistoryLoaded = '1';
+            this.loadPipelineHistory(entry.id, el);
+          }
+        });
+      });
+    } else {
+      items.forEach(entry => this.loadPipelineHistory(entry.id, el));
+    }
+  },
+
+  // code-reviewer LOW op claude/admin-pipeline: de oude tab Matches toonde
+  // `updated_at` ("Bijgewerkt"). De tab Pipeline haalt "Laatst gewijzigd"
+  // in plaats daarvan uit de historie, en die kan ontbreken (geen historie,
+  // of een historiefout) -- dan stond er nergens meer een datum bij een
+  // kaart die er toch echt een heeft. `updated_at` staat er daarom altijd,
+  // onafhankelijk van de historie.
+  pipelineEntryBody(entry) {
+    return html`
+      <div id="pipelineEntryAlert_${entry.id}"></div>
+      <div class="a-pipeline-controls">
+        <div class="form-group mb-0">
+          <label class="form-label" for="pipelineStage_${entry.id}">Huidige fase</label>
+          <select class="form-select" id="pipelineStage_${entry.id}" data-original-stage="${entry.stage ?? ''}">${this.pipelineStageOptions(entry.stage)}</select>
+        </div>
+        <button type="button" class="btn btn-primary" data-action="pipeline-change-stage"
+          data-entry-id="${entry.id}">Fase wijzigen</button>
+      </div>
+      <div class="a-meta mb-2">Bijgewerkt: ${this.retentionDate(entry.updated_at)}</div>
+      <div id="pipelineHistoryWrap_${entry.id}">
+        ${[0, 1, 2].map(() => html`<div class="a-skel-block"></div>`)}
+      </div>
+    `;
+  },
+
+  // §7.3.4 "Fase wijzigen": geen automatische opslag bij het wisselen van
+  // de select (de <select> zelf toont de gekozen waarde al -- dat IS de
+  // optimistische update), pas bij deze klik gaat de PATCH eruit. Bij een
+  // 4xx/5xx draait dit de select terug naar de laatst bevestigde waarde
+  // (data-original-stage) en toont een inline-melding boven de kaart; bij
+  // succes wordt alleen de historie van deze entry opnieuw opgehaald, niet
+  // lokaal aangevuld. `root` is de `.a-tabpane` van de drawer die de klik
+  // deed (zie de moduledoc hierboven) -- nooit weglaten voor een geopende
+  // drawer.
+  async changePipelineStage(entryId, root) {
+    const scope = root || document;
+    const selectEl = scope.querySelector(`#pipelineStage_${entryId}`);
+    const btnEl = scope.querySelector(`[data-action="pipeline-change-stage"][data-entry-id="${entryId}"]`);
+    if (!selectEl || !btnEl || btnEl.disabled) return;
+    this.pipelineEntryAlert(entryId, '', root);
+    const newStage = selectEl.value;
+    const stages = AdminLabels.pipelineStages || [];
+    // De ontsnappingsklep-optie mag nooit verzonden worden, ook niet
+    // wanneer ze toevallig de geselecteerde waarde is gebleven (§7.3.4:
+    // "de UI schrijft nooit stilzwijgend een onbekende fase weg").
+    if (!stages.includes(newStage)) {
+      this.pipelineEntryAlert(entryId, 'Kies een van de zeven fasen om op te slaan; de huidige waarde is alleen ter informatie te zien.', root);
+      return;
+    }
+    const originalStage = selectEl.dataset.originalStage;
+    if (newStage === originalStage) return; // geen wijziging, niets te bewaren.
+
+    btnEl.disabled = true;
+    selectEl.disabled = true;
+    const prevLabel = btnEl.innerHTML;
+    mount(btnEl, html`<i class="fa-solid fa-spinner fa-spin"></i> Fase wijzigen`);
+    try {
+      const res = await Auth.fetch(`/v1/admin/pipeline/${entryId}/stage`, {
+        method: 'PATCH', body: JSON.stringify({ stage: newStage }),
+      });
+      const data = res ? await res.json().catch(() => null) : null;
+      if (res && res.ok) {
+        selectEl.dataset.originalStage = newStage;
+        Auth.toast('Fase bijgewerkt', 'success');
+        await this.loadPipelineHistory(entryId, root);
+        btnEl.disabled = false;
+        selectEl.disabled = false;
+        mount(btnEl, raw(prevLabel));
+        return;
+      }
+      selectEl.value = originalStage;
+      this.pipelineEntryAlert(entryId, this.pipelineStageErrorText(data, res && res.status), root);
+    } catch {
+      selectEl.value = originalStage;
+      this.pipelineEntryAlert(entryId, 'Netwerkfout, probeer het opnieuw.', root);
+    }
+    btnEl.disabled = false;
+    selectEl.disabled = false;
+    mount(btnEl, raw(prevLabel));
+  },
+
+  pipelineStageErrorText(data, status) {
+    if (status === 401 || status === 403) return 'Je hebt geen rechten voor deze handeling.';
+    if (status === 404) return 'Deze pipeline-entry bestaat niet meer. Ververs de pagina.';
+    if (status === 422) return 'Deze fase is ongeldig. Kies een van de zeven fasen.';
+    const d = this.errorDetail(data);
+    if (d.message) return d.message;
+    return 'Er ging iets mis, probeer het opnieuw.';
+  },
+
+  pipelineEntryAlert(entryId, text, root) {
+    const el = (root || document).querySelector(`#pipelineEntryAlert_${entryId}`);
+    if (!el) return;
+    if (!text) { mount(el, ''); return; }
+    mount(el, html`
+      <div class="alert alert-danger" role="alert">
+        <i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i>
+        <span>${text}</span>
+      </div>`);
+  },
+
+  // security-auditor LOW op claude/admin-pipeline (herchecks op 3951578):
+  // twee aanroepen voor dezelfde entry kunnen overlappen (een trage
+  // initiële GET terwijl een geslaagde PATCH meteen zijn eigen herlading
+  // start), en zonder volgnummer wint welke respons dan ook het laatst
+  // binnenkomt -- een trage eerste GET zou de verse herlading na de PATCH
+  // zo kunnen overschrijven met de OUDE fase. `wrap._pipelineHistorySeq`
+  // is het volgnummer van de laatst GESTARTE aanroep voor deze wrap; een
+  // respons die niet meer de nieuwste aanroep is (seq komt niet meer
+  // overeen) wordt genegeerd, in zowel het succes- als het foutpad.
+  async loadPipelineHistory(entryId, root) {
+    const wrap = (root || document).querySelector(`#pipelineHistoryWrap_${entryId}`);
+    if (!wrap) return;
+    const seq = wrap._pipelineHistorySeq = (wrap._pipelineHistorySeq || 0) + 1;
+    mount(wrap, html`${[0, 1, 2].map(() => html`<div class="a-skel-block"></div>`)}`);
+    try {
+      const res = await Auth.fetch(`/v1/admin/pipeline/${entryId}/history`);
+      if (!res) return;
+      const data = await res.json();
+      if (seq !== wrap._pipelineHistorySeq) return; // een nieuwere aanroep won al
+      if (!res.ok) throw new Error();
+      // §7.3.4: de route sorteert ORDER BY h.changed_at (oplopend, append-
+      // only logboek); de tijdlijn toont nieuwste boven, dus hier
+      // aflopend, met id als tiebreak bij een gelijke timestamp.
+      wrap._pipelineHistoryItems = (data.items || []).slice().sort((a, b) => {
+        const diff = new Date(b.changed_at) - new Date(a.changed_at);
+        return diff !== 0 ? diff : (b.id || 0) - (a.id || 0);
+      });
+      this.renderPipelineHistory(entryId, false, root);
+    } catch {
+      if (seq !== wrap._pipelineHistorySeq) return;
+      this.setContainerLoadError(wrap, () => this.loadPipelineHistory(entryId, root));
+    }
+  },
+
+  pipelineActorLabel(item) {
+    if (item.changed_by_name) return item.changed_by_name;
+    if (item.changed_by != null) return `Gebruiker #${item.changed_by}`;
+    return 'Onbekend';
+  },
+
+  // "<van> → <naar>" (§7.3.4): een rechterpijl (U+2192), geen streepje en
+  // geen em-dash. from_stage: null toont als "(nieuw)"; elke waarde gaat
+  // door dezelfde labelmap als de select, met de ruwe waarde als terugval.
+  pipelineStageChangeLabel(item) {
+    const from = item.from_stage == null
+      ? '(nieuw)'
+      : AdminLabels.label('pipelinefase', item.from_stage, item.from_stage);
+    const to = AdminLabels.label('pipelinefase', item.to_stage, item.to_stage);
+    return html`${from} → ${to}`;
+  },
+
+  pipelineDateTime(d) {
+    if (!d) return '—';
+    const dt = new Date(d);
+    if (isNaN(dt.getTime())) return '—';
+    const date = dt.toLocaleDateString('nl-NL', { day: 'numeric', month: 'short', year: 'numeric' });
+    const time = dt.toLocaleTimeString('nl-NL', { hour: '2-digit', minute: '2-digit' });
+    return `${date} ${time}`;
+  },
+
+  // showAll: true toont alle items (na een klik op "Toon alles"), anders
+  // de eerste tien (§7.3.4: "Maximaal tien items zichtbaar, daarna 'Toon
+  // alles'"). Leest wrap._pipelineHistoryItems, gezet door
+  // loadPipelineHistory hierboven -- dat veld overleeft deze functie's
+  // eigen mount() omdat die alleen de innerHTML van wrap vervangt, niet
+  // wrap zelf.
+  renderPipelineHistory(entryId, showAll, root) {
+    const wrap = (root || document).querySelector(`#pipelineHistoryWrap_${entryId}`);
+    if (!wrap) return;
+    const sorted = wrap._pipelineHistoryItems || [];
+    if (!sorted.length) {
+      mount(wrap, html`<div class="a-state-block">Nog geen fasewijzigingen vastgelegd.</div>`);
+      return;
+    }
+    const last = sorted[0];
+    const MAX_VISIBLE = 10;
+    const visible = showAll ? sorted : sorted.slice(0, MAX_VISIBLE);
+    const hasMore = !showAll && sorted.length > MAX_VISIBLE;
+    mount(wrap, html`
+      <div class="a-meta mb-2">Laatst gewijzigd: ${this.retentionDate(last.changed_at)} door ${this.pipelineActorLabel(last)}</div>
+      <ul class="a-timeline">
+        ${visible.map((it, i) => html`
+          <li class="a-timeline__item${raw(i === 0 ? ' a-timeline__item--newest' : '')}">
+            <div class="a-num fs-xs">${this.pipelineDateTime(it.changed_at)}</div>
+            <div>${this.pipelineStageChangeLabel(it)}</div>
+            <div class="a-soft fs-xs">${this.pipelineActorLabel(it)}</div>
+          </li>`)}
+      </ul>
+      ${hasMore ? html`<button type="button" class="btn btn-sm btn-ghost-secondary" data-action="pipeline-history-show-all" data-entry-id="${entryId}">Toon alles</button>` : ''}
+    `);
+  },
 });
 
 /* Het dashboard blijft in de kern (Admin.init() laadt het zelf al), maar
