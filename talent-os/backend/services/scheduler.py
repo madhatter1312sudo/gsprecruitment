@@ -1480,23 +1480,26 @@ async def shutdown_scheduler() -> None:
             _lock_conn = None
 
 
+# Manual runs of a cron routine are wrapped with the same routine name as
+# start_scheduler() uses, so a "run now" from the admin panel shows up in
+# routine_runs and on /api/v1/admin/health/routines like a scheduler tick.
 JOBS_BY_NAME = {
-    "sourcing": apollo_search_and_sync,
-    "enrich": apollo_enrich_batch,
-    "matching": matching,
-    "drafting": draft_outreach,
-    "blog": draft_blog_post,
-    "retention_review": retention_review_job,
-    "talentpool_optin_cleanup": talentpool_optin_requests_cleanup_job,
+    "sourcing": _tracked("apollo_search_and_sync", apollo_search_and_sync),
+    "enrich": _tracked("apollo_enrich_batch", apollo_enrich_batch),
+    "matching": _tracked("matching", matching),
+    "drafting": _tracked("draft_outreach", draft_outreach),
+    "blog": _tracked("draft_blog_post", draft_blog_post),
+    "retention_review": _tracked("retention_review", retention_review_job),
+    "talentpool_optin_cleanup": _tracked("talentpool_optin_requests_cleanup", talentpool_optin_requests_cleanup_job),
     # WS3b/WS3c: handmatig te draaien via POST /api/v1/admin/outreach/run/
     # {job_name}, net als de andere jobs hier. Handmatig draaien omzeilt
     # géén schakelaar: allebei lezen ze settings (en job_alert ook de
     # DB-vlag) binnenin, dus een admin die dit aanroept met de
     # schakelaars uit krijgt dezelfde droogloop als de cron -- dezelfde
     # les als de security-audit-opmerking bij apollo_search_and_sync.
-    "dormant_warning": dormant_account_warning_job,
-    "job_alerts": job_alert_job,
-    "job_alert_sends_cleanup": job_alert_sends_cleanup_job,
+    "dormant_warning": _tracked("dormant_account_warning", dormant_account_warning_job),
+    "job_alerts": _tracked("job_alert", job_alert_job),
+    "job_alert_sends_cleanup": _tracked("job_alert_sends_cleanup", job_alert_sends_cleanup_job),
     # Manual-trigger only — deliberately NOT added to start_scheduler()'s
     # cron jobs below. One-shot Apollo bulk-harvest (services/harvest.py)
     # and its outreach-draft catch-up, both run via routers/outreach.py's
