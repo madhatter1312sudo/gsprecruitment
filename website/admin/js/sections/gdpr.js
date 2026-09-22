@@ -194,7 +194,6 @@
     // te doen. Zelfde patroon en dezelfde optie als candidates.js
     // gdprAlert()/placementAlert(): scrollIntoView op het element zelf, niet
     // op de modal.
-    el.scrollIntoView({ block: 'start' });
     const cb = document.getElementById('gdprEraseAdminConfirm');
     const primaryBtn = handle.button('primary');
     if (primaryBtn) {
@@ -207,6 +206,11 @@
       primaryBtn.classList.remove('btn-primary');
       primaryBtn.classList.add('btn-outline-danger');
     }
+    // Pas NA het tonen van de tweede knop scrollen: die knop maakt de
+    // modalvoet hoger en de scrollende body dus lager, waardoor een eerder
+    // gescrold blok weer onder de rand verdween (checkbox afgeknipt op
+    // 390px en 1440px). Doel is de checkboxregel zelf, gecentreerd.
+    ((cb && cb.closest('.form-check')) || el).scrollIntoView({ block: 'center' });
     // security-auditor op a2ec6ed: het bevestigingsveld bleef na de 409
     // bewerkbaar, dus confirm kon bij de tweede aanroep (confirm_admin_or_self:
     // true) een andere tekenreeks dragen dan bij de eerste. Op slot, zodat
