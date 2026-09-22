@@ -568,6 +568,13 @@ class CandidatePortalProfile(BaseModel):
     # the ground it is actually processing on rather than guessing.
     consent_withdrawn_at: Optional[datetime] = None
     lawful_basis: Optional[str] = None
+    # WS5 issue #136 (§7.3.7): the job-alert switch's initial state, read
+    # once at page load rather than via the PUT-only /job-alerts endpoint.
+    # job_alert_eligible is the same JOB_ALERT_ELIGIBILITY_SQL computation
+    # the PUT response returns as `eligible`.
+    job_alert_optin_at: Optional[datetime] = None
+    job_alert_unsubscribed_at: Optional[datetime] = None
+    job_alert_eligible: bool = False
     created_at: datetime
     updated_at: Optional[datetime] = None
 

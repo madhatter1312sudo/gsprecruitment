@@ -1214,6 +1214,35 @@
             "title": "Id",
             "type": "integer"
           },
+          "job_alert_eligible": {
+            "default": false,
+            "title": "Job Alert Eligible",
+            "type": "boolean"
+          },
+          "job_alert_optin_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Job Alert Optin At"
+          },
+          "job_alert_unsubscribed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Job Alert Unsubscribed At"
+          },
           "languages": {
             "default": [],
             "items": {
