@@ -910,7 +910,7 @@ Object.assign(Admin, {
     mount(el, html`
       <div class="mb-3">
         <button type="button" class="btn btn-sm btn-ghost-secondary" data-action="activity-toggle-form" data-container="${containerId}">
-          <i class="fa-solid fa-plus" aria-hidden="true"></i> Activiteit toevoegen
+          <i class="fa-solid fa-plus me-1" aria-hidden="true"></i>Activiteit toevoegen
         </button>
       </div>
       ${formOpen ? html`
