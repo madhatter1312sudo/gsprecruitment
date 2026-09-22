@@ -20,9 +20,14 @@ Covers:
     tabbed detail drawer (WS5 stap 3: een echte Offcanvas met id
     #clientDrawer in plaats van de gedeelde #adminModalOverlay -- vandaar
     dat de sluitknoppen hieronder per paneel gescoped zijn), and each of its four tabs (contacten, vacatures,
-    notities/activiteit, prospects) renders without a console error. The
-    activiteit tab has no backing endpoint on main (see js/admin.js) so
-    this only checks its empty-state text, never a network call.
+    notities/activiteit, prospects) renders without a console error.
+  - Activiteitentab (§7.3.6(b), gedeeld tussen de kandidaat- en
+    klantdrawer via Admin.loadActivityTab()/renderActivityTab() in
+    admin.js): de zes typechips in het Nederlands, een taak toont zijn
+    afgerond-staat als checkbox die na een tik en een tabherlading
+    aangevinkt blijft, het formulier "Activiteit toevoegen" staat niet
+    permanent open en een POST vanuit BEIDE drawers (candidate- resp.
+    client-subject) verschijnt in de tijdlijn zonder paginaherlading.
   - Leads: unified inbox renders rows from both sources (contact/quiz
     badges), the unread toggle re-fetches, and a row click PATCHes the
     read state.
@@ -192,9 +197,33 @@ PROSPECTS = [
 ACTIVITIES_BY_CLIENT = {
     1: [{"id": 401, "subject_type": "client", "subject_id": 1, "type": "call",
          "body": "Belde over nieuwe vacature", "due_at": None, "completed_at": None,
-         "created_at": "2026-01-01T00:00:00Z"}],
+         "created_by": None, "created_at": "2026-01-01T00:00:00Z"}],
     2: [],
 }
+
+# ---- Activiteitentab (§7.3.6(b), gedeeld tussen candidates.js/clients.js
+#      via Admin.loadActivityTab()/renderActivityTab() in admin.js) ------
+# Eén generieke opslag op (subject_type, subject_id) i.p.v. losse dicts per
+# subject_type, zodat GET/POST/PATCH /v1/admin/activities hieronder één
+# implementatie kan delen voor 'candidate' EN 'client' -- de echte route
+# maakt dat onderscheid ook niet (routers/activities.py: subject_type is
+# gewoon een kolom, geen aparte tabel). ACTIVITIES_BY_CLIENT hierboven
+# blijft bestaan (de bestaande Opdrachtgevers-test hieronder leest hem nog
+# rechtstreeks uit); deze dict is de nieuwe, generieke bron die de
+# GET-route bedient en die POST/PATCH muteren.
+ACTIVITIES_STORE = {
+    ("client", 1): list(ACTIVITIES_BY_CLIENT[1]),
+    ("client", 2): [],
+    # candidate_id 1482 = CANDIDATE_RECORD hieronder. Eén taak (open, geen
+    # completed_at) om de checkbox-tik te bewijzen, en één notitie om het
+    # gewone pad te tonen.
+    ("candidate", 1482): [
+        {"id": 402, "subject_type": "candidate", "subject_id": 1482, "type": "task",
+         "body": "Bel terug over contractvoorstel", "due_at": "2026-09-25T00:00:00Z",
+         "completed_at": None, "created_by": 1, "created_at": "2026-09-01T00:00:00Z"},
+    ],
+}
+ACTIVITY_STATE = {"next_id": 500, "create_calls": [], "patch_calls": []}
 
 # ---- Kandidaatdrawer: tab Toestemmingen + referral-intake (§7.3.2) -------
 # Twee kandidaten. CANDIDATE_RECORD (kind sourced, candidates.id 1482, geen
@@ -803,15 +832,53 @@ def route_admin_api(route, request):
         json_response({"items": items, "total": len(items)})
         return
 
-    # ---- Activities (WS-C.6, notities/activiteit tab) ----
+    # ---- Activities (WS-C.6 + §7.3.6(b), gedeelde Activiteitentab) ----
     if path == "/api/v1/admin/activities" and method == "GET":
         subject_type = qs.get("subject_type", [None])[0]
         subject_id = qs.get("subject_id", [None])[0]
-        if subject_type == "client" and subject_id is not None:
-            items = ACTIVITIES_BY_CLIENT.get(int(subject_id), [])
+        if subject_type is not None and subject_id is not None:
+            items = ACTIVITIES_STORE.get((subject_type, int(subject_id)), [])
             json_response({"items": items, "total": len(items)})
             return
         json_response({"items": [], "total": 0})
+        return
+    if path == "/api/v1/admin/activities" and method == "POST":
+        body = json.loads(request.post_data or "{}")
+        ACTIVITY_STATE["create_calls"].append(body)
+        subject_type = body.get("subject_type")
+        subject_id = body.get("subject_id")
+        ACTIVITY_STATE["next_id"] += 1
+        row = {
+            "id": ACTIVITY_STATE["next_id"], "subject_type": subject_type, "subject_id": subject_id,
+            "type": body.get("type"), "body": body.get("body"), "due_at": body.get("due_at"),
+            "completed_at": body.get("completed_at"), "created_by": 1,
+            "created_at": "2026-09-22T12:00:00Z",
+        }
+        key = (subject_type, subject_id)
+        ACTIVITIES_STORE.setdefault(key, []).insert(0, row)
+        json_response(row, status=201)
+        return
+    m = re.match(r"^/api/v1/admin/activities/(\d+)$", path)
+    if m and method == "PATCH":
+        activity_id = int(m.group(1))
+        body = json.loads(request.post_data or "{}")
+        ACTIVITY_STATE["patch_calls"].append({"id": activity_id, "body": body})
+        found = None
+        for items in ACTIVITIES_STORE.values():
+            for it in items:
+                if it["id"] == activity_id:
+                    found = it
+                    break
+            if found:
+                break
+        if found is None:
+            json_response({"detail": "Activity not found"}, status=404)
+            return
+        if "completed_at" in body:
+            found["completed_at"] = body["completed_at"]
+        if "body" in body:
+            found["body"] = body["body"]
+        json_response(found)
         return
 
     # ---- Prospects (client drawer's prospects tab) ----
@@ -1832,6 +1899,31 @@ def main():
                     if "werving_selectie" in text:
                         failures.append("clients: raw employment_type value leaked into the jobs tab")
 
+            # ---- Tab Notities/Activiteit (§7.3.6(b)): zelfde gedeelde
+            # component als de kandidaatdrawer (Admin.loadActivityTab(),
+            # hier op subject_type='client') -- bewijst dat het toevoegen
+            # ook vanuit DEZE drawer werkt, niet alleen vanuit de
+            # kandidaatdrawer hierboven. ----
+            click_or_fail(page, failures, '[data-action="client-tab"][data-tab="activity"]', "clients: de tab Notities/Activiteit")
+            if not wait_until(page, lambda: page.query_selector('#clientDrawerTabContent [data-action="activity-toggle-form"]') is not None):
+                failures.append("clients: de tab Notities/Activiteit rendeerde niet")
+            create_calls_before = len(ACTIVITY_STATE["create_calls"])
+            click_or_fail(page, failures, '#clientDrawerTabContent [data-action="activity-toggle-form"]', "clients: 'Activiteit toevoegen' openklappen")
+            select_or_fail(page, failures, '#clientDrawerTabContent [id$="_activityType"]', 'meeting', "clients: activiteitstype kiezen")
+            fill_or_fail(page, failures, '#clientDrawerTabContent [id$="_activityBody"]', 'Playwright-notitie op de opdrachtgever', "clients: notitie invullen")
+            click_or_fail(page, failures, '#clientDrawerTabContent [data-action="activity-submit"]', "clients: activiteit vastleggen")
+            if not wait_for_calls(page, ACTIVITY_STATE["create_calls"], create_calls_before + 1):
+                failures.append("clients: 'Vastleggen' stuurde geen POST /v1/admin/activities")
+            else:
+                sent = ACTIVITY_STATE["create_calls"][-1]
+                if sent.get("subject_type") != "client" or sent.get("subject_id") != 1 or sent.get("type") != "meeting":
+                    failures.append(f"clients: POST-payload voor de nieuwe activiteit klopt niet -- kreeg {sent!r}")
+            if not wait_for_text(page, '#clientDrawerTabContent', "Playwright-notitie op de opdrachtgever"):
+                failures.append("clients: de nieuwe activiteit verscheen niet in de tijdlijn na het opslaan")
+            act_client_text = text_of(page, '#clientDrawerTabContent')
+            if "Afspraak" not in act_client_text:
+                failures.append(f"clients: de tab Notities/Activiteit toont niet de Nederlandse typechip 'Afspraak' -- kreeg {act_client_text[:200]!r}")
+
             # ---- Tab Pipeline (§7.3.4): client_id=1 levert vijf entries
             # (604/603/602/601/600) -- accordeon, alleen de nieuwste open,
             # en showCandidateName=true zet de kandidaatnaam in de kop
@@ -2686,6 +2778,60 @@ def main():
             failures.append("candidates: historie van 601 herlaadde niet na de geslaagde derde poging")
         if PIPELINE_ENTRIES_BY_ID[601]["stage"] != "rejected":
             failures.append(f"candidates: de server-fixture van entry 601 bleef op {PIPELINE_ENTRIES_BY_ID[601]['stage']!r} na een geslaagde PATCH")
+
+        # ---- Tab Activiteit (§7.3.6(b), gedeelde Admin.loadActivityTab()/
+        # renderActivityTab() -- ook afgenomen door de klantdrawer
+        # hieronder). candidate_id 1482 heeft één bestaande taak
+        # (ACTIVITIES_STORE, id 402, open). ----
+        click_or_fail(page, failures, '#candidateDrawer [data-tab="activiteit"]', "candidates: de tab Activiteit")
+        if not wait_for_text(page, '#candidateDrawerTabContent', "Bel terug over contractvoorstel"):
+            failures.append(f"candidates: de tab Activiteit toont niet de bestaande taak -- kreeg {text_of(page, '#candidateDrawerTabContent')[:200]!r}")
+        act_text = text_of(page, '#candidateDrawerTabContent')
+        if "Taak" not in act_text:
+            failures.append(f"candidates: de tab Activiteit toont niet de Nederlandse typechip 'Taak' -- kreeg {act_text[:200]!r}")
+        task_checkbox = page.query_selector('#candidateDrawerTabContent [data-action="activity-toggle-task"]')
+        if task_checkbox is None:
+            failures.append("candidates: de open taak (402) toont geen checkbox")
+        elif task_checkbox.is_checked():
+            failures.append("candidates: de open taak (402) staat al aangevinkt (completed_at is null in de fixture)")
+
+        # Formulier staat niet permanent open (§7.3.6(b)).
+        if page.query_selector('#candidateDrawerTabContent [id$="_activityType"]') is not None:
+            failures.append("candidates: het formulier 'Activiteit toevoegen' staat open zonder op de knop te klikken")
+        click_or_fail(page, failures, '#candidateDrawerTabContent [data-action="activity-toggle-form"]', "candidates: 'Activiteit toevoegen' openklappen")
+        if not wait_until(page, lambda: page.query_selector('#candidateDrawerTabContent [id$="_activityType"]') is not None):
+            failures.append("candidates: het formulier klapte niet open na de klik op 'Activiteit toevoegen'")
+
+        create_calls_before = len(ACTIVITY_STATE["create_calls"])
+        select_or_fail(page, failures, '#candidateDrawerTabContent [id$="_activityType"]', 'note', "candidates: activiteitstype kiezen")
+        fill_or_fail(page, failures, '#candidateDrawerTabContent [id$="_activityBody"]', 'Playwright-notitie op de kandidaat', "candidates: notitie invullen")
+        click_or_fail(page, failures, '#candidateDrawerTabContent [data-action="activity-submit"]', "candidates: activiteit vastleggen")
+        if not wait_for_calls(page, ACTIVITY_STATE["create_calls"], create_calls_before + 1):
+            failures.append("candidates: 'Vastleggen' stuurde geen POST /v1/admin/activities")
+        else:
+            sent = ACTIVITY_STATE["create_calls"][-1]
+            if sent.get("subject_type") != "candidate" or sent.get("subject_id") != 1482 or sent.get("type") != "note":
+                failures.append(f"candidates: POST-payload voor de nieuwe activiteit klopt niet -- kreeg {sent!r}")
+        if not wait_for_text(page, '#candidateDrawerTabContent', "Playwright-notitie op de kandidaat"):
+            failures.append("candidates: de nieuwe activiteit verscheen niet in de tijdlijn na het opslaan (geen paginaherlading verwacht, wel een herladen tab)")
+
+        # Taak aanvinken: PATCH /activities/402, en het vinkje blijft staan
+        # na een herlading van de tab (niet alleen visueel in de browser).
+        patch_calls_before = len(ACTIVITY_STATE["patch_calls"])
+        check_or_fail(page, failures, '#candidateDrawerTabContent [data-action="activity-toggle-task"][data-id="402"]', "candidates: taak 402 aanvinken")
+        if not wait_for_calls(page, ACTIVITY_STATE["patch_calls"], patch_calls_before + 1):
+            failures.append("candidates: het aanvinken van taak 402 stuurde geen PATCH")
+        elif ACTIVITY_STATE["patch_calls"][-1]["id"] != 402 or not ACTIVITY_STATE["patch_calls"][-1]["body"].get("completed_at"):
+            failures.append(f"candidates: PATCH-payload voor taak 402 klopt niet -- kreeg {ACTIVITY_STATE['patch_calls'][-1]!r}")
+        click_or_fail(page, failures, '#candidateDrawer [data-tab="pipeline"]', "candidates: wegklikken naar Pipeline (voor de Activiteit-herlading)")
+        click_or_fail(page, failures, '#candidateDrawer [data-tab="activiteit"]', "candidates: terug naar de tab Activiteit (herlading)")
+
+        def _task_402_checked():
+            el = page.query_selector('#candidateDrawerTabContent [data-action="activity-toggle-task"][data-id="402"]')
+            return el is not None and el.is_checked()
+
+        if not wait_until(page, _task_402_checked):
+            failures.append("candidates: taak 402 stond na een herlading van de tab niet meer aangevinkt")
 
         click_or_fail(page, failures, '#candidateDrawer [data-tab="toestemmingen"]', "candidates: de tab Toestemmingen")
         if not wait_until(page, lambda: page.query_selector('[data-action="candidate-talentpool-edit"]') is not None):
@@ -3703,7 +3849,9 @@ def main():
 
     print("PASS: Users (§7.3.6(a): badge Vergrendeld, rijactie Deblokkeren, POST unlock met "
           "200- en 500-uitkomst), "
-          "Opdrachtgevers (list + tabbed drawer), Leads (inbox + unread filter + PATCH), "
+          "Opdrachtgevers (list + tabbed drawer), Activiteitentab "
+          "(§7.3.6(b), gedeeld tussen kandidaat- en klantdrawer: typechips, taakcheckbox, "
+          "activiteit toevoegen vanuit beide drawers), Leads (inbox + unread filter + PATCH), "
           "Rapportage, Bewaartermijnen (lijst, generate, goedkeuren met getypte bevestiging, "
           "afwijzen, categoriebrede bulk met 409-mismatch, droogloop en 500 met retry), "
           "Toestemmingen/referral (§7.3.2: talentpool- en presentatiemodal met clientside-validatie "

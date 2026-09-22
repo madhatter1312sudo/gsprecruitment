@@ -32,9 +32,12 @@
        lazen GET /admin/pipeline?candidate_id=, dus twee tabs op dezelfde
        gegevens was verwarrend. Pipeline voegt de fasewisselaar en de
        historietijdlijn toe (Admin.loadPipelineTab() in admin.js, gedeeld
-       met de klantdrawer in clients.js); Activiteit blijft een eigen tab
-       op de bestaande, gedeelde route (GET /admin/activities?
-       subject_type=candidate&subject_id=). §7.3.4 as-built.
+       met de klantdrawer in clients.js). §7.3.4 as-built. De tab
+       Activiteit is sinds §7.3.6(b) op dezelfde manier gedeeld
+       (Admin.loadActivityTab()/renderActivityTab() in admin.js, ook
+       afgenomen door de klantdrawer in clients.js): formulier om een
+       activiteit toe te voegen plus de taakcheckbox voor `type: "task"`,
+       niet langer een read-only tabel.
      - De titelweergave bij een actieve presentatietoestemming
        ("<titel> · Vacature #<id>") is best effort: er is geen admin-route
        voor één losse vacature, dus dit bestand haalt bij het openen van de
@@ -430,11 +433,12 @@
     }
   },
 
-  /* ---- Tab: Activiteit (GET /admin/activities?subject_type=candidate) ---- */
+  /* ---- Tab: Activiteit (§7.3.6(b), gedeelde tab -- Admin.loadActivityTab()
+     in admin.js, dezelfde implementatie als de klantdrawer in clients.js) ---- */
   async loadCandidateActivityTab(kind, itemId) {
     const el = document.getElementById('candidateDrawerTabContent');
     if (!el) return;
-    mount(el, html`<div class="a-state-block"><i class="fa-solid fa-spinner fa-spin"></i> Laden…</div>`);
+    mount(el, html`${[0, 1, 2].map(() => html`<div class="a-skel-block"></div>`)}`);
     try {
       const detail = await this.ensureCandidateDetail(kind, itemId);
       const candidateId = this.candidateRecordId(detail, kind);
@@ -442,24 +446,7 @@
         mount(el, html`<div class="a-state-block">Deze kandidaat heeft nog geen kandidaatrecord; er is geen activiteit om te tonen.</div>`);
         return;
       }
-      const res = await Auth.fetch(`/v1/admin/activities?subject_type=candidate&subject_id=${candidateId}&limit=50`);
-      if (!res) return;
-      const data = await res.json();
-      if (!res.ok) throw new Error();
-      const items = data.items || [];
-      mount(el, items.length ? html`
-        <div class="table-responsive">
-          <table class="table table-vcenter card-table">
-            <thead><tr><th>Type</th><th>Notitie</th><th>Datum</th><th>Status</th></tr></thead>
-            <tbody>${items.map(a => html`
-              <tr>
-                <td class="a-cell-strong">${this.activityTypeLabel(a.type)}</td>
-                <td class="a-soft">${a.body || '—'}</td>
-                <td class="a-soft">${this.retentionDate(a.created_at)}</td>
-                <td>${a.completed_at ? html`<span class="badge bg-secondary-lt">Afgerond</span>` : (a.due_at ? html`<span class="badge bg-blue-lt">Open</span>` : '—')}</td>
-              </tr>`)}</tbody>
-          </table>
-        </div>` : html`<div class="a-state-block">Nog geen activiteiten voor deze kandidaat.</div>`);
+      this.loadActivityTab('candidateDrawerTabContent', 'candidate', candidateId);
     } catch {
       this.setContainerLoadError(el, () => this.loadCandidateActivityTab(kind, itemId));
     }
