@@ -363,6 +363,42 @@ SECTIONS = [
 ]
 
 
+def wait_until(page, predicate, timeout=6000, step=50):
+    """Wacht op een voorwaarde in plaats van op een aantal milliseconden --
+    zelfde patroon als admin_sections_check.py's wait_until: een vaste
+    wait_for_timeout(900) na een sectiewissel klopt lokaal bijna altijd,
+    maar valt onder belasting (CI, meerdere checks na elkaar) soms net
+    buiten het venster, en levert dan geen duidelijke regel op, alleen een
+    assertie die faalt op een toevallig aantal rijen. Geeft True zodra de
+    voorwaarde geldt, anders False na `timeout`."""
+    waited = 0
+    while waited < timeout:
+        try:
+            if predicate():
+                return True
+        except Exception:
+            pass
+        page.wait_for_timeout(step)
+        waited += step
+    return False
+
+
+def click_or_fail(page, failures, selector, what, timeout=6000):
+    """Klikken met een genoemde faalregel in plaats van Playwrights eigen
+    standaard-timeout (30s) die de hele run met een traceback beëindigt
+    zodra het element er nog niet is -- zie admin_sections_check.py, dat
+    ditzelfde patroon al gebruikt voor elke sectiewissel."""
+    if page.query_selector(selector) is None:
+        failures.append(f"{what}: element niet gevonden ({selector})")
+        return False
+    try:
+        page.click(selector, timeout=timeout)
+    except Exception as exc:
+        failures.append(f"{what}: klikken op {selector} lukte niet binnen {timeout}ms ({exc})")
+        return False
+    return True
+
+
 def main():
     try:
         from playwright.sync_api import sync_playwright
@@ -521,24 +557,37 @@ def main():
 
         # ---- AVG: suppressielijst pagineert op 100 (§7.3.5), niet op 20 --
         errors_before = len(console_errors)
-        page.click('.nav-link[data-section="gdpr"]')
-        page.wait_for_timeout(900)
-        rows_p1 = page.eval_on_selector_all('#gdprSuppressionBody tr', "els => els.length")
-        texts_p1 = page.eval_on_selector_all('#gdprSuppressionBody tr', "els => els.map(e => e.textContent.trim())")
-        if rows_p1 != GDPR_PAGE_SIZE:
-            failures.append(f"gdpr: pagina 1 gaf {rows_p1} rijen, verwacht {GDPR_PAGE_SIZE}")
-        btn = '#gdprSuppressionPagination [data-action="page"][data-page="2"]'
-        if page.query_selector(btn) is None:
-            failures.append("gdpr: geen pagineerknop voor pagina 2 gevonden")
-        else:
-            page.click(btn)
-            page.wait_for_timeout(800)
-            rows_p2 = page.eval_on_selector_all('#gdprSuppressionBody tr', "els => els.length")
-            texts_p2 = page.eval_on_selector_all('#gdprSuppressionBody tr', "els => els.map(e => e.textContent.trim())")
-            if rows_p2 != GDPR_ROWS - GDPR_PAGE_SIZE:
-                failures.append(f"gdpr: pagina 2 gaf {rows_p2} rijen, verwacht {GDPR_ROWS - GDPR_PAGE_SIZE}")
-            if texts_p1 and texts_p1 == texts_p2:
-                failures.append("gdpr: pagina 2 toonde dezelfde rijen als pagina 1")
+        gdpr_row_sel = '#gdprSuppressionBody tr'
+        if click_or_fail(page, failures, '.nav-link[data-section="gdpr"]', "gdpr: sidebar-item AVG"):
+            if not wait_until(page, lambda: len(page.query_selector_all(gdpr_row_sel)) == GDPR_PAGE_SIZE):
+                failures.append(
+                    f"gdpr: pagina 1 laadde niet binnen 6000ms tot {GDPR_PAGE_SIZE} rijen -- "
+                    f"kreeg {len(page.query_selector_all(gdpr_row_sel))}"
+                )
+            rows_p1 = page.eval_on_selector_all(gdpr_row_sel, "els => els.length")
+            texts_p1 = page.eval_on_selector_all(gdpr_row_sel, "els => els.map(e => e.textContent.trim())")
+            if rows_p1 != GDPR_PAGE_SIZE:
+                failures.append(f"gdpr: pagina 1 gaf {rows_p1} rijen, verwacht {GDPR_PAGE_SIZE}")
+            btn = '#gdprSuppressionPagination [data-action="page"][data-page="2"]'
+            gdpr_p2_expected = GDPR_ROWS - GDPR_PAGE_SIZE
+            if click_or_fail(page, failures, btn, "gdpr: pagineerknop voor pagina 2"):
+                # Wachten op het exacte, verwachte rijenaantal in plaats van
+                # op "iets veranderde": een kale wait_for_timeout(800) zag
+                # soms een tussenstaat (de tabel al leeg, de nieuwe rijen nog
+                # niet gemount) en las die als "veranderd" af, wat een
+                # verkeerd rijenaantal verderop een verwarrende faalregel gaf
+                # in plaats van deze genoemde.
+                if not wait_until(page, lambda: len(page.query_selector_all(gdpr_row_sel)) == gdpr_p2_expected):
+                    failures.append(
+                        f"gdpr: pagina 2 laadde niet binnen 6000ms tot {gdpr_p2_expected} rijen -- "
+                        f"kreeg {len(page.query_selector_all(gdpr_row_sel))}"
+                    )
+                rows_p2 = page.eval_on_selector_all(gdpr_row_sel, "els => els.length")
+                texts_p2 = page.eval_on_selector_all(gdpr_row_sel, "els => els.map(e => e.textContent.trim())")
+                if rows_p2 != GDPR_ROWS - GDPR_PAGE_SIZE:
+                    failures.append(f"gdpr: pagina 2 gaf {rows_p2} rijen, verwacht {GDPR_ROWS - GDPR_PAGE_SIZE}")
+                if texts_p1 and texts_p1 == texts_p2:
+                    failures.append("gdpr: pagina 2 toonde dezelfde rijen als pagina 1")
         new_errors = console_errors[errors_before:]
         if new_errors:
             failures.append(f"gdpr: {len(new_errors)} console error(s): {new_errors[:3]}")
