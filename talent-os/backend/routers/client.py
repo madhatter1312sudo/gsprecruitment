@@ -770,7 +770,7 @@ async def get_client_analytics(current_user: dict = Depends(require_verified_rol
         "SELECT COUNT(*) FROM matches m JOIN job_orders j ON j.id = m.job_id WHERE j.client_id = $1 AND m.status = 'offered'",
         cid,
     ) or 0
-    analytics.offer_rate = round(total_offered / total_applied * 100, 1) if total_applied > 0 else 0
+    analytics.offer_rate = round(total_offered / total_applied * 100, 1) if total_applied > 0 else None
 
     # Cost-per-hire (placeholder - uses fee_value from job_orders)
     avg_cost = await fetch_val(

@@ -668,6 +668,46 @@ def test_client_edit_contact_unauthenticated_is_401(contact_test_client):
     assert res.status_code == 401
 
 
+def test_client_edit_contact_without_client_profile_is_404(contact_test_client, monkeypatch):
+    _override_as_contact_client_user()
+    _patch_contact_db(monkeypatch, client_id=None)
+
+    res = contact_test_client.patch(
+        "/api/v1/client/contacts/1",
+        json={"full_name": "Someone"},
+    )
+    assert res.status_code == 404
+
+
+def test_client_edit_contact_empty_body_is_400(contact_test_client, monkeypatch):
+    _override_as_contact_client_user()
+    _patch_contact_db(monkeypatch, client_id=7, own_contact_ids=(1,))
+
+    res = contact_test_client.patch("/api/v1/client/contacts/1", json={})
+    assert res.status_code == 400
+
+
+def test_client_edit_contact_ignores_extra_client_id_field(contact_test_client, monkeypatch):
+    """ClientContactUpdate has no client_id field -- an extra `client_id`
+    key in the body is dropped by validation, never reaching the SQL
+    UPDATE (the row stays scoped to the caller's own resolved client)."""
+    _override_as_contact_client_user()
+    db = _patch_contact_db(monkeypatch, client_id=7, own_contact_ids=(1,))
+
+    res = contact_test_client.patch(
+        "/api/v1/client/contacts/1",
+        json={"full_name": "Updated Name", "client_id": 999},
+    )
+    assert res.status_code == 200
+
+    update_calls = [args for sql, args in db.statements if sql.strip().startswith("UPDATE client_contacts SET") and "RETURNING *" in sql]
+    assert len(update_calls) == 1
+    # Only full_name (+ updated_at) was bound, client_id=999 never entered
+    # the SET clause or the scoping WHERE.
+    assert update_calls[0][0] == "Updated Name"
+    assert update_calls[0][-1] == 7  # scoping client_id is still the caller's own (7)
+
+
 def test_client_delete_own_contact_succeeds_and_is_audited(contact_test_client, monkeypatch):
     _override_as_contact_client_user()
     db = _patch_contact_db(monkeypatch, client_id=7, own_contact_ids=(1,))

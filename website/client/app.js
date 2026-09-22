@@ -350,6 +350,19 @@
         const data = await res.json();
         if (!res.ok) throw new Error();
         renderKanban(data.items || []);
+        const noteEl = document.getElementById('kanbanTruncatedNote');
+        if (noteEl) {
+          const total = Number(data.total) || 0;
+          if (total > 200) {
+            noteEl.textContent = naText(
+              `Toont de 200 meest recente van ${total}`,
+              `Showing the 200 most recent of ${total}`,
+            );
+            noteEl.style.display = 'block';
+          } else {
+            noteEl.style.display = 'none';
+          }
+        }
       } catch (err) {
         console.error('Kanban load error:', err);
         Auth.renderLoadError(el, () => loadKanban());
@@ -636,6 +649,14 @@
     // view "€1.234,56" (dot thousands, comma decimal), English view
     // "€1,234.56" (comma thousands, dot decimal). No rounding beyond the
     // two decimals the API already returns.
+    // Language-aware plain text for values JS sets via textContent (these
+    // aren't wrapped in .lang-nl/.lang-en spans, so they read the same
+    // data-lang attribute formatEuro does).
+    function naText(nlText, enText) {
+      const isNl = document.documentElement.getAttribute('data-lang') !== 'en';
+      return isNl ? nlText : enText;
+    }
+
     function formatEuro(value) {
       const num = Number(value);
       const isNl = document.documentElement.getAttribute('data-lang') !== 'en';
@@ -674,7 +695,6 @@
       const ttdEl = document.getElementById('analyticsTimeToHire');
       const offerEl = document.getElementById('analyticsOfferRate');
       const costEl = document.getElementById('analyticsCostPerHire');
-      const costNoteEl = document.getElementById('analyticsCostPerHireNote');
       const funnelEl = document.getElementById('analyticsFunnel');
       const sourcesEl = document.getElementById('analyticsSources');
       try {
@@ -688,18 +708,18 @@
             ? formatDutchDecimal(analytics.time_to_hire_avg_days, 1) + ' dagen'
             : 'n.v.t.';
         }
-        // 0% uit nul sollicitaties is geen percentage (§7.3.8b) -- de
-        // backend geeft in dat geval al 0, niet null, dus die waarde
-        // krijgt hier dezelfde "n.v.t."-behandeling als null.
+        // A genuine 0,0% (applications exist, none offered) is a real
+        // measurement and must render as 0,0% -- only null (no
+        // applications at all) means "n.v.t.".
         if (offerEl) {
-          offerEl.textContent = (analytics.offer_rate != null && analytics.offer_rate !== 0)
+          offerEl.textContent = analytics.offer_rate != null
             ? formatDutchDecimal(analytics.offer_rate, 1) + '%'
-            : 'n.v.t.';
+            : naText('n.v.t. (nog geen sollicitaties)', 'n/a (no applications yet)');
         }
         if (costEl) {
-          const hasCost = analytics.cost_per_hire_avg != null;
-          costEl.textContent = hasCost ? formatEuro(analytics.cost_per_hire_avg) : 'n.v.t.';
-          if (costNoteEl) costNoteEl.style.display = hasCost ? 'none' : 'block';
+          costEl.textContent = analytics.cost_per_hire_avg != null
+            ? formatEuro(analytics.cost_per_hire_avg)
+            : naText('n.v.t. (nog geen vervulde vacature)', 'n/a (no filled vacancy yet)');
         }
         renderBarRows(funnelEl, analytics.pipeline_funnel, stageLabel,
           '<div style="text-align:center;color:var(--navy-200);font-size:var(--font-size-sm);padding:var(--space-lg) 0;"><span class="lang-en">No candidates in the pipeline yet</span><span class="lang-nl">Nog geen kandidaten in de pipeline</span></div>');
@@ -1026,7 +1046,14 @@
         e.preventDefault();
         const fd = new FormData(e.target);
         const payload = {};
-        for (const [k, v] of fd.entries()) { if (v !== '') payload[k] = v; }
+        for (const [k, v] of fd.entries()) {
+          // Editing: an emptied field must clear the stored value, so a
+          // blank input sends null (the PATCH writes NULL) instead of
+          // being left out of the body. Creating: an unfilled optional
+          // field is simply omitted, same as before.
+          if (v !== '') payload[k] = v;
+          else if (isEdit) payload[k] = null;
+        }
         try {
           const url = isEdit ? `/v1/client/contacts/${contact.id}` : '/v1/client/contacts';
           const method = isEdit ? 'PATCH' : 'POST';
