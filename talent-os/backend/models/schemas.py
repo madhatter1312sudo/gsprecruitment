@@ -730,6 +730,39 @@ class HealthResponse(BaseModel):
     duplicate_profile_links: Optional[int] = None
 
 
+class RoutineHealth(BaseModel):
+    """One row per known scheduled routine (services/scheduler.ROUTINE_NAMES) --
+    GET /api/v1/admin/health/routines. Sourced from routine_runs
+    (migrations/044_routine_runs.py); a routine that has never run (or
+    never failed) reports None for the field(s) it has no row for yet.
+    No personal data -- a routine name, two timestamps and an exception
+    class name, nothing about a candidate/client/prospect."""
+    name: str
+    last_success_at: Optional[datetime] = None
+    last_error_at: Optional[datetime] = None
+    last_error_class: Optional[str] = None
+
+
+class RoutineHealthResponse(BaseModel):
+    """GET /api/v1/admin/health/routines -- admin-JWT only."""
+    routines: List[RoutineHealth]
+
+
+class SchedulerHealthResponse(BaseModel):
+    """GET /api/v1/admin/health/scheduler -- admin-JWT only. `running`
+    reflects the cross-worker Postgres advisory lock
+    (services/scheduler.SCHEDULER_LOCK_KEY), not this particular uvicorn
+    worker's own in-process state -- the app runs 4 workers and only the
+    one that won the lock actually starts APScheduler (see
+    services/scheduler.start_scheduler's docstring), so a request answered
+    by a different worker would otherwise misreport "not running" even
+    while the scheduler is alive elsewhere in the same process group."""
+    running: bool
+    timezone: str
+    registered_routines: List[str]
+    apollo_jobs_enabled: bool
+
+
 # ── Candidate Portal Schemas ────────────────────────────────────────────
 
 class CandidateMatchItem(BaseModel):
