@@ -505,6 +505,11 @@
         flex-direction: column;
         text-align: center;
       }
+      /* WS5 #136 (§7.3.7, 390px): the warning's button goes full width. */
+      #jobAlertsAction .btn {
+        width: 100%;
+        justify-content: center;
+      }
     }
   </style>
 </head>
@@ -987,6 +992,58 @@
         <!-- ==================== SETTINGS ==================== -->
         <section class="portal-section" id="section-settings">
           <div class="dashboard-grid-wide">
+            <div>
+              <!-- WS5 #136 (SITE-DESIGN-SPEC.md §7.3.7): job-alert switch.
+                   `enabled` (what the candidate asked for) and `eligible`
+                   (whether we can act on it today) are shown separately --
+                   the switch reflects `enabled` only and never flips back
+                   on its own. -->
+              <div class="card" style="margin-bottom:var(--space-xl);">
+                <div class="settings-section" id="jobAlertsSection" style="margin-bottom:0;">
+                  <h3>
+                    <span class="lang-en">Job alerts</span>
+                    <span class="lang-nl">Vacature-alerts</span>
+                  </h3>
+                  <!-- WS5 #136: loading state is the switch alone as a
+                       flat block -- the label stays put the whole time.
+                       Reuses the existing .toggle-switch checkbox look
+                       (defined above for Notification Preferences) rather
+                       than a new styled control. -->
+                  <div style="display:flex;align-items:center;gap:var(--space-md);min-height:44px;">
+                    <div id="jobAlertsSwitchLoading" style="width:44px;height:24px;border-radius:12px;background:rgba(74,111,159,0.2);flex-shrink:0;"></div>
+                    <span class="toggle-switch" style="display:none;" id="jobAlertsSwitchWrap">
+                      <input type="checkbox" role="switch" id="jobAlertsSwitch" aria-describedby="jobAlertsLabel">
+                    </span>
+                    <div>
+                      <label for="jobAlertsSwitch" id="jobAlertsLabel" style="font-size:var(--font-size-sm);color:var(--navy-100);cursor:pointer;">
+                        <span class="lang-en">Send me a message for a matching vacancy</span>
+                        <span class="lang-nl">Stuur mij een bericht bij een passende vacature</span>
+                      </label>
+                      <p id="jobAlertsSince" style="font-size:var(--font-size-xs);color:var(--navy-400);margin-top:2px;display:none;"></p>
+                    </div>
+                  </div>
+                  <div id="jobAlertsWarning" role="status" aria-live="polite" style="display:none;margin-top:var(--space-md);padding:var(--space-md);background:rgba(250,200,0,0.08);border:1px solid rgba(250,200,0,0.25);border-radius:var(--radius-md);">
+                    <h4 style="font-size:var(--font-size-sm);font-weight:600;color:var(--gold-400);margin-bottom:4px;">
+                      <i class="fa-regular fa-triangle-exclamation"></i>
+                      <span class="lang-en">No alerts are going out right now</span>
+                      <span class="lang-nl">Er gaan op dit moment geen alerts uit</span>
+                    </h4>
+                    <p id="jobAlertsReason" style="font-size:var(--font-size-sm);color:var(--navy-200);"></p>
+                    <div id="jobAlertsAction" style="margin-top:var(--space-sm);"></div>
+                  </div>
+                  <div id="jobAlertsError" style="display:none;margin-top:var(--space-md);padding:var(--space-md);background:rgba(239,68,68,0.08);border:1px solid rgba(239,68,68,0.25);border-radius:var(--radius-md);">
+                    <p style="font-size:var(--font-size-sm);color:#f87171;">
+                      <span class="lang-en">Could not save the setting, try again</span>
+                      <span class="lang-nl">Kon de instelling niet opslaan, probeer opnieuw</span>
+                      </p>
+                      <button type="button" class="btn btn-sm btn-outline" id="jobAlertsRetryBtn" style="margin-top:var(--space-sm);">
+                        <span class="lang-en">Try again</span>
+                        <span class="lang-nl">Probeer opnieuw</span>
+                      </button>
+                    </div>
+                </div>
+              </div>
+
             <div class="card">
               <div class="settings-section">
                 <h3>
@@ -1021,6 +1078,7 @@
                   </label>
                 </div>
               </div>
+            </div>
             </div>
 
             <div>

@@ -71,12 +71,22 @@ async def _attach_talentpool_consent(profile: dict, user_id: int) -> dict:
     # see CandidatePortalProfile for why the job-alert switch needs them.
     profile["consent_withdrawn_at"] = None
     profile["lawful_basis"] = None
+    # WS5 issue #136 (SITE-DESIGN-SPEC.md §7.3.7): the job-alert switch on
+    # a fresh page load must show the actual saved state, not a guess --
+    # PUT /v1/candidate/job-alerts is a write, so it cannot double as the
+    # read. job_alert_eligible mirrors the PUT response's `eligible`
+    # field, computed from the exact same JOB_ALERT_ELIGIBILITY_SQL, so
+    # a GET and a PUT into the same state always agree.
+    profile["job_alert_optin_at"] = None
+    profile["job_alert_unsubscribed_at"] = None
+    profile["job_alert_eligible"] = False
     candidate_id = await _get_candidate_id(user_id)
     if candidate_id:
         consent = await fetch_one(
-            "SELECT consent_talentpool_at, consent_talentpool_until, consent_scope, consent_source, "
-            "consent_withdrawn_at, lawful_basis "
-            "FROM candidates WHERE id = $1",
+            f"""SELECT consent_talentpool_at, consent_talentpool_until, consent_scope, consent_source,
+                       consent_withdrawn_at, lawful_basis, job_alert_optin_at, job_alert_unsubscribed_at,
+                       ({JOB_ALERT_ELIGIBILITY_SQL}) AS job_alert_eligible
+                  FROM candidates AS c WHERE c.id = $1""",
             candidate_id,
         )
         if consent:

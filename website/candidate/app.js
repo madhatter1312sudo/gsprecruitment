@@ -188,10 +188,15 @@
             }
           }
         }
+
+        // Job-alert switch (WS5 #136) needs the same profile fetch, not a
+        // second round trip.
+        if (profile) loadJobAlerts(profile);
       } catch (err) {
         console.error('Dashboard load error:', err);
         Auth.renderLoadError(document.getElementById('topMatchesList'), loadDashboard);
         Auth.renderLoadError(document.getElementById('recentActivity'), loadDashboard);
+        Auth.renderLoadError(document.getElementById('jobAlertsSection'), loadDashboard);
       }
     }
 
@@ -528,6 +533,158 @@
         Auth.renderLoadError(msgContainer, loadMessages);
       }
     }
+
+    /* ================================================================
+       API: Job alerts (WS5 #136, SITE-DESIGN-SPEC.md §7.3.7)
+       `enabled` is what the candidate asked for; `eligible` is whether we
+       can act on it today. The switch shows `enabled` only and never
+       flips back on `eligible: false` -- a warning appears instead.
+       ================================================================ */
+    const jaSwitchLoading = document.getElementById('jobAlertsSwitchLoading');
+    const jaSwitchWrap = document.getElementById('jobAlertsSwitchWrap');
+    const jaSwitch = document.getElementById('jobAlertsSwitch');
+    const jaSince = document.getElementById('jobAlertsSince');
+    const jaWarning = document.getElementById('jobAlertsWarning');
+    const jaReason = document.getElementById('jobAlertsReason');
+    const jaAction = document.getElementById('jobAlertsAction');
+    const jaError = document.getElementById('jobAlertsError');
+    const jaRetryBtn = document.getElementById('jobAlertsRetryBtn');
+
+    // Kept from the last profile load so the switch's own change handler
+    // (which never re-fetches the profile) can re-derive the reason after
+    // a successful PUT without a second network round trip.
+    let jaLastProfile = null;
+
+    function jaReasonBranch(profile) {
+      // Same order as JOB_ALERT_ELIGIBILITY_SQL (core/retention.py), so
+      // the one line shown is always the first condition actually failing.
+      if (profile.consent_withdrawn_at) {
+        return {
+          nl: 'Je hebt je toestemming ingetrokken. Zonder toestemming kunnen wij geen vacatures sturen.',
+          en: 'You withdrew your consent. Without consent we cannot send vacancies.',
+          btnNl: 'Toestemming opnieuw geven', btnEn: 'Give consent again',
+        };
+      }
+      const lawfulIsPortal = profile.lawful_basis === 'portal_registratie';
+      if (!lawfulIsPortal) {
+        const until = profile.consent_talentpool_until ? new Date(profile.consent_talentpool_until) : null;
+        if (until && until.getTime() < Date.now()) {
+          return {
+            nl: 'Je toestemming voor de talentpool is verlopen.',
+            en: 'Your talent pool consent has expired.',
+            btnNl: 'Toestemming verlengen', btnEn: 'Renew consent',
+          };
+        }
+        if (profile.consent_scope !== 'matching_and_contact') {
+          return {
+            nl: 'Je toestemming staat op alleen matching. Voor alerts is ook toestemming voor contact nodig.',
+            en: 'Your consent is limited to matching. Alerts also need consent for contact.',
+            btnNl: 'Omvang aanpassen', btnEn: 'Adjust scope',
+          };
+        }
+      }
+      return {
+        nl: 'Wij kunnen op dit moment geen alerts sturen. Neem contact op als dit onverwacht is.',
+        en: 'We cannot send alerts right now. Contact us if this is unexpected.',
+        btnNl: null, btnEn: null,
+      };
+    }
+
+    function renderJobAlertsWarning(enabled, eligible, profile) {
+      if (!jaWarning) return;
+      if (!(enabled && !eligible)) {
+        jaWarning.style.display = 'none';
+        return;
+      }
+      const branch = jaReasonBranch(profile);
+      jaReason.innerHTML = `<span class="lang-nl">${GSP.esc(branch.nl)}</span><span class="lang-en">${GSP.esc(branch.en)}</span>`;
+      if (branch.btnNl) {
+        jaAction.innerHTML = `<button type="button" class="btn btn-sm btn-outline" data-action="navigate" data-section="profile">
+          <span class="lang-nl">${GSP.esc(branch.btnNl)}</span>
+          <span class="lang-en">${GSP.esc(branch.btnEn)}</span>
+        </button>`;
+      } else {
+        jaAction.innerHTML = `<a href="../contact.html" class="btn btn-sm btn-outline"><span class="lang-nl">Contact opnemen</span><span class="lang-en">Contact us</span></a>`;
+      }
+      jaWarning.style.display = 'block';
+    }
+
+    function applyJobAlertsState(enabled, eligible, optinAt, profile) {
+      jaLastProfile = profile;
+      if (jaSwitch) jaSwitch.checked = !!enabled;
+      if (jaSince) {
+        if (enabled && optinAt) {
+          const isNl = document.documentElement.getAttribute('data-lang') === 'nl';
+          const d = new Date(optinAt);
+          jaSince.textContent = isNl
+            ? `Aangezet op ${d.toLocaleDateString('nl-NL', { day: 'numeric', month: 'long', year: 'numeric' })}`
+            : `Turned on ${d.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}`;
+          jaSince.style.display = 'block';
+        } else {
+          jaSince.style.display = 'none';
+        }
+      }
+      renderJobAlertsWarning(enabled, eligible, profile);
+    }
+
+    async function loadJobAlerts(profile) {
+      if (!jaSwitch) return;
+      try {
+        applyJobAlertsState(
+          !!profile.job_alert_optin_at && !profile.job_alert_unsubscribed_at,
+          !!profile.job_alert_eligible,
+          profile.job_alert_optin_at,
+          profile,
+        );
+        if (jaSwitchLoading) jaSwitchLoading.style.display = 'none';
+        if (jaSwitchWrap) jaSwitchWrap.style.display = '';
+      } catch (err) {
+        console.error('Job alerts state error:', err);
+      }
+    }
+
+    // Last value the candidate actually asked for, kept outside the switch
+    // itself so a rollback (which flips jaSwitch.checked back) and a
+    // retry (which must resend the ORIGINAL request, not whatever the
+    // switch shows after the rollback) never disagree.
+    let jaDesired = null;
+
+    async function saveJobAlerts(desired) {
+      jaDesired = desired;
+      const isNl = document.documentElement.getAttribute('data-lang') === 'nl';
+      if (jaError) jaError.style.display = 'none';
+      jaSwitch.setAttribute('aria-busy', 'true');
+      try {
+        const res = await Auth.fetch('/v1/candidate/job-alerts', {
+          method: 'PUT',
+          body: JSON.stringify({ enabled: desired }),
+        });
+        if (res && res.ok) {
+          const row = await res.json();
+          applyJobAlertsState(row.enabled, row.eligible, row.job_alert_optin_at, jaLastProfile || {});
+          Auth.toast(isNl ? 'Opgeslagen' : 'Saved');
+        } else {
+          jaSwitch.checked = !desired; // rollback -- optimistic toggle failed
+          if (jaError) jaError.style.display = 'block';
+        }
+      } catch (err) {
+        jaSwitch.checked = !desired;
+        if (jaError) jaError.style.display = 'block';
+      } finally {
+        jaSwitch.removeAttribute('aria-busy');
+      }
+    }
+
+    if (jaSwitch) {
+      jaSwitch.addEventListener('change', () => { saveJobAlerts(jaSwitch.checked); });
+    }
+
+    if (jaRetryBtn) {
+      jaRetryBtn.addEventListener('click', () => {
+        if (jaDesired !== null) saveJobAlerts(jaDesired);
+      });
+    }
+
 
     /* ================================================================
        API: Salary Benchmark
