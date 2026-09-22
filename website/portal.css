@@ -303,4 +303,12 @@ body {
 .toggle-switch input[type="checkbox"]:checked { background: var(--gold-500, #FAC800); }
 .toggle-switch input[type="checkbox"]:checked::before { transform: translateX(20px); }
 
+/* ---- Shared text utilities (SITE-DESIGN-SPEC.md §7.3.8): mono data
+   values and muted secondary text, named there for the kanban, analytics
+   and team-table work -- same semantics as the admin panel's .a-num/
+   .fs-xs/.a-soft (admin.css), reusing existing tokens only. ---- */
+.gsp-num { font-family: var(--font-mono, 'IBM Plex Mono', monospace); }
+.fs-xs { font-size: var(--font-size-xs, 0.75rem); }
+.a-soft { color: var(--navy-200, #7FA0C9); }
+
 .activity-content { flex: 1; }

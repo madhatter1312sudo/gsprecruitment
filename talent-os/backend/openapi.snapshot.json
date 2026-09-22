@@ -13735,6 +13735,144 @@
         "tags": [
           "client-contacts-portal"
         ]
+      },
+      "post": {
+        "description": "Create a contact for the caller's own client. Same validation and\naudit trail as the admin create route.",
+        "operationId": "create_own_client_contact_api_v1_client_contacts_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClientContactCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create Own Client Contact",
+        "tags": [
+          "client-contacts-portal"
+        ]
+      }
+    },
+    "/api/v1/client/contacts/{contact_id}": {
+      "delete": {
+        "description": "Soft delete -- sets deleted_at, never a real DELETE (same GDPR\nprovenance/audit-trail reasons as the admin route). Scoped to the\ncaller's own client; another client's contact 404s.",
+        "operationId": "delete_own_client_contact_api_v1_client_contacts__contact_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "contact_id",
+            "required": true,
+            "schema": {
+              "title": "Contact Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Delete Own Client Contact",
+        "tags": [
+          "client-contacts-portal"
+        ]
+      },
+      "patch": {
+        "description": "Edit a contact belonging to the caller's own client. A contact of\nanother client (or no client profile at all) 404s -- never a 403\nthat would confirm the contact exists.",
+        "operationId": "update_own_client_contact_api_v1_client_contacts__contact_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "contact_id",
+            "required": true,
+            "schema": {
+              "title": "Contact Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClientContactUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Update Own Client Contact",
+        "tags": [
+          "client-contacts-portal"
+        ]
       }
     },
     "/api/v1/client/dashboard": {
