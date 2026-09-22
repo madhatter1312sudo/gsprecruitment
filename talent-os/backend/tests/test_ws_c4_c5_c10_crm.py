@@ -13,8 +13,14 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
+os.environ.setdefault("JWT_SECRET", "ci-test-secret-not-used-in-production-32chars")
+os.environ.setdefault("API_KEY", "x")
+os.environ.setdefault("WEBHOOK_SECRET", "x")
+os.environ.setdefault("POSTGRES_PASSWORD", "x")
+
 import pytest
 from pydantic import ValidationError
+from fastapi.testclient import TestClient
 
 from models.schemas import (
     ClientContactCreate, ClientContactUpdate, PipelineStageUpdate,
@@ -463,3 +469,234 @@ def test_list_leads_rejects_invalid_type(monkeypatch):
             )
         )
     assert exc_info.value.status_code == 400
+
+
+# ── Client-portal contacts write side (issue #141): POST/PATCH/DELETE
+#    /api/v1/client/contacts[/{contact_id}] -- TestClient + stubbed auth +
+#    stubbed DB, same style as tests/test_ws_c6_activities.py's
+#    client-portal scoping section. ──────────────────────────────────────
+
+import main as _main_module  # noqa: E402
+from core.deps import get_verified_user as _get_verified_user_dep  # noqa: E402
+import routers.client_contacts as client_contacts_router  # noqa: E402
+
+CONTACT_CLIENT_USER = {
+    "id": 42,
+    "email": "client@example.com",
+    "full_name": "A Client User",
+    "role": "client",
+    "is_verified": True,
+    "approved_by_admin_at": "2026-01-01T00:00:00Z",
+}
+
+
+@pytest.fixture
+def contact_test_client():
+    tc = TestClient(_main_module.app)
+    yield tc
+    _main_module.app.dependency_overrides.pop(_get_verified_user_dep, None)
+
+
+def _override_as_contact_client_user():
+    _main_module.app.dependency_overrides[_get_verified_user_dep] = lambda: CONTACT_CLIENT_USER
+
+
+class _ContactStubDB:
+    """Tiny in-memory stub for core.database's fetch_one/fetch_all/execute,
+    keyed by a substring of the SQL -- same recording style as
+    tests/test_gdpr_erasure.py's _FakeDB and test_ws_c6_activities.py's
+    _StubDB. `own_contact_ids` models the contacts that really belong to
+    `client_id`; any id outside that set 404s."""
+
+    def __init__(self, client_id=7, own_contact_ids=(1,)):
+        self.client_id = client_id
+        self.own_contact_ids = set(own_contact_ids)
+        self.statements = []
+        self._next_id = 100
+
+    async def fetch_one(self, sql, *args):
+        self.statements.append((sql, args))
+        if "FROM clients c JOIN user_clients uc" in sql:
+            return {"id": self.client_id} if self.client_id is not None else None
+        if sql.strip().startswith("SELECT id FROM client_contacts"):
+            contact_id, client_id = args[0], args[1]
+            if contact_id in self.own_contact_ids and client_id == self.client_id:
+                return {"id": contact_id}
+            return None
+        if sql.strip().startswith("INSERT INTO client_contacts"):
+            row_id = self._next_id
+            self._next_id += 1
+            self.own_contact_ids.add(row_id)
+            return {
+                "id": row_id, "client_id": args[0], "full_name": args[1],
+                "email": args[2], "phone": args[3], "role": args[4],
+                "is_primary": args[5], "lawful_basis": args[6],
+                "created_at": "2026-09-22T00:00:00Z", "updated_at": None,
+            }
+        if sql.strip().startswith("UPDATE client_contacts SET") and "RETURNING *" in sql:
+            *values, contact_id, client_id = args
+            if contact_id not in self.own_contact_ids or client_id != self.client_id:
+                return None
+            return {
+                "id": contact_id, "client_id": client_id, "full_name": "Updated Name",
+                "email": None, "phone": None, "role": None, "is_primary": False,
+                "lawful_basis": None, "created_at": "2026-09-22T00:00:00Z",
+                "updated_at": "2026-09-22T01:00:00Z",
+            }
+        if "UPDATE client_contacts SET deleted_at" in sql:
+            contact_id, client_id = args[0], args[1]
+            if contact_id in self.own_contact_ids and client_id == self.client_id:
+                self.own_contact_ids.discard(contact_id)
+                return {"id": contact_id}
+            return None
+        return None
+
+    async def fetch_all(self, sql, *args):
+        self.statements.append((sql, args))
+        return []
+
+    async def execute(self, sql, *args):
+        self.statements.append((sql, args))
+        return "OK"
+
+
+def _patch_contact_db(monkeypatch, **kwargs):
+    db = _ContactStubDB(**kwargs)
+    monkeypatch.setattr(client_contacts_router, "fetch_one", db.fetch_one)
+    monkeypatch.setattr(client_contacts_router, "fetch_all", db.fetch_all)
+    monkeypatch.setattr(client_contacts_router, "execute", db.execute)
+    return db
+
+
+def test_client_create_contact_succeeds_and_is_audited(contact_test_client, monkeypatch):
+    _override_as_contact_client_user()
+    db = _patch_contact_db(monkeypatch, client_id=7)
+
+    res = contact_test_client.post(
+        "/api/v1/client/contacts",
+        json={"full_name": "Jane Doe", "role": "hiring_manager", "email": "jane@example.com"},
+    )
+    assert res.status_code == 201
+    body = res.json()
+    assert body["client_id"] == 7
+    assert body["full_name"] == "Jane Doe"
+
+    audit_calls = [args for sql, args in db.statements if sql.strip().startswith("INSERT INTO audit_log")]
+    assert len(audit_calls) == 1
+    assert audit_calls[0][2] == "client_contact"  # target_type
+    assert audit_calls[0][0] == "client_contact_create"  # action
+    # changes column must be a JSON string, never a raw dict (commit 72b4bcd).
+    assert isinstance(audit_calls[0][4], str)
+
+
+def test_client_create_contact_without_client_profile_is_404(contact_test_client, monkeypatch):
+    _override_as_contact_client_user()
+    _patch_contact_db(monkeypatch, client_id=None)
+
+    res = contact_test_client.post(
+        "/api/v1/client/contacts",
+        json={"full_name": "Jane Doe"},
+    )
+    assert res.status_code == 404
+
+
+def test_client_create_contact_rejects_bad_role_422(contact_test_client, monkeypatch):
+    _override_as_contact_client_user()
+    _patch_contact_db(monkeypatch, client_id=7)
+
+    res = contact_test_client.post(
+        "/api/v1/client/contacts",
+        json={"full_name": "Jane Doe", "role": "ceo"},
+    )
+    assert res.status_code == 422
+
+
+def test_client_create_contact_unauthenticated_is_401(contact_test_client):
+    res = contact_test_client.post(
+        "/api/v1/client/contacts",
+        json={"full_name": "Jane Doe"},
+    )
+    assert res.status_code == 401
+
+
+def test_client_edit_own_contact_succeeds_and_is_audited(contact_test_client, monkeypatch):
+    _override_as_contact_client_user()
+    db = _patch_contact_db(monkeypatch, client_id=7, own_contact_ids=(1,))
+
+    res = contact_test_client.patch(
+        "/api/v1/client/contacts/1",
+        json={"full_name": "Updated Name"},
+    )
+    assert res.status_code == 200
+    assert res.json()["full_name"] == "Updated Name"
+
+    audit_calls = [args for sql, args in db.statements if sql.strip().startswith("INSERT INTO audit_log")]
+    assert len(audit_calls) == 1
+    assert audit_calls[0][0] == "client_contact_update"
+    assert isinstance(audit_calls[0][4], str)
+
+
+def test_client_edit_another_clients_contact_is_404_not_403(contact_test_client, monkeypatch):
+    """A contact belonging to another client must 404, never a 403 that
+    would confirm the contact exists (WS-C.4 scoping rule)."""
+    _override_as_contact_client_user()
+    _patch_contact_db(monkeypatch, client_id=7, own_contact_ids=(1,))
+
+    res = contact_test_client.patch(
+        "/api/v1/client/contacts/999",
+        json={"full_name": "Someone Else"},
+    )
+    assert res.status_code == 404
+
+
+def test_client_edit_contact_rejects_bad_role_422(contact_test_client, monkeypatch):
+    _override_as_contact_client_user()
+    _patch_contact_db(monkeypatch, client_id=7, own_contact_ids=(1,))
+
+    res = contact_test_client.patch(
+        "/api/v1/client/contacts/1",
+        json={"role": "owner"},
+    )
+    assert res.status_code == 422
+
+
+def test_client_edit_contact_unauthenticated_is_401(contact_test_client):
+    res = contact_test_client.patch(
+        "/api/v1/client/contacts/1",
+        json={"full_name": "Someone"},
+    )
+    assert res.status_code == 401
+
+
+def test_client_delete_own_contact_succeeds_and_is_audited(contact_test_client, monkeypatch):
+    _override_as_contact_client_user()
+    db = _patch_contact_db(monkeypatch, client_id=7, own_contact_ids=(1,))
+
+    res = contact_test_client.delete("/api/v1/client/contacts/1")
+    assert res.status_code == 204
+
+    audit_calls = [args for sql, args in db.statements if sql.strip().startswith("INSERT INTO audit_log")]
+    assert len(audit_calls) == 1
+    assert audit_calls[0][0] == "client_contact_delete"
+    assert isinstance(audit_calls[0][4], str)
+
+
+def test_client_delete_another_clients_contact_is_404_not_403(contact_test_client, monkeypatch):
+    _override_as_contact_client_user()
+    _patch_contact_db(monkeypatch, client_id=7, own_contact_ids=(1,))
+
+    res = contact_test_client.delete("/api/v1/client/contacts/999")
+    assert res.status_code == 404
+
+
+def test_client_delete_contact_without_client_profile_is_404(contact_test_client, monkeypatch):
+    _override_as_contact_client_user()
+    _patch_contact_db(monkeypatch, client_id=None)
+
+    res = contact_test_client.delete("/api/v1/client/contacts/1")
+    assert res.status_code == 404
+
+
+def test_client_delete_contact_unauthenticated_is_401(contact_test_client):
+    res = contact_test_client.delete("/api/v1/client/contacts/1")
+    assert res.status_code == 401
