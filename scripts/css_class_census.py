@@ -136,9 +136,57 @@ def count_usages(class_names):
     return counts
 
 
+# ── 3. Table structure check (SITE-DESIGN-SPEC.md §7.3.8d): one <th> per
+#      column, and every colspan in that table equal to the <th> count.
+#      A <colspan> that doesn't match is a structural fault, not a style
+#      question -- it breaks the header/cell association a screen reader
+#      relies on (see WS5 #142). Static, regex-based like the rest of this
+#      file: no real HTML parser needed for well-formed <table> markup, and
+#      any table wrote across admin/candidate/client is in scope, unlike
+#      the class census above (which is styles.css-only and skips admin/).
+TABLE_RE = re.compile(r"<table\b.*?</table>", re.DOTALL | re.IGNORECASE)
+THEAD_RE = re.compile(r"<thead\b.*?</thead>", re.DOTALL | re.IGNORECASE)
+TH_RE = re.compile(r"<th\b", re.IGNORECASE)
+COLSPAN_RE = re.compile(r'colspan\s*=\s*"(\d+)"', re.IGNORECASE)
+
+
+def find_table_mismatches():
+    """Return a list of (file, table_index, th_count, bad_colspans) for
+    every <table> whose <thead> <th> count disagrees with one or more of
+    its <colspan> values. Scans every *.html file under website/ except
+    vendor/ bundles (third-party markup, not ours to fix)."""
+    mismatches = []
+    for path in WEBSITE.rglob("*.html"):
+        if any(part == "vendor" for part in path.parts):
+            continue
+        try:
+            text = path.read_text(encoding="utf-8")
+        except (UnicodeDecodeError, OSError):
+            continue
+        for i, table in enumerate(TABLE_RE.findall(text)):
+            thead_m = THEAD_RE.search(table)
+            head = thead_m.group(0) if thead_m else table
+            th_count = len(TH_RE.findall(head))
+            if th_count == 0:
+                continue  # no static <th> here (e.g. a fully JS-rendered table)
+            bad = [c for c in COLSPAN_RE.findall(table) if int(c) != th_count]
+            if bad:
+                mismatches.append((path, i, th_count, bad))
+    return mismatches
+
+
 def main():
     as_json = "--json" in sys.argv
     fail_on_unused = "--fail-on-unused" in sys.argv
+
+    table_mismatches = find_table_mismatches()
+    if table_mismatches:
+        print("TABLE STRUCTURE MISMATCH: a <colspan> doesn't match its table's <th> count "
+              "(SITE-DESIGN-SPEC.md §7.3.8d):")
+        for path, idx, th_count, bad in table_mismatches:
+            rel = path.relative_to(ROOT)
+            print(f"  {rel} (table #{idx}): {th_count} <th> cells, colspan(s) {bad}")
+        print()
 
     if not STYLESHEET.exists():
         print(f"css_class_census: {STYLESHEET} not found", file=sys.stderr)
@@ -157,6 +205,10 @@ def main():
             "declared_class_count": len(declared),
             "unused": unused,
             "used": {name: counts[name] for name in used},
+            "table_mismatches": [
+                {"file": str(p.relative_to(ROOT)), "table_index": i, "th_count": t, "bad_colspans": b}
+                for p, i, t, b in table_mismatches
+            ],
         }
         print(json.dumps(payload, indent=2))
     else:
@@ -169,6 +221,8 @@ def main():
                 sels = " | ".join(sorted(declared[name]))[:120]
                 print(f"  .{name}   (declared in: {sels})")
 
+    if table_mismatches:
+        return 1
     if fail_on_unused and unused:
         return 1
     return 0

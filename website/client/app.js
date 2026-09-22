@@ -484,11 +484,13 @@
        API: Load Team
        ================================================================ */
     async function loadTeam() {
+      const tbody = document.getElementById('teamTableBody');
+      if (!tbody) return;
       try {
         const res = await Auth.fetch('/v1/client/team');
-        const members = res && res.ok ? await res.json() : [];
-        const tbody = document.getElementById('teamTableBody');
-        if (!tbody) return;
+        if (!res) return;
+        if (!res.ok) throw new Error();
+        const members = await res.json();
         if (!members || members.length === 0) {
           tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--navy-200);padding:var(--space-lg);">No team members yet.</td></tr>';
           return;
@@ -508,6 +510,13 @@
         }).join('');
       } catch (err) {
         console.error('Team load error:', err);
+        const id = '_retryTeam';
+        tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;color:var(--navy-200);padding:var(--space-lg);">
+          <span class="lang-nl">Kon niet laden — <a href="#" id="${id}">probeer opnieuw</a></span>
+          <span class="lang-en">Could not load — <a href="#" id="${id}_en">try again</a></span>
+        </td></tr>`;
+        document.getElementById(id)?.addEventListener('click', (e) => { e.preventDefault(); loadTeam(); });
+        document.getElementById(id + '_en')?.addEventListener('click', (e) => { e.preventDefault(); loadTeam(); });
       }
     }
 
