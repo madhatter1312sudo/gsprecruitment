@@ -590,21 +590,19 @@ async def erase_person(
     # address's hash (pg_advisory_xact_lock -- scoped to the transaction,
     # released automatically on COMMIT or ROLLBACK, no separate unlock
     # call to remember). A second concurrent call for the same address
-    # simply blocks here until the first one finishes, then proceeds
-    # against a now-consistent database: every SELECT below is keyed off
-    # the still-plaintext address, which the first call's COMMIT has
-    # already replaced -- so the second call's selects now match nothing
-    # and its updates become no-ops -- while _anonymize_by_id's per-row
-    # placeholder is a deterministic function of (row id, email_hash), so
-    # even a genuine double-application of the exact same UPDATE is
-    # idempotent, not corrupting. The one place this isn't quite true is
-    # the plain INSERTs right at the end (audit_log, data_subject_requests
-    # via _log_request): a second concurrent call for the same address can
-    # add one redundant audit-trail row once it is unblocked, since a
-    # plain INSERT has no "already applied" state to detect -- but that is
-    # a duplicate log entry, never a corruption of already-erased PII, and
-    # the identity/secondary-table updates above it in the same statement
-    # order are exactly the no-ops just described.
+    # simply blocks here until the first one finishes, then proceeds.
+    # Note that the identity SELECTs above ran BEFORE this lock, so the
+    # second call still holds the row ids it collected while the address
+    # was plaintext, and replays the same UPDATEs/DELETEs by id after the
+    # first call's COMMIT. That is safe because every write here is
+    # idempotent: _anonymize_by_id's per-row placeholder is a
+    # deterministic function of (row id, email_hash), the DELETEs delete
+    # nothing the second time, and the NULL-outs write the same NULLs.
+    # The observable residue of a genuine race is a later deleted_at
+    # stamp, one redundant audit-trail row from the plain INSERTs at the
+    # end (audit_log, data_subject_requests via _log_request), and a
+    # possibly spurious "partial" from the R2 delete, which runs outside
+    # the lock; never a corruption of already-erased PII.
     pool = await get_pool()
     async with pool.acquire() as conn:
         async with conn.transaction():
