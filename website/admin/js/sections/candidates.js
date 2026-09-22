@@ -1,7 +1,7 @@
 /* ============================================================
    GSP Recruitment: admin/js/sections/candidates.js
    Kandidatenlijst met type- en statusfilter, de kandidaatdrawer (Profiel,
-   Matches, Activiteit, Toestemmingen, SITE-DESIGN-SPEC.md §7.3.2), en de
+   Pipeline, Activiteit, Toestemmingen, SITE-DESIGN-SPEC.md §7.3.2), en de
    referral-intake.
 
    Registreert zichzelf via Admin.registerSection(). Geladen na admin.js
@@ -145,7 +145,7 @@
   },
 
   /* ============================================================
-     KANDIDAATDRAWER: Profiel, Matches, Activiteit, Toestemmingen
+     KANDIDAATDRAWER: Profiel, Pipeline, Activiteit, Toestemmingen
      ============================================================ */
   _candidateTabs: [
     { key: 'profiel', label: 'Profiel' },
@@ -198,7 +198,7 @@
   },
 
   // Eén cache per kind/id-paar (de vorm die GET /candidates/{kind}/{id}
-  // voor dát kind teruggeeft), gedeeld door de tabs Profiel/Matches/
+  // voor dát kind teruggeeft), gedeeld door de tabs Profiel/Pipeline/
   // Activiteit. De tab Toestemmingen en de twee wijzigmodals lezen NOOIT
   // rechtstreeks uit deze cache: zie resolveConsentDetail() hieronder.
   async ensureCandidateDetail(kind, itemId, { force = false } = {}) {
