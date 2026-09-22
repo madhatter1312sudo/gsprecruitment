@@ -1050,7 +1050,9 @@ async def admin_create_referral(
             },
         )
 
-    existing = await fetch_one("SELECT id FROM candidates WHERE LOWER(email) = $1", email)
+    existing = await fetch_one(
+        "SELECT id FROM candidates WHERE LOWER(email) = $1 AND deleted_at IS NULL", email,
+    )
     if existing:
         raise HTTPException(
             status_code=409,
