@@ -222,6 +222,17 @@
                   </button>
                 </div>
               </div>
+
+              <!-- WS5 §7.3.6(d): healthwidget. GET /api/v1/admin/health,
+                   vier regels (database, OpenRouter, Apollo, dubbele
+                   profielkoppelingen); Admin.renderHealthCard() in
+                   js/admin.js vult #healthCardBody. -->
+              <div class="card mt-3">
+                <div class="card-header"><h3 class="card-title"><i class="fa-solid fa-heart-pulse text-primary me-2"></i>Systeemstatus</h3></div>
+                <div class="card-body">
+                  <div id="healthCardBody" class="text-secondary">Loading…</div>
+                </div>
+              </div>
             </div>
           </div>
         </section>

@@ -136,10 +136,17 @@ const Admin = {
      ============================================================ */
   async loadDashboard() {
     try {
-      const [dashRes, recentRes] = await Promise.all([
+      const [dashRes, recentRes, healthRes] = await Promise.all([
         Auth.fetch('/v1/admin/dashboard'),
         Auth.fetch('/v1/admin/audit-log?limit=8'),
+        Auth.fetch('/v1/admin/health'),
       ]);
+
+      if (healthRes?.ok) {
+        this.renderHealthCard(await healthRes.json());
+      } else {
+        this.setContainerLoadError(document.getElementById('healthCardBody'), () => this.loadDashboard());
+      }
 
       if (dashRes?.ok) {
         const d = await dashRes.json();
@@ -179,7 +186,46 @@ const Admin = {
       this.setContainerLoadError(document.getElementById('recentActivityList'), () => this.loadDashboard());
       this.setContainerLoadError(document.getElementById('pendingRegistrationsList'), () => this.loadDashboard());
       this.setContainerLoadError(document.getElementById('newRegistrationsList'), () => this.loadDashboard());
+      this.setContainerLoadError(document.getElementById('healthCardBody'), () => this.loadDashboard());
     }
+  },
+
+  // WS5 §7.3.6(d): GET /api/v1/admin/health -> vier regels met statusstip.
+  // duplicate_profile_links is de reden dat de kaart bestaat (hoort altijd
+  // 0 te zijn); boven 0 wordt de hele kaart een inline-melding van het
+  // type fout in plaats van de vierregelige lijst. candidates_count en
+  // open_jobs uit dezelfde respons komen hier niet terug -- die staan al
+  // in de KPI-rij (§7.3.6(d), laatste zin).
+  renderHealthCard(h) {
+    const el = document.getElementById('healthCardBody');
+    if (!el) return;
+    const dup = h.duplicate_profile_links;
+
+    if (typeof dup === 'number' && dup > 0) {
+      mount(el, html`
+        <div class="alert alert-danger mb-0" role="alert">
+          <i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i>
+          <span>${dup} dubbele profielkoppelingen. Dit hoort 0 te zijn.</span>
+          <div class="mt-2">
+            <button type="button" class="btn btn-sm btn-outline-secondary" data-action="navigate" data-section="candidates">Kandidaten openen</button>
+          </div>
+        </div>`);
+      return;
+    }
+
+    const dot = (ok) => raw(`<span class="status-dot ${ok ? 'bg-success' : 'bg-danger'} me-2" aria-hidden="true"></span>`);
+    const dbOk = h.database === 'connected';
+    const orOk = h.openrouter === 'configured';
+    const apOk = h.apollo === 'configured';
+    const dupLine = dup === 0
+      ? html`<span class="status-dot bg-success me-2" aria-hidden="true"></span><span><span class="a-num">0</span> dubbele profielkoppelingen</span>`
+      : html`<span class="status-dot bg-secondary me-2" aria-hidden="true"></span><span class="a-soft">Onbekend</span>`;
+
+    mount(el, html`
+      <div class="d-flex align-items-center mb-2">${dot(dbOk)}<span>Database: ${raw(dbOk ? 'verbonden' : 'niet verbonden')}</span></div>
+      <div class="d-flex align-items-center mb-2">${dot(orOk)}<span>OpenRouter: ${raw(orOk ? 'geconfigureerd' : 'niet geconfigureerd')}</span></div>
+      <div class="d-flex align-items-center mb-2">${dot(apOk)}<span>Apollo: ${raw(apOk ? 'geconfigureerd' : 'niet geconfigureerd')}</span></div>
+      <div class="d-flex align-items-center">${dupLine}</div>`);
   },
 
   renderNewRegistrations(items) {
