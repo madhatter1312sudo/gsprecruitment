@@ -3,7 +3,7 @@ Talent OS — Public API Router.
 Unauthenticated endpoints for site content, salary benchmarks, and lead submission.
 """
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
-from core.database import fetch_all, fetch_one, execute
+from core.database import fetch_all, fetch_one, execute, get_pool
 from core.config import settings
 from core.deps import get_optional_user
 from core.security import hash_token
@@ -415,15 +415,40 @@ async def talentpool_confirm(request: Request, data: TalentpoolConfirmRequest):
     a match already past 'suggested' (e.g. already 'applied') is left
     alone. Calling this endpoint twice with the same token 400s on the
     second call (confirmed_at is no longer NULL), so the match/candidate
-    side effects only ever happen once per token."""
+    side effects only ever happen once per token.
+
+    Security-audit follow-up #2: a token issued BEFORE a withdrawal must
+    not be able to undo that withdrawal. Tokens live 24h and nothing
+    invalidated a pending talentpool_optin_requests row when the person
+    withdrew in between, so a stale confirm click (or a stale
+    already-loaded page auto-POSTing, website/talentpool-confirm.js)
+    could still re-grant. If the matching candidates row has
+    consent_withdrawn_at newer than this request's requested_at, the
+    token is treated exactly like an expired one (400, same message, no
+    state change at all -- talentpool_optin_requests.confirmed_at is not
+    even stamped)."""
     token_hash = hash_token(data.token)
     pending = await fetch_one(
-        """SELECT id, email, scope, source, job_id, job_alerts FROM talentpool_optin_requests
+        """SELECT id, email, scope, source, job_id, job_alerts, requested_at
+           FROM talentpool_optin_requests
            WHERE token_hash = $1 AND confirmed_at IS NULL
              AND requested_at > NOW() - INTERVAL '24 hours'""",
         token_hash,
     )
     if not pending:
+        raise HTTPException(status_code=400, detail="Invalid or expired confirmation token")
+
+    existing = await fetch_one(
+        "SELECT id, lawful_basis, consent_withdrawn_at FROM candidates WHERE LOWER(email) = $1",
+        pending["email"],
+    )
+    # #2: a withdrawal that happened AFTER this token was requested makes
+    # the token stale -- same treatment as an expired one, and checked
+    # before anything (including confirmed_at) is written.
+    if (
+        existing and existing.get("consent_withdrawn_at") and pending.get("requested_at")
+        and existing["consent_withdrawn_at"] > pending["requested_at"]
+    ):
         raise HTTPException(status_code=400, detail="Invalid or expired confirmation token")
 
     await execute(
@@ -464,53 +489,119 @@ async def talentpool_confirm(request: Request, data: TalentpoolConfirmRequest):
     # vinkje wordt dus genegeerd, niet stilzwijgend bewaard.
     wants_alerts = bool(pending["job_alerts"]) and pending["scope"] == "matching_and_contact"
 
-    existing = await fetch_one(
-        "SELECT id, lawful_basis FROM candidates WHERE LOWER(email) = $1", pending["email"],
-    )
+    # Issue #110: confirming here is the person's own, new opt-in -- if
+    # they had previously withdrawn (consent_withdrawn_at set, e.g. via
+    # the public unsubscribe-all link or a talentpool withdrawal), this
+    # click must actually make the re-grant effective rather than being
+    # silently accepted-but-inert. `existing` was already fetched above
+    # (to check the #2 stale-token guard); was_withdrawn below is
+    # recomputed from a FRESH, LOCKED read inside the transaction (#3),
+    # not from that first unlocked read, which could be stale by the time
+    # the transaction opens.
     if existing:
-        # Security-audit B1. `should_set_talentpool_lawful_basis()` only
-        # says yes for NULL or an existing 'opt_in_talentpool', so a
-        # referral that confirms here kept `lawful_basis =
-        # 'toestemming_referral'` -- and then fell out of EVERY retention
-        # row at once: core/retention.py's REFERRAL_NO_RESPONSE_SQL
-        # excludes him the moment `referral_confirmed_at` is stamped,
-        # while TALENTPOOL_EXPIRED_SQL only ever looks at
-        # 'opt_in_talentpool'. The same mismatch kept him out of
-        # routers/matches.py's `_consent_gate_sql()` and out of
-        # routers/outreach.py's `_draft_refusal()`: consent confirmed, and
-        # unusable and unbounded at the same time.
-        #
-        # Confirming here IS the talentpool opt-in (this is the same
-        # double-opt-in token flow, and the UPDATE below writes all four
-        # consent_talentpool_* columns regardless), so the basis becomes
-        # the one that describes what actually happened. That is not the
-        # thing H3a guards against: H3a forbids overwriting a DIFFERENT,
-        # stronger basis (portal_registratie, gerechtvaardigd_belang)
-        # behind the person's back. 'toestemming_referral' is the same
-        # kind of basis -- consent -- for the same person, upgraded by
-        # that person's own click, and only for the request this referral
-        # created. From here he falls under exactly one retention row:
-        # talentpool_consent, 12 months plus the 30-day grace.
-        set_lawful_basis = privacy.should_set_talentpool_lawful_basis(existing["lawful_basis"]) or (
-            is_referral and existing["lawful_basis"] == "toestemming_referral"
-        )
-        row = await fetch_one(
-            """UPDATE candidates
-               SET consent_talentpool_at = $1, consent_talentpool_until = $2,
-                   consent_scope = $3, consent_source = $4, consent_reminder_sent_at = NULL,
-                   lawful_basis = CASE WHEN $5 THEN 'opt_in_talentpool' ELSE lawful_basis END,
-                   referral_confirmed_at = CASE WHEN $6 THEN COALESCE(referral_confirmed_at, NOW())
-                                                ELSE referral_confirmed_at END,
-                   job_alert_optin_at = CASE
-                       WHEN $7 AND job_alert_unsubscribed_at IS NULL
-                       THEN COALESCE(job_alert_optin_at, NOW())
-                       ELSE job_alert_optin_at END,
-                   updated_at = NOW()
-               WHERE id = $8
-               RETURNING id, lawful_basis, consent_talentpool_at, consent_talentpool_until""",
-            now, until, pending["scope"], pending["source"], set_lawful_basis,
-            is_referral, wants_alerts, existing["id"],
-        )
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            async with conn.transaction():
+                # #3: FOR UPDATE -- the candidates row is locked for the
+                # rest of this transaction, so a concurrent withdrawal or
+                # suppression-list write can't slip in between this read
+                # and the UPDATE below.
+                locked = await conn.fetchrow(
+                    "SELECT lawful_basis, consent_withdrawn_at FROM candidates WHERE id = $1 FOR UPDATE",
+                    existing["id"],
+                )
+                locked = dict(locked) if locked else {}
+                locked_lawful_basis = locked.get("lawful_basis", existing["lawful_basis"])
+                was_withdrawn = bool(locked.get("consent_withdrawn_at"))
+
+                email_hash = privacy.email_hash(pending["email"])
+                supp_row = await conn.fetchrow(
+                    "SELECT reason FROM suppression_list WHERE email_hash = $1", email_hash,
+                )
+                suppression_reason = supp_row["reason"] if supp_row else None
+                # #1: unsubscribe-all is NOT the only suppression_list
+                # writer -- routers/gdpr.py's add_suppression() (a STOP
+                # reply or hard bounce an admin recorded) also stamps
+                # consent_withdrawn_at, with a free-text `reason` this
+                # route must never mistake for a spent unsubscribe. A
+                # public confirm click can't 409 the way the portal does
+                # (no caller to show an error to that isn't the person
+                # themselves clicking an e-mail link), so it keeps the
+                # PRE-#110 accept-but-inert behaviour instead: the token
+                # is consumed and the response looks the same, but
+                # consent_withdrawn_at stays set and nothing is deleted.
+                blocked_by_suppression = (
+                    suppression_reason is not None and suppression_reason != "unsubscribe_all"
+                )
+                clear_withdrawn = was_withdrawn and not blocked_by_suppression
+
+                # Security-audit B1. `should_set_talentpool_lawful_basis()`
+                # only says yes for NULL or an existing 'opt_in_talentpool',
+                # so a referral that confirms here kept `lawful_basis =
+                # 'toestemming_referral'` -- and then fell out of EVERY
+                # retention row at once: core/retention.py's
+                # REFERRAL_NO_RESPONSE_SQL excludes him the moment
+                # `referral_confirmed_at` is stamped, while
+                # TALENTPOOL_EXPIRED_SQL only ever looks at
+                # 'opt_in_talentpool'. The same mismatch kept him out of
+                # routers/matches.py's `_consent_gate_sql()` and out of
+                # routers/outreach.py's `_draft_refusal()`: consent
+                # confirmed, and unusable and unbounded at the same time.
+                #
+                # Confirming here IS the talentpool opt-in (this is the
+                # same double-opt-in token flow, and the UPDATE below
+                # writes all four consent_talentpool_* columns
+                # regardless), so the basis becomes the one that describes
+                # what actually happened. That is not the thing H3a guards
+                # against: H3a forbids overwriting a DIFFERENT, stronger
+                # basis (portal_registratie, gerechtvaardigd_belang)
+                # behind the person's back. 'toestemming_referral' is the
+                # same kind of basis -- consent -- for the same person,
+                # upgraded by that person's own click, and only for the
+                # request this referral created. From here he falls under
+                # exactly one retention row: talentpool_consent, 12 months
+                # plus the 30-day grace.
+                set_lawful_basis = privacy.should_set_talentpool_lawful_basis(locked_lawful_basis) or (
+                    is_referral and locked_lawful_basis == "toestemming_referral"
+                )
+                row = await conn.fetchrow(
+                    """UPDATE candidates
+                       SET consent_talentpool_at = $1, consent_talentpool_until = $2,
+                           consent_scope = $3, consent_source = $4, consent_reminder_sent_at = NULL,
+                           consent_withdrawn_at = CASE WHEN $9 THEN NULL ELSE consent_withdrawn_at END,
+                           lawful_basis = CASE WHEN $5 THEN 'opt_in_talentpool' ELSE lawful_basis END,
+                           referral_confirmed_at = CASE WHEN $6 THEN COALESCE(referral_confirmed_at, NOW())
+                                                        ELSE referral_confirmed_at END,
+                           job_alert_optin_at = CASE
+                               WHEN $7 AND job_alert_unsubscribed_at IS NULL
+                               THEN COALESCE(job_alert_optin_at, NOW())
+                               ELSE job_alert_optin_at END,
+                           updated_at = NOW()
+                       WHERE id = $8
+                       RETURNING id, lawful_basis, consent_talentpool_at, consent_talentpool_until""",
+                    now, until, pending["scope"], pending["source"], set_lawful_basis,
+                    is_referral, wants_alerts, existing["id"], clear_withdrawn,
+                )
+                row = dict(row)
+                if was_withdrawn:
+                    suppression_rows_deleted = 0
+                    if clear_withdrawn:
+                        del_status = await conn.execute(
+                            "DELETE FROM suppression_list WHERE email_hash = $1 AND reason = 'unsubscribe_all'",
+                            email_hash,
+                        )
+                        suppression_rows_deleted = privacy.parse_row_count(del_status)
+                    await conn.execute(
+                        "INSERT INTO audit_log (action, actor_id, target_type, target_id, changes) VALUES ($1, $2, $3, $4, $5::jsonb)",
+                        "talentpool_consent_update", None, "candidate", existing["id"],
+                        json.dumps({
+                            "consent": True, "scope": pending["scope"], "source": pending["source"],
+                            "regrant": clear_withdrawn,
+                            "blocked_by_suppression": blocked_by_suppression,
+                            "optin_request_id": pending["id"],
+                            "suppression_rows_deleted": suppression_rows_deleted,
+                        }),
+                    )
     else:
         # `full_name` krijgt hier het e-mailadres omdat
         # `candidates.full_name` NOT NULL is (migratie 000_baseline) en

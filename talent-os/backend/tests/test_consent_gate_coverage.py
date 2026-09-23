@@ -76,6 +76,16 @@ _ALLOWLIST = {
         "inbox; the JOIN's WHERE already scopes om.candidate_id to the "
         "authenticated user's own candidate_id, so c.full_name is always "
         "the viewer's own name, never another candidate's.",
+    ("candidate.py", "SELECT lawful_basis, email, consent_withdrawn_at FROM candidates WHERE id = $1"):
+        "POST /api/v1/candidate/talentpool-consent (issue #110) -- the "
+        "candidate re-granting their own withdrawn consent; candidate_id "
+        "comes from _get_candidate_id(current_user['id']), never from "
+        "caller input, so this is always the authenticated candidate's "
+        "own row. The read must see consent_withdrawn_at even when it is "
+        "set (that's the point -- deciding whether this consent=true is a "
+        "re-grant) and the e-mail only to compute privacy.email_hash() "
+        "for the suppression_list DELETE; the address is never returned "
+        "to the caller.",
     ("public.py", "SELECT id, email FROM candidates WHERE id = $1::int"):
         "POST /api/public/unsubscribe (WS3c) -- the one-click unsubscribe "
         "must keep working for exactly the people these two guards exclude: "
