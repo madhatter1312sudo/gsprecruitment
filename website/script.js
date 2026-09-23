@@ -874,7 +874,7 @@ const GSP_WHATSAPP = '31617913965';
       body.innerHTML = `
         <h2 style="margin-bottom:8px">${GSP.esc(job.title)}</h2>
         <div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap">
-          ${[job.department, job.seniority, job.location_type].map(t => `<span class="job-tag gold" style="font-size:0.8rem;padding:6px 14px">${GSP.esc(t)}</span>`).join('')}
+          ${[job.department, job.seniority].filter(Boolean).map(t => `<span class="job-tag gold" style="font-size:0.8rem;padding:6px 14px">${GSP.esc(t)}</span>`).join('')}
         </div>
         <div style="background:var(--bg-alt);padding:16px;border-radius:var(--radius-sm);margin-bottom:16px">
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
