@@ -122,6 +122,20 @@ class _FakeItemsDB:
                 return None
             item["status"] = "purging"
             return {"id": args[0]}
+        if "SET status = 'no_longer_eligible'" in sql:
+            # Guarded the same way as the 'purging' claim above (the race
+            # this file's test_approve_loses_the_no_longer_eligible_race_...
+            # test exercises): a no-op, RETURNING nothing, unless the item
+            # is still in ('pending', 'rejected').
+            item = self.items.get(args[0])
+            if item is None or item["status"] not in ("pending", "rejected"):
+                return None
+            item["status"] = "no_longer_eligible"
+            item["email"] = None
+            return {"id": args[0]}
+        if sql.strip() == "SELECT status FROM retention_review_items WHERE id = $1":
+            item = self.items.get(args[0])
+            return {"status": item["status"]} if item else None
         m = _MARKER_COL_RE.search(sql)
         if m:
             table = m.group(2)
@@ -403,6 +417,42 @@ def test_approve_refuses_and_marks_no_longer_eligible_when_a_protective_signal_a
     assert exc_info.value.status_code == 409
     assert db.items[1]["status"] == "no_longer_eligible"
     assert db.decisions == []  # never recorded as an actual decision -- nothing was approved
+
+
+def test_approve_loses_the_no_longer_eligible_race_when_a_concurrent_approve_already_claimed_the_item(monkeypatch):
+    """Regression for the concurrent-approval race (CI:
+    test_probe4_concurrent_approvals_on_the_same_item_produce_exactly_one_decision_and_one_purge):
+    two overlapping approve calls on the same item both read it as
+    'pending'. The winner claims it (status -> 'purging', and in the real
+    flow goes on to 'purged'). The loser's _is_still_eligible() check can
+    then observe the subject already erased and return False -- but by
+    the time the loser's write runs, the item is no longer 'pending' or
+    'rejected', so the write here must be a guarded no-op, and the loser
+    must report the SAME 409 family ('not_actionable', not
+    'no_longer_eligible') the winner's own already-claimed item would --
+    never overwrite the winner's status."""
+    for claimed_status in ("purging", "purged"):
+        db = _FakeItemsDB({1: _pending_item()})  # read as 'pending', same as the real race
+        retention_admin = _install(monkeypatch, db)
+
+        async def _eligibility_check_loses_the_race(item, _db=db, _status=claimed_status):
+            # Simulates the winner's concurrent claim (and, for 'purged',
+            # its full erase+finish) landing in the gap between this
+            # item's initial read and this eligibility check -- exactly
+            # why the check now sees the subject already gone.
+            _db.items[1]["status"] = _status
+            return False
+
+        monkeypatch.setattr(retention_admin, "_is_still_eligible", _eligibility_check_loses_the_race)
+
+        payload = retention_admin.ReviewDecisionRequest(confirm="APPROVE")
+        with pytest.raises(HTTPException) as exc_info:
+            asyncio.run(retention_admin.approve_review_item(1, payload, current_user={"id": 9, "role": "admin"}))
+        assert exc_info.value.status_code == 409
+        assert exc_info.value.detail["code"] == "retention_review_item_not_actionable"
+        # The write must be a no-op: status untouched, email untouched.
+        assert db.items[1]["status"] == claimed_status
+        assert db.decisions == []
 
 
 def test_approve_refuses_an_already_purged_item(monkeypatch):
