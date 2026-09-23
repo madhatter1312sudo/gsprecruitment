@@ -243,11 +243,31 @@
   const openMenus = [];
   const registeredMenus = new WeakMap();
   let overlaySeq = 0;
+
+  // Table re-renders (GSP.mount() in render.js) replace a section's
+  // innerHTML wholesale, so a menu node that was pushed onto openMenus
+  // gets detached from the document without ever being unregistered.
+  // Harmless on its own -- topOverlay() only looks at isOpen(), and a
+  // detached node's style.display can't become 'block' again -- but the
+  // array would otherwise keep every stale entry for the life of the
+  // session. Dropping disconnected entries here, on every call that
+  // touches openMenus, keeps it bounded to the menus currently in the
+  // DOM without changing which entry is "topmost" (issue #182).
+  function pruneMenus() {
+    for (let i = openMenus.length - 1; i >= 0; i--) {
+      if (!openMenus[i].el.isConnected) {
+        registeredMenus.delete(openMenus[i].el);
+        openMenus.splice(i, 1);
+      }
+    }
+  }
+
   // Elke aanroep (ook een heropening van hetzelfde menu) telt als een
   // nieuwe "laatst geopend"-tijd, maar hetzelfde el krijgt maar één
   // stapel-item -- anders groeit openMenus door bij elk klikje.
   function registerMenu(el, close) {
     if (!el) return;
+    pruneMenus();
     const existing = registeredMenus.get(el);
     if (existing) { existing.seq = ++overlaySeq; return; }
     const entry = { el, close, isOpen: () => el.style.display === 'block', seq: ++overlaySeq };
@@ -260,6 +280,7 @@
   // registerMenu()) zet een oplopend seq-nummer; wie het hoogste seq heeft
   // en nog open is, is de bovenste laag.
   function topOverlay() {
+    pruneMenus();
     let best = null;
     openPanels.forEach((p) => {
       if (p.el.classList.contains('show') && (!best || p.seq > best.seq)) best = p;
@@ -268,6 +289,14 @@
       if (m.isOpen() && (!best || m.seq > best.seq)) best = m;
     });
     return best;
+  }
+
+  // Read-only for scripts/admin_sections_check.py (CI) -- pruned, so this
+  // reflects only menus still attached to the document, never a raw
+  // count of everything ever registered this session.
+  function openMenuCount() {
+    pruneMenus();
+    return openMenus.length;
   }
 
   // Eén document-listener voor het hele paneel, niet één per geopend
@@ -881,5 +910,5 @@
     });
   }
 
-  root.ui = { modal, drawer, tabs, table, confirm: confirmDialog, closeTop, registerMenu };
+  root.ui = { modal, drawer, tabs, table, confirm: confirmDialog, closeTop, registerMenu, openMenuCount };
 })(typeof window !== 'undefined' ? window : globalThis);
