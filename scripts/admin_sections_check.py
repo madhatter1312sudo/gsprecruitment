@@ -42,6 +42,18 @@ Covers:
     tables from stubbed /jobs and /leads data, with no invented numbers
     (every value traces to a stubbed API field).
 
+  - Escape (SITE-DESIGN-SPEC.md §7.4 punt 2, issue #146): Escape closes
+    only the topmost open layer. An action menu alone closes on Escape
+    without touching any modal; a modal alone closes on Escape; with a
+    modal and an action menu open at once (the menu registered after the
+    modal, via js/ui.js registerMenu()/topOverlay()), the first Escape
+    closes the menu and the second closes the modal; and a form opened
+    with trackDirty (js/sections/users.js openEditUserModal()) shows
+    "Wijzigingen weggooien?" on Escape once changed, where Escape on that
+    confirmation itself cancels (the form and its edit stay), and its
+    "Weggooien" button discards for real. The Opdrachtgevers drawer gets
+    its own Escape-closes-it check alongside its existing coverage.
+
   - Bewaartermijnen (SITE-DESIGN-SPEC.md §7.3.1): de samenvatting, de
     categorietabel en de lijst met gemengde statussen renderen; de
     heropende rij toont zijn eigen regel; er staat geen e-mailadres en
@@ -1868,6 +1880,94 @@ def main():
         if new_errors:
             failures.append(f"users: {len(new_errors)} console error(s): {new_errors[:3]}")
 
+        # ---- Escape (§146): modal, actiemenu en de volgorde ertussen ----
+        # Elk stuk laat het paneel achteraf gesloten en de focus niet op
+        # <body>, zoals de keyboard-only-pas verderop (§146 punt 5) voor
+        # Users, Candidates en Clients eist.
+        def _active_is_body():
+            return page.evaluate("() => document.activeElement === document.body")
+
+        # 1) Actiemenu alleen: Escape sluit het menu en verder niets.
+        click_or_fail(page, failures, '[data-action="toggle-user-menu"][data-id="91"]',
+                      "escape: menu openen (91)")
+        if not page.is_visible('#user-menu-91'):
+            failures.append("escape: actiemenu 91 werd niet zichtbaar na openen")
+        page.keyboard.press("Escape")
+        page.wait_for_timeout(150)
+        if page.is_visible('#user-menu-91'):
+            failures.append("escape: actiemenu 91 sloot niet op Escape")
+        if page.query_selector('#adminModalOverlay.show') is not None:
+            failures.append("escape: een Escape op alleen een open menu opende of sloot een modal")
+
+        # 2) Modal alleen, ongewijzigd: Escape sluit meteen (geen
+        # "Wijzigingen weggooien?"), focus valt niet terug op <body>.
+        page.evaluate("() => Admin.openEditUserModal(91)")
+        page.wait_for_timeout(200)
+        if page.query_selector('#editUserName') is None:
+            failures.append("escape: bewerkmodal (91) opende niet voor de Escape-test")
+        page.keyboard.press("Escape")
+        page.wait_for_timeout(200)
+        if page.query_selector('#editUserName') is not None:
+            failures.append("escape: een ongewijzigde bewerkmodal sloot niet op de eerste Escape")
+        if _active_is_body():
+            failures.append("escape: focus viel na Escape (modal, ongewijzigd) terug op <body>")
+
+        # 3) Modal èn actiemenu tegelijk open (het menu opent na de modal,
+        # dus is de bovenste laag): de eerste Escape sluit alleen het menu,
+        # de tweede sluit de modal die eronder lag. Dit paneelcombinatie
+        # ontstaat via de gewone kliklaag nooit in één stap (elke klik
+        # sluit eerst elk open menu, admin.js bindGlobal()) -- de twee
+        # Admin-aanroepen hieronder zetten dezelfde staat rechtstreeks neer
+        # zoals ook elders in dit bestand gebeurt (bijv. Admin.fillRetentionCategoryModal).
+        page.evaluate("() => Admin.openEditUserModal(90)")
+        page.wait_for_timeout(200)
+        page.evaluate("() => Admin.toggleUserMenu(91)")
+        page.wait_for_timeout(200)
+        if page.query_selector('#editUserName') is None or not page.is_visible('#user-menu-91'):
+            failures.append("escape: kon modal (90) en menu (91) niet tegelijk open krijgen voor de stapeltest")
+        else:
+            page.keyboard.press("Escape")
+            page.wait_for_timeout(200)
+            if page.is_visible('#user-menu-91'):
+                failures.append("escape: bij modal+menu sloot de eerste Escape niet het menu (de laatst geopende laag)")
+            if page.query_selector('#editUserName') is None:
+                failures.append("escape: bij modal+menu sloot de eerste Escape ook meteen de modal mee (hoort alleen de bovenste laag te zijn)")
+            page.keyboard.press("Escape")
+            page.wait_for_timeout(200)
+            if page.query_selector('#editUserName') is not None:
+                failures.append("escape: de tweede Escape sloot de resterende modal niet")
+
+        # 4) Onopgeslagen wijzigingen: Escape vraagt eerst "Wijzigingen
+        # weggooien?"; Escape op die bevestiging annuleert het sluiten (het
+        # formulier blijft open, met de wijziging nog intact); de knop
+        # "Weggooien" sluit daarna wel.
+        page.evaluate("() => Admin.openEditUserModal(91)")
+        page.wait_for_timeout(200)
+        page.fill('#editUserName', 'Playwright wijziging')
+        page.keyboard.press("Escape")
+        page.wait_for_timeout(250)
+        if "Wijzigingen weggooien" not in (text_of(page, '#adminConfirmModal') or ''):
+            failures.append(f"escape: geen 'Wijzigingen weggooien?'-bevestiging bij een gewijzigd formulier -- kreeg {text_of(page, '#adminConfirmModal')!r}")
+        if page.query_selector('#editUserName') is None:
+            failures.append("escape: het formulier sloot al vóór de bevestiging")
+        # Escape op de bevestiging zelf: annuleren, formulier blijft open
+        # met de wijziging nog intact.
+        page.keyboard.press("Escape")
+        page.wait_for_timeout(200)
+        if page.query_selector('#adminConfirmModal.show') is not None:
+            failures.append("escape: de bevestiging zelf sloot niet op Escape")
+        name_value = page.eval_on_selector('#editUserName', "el => el.value") if page.query_selector('#editUserName') else None
+        if name_value != 'Playwright wijziging':
+            failures.append(f"escape: Escape op de bevestiging gooide het formulier of de wijziging alsnog weg -- kreeg {name_value!r}")
+        # Nu écht weggooien via de knop.
+        page.keyboard.press("Escape")
+        page.wait_for_timeout(200)
+        click_or_fail(page, failures, '#adminConfirmModal .btn-outline-danger, #adminConfirmModal .btn-primary',
+                      "escape: 'Weggooien' bevestigen")
+        page.wait_for_timeout(200)
+        if page.query_selector('#editUserName') is not None:
+            failures.append("escape: 'Weggooien' bevestigen sloot het formulier niet")
+
         # ---- Opdrachtgevers ----
         errors_before = len(console_errors)
         page.click('.nav-link[data-section="clients"]')
@@ -1889,6 +1989,21 @@ def main():
         if page.query_selector('#clientDrawerTabContent') is None:
             failures.append("clients: detail drawer did not open")
         else:
+            # §146 punt 1: Escape sluit ook een drawer (niet alleen een
+            # modal), en laat de focus niet op <body> vallen. De drawer
+            # gaat hierna weer open zodat de rest van deze sectie
+            # ongewijzigd verder kan.
+            page.keyboard.press("Escape")
+            page.wait_for_timeout(300)
+            if page.query_selector('#clientDrawerTabContent') is not None:
+                failures.append("clients: Escape sloot de detail drawer niet")
+            if page.evaluate("() => document.activeElement === document.body"):
+                failures.append("clients: focus viel na Escape (drawer) terug op <body>")
+            page.click('#section-clients table tbody tr')
+            page.wait_for_timeout(600)
+            if page.query_selector('#clientDrawerTabContent') is None:
+                failures.append("clients: detail drawer opende niet opnieuw na de Escape-test")
+
             # Info tab (default on open): erkend_referent select + notes
             # textarea, editable via PATCH /v1/admin/clients/{id}.
             if page.query_selector('#clientInfoErkendReferent') is None:
@@ -3950,7 +4065,10 @@ def main():
         sys.exit(1)
 
     print("PASS: Users (§7.3.6(a): badge Vergrendeld, rijactie Deblokkeren, POST unlock met "
-          "200- en 500-uitkomst), Opdrachtgevers (list + tabbed drawer), Activiteitentab "
+          "200- en 500-uitkomst), Escape (§146: alleen de bovenste laag sluit -- actiemenu "
+          "alleen, modal alleen, modal+actiemenu in openvolgorde met twee losse Escapes, en "
+          "'Wijzigingen weggooien?' op een gewijzigd formulier met Escape-op-de-bevestiging als "
+          "annuleren), Opdrachtgevers (list + tabbed drawer + Escape sluit de drawer), Activiteitentab "
           "(§7.3.6(b), gedeeld tussen kandidaat- en klantdrawer: typechips, taakcheckbox, "
           "activiteit toevoegen vanuit beide drawers), Leads (inbox + unread filter + PATCH), "
           "Prospects (§7.3.6(c): datalist, lawful_basis zonder lege optie, source_url-validatie, "

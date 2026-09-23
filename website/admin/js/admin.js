@@ -424,6 +424,10 @@ const Admin = {
       body: bodyHtml,
       wide: !!opts.wide,
       ariaLabel: opts.ariaLabel || 'Detailpaneel',
+      // §146 punt 4: alleen aan als de aanroeper zijn formulier synchroon
+      // met de echte waarden opbouwt (zie de toelichting bij
+      // dirtyTrackingEnabled in ui.js) -- staat standaard uit.
+      trackDirty: !!opts.trackDirty,
       onClose: () => { this._modal = null; },
     });
     return this._modal;

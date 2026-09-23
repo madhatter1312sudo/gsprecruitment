@@ -119,7 +119,12 @@
     // way the old inline onclick= version did.
     this.closeMenus();
     const menu = document.getElementById(`user-menu-${id}`);
-    if (menu) menu.style.display = 'block';
+    if (menu) {
+      menu.style.display = 'block';
+      // §146: laat dit menu meedoen aan dezelfde Escape-stapel als modal en
+      // drawer, zodat één Escape steeds alleen de bovenste laag sluit.
+      ui.registerMenu(menu, () => this.closeMenus());
+    }
   },
 
   openEditUserModal(userId) {
@@ -149,7 +154,7 @@
         <button class="btn btn-primary" data-action="save-user-edit" data-id="${userId}">Save Changes</button>
         <button class="btn btn-ghost-secondary" data-action="close-modal">Cancel</button>
       </div>
-    `, { title: 'Edit User: ' + (user.full_name || user.email) });
+    `, { title: 'Edit User: ' + (user.full_name || user.email), trackDirty: true });
   },
 
   async saveUserEdit(userId) {
