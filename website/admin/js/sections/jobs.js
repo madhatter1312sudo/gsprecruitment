@@ -75,9 +75,9 @@
         await this.loadJobs(this._lastParams.jobs || {});
       } else {
         const d = await res?.json();
-        Auth.toast(d?.detail || 'Update failed', 'error');
+        Auth.toast(d?.detail || 'Bijwerken mislukt', 'error');
       }
-    } catch { Auth.toast('Network error', 'error'); }
+    } catch { Auth.toast('Netwerkfout', 'error'); }
   },
 
   confirmDeleteJob(jobId) {
@@ -92,13 +92,13 @@
       // never existed) is an error the operator needs to see, not a
       // silent success (this used to also accept status===404 as OK).
       if (res?.ok) {
-        Auth.toast('Job deleted', 'success');
+        Auth.toast('Vacature verwijderd', 'success');
         await this.loadJobs(this._lastParams.jobs || {});
       } else {
         const d = await res?.json().catch(() => null);
         Auth.toast(d?.detail || 'Delete failed', 'error');
       }
-    } catch { Auth.toast('Network error', 'error'); }
+    } catch { Auth.toast('Netwerkfout', 'error'); }
   },
 
   /* ---- "Nieuwe vacature" (WS-B.2) ----

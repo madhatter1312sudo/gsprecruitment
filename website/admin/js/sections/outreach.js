@@ -110,14 +110,14 @@
         method: 'PUT', body: JSON.stringify({ subject, body }),
       });
       if (res?.ok) {
-        Auth.toast('Draft saved', 'success');
+        Auth.toast('Concept opgeslagen', 'success');
         this.closeModal();
         await this.loadOutreach();
       } else {
         const d = await res?.json();
         Auth.toast(d?.detail || 'Save failed', 'error');
       }
-    } catch { Auth.toast('Network error', 'error'); }
+    } catch { Auth.toast('Netwerkfout', 'error'); }
   },
 
   async approveDraft(id) {
@@ -127,14 +127,14 @@
     try {
       const res = await Auth.fetch(`/v1/admin/outreach/drafts/${id}/approve`, { method: 'POST' });
       if (res?.ok) {
-        Auth.toast('Email sent', 'success');
+        Auth.toast('E-mail verstuurd', 'success');
         this.closeModal();
         await this.loadOutreach();
       } else {
         const data = await res?.json();
         Auth.toast(data?.detail || 'Failed to send', 'error');
       }
-    } catch { Auth.toast('Network error', 'error'); }
+    } catch { Auth.toast('Netwerkfout', 'error'); }
   },
 
   async rejectDraft(id) {
@@ -142,14 +142,14 @@
     try {
       const res = await Auth.fetch(`/v1/admin/outreach/drafts/${id}/reject`, { method: 'POST' });
       if (res?.ok) {
-        Auth.toast('Draft rejected', 'success');
+        Auth.toast('Concept afgewezen', 'success');
         this.closeModal();
         await this.loadOutreach();
       } else {
         const data = await res?.json();
         Auth.toast(data?.detail || 'Reject failed', 'error');
       }
-    } catch { Auth.toast('Network error', 'error'); }
+    } catch { Auth.toast('Netwerkfout', 'error'); }
   },
 
   async runOutreachJob(name, btn) {
@@ -162,7 +162,7 @@
         const data = await res?.json();
         Auth.toast(data?.detail || 'Taak starten mislukt', 'error');
       }
-    } catch { Auth.toast('Network error', 'error'); }
+    } catch { Auth.toast('Netwerkfout', 'error'); }
     finally { if (btn) { btn.disabled = false; btn.innerHTML = btn.dataset.origText || btn.innerHTML; } }
   },
   });

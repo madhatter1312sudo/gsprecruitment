@@ -302,7 +302,7 @@ const Admin = {
         method: 'PUT', body: JSON.stringify({ is_verified: true }),
       });
       if (res?.ok) {
-        Auth.toast('User verified', 'success');
+        Auth.toast('Gebruiker geverifieerd', 'success');
         await this.loadDashboard();
         if (document.getElementById('section-users').classList.contains('active')) {
           await this.loadUsers();
@@ -312,7 +312,7 @@ const Admin = {
         Auth.toast(d?.detail || 'Failed to verify', 'error');
         if (btn) { btn.disabled = false; btn.textContent = 'Verify'; }
       }
-    } catch { Auth.toast('Network error', 'error'); if (btn) { btn.disabled = false; btn.textContent = 'Verify'; } }
+    } catch { Auth.toast('Netwerkfout', 'error'); if (btn) { btn.disabled = false; btn.textContent = 'Verify'; } }
   },
   closeMenus() {
     document.querySelectorAll('.action-menu').forEach(m => m.style.display = 'none');

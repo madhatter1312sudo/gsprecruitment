@@ -42,9 +42,9 @@
       const res = await Auth.fetch('/v1/admin/settings', {
         method: 'PUT', body: JSON.stringify({ settings }),
       });
-      if (res?.ok) Auth.toast('Settings saved', 'success');
-      else Auth.toast('Failed to save settings', 'error');
-    } catch { Auth.toast('Network error', 'error'); }
+      if (res?.ok) Auth.toast('Instellingen opgeslagen', 'success');
+      else Auth.toast('Instellingen opslaan mislukt', 'error');
+    } catch { Auth.toast('Netwerkfout', 'error'); }
     finally { if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fa-regular fa-floppy-disk"></i> Save Settings'; } }
   },
 

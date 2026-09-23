@@ -166,21 +166,21 @@
         method: 'PUT', body: JSON.stringify(payload),
       });
       if (res?.ok) {
-        Auth.toast('User updated', 'success');
+        Auth.toast('Gebruiker bijgewerkt', 'success');
         this.closeModal();
         await this.loadUsers();
       } else {
         const d = await res?.json();
-        Auth.toast(d?.detail || 'Update failed', 'error');
+        Auth.toast(d?.detail || 'Bijwerken mislukt', 'error');
       }
-    } catch { Auth.toast('Network error', 'error'); }
+    } catch { Auth.toast('Netwerkfout', 'error'); }
   },
 
   async impersonateUser(userId, email) {
     if (!confirm(`Impersonate ${email}? You will get a 15-minute session token as this user.`)) return;
     try {
       const res = await Auth.fetch(`/v1/admin/users/${userId}/impersonate`, { method: 'POST' });
-      if (!res?.ok) { Auth.toast('Impersonation failed', 'error'); return; }
+      if (!res?.ok) { Auth.toast('Inloggen als gebruiker mislukt', 'error'); return; }
       const data = await res.json();
       const user = data.user;
       // WS-B.2: park the admin's own token/user first so it's never left
@@ -189,7 +189,7 @@
       Auth.startImpersonation(data.access_token, user);
       const dest = user.role === 'candidate' ? '/candidate/' : user.role === 'client' ? '/client/' : '/admin/';
       window.location.href = dest;
-    } catch { Auth.toast('Network error', 'error'); }
+    } catch { Auth.toast('Netwerkfout', 'error'); }
   },
 
   confirmDeleteUser(userId, email) {
@@ -208,7 +208,7 @@
         const d = await res?.json();
         Auth.toast(d?.detail || 'Delete failed', 'error');
       }
-    } catch { Auth.toast('Network error', 'error'); }
+    } catch { Auth.toast('Netwerkfout', 'error'); }
   },
   });
 
