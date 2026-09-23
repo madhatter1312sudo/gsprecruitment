@@ -72,6 +72,17 @@ def test_verify_password_returns_false_not_raises_for_over_72_bytes():
     assert verify_password(too_long, h) is False
 
 
+def test_verify_password_accepts_legacy_bcrypt4_truncated_password():
+    # bcrypt 4 hashed only the first 72 bytes of a longer password, silently.
+    # An account created that way must still log in with the same long
+    # password after the bcrypt 5 bump: verification compares the first 72
+    # bytes, and a mismatch within those bytes still fails.
+    first_72 = "L" * 72
+    legacy_hash = hash_password(first_72)
+    assert verify_password("L" * 80, legacy_hash) is True
+    assert verify_password("L" * 71 + "X" + "L" * 8, legacy_hash) is False
+
+
 def test_bcrypt4_hash_still_verifies_under_bcrypt5():
     # Fixed hash produced by bcrypt 4.3.0 (bcrypt.hashpw with gensalt(rounds=4))
     # for the password below -- proves existing stored hashes keep working

@@ -100,15 +100,16 @@ def hash_password(password: str) -> str:
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     """Verify a plaintext password against a bcrypt hash.
 
-    A plaintext password over 72 UTF-8 bytes can never be the one that was
-    hashed (hash_password() refuses to hash it), so this returns False
-    rather than raising -- login/change-password callers already treat a
-    False return as "wrong password" (4xx), and login's password field has
-    no schema-level length cap, so this is the only gate on that path.
+    New passwords cannot exceed 72 UTF-8 bytes (hash_password() refuses),
+    but hashes made under bcrypt 4 were computed from the first 72 bytes of
+    whatever the user typed, silently. To keep those accounts working after
+    the bcrypt 5 bump (which raises instead of truncating), verification
+    compares the first 72 bytes, exactly bcrypt 4's semantics; bcrypt never
+    encoded more than that anyway, so this is no weaker than before. A
+    False return is "wrong password" (4xx) for every caller, and login's
+    password field has no schema-level cap, so this is the gate there.
     """
-    encoded = plain_password.encode("utf-8")
-    if len(encoded) > BCRYPT_MAX_PASSWORD_BYTES:
-        return False
+    encoded = plain_password.encode("utf-8")[:BCRYPT_MAX_PASSWORD_BYTES]
     return _bcrypt.checkpw(
         encoded,
         hashed_password.encode("utf-8"),
