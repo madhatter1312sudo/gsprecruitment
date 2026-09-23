@@ -244,6 +244,55 @@ if (typeof module !== 'undefined' && module.exports) {
   module.exports.renderVacancyApplyPanel = renderVacancyApplyPanel;
 }
 
+// ─── Sticky mobile apply bar (design-spec-batch.md item 3) ─────────────
+// Mobile-only (<768px, belt-and-suspenders with styles.css's own media
+// query). Mirrors whichever apply action vacature.js's success branch
+// picked: a direct apply link, or (anonymous client, no logged-in
+// candidate) a scroll-to-panel action, never both at once.
+function initApplySticky(job, lang, salaryLabel) {
+  const bar = document.getElementById('applySticky');
+  const cta = document.getElementById('applyStickyCta');
+  const salaryEl = document.getElementById('applyStickySalary');
+  if (!bar || !cta || !salaryEl) return;
+  if (window.matchMedia('(min-width: 768px)').matches) return; // desktop: never shown
+
+  salaryEl.textContent = salaryLabel || (lang === 'nl' ? 'Salaris niet opgegeven' : 'Salary not specified');
+
+  const anonymousNoLogin = job.anonymous_client === true &&
+    !(typeof Auth !== 'undefined' && Auth.getUser && Auth.getUser() && Auth.getUser().role === 'candidate');
+  if (anonymousNoLogin) {
+    // Mirror the talent-pool opt-in panel instead of a direct apply link --
+    // scroll to the real panel rather than duplicating its form in the bar.
+    cta.removeAttribute('href');
+    cta.setAttribute('role', 'button');
+    cta.addEventListener('click', (e) => {
+      e.preventDefault();
+      document.getElementById('vacancyApplyPanel')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      document.getElementById('vacancyOptinEmail')?.focus();
+    });
+  } else {
+    cta.href = document.getElementById('applyBtn')?.href || `contact.html?job=${encodeURIComponent(job.id)}`;
+  }
+
+  // "The hero" for this page's purposes is the top eyebrow/breadcrumb --
+  // vacature.html has no .page-hero, this sits immediately above the H1.
+  const hero = document.querySelector('.job-detail .eyebrow');
+  const ctaBox = document.querySelector('.cta-box');
+  if (!hero || !ctaBox) return;
+
+  const heroObserver = new IntersectionObserver((entries) => {
+    bar.classList.toggle('apply-sticky--visible', !entries[0].isIntersecting);
+  }, { threshold: 0 });
+  heroObserver.observe(hero);
+
+  // Hide once the real in-flow CTA box is on screen, so two apply actions
+  // never show at once.
+  const ctaObserver = new IntersectionObserver((entries) => {
+    if (entries[0].isIntersecting) bar.classList.remove('apply-sticky--visible');
+  }, { threshold: 0.3 });
+  ctaObserver.observe(ctaBox);
+}
+
 // Guarded so scripts/test_jobposting_ld.mjs can `require()` this file for
 // the pure builder functions above without running the page-fetch IIFE
 // below (there's no `window`/DOM in that Node context).
@@ -307,6 +356,22 @@ if (typeof window !== 'undefined') {
     const salaryLabel = (job.salary_min != null && job.salary_max != null)
       ? `€${Number(job.salary_min).toLocaleString(lang === 'nl' ? 'nl-NL' : 'en-US')} – €${Number(job.salary_max).toLocaleString(lang === 'nl' ? 'nl-NL' : 'en-US')}`
       : '';
+    // Salary line under the H1 (design-spec-batch.md item 1a): a second,
+    // more prominent render of the same salaryLabel numbers, not a
+    // duplicate fetch. Uses the same €-formatting as salaryLabel above
+    // (no space after €, toLocaleString per language) rather than the
+    // spec's own example markup, which had a space -- matching the
+    // existing codebase pattern here, not the prompt's literal example.
+    const hasSalaryRange = job.salary_min != null && job.salary_max != null;
+    const salaryLineHtml = hasSalaryRange
+      ? `<span class="lang-nl">€${Number(job.salary_min).toLocaleString('nl-NL')} – €${Number(job.salary_max).toLocaleString('nl-NL')} <span class="job-salary-line__unit">bruto per jaar</span></span>` +
+        `<span class="lang-en">€${Number(job.salary_min).toLocaleString('en-US')} – €${Number(job.salary_max).toLocaleString('en-US')} <span class="job-salary-line__unit">gross per year</span></span>`
+      : `<span class="lang-nl">Salaris niet opgegeven</span><span class="lang-en">Salary not specified</span>`;
+    const jobSalaryLineEl = document.getElementById('jobSalaryLine');
+    if (jobSalaryLineEl) {
+      jobSalaryLineEl.innerHTML = salaryLineHtml;
+      jobSalaryLineEl.classList.toggle('job-salary-line--unset', !hasSalaryRange);
+    }
     const metaHtml = [];
     if (company !== 'confidential') metaHtml.push(`<div class="meta-item"><strong><span class="lang-en">Company</span><span class="lang-nl">Bedrijf</span></strong>${GSP.esc(company)}</div>`);
     if (locationLabel) metaHtml.push(`<div class="meta-item"><strong><span class="lang-en">Location</span><span class="lang-nl">Locatie</span></strong>${GSP.esc(locationLabel)}</div>`);
@@ -383,6 +448,10 @@ if (typeof window !== 'undefined') {
         });
       }
     }
+
+    // Sticky mobile apply bar (design-spec-batch.md item 3): mirrors
+    // whichever apply action the branching above chose.
+    initApplySticky(job, lang, salaryLabel);
   } catch(e) {
     document.getElementById('loadingSpinner').style.display = 'none';
     document.getElementById('jobNotFound').style.display = 'block';

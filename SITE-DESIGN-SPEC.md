@@ -182,6 +182,8 @@ Auth is JWT-based (email/password or Google sign-in). There is no `client_admin`
 
 The visual system described in §1.2–§1.3 (Newsreader/Plex fonts, flat 3px radius, gold reserved for the primary CTA) is implemented across the homepage, vacatures/vacature, kandidaten (signup split), the candidate portal, and, as a font/token pass on top of vendored Tabler, the admin panel. Not yet built (no invented ship dates): animated hero particles/counters, an interactive salary chart component (the salary table is still static HTML), a true auto-rotating testimonial carousel, expandable case-study modals, a multi-route contact form, and PWA/service-worker support (the last of those is also listed in §9, since it's part of the shared "not before 3 billable seats" list).
 
+Also built (September 2026 batch): a salary line under the H1 on `vacature.html` and a salary + "geplaatst"-freshness line on every job card (`vacatures.html`, homepage grid); a homepage hero search (keyword + discipline) that submits to `vacatures.html?q=&dept=`, plus a live, hide-until-loaded vacancy count; a sticky mobile apply bar on `vacature.html` that mirrors the page's direct-apply/talent-pool-opt-in branching; and a fee & guarantee block above `werkgevers.html`'s FAQ. City×discipline landing pages and a standalone salary guide page remain backlog (§3.3, no ship date).
+
 ### 3.3 Not-yet-built page sections (backlog, no ship date)
 
 These are drafted UI ideas for the public site, not built and not scheduled: a blog preview strip on the homepage, a partner/client logo trust bar, and an FAQ accordion before the closing CTA. None of them require anything beyond the current static-HTML stack; they're ordinary content backlog, not architecture work, so they stay here rather than in the appendix.
@@ -1383,6 +1385,8 @@ Twee dingen zijn sectie-eigen: `.a-num--tab` (`font-variant-numeric: tabular-num
 ## 8. Component Library
 
 Base components used across the four surfaces: Button (primary/ghost/outline, 3px radius), Input, Select, Card, Modal, Toast, Badge (status/semantic colors from §1.2), mono pill chip (role/level/location tags), Sidebar nav item, KPI stat tile, Table (sortable header, empty/error/loading row states), Avatar.
+
+Public-site-only additions (September 2026 batch, unprefixed classes, existing tokens only): `.job-salary-line` (salary under the vacature.html H1), `.card-data__freshness` (posting-age line on job cards), `.hero-search`/`.hero-vacancy-count` (homepage hero search + live count), `.apply-sticky` (mobile-only sticky apply bar), `.proof-strip` (+ `--compact`/`--on-light` modifiers, four fixed facts, used on werkwijze.html twice and werkgevers.html once).
 
 ### 8.x Kaartsysteem
 

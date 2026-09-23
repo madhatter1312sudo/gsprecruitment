@@ -127,6 +127,33 @@
     <h1 class="lang-nl">De specialist voor tech &amp; IT-werving in de Brainport-regio.</h1>
     <p class="lang-en">Hiring or looking for your next role? You work with a recruiter who actually understands embedded software, C++, cloud &amp; DevOps — and is straight with you. <strong>No cure, no pay. 30-day replacement guarantee.</strong></p>
     <p class="lang-nl">Aan het werven of zelf op zoek? Je werkt met een recruiter die embedded software, C++, cloud &amp; DevOps écht snapt — en eerlijk tegen je is. <strong>No cure, no pay. 30 dagen vervangingsgarantie.</strong></p>
+    <form class="hero-search" id="heroSearchForm" role="search" aria-label="Vacatures zoeken">
+      <label for="heroSearchInput" class="sr-only-visually-hidden">
+        <span class="lang-nl">Zoek op functie of discipline</span><span class="lang-en">Search by role or discipline</span>
+      </label>
+      <input
+        type="search"
+        id="heroSearchInput"
+        name="q"
+        class="hero-search__input"
+        placeholder="Zoek op functie of discipline…"
+        data-lang-en="Search by role or discipline…"
+        data-lang-nl="Zoek op functie of discipline…">
+      <select id="heroSearchDept" name="dept" class="hero-search__select" aria-label="Vakgebied">
+        <option value="" data-lang-en="All fields" data-lang-nl="Alle vakgebieden">Alle vakgebieden</option>
+        <option value="Embedded software" data-lang-en="Embedded software / C++" data-lang-nl="Embedded software / C++">Embedded software / C++</option>
+        <option value="Mechatronica" data-lang-en="Mechatronics / FPGA" data-lang-nl="Mechatronica / FPGA">Mechatronica / FPGA</option>
+        <option value="OT-security" data-lang-en="OT-Cybersecurity" data-lang-nl="OT-Cybersecurity">OT-Cybersecurity</option>
+        <option value="Test en verificatie" data-lang-en="Test and verification" data-lang-nl="Test en verificatie">Test en verificatie</option>
+      </select>
+      <button type="submit" class="btn btn-gold hero-search__submit">
+        <i class="fas fa-search" aria-hidden="true"></i> <span class="lang-nl">Zoeken</span><span class="lang-en">Search</span>
+      </button>
+    </form>
+    <div class="hero-vacancy-count" id="heroVacancyCount" style="display:none" aria-live="polite">
+      <span class="lang-nl">— vacatures in Brainport</span>
+      <span class="lang-en">— vacancies in Brainport</span>
+    </div>
     <div class="choice-grid">
       <a href="werkgevers.html" class="choice-card card-dark">
         <div class="eyebrow"><span class="lang-en">Employers</span><span class="lang-nl">Werkgevers</span></div>

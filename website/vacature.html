@@ -87,6 +87,7 @@
 <section class="job-detail" id="jobDetail" style="display:none">
   <div class="eyebrow" id="jobBreadcrumb"><a href="vacatures.html"><span class="lang-en">← Back to vacancies</span><span class="lang-nl">← Terug naar vacatures</span></a></div>
   <h1 id="jobTitle"></h1>
+  <div class="job-salary-line" id="jobSalaryLine"></div>
   <div class="meta-row" id="jobMeta"></div>
   <div id="jobBody"></div>
   <div class="cta-box">
@@ -125,6 +126,12 @@
 <script src="gsp-util.js"></script>
 <script src="vacature.js"></script>
 </main>
+<div class="apply-sticky" id="applySticky" aria-hidden="true">
+  <span class="apply-sticky__salary" id="applyStickySalary"></span>
+  <a href="#" class="btn btn-gold apply-sticky__cta" id="applyStickyCta">
+    <span class="lang-nl">Solliciteer</span><span class="lang-en">Apply</span>
+  </a>
+</div>
 <footer class="footer">
   <div class="container">
     <div class="footer-grid footer-grid-5">
