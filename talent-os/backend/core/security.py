@@ -64,15 +64,53 @@ def verify_webhook_signature(payload_body: bytes, signature_header: str, secret:
 
 # ── Password Hashing (direct bcrypt, no passlib) ───────────────────────
 
+# bcrypt only ever looks at the first 72 bytes of the input. Under the
+# pinned bcrypt 4 anything past that was silently truncated; bcrypt 5
+# raises a bare ValueError from hashpw()/checkpw() instead (issue #177,
+# PR #87). models/schemas.py already rejects a >72-byte password at the
+# API boundary with a 422, so in the normal request path neither function
+# below should ever see one -- this is the second gate for any caller
+# that builds a UserRegister/ChangePasswordRequest/etc. by hand (a script,
+# a future router) and skips pydantic validation.
+BCRYPT_MAX_PASSWORD_BYTES = 72
+
+
+class PasswordTooLongError(Exception):
+    """Raised by hash_password() when the UTF-8 encoding of the password
+    exceeds BCRYPT_MAX_PASSWORD_BYTES -- our own type, not bcrypt's
+    ValueError, so a caller can catch it specifically (routers/auth.py
+    turns it into a 422) without also swallowing an unrelated ValueError
+    bcrypt might raise for some other reason."""
+
+
 def hash_password(password: str) -> str:
-    """Hash a plaintext password using bcrypt."""
-    return _bcrypt.hashpw(password.encode("utf-8"), _bcrypt.gensalt()).decode("utf-8")
+    """Hash a plaintext password using bcrypt.
+
+    Raises PasswordTooLongError instead of letting bcrypt 5's ValueError
+    through when the password is more than 72 UTF-8 bytes.
+    """
+    encoded = password.encode("utf-8")
+    if len(encoded) > BCRYPT_MAX_PASSWORD_BYTES:
+        raise PasswordTooLongError(
+            f"password is {len(encoded)} UTF-8 bytes, bcrypt allows at most {BCRYPT_MAX_PASSWORD_BYTES}"
+        )
+    return _bcrypt.hashpw(encoded, _bcrypt.gensalt()).decode("utf-8")
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
-    """Verify a plaintext password against a bcrypt hash."""
+    """Verify a plaintext password against a bcrypt hash.
+
+    A plaintext password over 72 UTF-8 bytes can never be the one that was
+    hashed (hash_password() refuses to hash it), so this returns False
+    rather than raising -- login/change-password callers already treat a
+    False return as "wrong password" (4xx), and login's password field has
+    no schema-level length cap, so this is the only gate on that path.
+    """
+    encoded = plain_password.encode("utf-8")
+    if len(encoded) > BCRYPT_MAX_PASSWORD_BYTES:
+        return False
     return _bcrypt.checkpw(
-        plain_password.encode("utf-8"),
+        encoded,
         hashed_password.encode("utf-8"),
     )
 

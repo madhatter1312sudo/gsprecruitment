@@ -9,11 +9,33 @@ from urllib.parse import parse_qs
 
 # ── Auth / Users ─────────────────────────────────────────────────────────
 
+# bcrypt only hashes the first 72 bytes of a password; under bcrypt 4 a
+# longer one was silently truncated, and bcrypt 5 raises ValueError
+# instead (issue #177, PR #87). max_length=128 above is a character count
+# and does not stop a 128-character multi-byte string from being well
+# over 72 *bytes* -- this validator is the actual bcrypt-shaped limit,
+# shared by every field that becomes a stored password hash. core/security.py
+# hash_password()/verify_password() enforce the same limit server-side as
+# a second gate for any caller that builds these models by hand.
+def _validate_password_max_bytes(v: str) -> str:
+    if len(v.encode("utf-8")) > 72:
+        raise ValueError(
+            "Wachtwoord mag maximaal 72 bytes zijn (UTF-8-codering) / "
+            "Password may be at most 72 bytes (UTF-8 encoding)"
+        )
+    return v
+
+
 class UserRegister(BaseModel):
     email: EmailStr
     password: str = Field(..., min_length=8, max_length=128)
     full_name: str = Field(..., min_length=1, max_length=255)
     role: str = Field("candidate", pattern=r"^(candidate|client)$")
+
+    @field_validator("password")
+    @classmethod
+    def _password_max_bytes(cls, v):
+        return _validate_password_max_bytes(v)
 
 
 class UserLogin(BaseModel):
@@ -48,6 +70,11 @@ class ChangePasswordRequest(BaseModel):
     current_password: str
     new_password: str = Field(..., min_length=8, max_length=128)
 
+    @field_validator("new_password")
+    @classmethod
+    def _password_max_bytes(cls, v):
+        return _validate_password_max_bytes(v)
+
 
 class ForgotPasswordRequest(BaseModel):
     email: EmailStr
@@ -56,6 +83,11 @@ class ForgotPasswordRequest(BaseModel):
 class ResetPasswordRequest(BaseModel):
     token: str
     new_password: str = Field(..., min_length=8, max_length=128)
+
+    @field_validator("new_password")
+    @classmethod
+    def _password_max_bytes(cls, v):
+        return _validate_password_max_bytes(v)
 
 
 class VerifyEmailRequest(BaseModel):
@@ -72,6 +104,11 @@ class SetPasswordRequest(BaseModel):
     chosen password, and marks the e-mail verified in the same step."""
     token: str
     new_password: str = Field(..., min_length=8, max_length=128)
+
+    @field_validator("new_password")
+    @classmethod
+    def _password_max_bytes(cls, v):
+        return _validate_password_max_bytes(v)
 
 
 # ── WS-C.17 talentpool consent (migrations/030_talentpool_consent.py) ────
