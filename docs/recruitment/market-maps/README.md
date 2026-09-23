@@ -1,11 +1,11 @@
-# Market maps — methode
+# Market maps: methode
 
 Status: eerste versie, 2026-09-23. Bijlage bij GitHub issue #115.
 
 ## Doel
 
-Vier marktkaarten — embedded software, mechatronica en besturingssoftware,
-OT-cybersecurity, test en verificatie — zodat recruiters starten vanaf een
+Vier marktkaarten (embedded software, mechatronica en besturingssoftware,
+OT-cybersecurity, test en verificatie), zodat recruiters starten vanaf een
 gevulde, gesourcete lijst in plaats van een leeg vel. Elke kaart somt de
 bedrijven op die in en rond Brainport/Eindhoven (en waar relevant breder
 Nederland) in die discipline werven, plus een eerste long-list per top-
@@ -20,7 +20,7 @@ te vinden zijn. Een long-list bevat geen namen van personen.
    bestand; bij gebrek daaraan zijn per discipline de twee meest senior en
    meest gespecialiseerde rollen gekozen (architect/lead-niveau of een
    nichecombinatie), als redelijke eerste aanname voor "moeilijkst te
-   vullen". Dit is een keuze van de opsteller, geen gemeten rangorde — de
+   vullen". Dit is een keuze van de opsteller, geen gemeten rangorde. De
    chief kan dit bij een volgende iteratie herzien met echte prioriteiten.
 2. **Bedrijven.** Gevonden via publieke zoekopdrachten (bedrijfssites,
    Brainport Eindhoven-portaal, Brainport Industries-ledenlijst, DSPE,
@@ -32,7 +32,7 @@ te vinden zijn. Een long-list bevat geen namen van personen.
    discipline: bedrijven die voor die rol een plausibele bron of
    concurrent zijn, plus publieke community's (meetups, conferenties,
    open-sourceprojecten, universitaire opleidingen) waar kandidaten met dat
-   profiel te vinden zijn — dezelfde bronvermelding per regel.
+   profiel te vinden zijn, dezelfde bronvermelding per regel.
 4. **Bronvermelding.** Elk feit (wat een bedrijf bouwt, waar het zit, welke
    discipline) draagt de publieke bron-URL en de datum van raadpleging
    (2026-09-23 voor deze versie). Geen cijfer (headcount, omzet, aantal
