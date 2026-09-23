@@ -61,11 +61,11 @@
         method: 'PUT', body: JSON.stringify({ value }),
       });
       if (res?.ok) {
-        Auth.toast('Content updated', 'success');
+        Auth.toast('Content-item bijgewerkt', 'success');
         this.closeModal();
         await this.loadContent();
-      } else { Auth.toast('Update failed', 'error'); }
-    } catch { Auth.toast('Network error', 'error'); }
+      } else { Auth.toast('Bijwerken mislukt', 'error'); }
+    } catch { Auth.toast('Netwerkfout', 'error'); }
   },
   });
 

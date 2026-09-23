@@ -141,7 +141,7 @@
         const d = await res?.json();
         Auth.toast(d?.detail || 'Save failed', 'error');
       }
-    } catch { Auth.toast('Network error', 'error'); }
+    } catch { Auth.toast('Netwerkfout', 'error'); }
   },
 
   async publishBlogPost(id) {
@@ -149,13 +149,13 @@
     try {
       const res = await Auth.fetch(`/v1/admin/blog/${id}/publish`, { method: 'POST' });
       if (res?.ok) {
-        Auth.toast('Post published', 'success');
+        Auth.toast('Bericht gepubliceerd', 'success');
         await this.loadBlog();
       } else {
         const d = await res?.json();
         Auth.toast(d?.detail || 'Publish failed', 'error');
       }
-    } catch { Auth.toast('Network error', 'error'); }
+    } catch { Auth.toast('Netwerkfout', 'error'); }
   },
 
   async archiveBlogPost(id) {
@@ -163,13 +163,13 @@
     try {
       const res = await Auth.fetch(`/v1/admin/blog/${id}/archive`, { method: 'POST' });
       if (res?.ok) {
-        Auth.toast('Post archived', 'success');
+        Auth.toast('Bericht gearchiveerd', 'success');
         await this.loadBlog();
       } else {
         const d = await res?.json();
         Auth.toast(d?.detail || 'Archive failed', 'error');
       }
-    } catch { Auth.toast('Network error', 'error'); }
+    } catch { Auth.toast('Netwerkfout', 'error'); }
   },
   });
 

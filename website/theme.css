@@ -24,6 +24,7 @@
   --gold-700: #AD8800;
   --gold-glow: rgba(250, 200, 0, 0.28);   /* gelijk aan styles.css en SITE-DESIGN-SPEC.md §1 */
   --gold-gradient: linear-gradient(135deg, #FBD74A 0%, #FAC800 45%, #D4A800 100%);
+  --gold-ink: #8A6800; /* enige toegestane goud-tekstkleur op licht, 5,17:1 op wit — §7.1.1 punt 2 */
 
   /* ── Neutrals ───────────────────────────────────────────── */
   --white: #FFFFFF;
@@ -35,6 +36,7 @@
   --font-mono: 'IBM Plex Mono', ui-monospace, 'SF Mono', Menlo, monospace;
   --font-size-xs:  0.75rem;   /* 12 */
   --font-size-sm:  0.875rem;  /* 14 */
+  --font-size-base: 1rem;     /* 16 — §7.1.1 punt 2, gelijk aan styles.css */
   --font-size-md:  1rem;      /* 16 */
   --font-size-lg:  1.125rem;  /* 18 */
   --font-size-xl:  1.25rem;   /* 20 */
@@ -42,6 +44,7 @@
   --font-size-3xl: 2rem;      /* 32 — aligned with SITE-DESIGN-SPEC.md §1.3 / styles.css (was 1.875rem/30, a drift the kaartsysteem integration pass corrected) */
   --font-size-4xl: 2.5rem;    /* 40 — idem, was 2.25rem/36 */
   --font-size-5xl: 3.25rem;   /* 52 — idem, was 3rem/48 */
+  --font-size-6xl: 4rem;      /* 64 — §7.1.1 punt 2, dashboard hero stats */
 
   /* ── Spacing ────────────────────────────────────────────── */
   --space-xs: 4px;
@@ -51,6 +54,8 @@
   --space-xl: 32px;
   --space-2xl: 48px;
   --space-3xl: 64px;
+  --space-4xl: 96px;  /* §7.1.1 punt 2, gelijk aan styles.css */
+  --space-5xl: 128px; /* §7.1.1 punt 2, gelijk aan styles.css */
 
   /* ── Radii ──────────────────────────────────────────────── */
   /* Flat 3px system site-wide (see SITE-DESIGN-SPEC.md §1.2) — cards,

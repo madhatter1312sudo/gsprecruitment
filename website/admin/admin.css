@@ -208,8 +208,12 @@ h1, h2, h3, h4,
   font-weight: 500;
   letter-spacing: 0;
 }
-/* Eyebrow-achtige kleine kopjes staan in mono, net als op de publieke site. */
-.text-uppercase { font-family: var(--font-mono); }
+/* .text-uppercase betekent "hoofdletters", niet "mono" (§7.1.4). Tabler zet
+   text-transform:uppercase al via zijn eigen utility; deze regel is hier
+   zelfstandig herhaald zodat de klasse ook zonder die bundel compleet is.
+   Wat echt mono moet zijn (datawaarde/eyebrow), krijgt .a-eyebrow of
+   .a-num expliciet -- zie die klassen verderop in dit bestand. */
+.text-uppercase { text-transform: uppercase; }
 /* KPI-tegels: het getal in mono, zoals de salaris-/datachips elders. */
 .card .h1,
 .card .display-6,

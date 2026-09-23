@@ -153,6 +153,18 @@
     (items[0] || el).focus();
   }
 
+  /* §146: momentopname van elk formulierveld in een paneel, om op Escape te
+     kunnen zien of er onopgeslagen wijzigingen zijn. Volgorde-onafhankelijk
+     genoeg voor dit doel: dezelfde velden in dezelfde DOM-volgorde bij het
+     openen en bij de Escape-druk. */
+  function serializeFormValues(el) {
+    const fields = el.querySelectorAll('input, select, textarea');
+    return Array.prototype.map.call(fields, (f) => {
+      if (f.type === 'checkbox' || f.type === 'radio') return f.checked ? '1' : '0';
+      return f.value;
+    }).join('␟');
+  }
+
   /* Alleen de focustrap. Het teruggeven van de focus is bewust een aparte
      stap: bij het hervullen van hetzelfde paneel moet de trap er wel af,
      maar mag de focus niet naar de opener springen. */
@@ -215,11 +227,74 @@
     return !!p;
   }
 
+  // §146: een actiemenu is geen ui.modal()/ui.drawer() -- het heeft geen
+  // Bootstrap-instantie, geen focustrap, geen backdrop en zijn eigen
+  // klik-buiten-afhandeling ligt al in admin.js (closeMenus() op elke
+  // document-click). Hij hoort daarom NIET in openPanels: de klik-buiten-
+  // sluiter hierboven test daar of een klik binnen `.modal-content`/
+  // `.offcanvas-body` viel en sluit anders het hele paneel -- een
+  // actiemenu heeft geen van beide klassen, dus zou elke klik op een eigen
+  // knop (bijvoorbeeld "Deblokkeren") zichzelf als klik-buiten lezen en de
+  // knop wegvegen vóór zijn eigen click-handler kan lopen. Een apart
+  // registerMenu op een eigen lijstje, met een seq-nummer waarmee de
+  // Escape-listener hieronder kan bepalen of het menu of het paneel het
+  // laatst is geopend, houdt dat gescheiden terwijl Escape ze toch als één
+  // stapel behandelt.
+  const openMenus = [];
+  const registeredMenus = new WeakMap();
+  let overlaySeq = 0;
+  // Elke aanroep (ook een heropening van hetzelfde menu) telt als een
+  // nieuwe "laatst geopend"-tijd, maar hetzelfde el krijgt maar één
+  // stapel-item -- anders groeit openMenus door bij elk klikje.
+  function registerMenu(el, close) {
+    if (!el) return;
+    const existing = registeredMenus.get(el);
+    if (existing) { existing.seq = ++overlaySeq; return; }
+    const entry = { el, close, isOpen: () => el.style.display === 'block', seq: ++overlaySeq };
+    registeredMenus.set(el, entry);
+    openMenus.push(entry);
+  }
+
+  // Topmost over modal/drawer (openPanels) èn actiemenu (openMenus) samen,
+  // op volgorde van opening -- elke push hieronder (panel() en
+  // registerMenu()) zet een oplopend seq-nummer; wie het hoogste seq heeft
+  // en nog open is, is de bovenste laag.
+  function topOverlay() {
+    let best = null;
+    openPanels.forEach((p) => {
+      if (p.el.classList.contains('show') && (!best || p.seq > best.seq)) best = p;
+    });
+    openMenus.forEach((m) => {
+      if (m.isOpen() && (!best || m.seq > best.seq)) best = m;
+    });
+    return best;
+  }
+
   // Eén document-listener voor het hele paneel, niet één per geopend
-  // paneel: Escape moet ook werken als de focus intussen buiten het
-  // paneel is beland (na een toast, na een geherrenderde knop).
+  // paneel of menu: Escape moet ook werken als de focus intussen buiten
+  // het paneel is beland (na een toast, na een geherrenderde knop), en
+  // sluit steeds alleen de bovenste laag -- modal, drawer of actiemenu,
+  // welke van de drie het laatst geopend is. Bij onopgeslagen wijzigingen
+  // in het bovenste paneel (§146 punt 4) vraagt Escape eerst bevestiging
+  // in plaats van meteen te sluiten; Escape op die bevestiging zelf sluit
+  // alleen de bevestiging (annuleren), niet het formulier eronder -- de
+  // bevestiging is zelf ook gewoon de nieuwe bovenste laag van dezelfde
+  // stapel.
   document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') closeTop();
+    if (e.key !== 'Escape') return;
+    const p = topOverlay();
+    if (!p) return;
+    if (typeof p.isDirty === 'function' && p.isDirty()) {
+      confirmDialog('Wijzigingen worden niet opgeslagen.', {
+        title: 'Wijzigingen weggooien?',
+        confirmLabel: 'Weggooien',
+        cancelLabel: 'Annuleren',
+        danger: true,
+        onConfirm: () => p.close(),
+      });
+      return;
+    }
+    p.close();
   });
 
   // Klikken naast het paneel sluit het, zoals de oude overlay deed.
@@ -260,7 +335,6 @@
     if (!el) {
       el = document.createElement('div');
       el.id = id;
-      document.body.appendChild(el);
     } else if (typeof el._gspDetach === 'function') {
       // Hetzelfde paneel opnieuw vullen (spinner -> inhoud) mag geen tweede
       // set listeners opleveren; dat is het dubbele-bind patroon uit commit
@@ -268,6 +342,13 @@
       // verplaatsen en zonder het paneel te verbergen.
       el._gspDetach();
     }
+    // Elk .modal/.offcanvas deelt hetzelfde Bootstrap-z-index, dus bepaalt
+    // de DOM-volgorde wie er bovenop ligt. appendChild op een bestaand kind
+    // verplaatst het (geen dubbele node): zo komt het paneel dat nu opent
+    // altijd laatst te staan, ook als het (zoals de "Wijzigingen
+    // weggooien?"-bevestiging, §146 punt 4) boven een al open ander paneel
+    // hoort te verschijnen in plaats van erachter weg te vallen.
+    document.body.appendChild(el);
     // Bij hervullen blijft het element dat het paneel oorspronkelijk opende
     // de plek waar de focus straks naartoe terugkeert.
     const returnTo = (el._gspOpener && document.contains(el._gspOpener) && el.classList.contains('show'))
@@ -433,6 +514,22 @@
                </div>
              </div>`);
 
+    // §146 punt 4: momentopname van de formuliervelden zoals ze net
+    // gemount zijn, om op Escape te kunnen zien of er onopgeslagen
+    // wijzigingen zijn. Bewust opt-in via opts.trackDirty: nogal wat
+    // panelen in dit paneel tonen eerst een spinner en vullen de echte
+    // velden pas na een async fetch in een submount die niet via deze
+    // panel()-functie loopt (bijvoorbeeld het Opdrachtgevers-infotabblad,
+    // js/sections/clients.js loadClientInfoTab()/renderClientInfoTab()).
+    // Een momentopname vóór die vulling ziet dan geen velden, de vulling
+    // erna ziet ze wél met hun serverwaarde, en dat leest als "gewijzigd"
+    // zonder dat de gebruiker iets heeft aangeraakt. trackDirty is daarom
+    // alleen aan bij een aanroeper die zijn formulier synchroon, compleet
+    // met de echte waarden, in één keer opbouwt (zoals
+    // Admin.openEditUserModal()) -- niet de standaard voor elk paneel.
+    const dirtyTrackingEnabled = opts.trackDirty === true;
+    const initialSnapshot = dirtyTrackingEnabled ? serializeFormValues(el) : null;
+
     let instance = null;
     let closed = false;
     let releaseTrap = null;
@@ -493,6 +590,13 @@
     const handle = {
       el,
       close,
+      // §146 punt 4: true zodra een formulierveld in dit paneel afwijkt van
+      // de momentopname bij het openen. De Escape-listener hierboven roept
+      // dit aan om te beslissen of Escape meteen sluit of eerst
+      // "Wijzigingen weggooien?" vraagt.
+      isDirty() {
+        return dirtyTrackingEnabled && serializeFormValues(el) !== initialSnapshot;
+      },
       button(role) {
         return byRole[role] ? document.getElementById(byRole[role]) : null;
       },
@@ -551,11 +655,22 @@
         if (typeof opts.onSelect === 'function') opts.onSelect(key);
       },
     };
+    // §146: seq plaatst dit paneel op dezelfde tijdlijn als een eventueel
+    // open actiemenu (registerMenu hierboven), zodat topOverlay() kan
+    // bepalen wie van de twee het laatst is geopend.
+    handle.seq = ++overlaySeq;
     openPanels.push(handle);
     el._gspDetach = detach;
 
     if (Ctor) {
-      instance = Ctor.getOrCreateInstance(el, { backdrop: true, keyboard: true, focus: false });
+      // keyboard: false -- Bootstraps eigen Escape-afhandeling kent alleen
+      // dit ene paneel en niet de stapelvolgorde uit topOverlay() hierboven
+      // (§146: bij modal+actiemenu tegelijk mag Escape alleen de bovenste
+      // laag sluiten). Zonder deze regel sluit Bootstrap intern zijn eigen
+      // paneel op Escape, los van en gelijktijdig met de document-listener
+      // die hierboven beslist welke laag aan de beurt is. De enige bron
+      // van Escape-gedrag is daarom die ene document-listener.
+      instance = Ctor.getOrCreateInstance(el, { backdrop: true, keyboard: false, focus: false });
       instance.show();
     } else {
       fallbackShow(el, isDrawer ? 'offcanvas-backdrop' : 'modal-backdrop');
@@ -766,5 +881,5 @@
     });
   }
 
-  root.ui = { modal, drawer, tabs, table, confirm: confirmDialog, closeTop };
+  root.ui = { modal, drawer, tabs, table, confirm: confirmDialog, closeTop, registerMenu };
 })(typeof window !== 'undefined' ? window : globalThis);

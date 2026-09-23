@@ -526,8 +526,8 @@ def main():
             ".toast-container .toast span:last-child", "els => els.map(e => e.textContent)"
         )
         last_200 = toast_texts_200[len(toast_texts_404):]
-        if not any("deleted" in t.lower() for t in last_200):
-            failures.append(f"jobs delete (200): expected a 'Job deleted' success toast — got {last_200!r}")
+        if not any("verwijderd" in t.lower() for t in last_200):
+            failures.append(f"jobs delete (200): expected a 'Vacature verwijderd' success toast — got {last_200!r}")
 
         # ---- Bewaartermijnen: pagineert op 50 (§7.3.1), niet op 20 ----
         errors_before = len(console_errors)

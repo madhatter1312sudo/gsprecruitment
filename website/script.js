@@ -657,6 +657,12 @@ const GSP_WHATSAPP = '31617913965';
     });
   }
 
+  // location_type label map (#152 defect E), same keys/values as
+  // website/vacature.js -- kept as a separate copy since this file loads
+  // as a plain script, not a module. Card meta line, job cards grid and
+  // the job modal below all read from this one map.
+  const JOB_LOCATION_TYPE_LABEL = { 'on-site': { nl: 'Op locatie', en: 'On-site' }, hybride: { nl: 'Hybride', en: 'Hybrid' } };
+
   // ── Datakaart template (archetype 3 — SITE-DESIGN-SPEC.md §8.x.1/§8.x.8
   //    step 2). One card, two contexts: #jobsGrid (vacatures.html, full
   //    board) and #homeVacanciesGrid (index.html, top-3 teaser). Each
@@ -667,17 +673,26 @@ const GSP_WHATSAPP = '31617913965';
   //    through GSP.esc/encodeURIComponent (xss_static_check.py). ───────
   function jobCardHTML(job, ctaClass, ctaLabel) {
     const discipline = GSP.esc(job.department || '');
-    const metaRest = [job.seniority, job.location_type || job.location]
-      .filter(Boolean)
-      .map(GSP.esc);
+    // location_type label map (#152 defect E): lookup is case-insensitive
+    // against the stored values ("On-site", "Hybride"); an unmapped value
+    // (or the plain job.location fallback) keeps its raw text in both
+    // languages, same as before.
+    const rawLocation = job.location_type || job.location;
+    const locKey = rawLocation ? String(rawLocation).toLowerCase() : '';
+    const locLabel = JOB_LOCATION_TYPE_LABEL[locKey] || (rawLocation ? { nl: rawLocation, en: rawLocation } : null);
+    const metaRest = [];
+    if (job.seniority) metaRest.push(GSP.esc(job.seniority));
+    if (locLabel) metaRest.push(`<span class="lang-nl">${GSP.esc(locLabel.nl)}</span><span class="lang-en">${GSP.esc(locLabel.en)}</span>`);
     // Anonymous/tbd-salary vacancies (WS4) have no salary_min/max — show
     // "salary on request" instead of a blank gap next to the CTA.
     const hasSalary = job.salary_min != null && job.salary_max != null;
-    // Shortened fallback copy ("Op aanvraag" / "On request") keeps this
-    // span narrow enough to sit next to the CTA on one row at 390px
-    // without wrapping (design-reviewer, jobCardHTML footer, WS1 review).
+    // Currency per STYLE.md (#152 defect F): no currency code, no "k" --
+    // €1.234 in Dutch (period thousands separator), €1,234 in English.
+    // Both forms sit in the same DOM node behind .lang-nl/.lang-en so the
+    // client-side language toggle (script.js initLang()) shows the right
+    // one without a re-render, same as the CTA label two lines down.
     const salary = hasSalary
-      ? `€${Math.round(job.salary_min / 1000)}k – €${Math.round(job.salary_max / 1000)}k`
+      ? `<span class="lang-nl">€${Number(job.salary_min).toLocaleString('nl-NL')} – €${Number(job.salary_max).toLocaleString('nl-NL')}</span><span class="lang-en">€${Number(job.salary_min).toLocaleString('en-US')} – €${Number(job.salary_max).toLocaleString('en-US')}</span>`
       : `<span class="lang-nl">Op aanvraag</span><span class="lang-en">On request</span>`;
     const href = `vacature.html?id=${encodeURIComponent(job.slug || job.id)}`;
     return `
@@ -859,12 +874,17 @@ const GSP_WHATSAPP = '31617913965';
       body.innerHTML = `
         <h2 style="margin-bottom:8px">${GSP.esc(job.title)}</h2>
         <div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap">
-          ${[job.department, job.seniority, job.location_type].map(t => `<span class="job-tag gold" style="font-size:0.8rem;padding:6px 14px">${GSP.esc(t)}</span>`).join('')}
+          ${[job.department, job.seniority].filter(Boolean).map(t => `<span class="job-tag gold" style="font-size:0.8rem;padding:6px 14px">${GSP.esc(t)}</span>`).join('')}
         </div>
         <div style="background:var(--bg-alt);padding:16px;border-radius:var(--radius-sm);margin-bottom:16px">
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
-            <div><strong>Salary:</strong> ${(job.salary_min != null && job.salary_max != null) ? `€${(job.salary_min/1000).toFixed(0)}k – €${(job.salary_max/1000).toFixed(0)}k` : `<span class="lang-nl">Salaris op aanvraag</span><span class="lang-en">Salary on request</span>`}</div>
-            <div><strong>Location:</strong> ${GSP.esc(job.location_type || 'Netherlands')}</div>
+            <div><strong>Salary:</strong> ${(job.salary_min != null && job.salary_max != null) ? `<span class="lang-nl">€${Number(job.salary_min).toLocaleString('nl-NL')} – €${Number(job.salary_max).toLocaleString('nl-NL')}</span><span class="lang-en">€${Number(job.salary_min).toLocaleString('en-US')} – €${Number(job.salary_max).toLocaleString('en-US')}</span>` : `<span class="lang-nl">Salaris op aanvraag</span><span class="lang-en">Salary on request</span>`}</div>
+            <div><strong>Location:</strong> ${(() => {
+              const rawLocation = job.location_type || 'Netherlands';
+              const locKey = String(rawLocation).toLowerCase();
+              const locLabel = JOB_LOCATION_TYPE_LABEL[locKey] || { nl: rawLocation, en: rawLocation };
+              return `<span class="lang-nl">${GSP.esc(locLabel.nl)}</span><span class="lang-en">${GSP.esc(locLabel.en)}</span>`;
+            })()}</div>
           </div>
         </div>
         <h3 style="font-size:1rem;margin-bottom:8px">Description</h3>
