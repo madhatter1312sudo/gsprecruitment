@@ -536,11 +536,39 @@ async def _approve_one(item_id: int, actor_id: int, note: Optional[str]) -> dict
         )
 
     if not await _is_still_eligible(item):
-        await execute(
+        # Race guard (WS-E.10 round 6 probe): a concurrent approve of this
+        # same item may have already claimed it (status -> 'purging', and
+        # possibly already 'purged') by the time this eligibility check
+        # runs -- in particular, its erase_person() can be the very reason
+        # _is_still_eligible() above just returned False (the subject's
+        # e-mail is now gone). Without this guard the write below is
+        # unconditional and stomps the winner's 'purging'/'purged' back to
+        # 'no_longer_eligible', so it is scoped the same way the claim
+        # UPDATE further down already is: only a row still in
+        # ('pending', 'rejected') is ours to move, and the write is a
+        # no-op otherwise.
+        reclassified = await fetch_one(
             "UPDATE retention_review_items SET status = 'no_longer_eligible', last_seen_at = NOW(), email = NULL "
-            "WHERE id = $1",
+            "WHERE id = $1 AND status IN ('pending', 'rejected') RETURNING id",
             item_id,
         )
+        if not reclassified:
+            # Lost the race: some other call already claimed (or finished
+            # claiming) this item. Re-read its current status so the 409
+            # reflects reality -- "someone else is handling/handled this"
+            # (not_actionable), not "this item is no longer eligible",
+            # which would be false once it has actually been purged.
+            current = await fetch_one("SELECT status FROM retention_review_items WHERE id = $1", item_id)
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "retention_review_item_not_actionable",
+                    "message": (
+                        f"Item {item_id} has status '{current['status'] if current else 'unknown'}', "
+                        "cannot approve."
+                    ),
+                },
+            )
         raise HTTPException(
             status_code=409,
             detail={
