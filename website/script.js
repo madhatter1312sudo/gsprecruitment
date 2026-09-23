@@ -1023,11 +1023,11 @@ const GSP_WHATSAPP = '31617913965';
         if (enEl) enEl.textContent = `${count} ${count === 1 ? 'vacancy' : 'vacancies'} in Brainport`;
         el.style.display = 'block';
       })
-      .catch(() => { /* stay hidden — never show a stale or fake number */ });
+      .catch(() => { /* stay hidden, never show a stale or fake number */ });
   }
 
   // ── Hero search (design-spec-batch.md item 2) ──────────────────────────
-  // Not a live filter — a link-builder to vacatures.html, which reads the
+  // Not a live filter, a link-builder to vacatures.html, which reads the
   // q/dept params on load (initJobBoard() above).
   function initHeroSearch() {
     const form = $('heroSearchForm');

@@ -281,16 +281,36 @@ function initApplySticky(job, lang, salaryLabel) {
   if (!hero || !ctaBox) return;
 
   const heroObserver = new IntersectionObserver((entries) => {
-    bar.classList.toggle('apply-sticky--visible', !entries[0].isIntersecting);
+    setApplyStickyVisible(bar, !entries[0].isIntersecting);
   }, { threshold: 0 });
   heroObserver.observe(hero);
 
   // Hide once the real in-flow CTA box is on screen, so two apply actions
   // never show at once.
   const ctaObserver = new IntersectionObserver((entries) => {
-    if (entries[0].isIntersecting) bar.classList.remove('apply-sticky--visible');
+    if (entries[0].isIntersecting) setApplyStickyVisible(bar, false);
   }, { threshold: 0.3 });
   ctaObserver.observe(ctaBox);
+}
+
+// Lifts the fixed-bottom contact rail (WhatsApp/e-mail pill, styles.css's
+// .contact-rail) clear of the sticky apply bar instead of hiding either
+// one -- both stay reachable. Reuses the site's existing
+// --fixed-stack-offset pattern (set elsewhere by the cookie-consent
+// banner in script.js) via a second, additive variable so the two never
+// fight over the same custom property. Height is measured after the bar
+// is actually laid out (display:flex, not display:none) since offsetHeight
+// is 0 while hidden.
+function setApplyStickyVisible(bar, visible) {
+  bar.classList.toggle('apply-sticky--visible', visible);
+  document.body.classList.toggle('has-apply-sticky', visible);
+  if (visible) {
+    requestAnimationFrame(() => {
+      document.documentElement.style.setProperty('--apply-sticky-offset', (bar.offsetHeight + 12) + 'px');
+    });
+  } else {
+    document.documentElement.style.setProperty('--apply-sticky-offset', '0px');
+  }
 }
 
 // Guarded so scripts/test_jobposting_ld.mjs can `require()` this file for

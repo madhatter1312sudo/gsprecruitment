@@ -383,12 +383,12 @@ body:not(.portal) .card > .mark:first-child, .service-card > .mark:first-child,
    (set on .card-data__meta-top above). */
 .card-data__discipline { color: var(--gold-ink); }
 /* Freshness line ("Geplaatst N dagen geleden"), directly under the meta-top
-   row, above the title — batch 1 item 1b (design-spec-batch.md §1b). */
+   row, above the title, batch 1 item 1b (design-spec-batch.md §1b). */
 .card-data__freshness {
   font-family: var(--font-mono); font-size: var(--font-size-xs); color: var(--gray-400);
   margin: 2px 0 var(--space-sm);
 }
-/* Salary line under the H1 on vacature.html — batch 1 item 1a. Moved out
+/* Salary line under the H1 on vacature.html, batch 1 item 1a. Moved out
    of vacature.html's inline <style> since it's a reusable component. */
 .job-salary-line {
   font-family: var(--font-mono); font-size: var(--font-size-lg); font-weight: 500;
@@ -635,6 +635,21 @@ body:not(.portal) .card > .mark:first-child, .service-card > .mark:first-child,
   }
   .contact-rail__item--mail { display: none; }
   .contact-rail__item + .contact-rail__item { border-top: none; border-left: 1px solid var(--navy-600); }
+}
+/* vacature.html's sticky mobile apply bar (batch 1 item 3) sits on top of
+   the contact rail's usual bottom-left/bottom-right corner otherwise --
+   body.has-apply-sticky (toggled by vacature.js's setApplyStickyVisible())
+   lifts the rail by the bar's own measured height + 12px via
+   --apply-sticky-offset, additive with --fixed-stack-offset rather than
+   replacing it, so a cookie banner shown at the same time still stacks
+   correctly. Right-aligned at every width the bar can appear at (<768px,
+   matches .apply-sticky's own breakpoint) so the rail never sits under the
+   bar's left edge either. */
+@media (max-width: 767px) {
+  body.has-apply-sticky .contact-rail {
+    left: auto; right: 16px;
+    bottom: calc(16px + var(--fixed-stack-offset, 0px) + var(--apply-sticky-offset, 0px));
+  }
 }
 
 /* ── Reset ──────────────────────────────────────────────── */
