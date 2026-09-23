@@ -228,13 +228,26 @@ async def update_talentpool_consent(
     Issue #110: consent=True is also how a candidate who previously
     withdrew (consent_withdrawn_at set) re-grants -- that is their own,
     explicit new opt-in, so it must actually take effect. In one
-    transaction this clears consent_withdrawn_at, stamps the usual four
-    consent columns, deletes any suppression_list row this e-mail picked
-    up from the withdrawal (reason='unsubscribe_all' -- the only
-    withdrawal touchpoint that adds one; talentpool-consent(false) never
-    does), and writes the audit_log row. Job alerts are untouched
-    either way (job_alert_optin_at / job_alert_unsubscribed_at) -- a
-    talentpool re-grant is not a job-alerts re-opt-in."""
+    transaction, with the candidates row locked (FOR UPDATE, security-
+    audit follow-up #3 -- the unlocked read this used to do left a
+    concurrent write racing between the read and the write) this clears
+    consent_withdrawn_at, stamps the usual four consent columns, deletes
+    any suppression_list row this e-mail picked up from an unsubscribe-
+    all (reason='unsubscribe_all'), and writes an audit_log row.
+
+    Security-audit follow-up #1: unsubscribe-all is NOT the only
+    suppression_list writer -- routers/gdpr.py's add_suppression() (a
+    STOP reply or hard bounce an admin recorded) also stamps
+    consent_withdrawn_at and adds a row, with a free-text `reason` this
+    endpoint must never mistake for a spent unsubscribe. Any
+    suppression_list row for this e-mail whose reason is NOT
+    'unsubscribe_all' blocks this re-grant outright (409
+    candidate_suppressed) -- ticking the box again must not silently
+    undo an admin-recorded STOP.
+
+    Job alerts are untouched either way (job_alert_optin_at /
+    job_alert_unsubscribed_at) -- a talentpool re-grant is not a
+    job-alerts re-opt-in."""
     if current_user["role"] != "candidate":
         raise HTTPException(status_code=403, detail="Only candidates can set talentpool consent")
 
@@ -245,19 +258,53 @@ async def update_talentpool_consent(
     if not candidate_id:
         raise HTTPException(status_code=404, detail="No candidate record found for this account")
 
-    candidate = await fetch_one(
-        "SELECT lawful_basis, email, consent_withdrawn_at FROM candidates WHERE id = $1", candidate_id,
-    )
-    current_lawful_basis = candidate["lawful_basis"] if candidate else None
-    was_withdrawn = bool(candidate["consent_withdrawn_at"]) if candidate else False
-
     if data.consent:
         now = datetime.now(timezone.utc)
         until = now + timedelta(days=365)  # 12 months, renewable on re-tick
-        set_lawful_basis = privacy.should_set_talentpool_lawful_basis(current_lawful_basis)
         pool = await get_pool()
         async with pool.acquire() as conn:
             async with conn.transaction():
+                # #3: locked read -- the candidates row is held for the
+                # rest of this transaction, so a concurrent withdrawal or
+                # suppression-list write can't slip in between this read
+                # and the UPDATE below.
+                locked = await conn.fetchrow(
+                    "SELECT lawful_basis, email, consent_withdrawn_at FROM candidates "
+                    "WHERE id = $1 FOR UPDATE",
+                    candidate_id,
+                )
+                locked = dict(locked) if locked else {}
+                current_lawful_basis = locked.get("lawful_basis")
+                was_withdrawn = bool(locked.get("consent_withdrawn_at"))
+                set_lawful_basis = privacy.should_set_talentpool_lawful_basis(current_lawful_basis)
+
+                email_hash = privacy.email_hash(locked["email"]) if locked.get("email") else None
+                suppression_reason = None
+                if email_hash:
+                    supp_row = await conn.fetchrow(
+                        "SELECT reason FROM suppression_list WHERE email_hash = $1", email_hash,
+                    )
+                    suppression_reason = supp_row["reason"] if supp_row else None
+
+                # #1: a suppression row for a reason OTHER than
+                # unsubscribe_all (a STOP reply, a hard bounce, an
+                # erasure) is not this endpoint's to clear -- reject the
+                # re-grant instead of silently accepting it and leaving
+                # the STOP row (and every draft-refusal it backs) behind
+                # a candidates row that now looks like a clean opt-in.
+                if suppression_reason is not None and suppression_reason != "unsubscribe_all":
+                    raise HTTPException(
+                        status_code=409,
+                        detail={
+                            "code": "candidate_suppressed",
+                            "message": (
+                                "Dit e-mailadres staat geblokkeerd na een eerder stopverzoek -- "
+                                "toestemming kan hier niet opnieuw worden gegeven. Neem contact met "
+                                "ons op als u dit onterecht vindt."
+                            ),
+                        },
+                    )
+
                 row = await conn.fetchrow(
                     """UPDATE candidates
                        SET consent_talentpool_at = $1, consent_talentpool_until = $2,
@@ -271,18 +318,25 @@ async def update_talentpool_consent(
                     now, until, data.scope, set_lawful_basis, candidate_id,
                 )
                 row = dict(row)
-                if was_withdrawn and candidate.get("email"):
-                    await conn.execute(
+                suppression_rows_deleted = 0
+                if was_withdrawn and email_hash:
+                    del_status = await conn.execute(
                         "DELETE FROM suppression_list WHERE email_hash = $1 AND reason = 'unsubscribe_all'",
-                        privacy.email_hash(candidate["email"]),
+                        email_hash,
                     )
+                    suppression_rows_deleted = privacy.parse_row_count(del_status)
                 await conn.execute(
                     "INSERT INTO audit_log (action, actor_id, target_type, target_id, changes) VALUES ($1, $2, $3, $4, $5::jsonb)",
                     "talentpool_consent_update", current_user["id"], "candidate", candidate_id,
-                    json.dumps({"consent": True, "scope": data.scope, "source": "portal", "regrant": was_withdrawn}),
+                    json.dumps({
+                        "consent": True, "scope": data.scope, "source": "portal", "regrant": was_withdrawn,
+                        "suppression_rows_deleted": suppression_rows_deleted,
+                    }),
                 )
         return row
     else:
+        candidate = await fetch_one("SELECT lawful_basis FROM candidates WHERE id = $1", candidate_id)
+        current_lawful_basis = candidate["lawful_basis"] if candidate else None
         withdraw = current_lawful_basis == "opt_in_talentpool"
         row = await fetch_one(
             """UPDATE candidates

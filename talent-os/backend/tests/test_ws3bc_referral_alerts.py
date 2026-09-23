@@ -1118,6 +1118,11 @@ def test_confirmed_referral_becomes_a_talentpool_consent():
     from routers import public as public_router
 
     src = inspect.getsource(public_router.talentpool_confirm)
-    assert 'is_referral and existing["lawful_basis"] == "toestemming_referral"' in src
+    # Security-audit follow-up #3 (issue #110): the lawful_basis read this
+    # compares against now comes from the FOR UPDATE-locked read inside
+    # the transaction (`locked_lawful_basis`), not the unlocked `existing`
+    # dict from before the transaction opened -- same semantics, renamed
+    # variable.
+    assert 'is_referral and locked_lawful_basis == "toestemming_referral"' in src
     # De rij waar hij daarna wél in valt.
     assert "lawful_basis = 'opt_in_talentpool'" in retention.TALENTPOOL_EXPIRED_SQL

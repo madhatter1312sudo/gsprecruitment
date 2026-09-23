@@ -12,7 +12,7 @@ import os
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, field_validator
 
 from core.database import fetch_one, fetch_all, execute, fetch_val, get_pool
 from core.deps import get_current_user, require_role
@@ -968,6 +968,25 @@ async def admin_erase_person(
 class SuppressionCreate(BaseModel):
     email: EmailStr
     reason: str = "STOP"
+
+    # Security-audit follow-up #1 (issue #110): 'unsubscribe_all' is the
+    # exact reason value routers/public.py's unsubscribe(scope='all')
+    # writes for a suppression it created itself -- the talentpool
+    # re-grant paths (portal, public confirm) treat that one value as
+    # "this was a plain unsubscribe, safe to clear on a fresh opt-in" and
+    # anything else as "an admin/human handled this deliberately, leave
+    # it". An admin creating a row through this endpoint with that exact
+    # reason would make a real STOP/bounce look like a plain unsubscribe
+    # to that logic and let a later re-grant silently clear it.
+    @field_validator("reason")
+    @classmethod
+    def _reason_not_unsubscribe_all(cls, v):
+        if v == "unsubscribe_all":
+            raise ValueError(
+                "reason 'unsubscribe_all' is reserved for POST /api/public/unsubscribe "
+                "(scope=all) -- use a different reason for an admin-recorded suppression."
+            )
+        return v
 
 
 @suppression_router.post("", status_code=201)

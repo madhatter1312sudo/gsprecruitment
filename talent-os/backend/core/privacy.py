@@ -26,6 +26,23 @@ def email_domain(email: Optional[str]) -> Optional[str]:
     return e.split("@", 1)[1] if "@" in e else None
 
 
+def parse_row_count(status: Optional[str]) -> int:
+    """Parses an asyncpg `conn.execute()`/`execute()` status string
+    ("DELETE 3", "UPDATE 1", ...) into the row count. Falls back to 0 for
+    anything unexpected -- this only ever feeds an audit_log 'how many
+    rows did this affect' field (issue #110 security-audit follow-up),
+    never a control-flow decision, so it must never raise."""
+    if not status:
+        return 0
+    parts = status.split()
+    if len(parts) < 2:
+        return 0
+    try:
+        return int(parts[-1])
+    except ValueError:
+        return 0
+
+
 _EMAIL_LIKE_RE = re.compile(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}")
 
 
