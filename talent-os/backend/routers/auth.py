@@ -37,6 +37,15 @@ logger = logging.getLogger("talent_os.auth")
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
+# Fixed dummy hash (issue #178) -- generated once at import time from a
+# constant string, never from real input. login() below verifies against
+# this when the e-mail is unknown, so both branches do exactly one bcrypt
+# check; without it, an unknown address short-circuited before ever
+# calling bcrypt and answered in ~0ms against ~270ms for a known one,
+# letting an attacker enumerate accounts by timing. This hash never
+# authenticates anything real.
+_DUMMY_PASSWORD_HASH = hash_password("gsp-dummy-password-for-login-timing-safety")
+
 
 # ── Helper ──────────────────────────────────────────────────────────────
 
@@ -235,6 +244,15 @@ async def login(request: Request, data: UserLogin):
             detail="Invalid email or password",
             headers={"Retry-After": str(retry_after)},
         )
+
+    if not user:
+        # Unknown e-mail: verify against the fixed dummy hash so this
+        # branch still does one bcrypt check, matching the known-user
+        # branch's timing (issue #178). The result is discarded -- there
+        # is nothing real to accept or reject here. `or` short-circuits
+        # the check below, so this is the only bcrypt call this branch
+        # makes.
+        verify_password(data.password, _DUMMY_PASSWORD_HASH)
 
     if not user or not verify_password(data.password, user["password_hash"]):
         if user:
