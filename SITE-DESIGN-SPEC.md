@@ -133,6 +133,8 @@ gsprecruitment.nl/
 │   ├── /over-ons.html                        About ("wij", no founder bio)
 │   ├── /contact.html
 │   ├── /vacature.html, /vacatures             Job listing + detail (pulled from /api/public/jobs)
+│   ├── /vacatures/<city>/<discipline>.html    16 static city×discipline landing pages (Eindhoven/Veldhoven/Helmond/Best × embedded-software/mechatronica-besturingssoftware/ot-cybersecurity/test-en-verificatie), built by scripts/build_landing_pages.py from website/data/landing-copy.json
+│   ├── /salarisgids.html                     Static salary guide: range/spread + source + check date per discipline×seniority, sourced from docs/strategy/salary-guide-sources-2026-09.md
 │   ├── /blog/*                               Blog articles (pulled from /api/v1/public/blog)
 │   ├── /privacy.html, /privacy-kandidaten.html, /cookies.html, /terms.html
 │   └── /404.html
@@ -182,7 +184,7 @@ Auth is JWT-based (email/password or Google sign-in). There is no `client_admin`
 
 The visual system described in §1.2–§1.3 (Newsreader/Plex fonts, flat 3px radius, gold reserved for the primary CTA) is implemented across the homepage, vacatures/vacature, kandidaten (signup split), the candidate portal, and, as a font/token pass on top of vendored Tabler, the admin panel. Not yet built (no invented ship dates): animated hero particles/counters, an interactive salary chart component (the salary table is still static HTML), a true auto-rotating testimonial carousel, expandable case-study modals, a multi-route contact form, and PWA/service-worker support (the last of those is also listed in §9, since it's part of the shared "not before 3 billable seats" list).
 
-Also built (September 2026 batch): a salary line under the H1 on `vacature.html` and a salary + "geplaatst"-freshness line on every job card (`vacatures.html`, homepage grid); a homepage hero search (keyword + discipline) that submits to `vacatures.html?q=&dept=`, plus a live, hide-until-loaded vacancy count; a sticky mobile apply bar on `vacature.html` that mirrors the page's direct-apply/talent-pool-opt-in branching; and a fee & guarantee block above `werkgevers.html`'s FAQ. City×discipline landing pages and a standalone salary guide page remain backlog (§3.3, no ship date).
+Also built (September 2026 batch): a salary line under the H1 on `vacature.html` and a salary + "geplaatst"-freshness line on every job card (`vacatures.html`, homepage grid); a homepage hero search (keyword + discipline) that submits to `vacatures.html?q=&dept=`, plus a live, hide-until-loaded vacancy count; a sticky mobile apply bar on `vacature.html` that mirrors the page's direct-apply/talent-pool-opt-in branching; a fee & guarantee block above `werkgevers.html`'s FAQ; 16 static city×discipline landing pages under `vacatures/<city>/<discipline>.html` (client-side filtered on the public jobs list, shared `.card-data`/proof-strip/crosslink footer, linked from `vacatures.html`'s job cards being reused, generated idempotently by `scripts/build_landing_pages.py`); and a standalone `salarisgids.html` with a per-discipline range/spread/source/check-date table, linked from every main page's footer and from `vacature.html`'s salary line.
 
 ### 3.3 Not-yet-built page sections (backlog, no ship date)
 

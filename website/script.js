@@ -799,6 +799,12 @@ const GSP_WHATSAPP = '31617913965';
     const levelFilter = $('levelFilter');
     const searchInput = $('searchInput');
     if (!grid) return;
+    // City x discipline landing pages (design-spec-batch.md item 6) use
+    // the same #jobsGrid id but drive it through initLandingJobs() below,
+    // filtered server-side-by-us on city+department, not this page's
+    // #deptFilter/#searchInput (which don't exist there) -- bail out so
+    // the two initializers never race on the same grid.
+    if (grid.dataset.landingCity) return;
 
     // Pre-fill from the homepage hero search's query params (design-spec-
     // batch.md item 2) so the existing filter logic below (already reading
@@ -1024,6 +1030,71 @@ const GSP_WHATSAPP = '31617913965';
         el.style.display = 'block';
       })
       .catch(() => { /* stay hidden — never show a stale or fake number */ });
+  }
+
+  // ── City x discipline landing pages (design-spec-batch.md item 6) ─────
+  // #jobsGrid with data-landing-city/data-landing-dept, filtered client-
+  // side on the public jobs list -- no city/department filter on the API
+  // itself, so this is the same pattern initJobBoard() already uses for
+  // dept/level/search, just fixed to one city+dept pair per page. A real,
+  // expected empty state (not an error) gets its own two-way-out card:
+  // "all vacancies" or the talent pool, never a dead end.
+  function landingEmptyState(city, dept) {
+    return `
+      <div class="card-data card-data--empty" style="grid-column:1/-1;max-width:480px;margin-inline:auto">
+        <span class="mark" aria-hidden="true">00</span>
+        <h3 style="margin:var(--space-md) 0 var(--space-sm)">
+          <span class="lang-nl">Nu geen openstaande ${GSP.esc(dept.toLowerCase())}-rollen in ${GSP.esc(city)}</span>
+          <span class="lang-en">No open ${GSP.esc(dept.toLowerCase())} roles in ${GSP.esc(city)} right now</span>
+        </h3>
+        <p style="color:var(--gray-500);margin-bottom:var(--space-lg)">
+          <span class="lang-nl">Bekijk alle vacatures in de regio, of meld je aan voor de talentpool — dan nemen wij contact op zodra er iets past.</span>
+          <span class="lang-en">Browse all vacancies in the region, or join the talent pool — we'll reach out as soon as something fits.</span>
+        </p>
+        <div class="hero-actions" style="justify-content:center">
+          <a href="../../vacatures.html" class="btn btn-gold btn-sm"><span class="lang-nl">Alle vacatures →</span><span class="lang-en">All vacancies →</span></a>
+          <a href="../../kandidaten.html#talentpoolOptin" class="btn btn-outline btn-sm"><span class="lang-nl">Talentpool →</span><span class="lang-en">Talent pool →</span></a>
+        </div>
+      </div>`;
+  }
+
+  function initLandingJobs() {
+    const grid = $('jobsGrid');
+    if (!grid || !grid.dataset.landingCity) return; // not a landing page
+    const city = grid.dataset.landingCity;
+    const dept = grid.dataset.landingDept;
+
+    function fetchAndRender() {
+      grid.innerHTML = `${jobCardSkeleton()}${jobCardSkeleton()}${jobCardSkeleton()}`;
+      fetchTimeout(`${API}/api/public/jobs`)
+        .then(res => res.ok ? res.json() : Promise.reject())
+        .then(data => {
+          const lang = localStorage.getItem('gsp_lang') || 'nl';
+          const filtered = (Array.isArray(data) ? data : []).filter(j =>
+            j.department === dept && (j.city || '').toLowerCase() === city.toLowerCase()
+          );
+          if (filtered.length === 0) {
+            grid.innerHTML = landingEmptyState(city, dept);
+            return;
+          }
+          // jobCardHTML() builds its CTA href as "vacature.html?id=..."
+          // (correct for vacatures.html/index.html, one level deep from
+          // the site root); this landing page lives two levels deep
+          // (website/vacatures/<city>/<discipline>.html), so re-root that
+          // one relative link without touching the shared function that
+          // vacatures.html and index.html both still rely on unprefixed.
+          grid.innerHTML = filtered
+            .map(job => jobCardHTML(job, 'job-view-link', { nl: 'Bekijk details →', en: 'View details →' }, lang))
+            .join('')
+            .replace(/href="vacature\.html\?/g, 'href="../../vacature.html?');
+        })
+        .catch(() => {
+          grid.innerHTML = jobCardError('job-view-link');
+          grid.querySelector('[data-action="retry-jobs"]')?.addEventListener('click', fetchAndRender);
+        });
+    }
+
+    fetchAndRender();
   }
 
   // ── Hero search (design-spec-batch.md item 2) ──────────────────────────
@@ -1703,6 +1774,7 @@ const GSP_WHATSAPP = '31617913965';
     initCookieConsent();
     initJobBoard();
     initHomeVacancies();
+    initLandingJobs();
     initHeroSearch();
     initHeroVacancyCount();
     initSalaryCalc();
