@@ -9,6 +9,7 @@ from core.security import hash_password, verify_password, create_access_token, d
 from core.deps import get_current_user, get_optional_user, require_role, _token_predates_password_change
 from core.mfa import mfa_required_for_user, issue_mfa_pending_token
 from core import privacy
+from core import retention
 from core.config import settings
 from models.schemas import (
     UserRegister, UserLogin, TokenResponse, UserResponse, UserUpdate,
@@ -254,7 +255,11 @@ async def login(request: Request, data: UserLogin):
     # would still drift toward the purge window with nobody able to tell.
     # last_login_at is a plain UPDATE on an existing row (no jsonb, no FK
     # it could violate) -- there is no expected failure mode left to catch.
-    await execute("UPDATE users SET last_login_at = NOW() WHERE id = $1", user["id"])
+    #
+    # The statement itself lives in core/retention.py (LOGIN_STAMP_SQL):
+    # it also resets users.dormant_warning_attempts, and all four login
+    # paths in this codebase have to agree on that. See that constant.
+    await execute(retention.LOGIN_STAMP_SQL, user["id"])
 
     return _build_token_response(user)
 
@@ -819,7 +824,7 @@ async def google_callback(
 
     # WS-E.8 follow-up -- see login()'s comment above (blocking point 7:
     # no more try/except here either).
-    await execute("UPDATE users SET last_login_at = NOW() WHERE id = $1", user["id"])
+    await execute(retention.LOGIN_STAMP_SQL, user["id"])
 
     resolved_role = user["role"]
     resolved_next = (

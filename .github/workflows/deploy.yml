@@ -106,12 +106,37 @@ jobs:
             fi
           "
 
-      - name: SSH and restart Docker containers
+      # Deze stap BOUWT alleen, hij vervangt de draaiende backend niet.
+      # Tot deze reparatieronde stond hier `docker compose up -d --build
+      # backend`, dus draaide de nieuwe code al vóór de migratiestap
+      # hieronder. Elke deploy met een schemawijziging had daarmee een
+      # venster van tientallen seconden waarin de nieuwe code kolommen
+      # aansprak die nog niet bestonden -- concreet: core/retention.py's
+      # LOGIN_STAMP_SQL schrijft `dormant_warning_attempts` en
+      # `dormant_warning_attempt_at` (migratie 042) in alle vier de
+      # inlogpaden zonder try/except, dus élke login, ook die van de
+      # beheerder, gaf in dat venster een 500 met een
+      # UndefinedColumnError. Dat is structureel en niet eigen aan dat
+      # ene spoor: bouwen, dan migreren, dan omschakelen is de enige
+      # volgorde waarin de draaiende code nooit voorloopt op het schema.
+      #
+      # `build` tagt dezelfde image (`<project>-backend:latest`) die `up
+      # --build` tagde, dus de migratiestap hieronder en de
+      # up-stap daarna draaien allebei op precies deze build, en de
+      # rollback-tak onderaan (die `:previous` terugtagt) blijft kloppen.
+      #
+      # `up -d --wait postgres` staat hier omdat de migratiestap
+      # hieronder `--no-deps` gebruikt en dus zelf geen postgres start:
+      # die afhankelijkheid werd tot nu toe stilzwijgend vervuld door de
+      # `up -d --build backend` die hier stond (depends_on:
+      # service_healthy). Idempotent op een draaiende VPS, en `--wait`
+      # houdt dezelfde healthy-garantie aan als dat depends_on.
+      - name: Build the new backend image and make sure postgres is up
         run: |
           ssh "${VPS_USER}@${VPS_HOST}" "
             cd ${VPS_PATH} && \
-            docker compose up -d --build backend && \
-            sleep 5
+            docker compose build backend && \
+            docker compose up -d --wait postgres
           "
 
       - name: Run database migrations
@@ -125,14 +150,34 @@ jobs:
         # `run --rm --no-deps` starts a fresh one-off container from the
         # same image, independent of the restarted service's state, so a
         # bad image fails loudly right here instead. --no-deps: postgres
-        # is already up from the previous step. Each migration tracks
+        # is already up from the previous step (die stap start hem nu
+        # expliciet met `up -d --wait postgres`, want hij start de
+        # backend-service niet meer). Each migration tracks
         # itself in schema_migrations and is a no-op if already applied
         # (migrations/_runner.py), so running the full set on every deploy
         # is safe.
+        #
+        # Wat deze stap DOET is onveranderd. Alleen zijn plaats in de
+        # volgorde is veranderd: hij draait nu vóór de nieuwe code live
+        # gaat, niet erna. Dezelfde image, dezelfde env_files en dus
+        # dezelfde database-URL als de service -- `run` neemt de
+        # servicedefinitie over -- dus er is geen pad waarlangs deze
+        # container een andere database zou raken dan de backend zelf.
         run: |
           ssh "${VPS_USER}@${VPS_HOST}" "
             cd ${VPS_PATH} && \
             docker compose run --rm -T --no-deps backend sh -c 'for f in migrations/0*.py; do echo Running \$f; python \$f || exit 1; done'
+          "
+
+      # Pas hier gaat de nieuwe code live, op een schema dat er al bij
+      # past. Mislukt de migratiestap hierboven, dan draait de OUDE
+      # backend nog en is er niets omgeschakeld.
+      - name: Start the new backend image
+        run: |
+          ssh "${VPS_USER}@${VPS_HOST}" "
+            cd ${VPS_PATH} && \
+            docker compose up -d backend && \
+            sleep 5
           "
 
       - name: Health check

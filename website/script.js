@@ -78,12 +78,18 @@ const GSP_WHATSAPP = '31617913965';
       }
 
       document.querySelectorAll('[data-lang-' + lang + ']').forEach(el => {
-        const placeholder = el.getAttribute('data-lang-' + lang);
-        if (placeholder && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT')) {
-          el.setAttribute('placeholder', placeholder);
+        const text = el.getAttribute('data-lang-' + lang);
+        if (!text) return;
+        if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT') {
+          el.setAttribute('placeholder', text);
           // Placeholder text is the only visible label on these compact forms;
           // mirror it into aria-label so it survives once the field has a value.
-          el.setAttribute('aria-label', placeholder);
+          el.setAttribute('aria-label', text);
+        } else if (el.hasAttribute('aria-label')) {
+          // Non-form elements whose accessible name is an aria-label already
+          // (e.g. the contact rail's icon-only links, §8.x.4) get it
+          // refreshed to the active language the same way.
+          el.setAttribute('aria-label', text);
         }
       });
 
@@ -651,6 +657,100 @@ const GSP_WHATSAPP = '31617913965';
     });
   }
 
+  // ── Datakaart template (archetype 3 — SITE-DESIGN-SPEC.md §8.x.1/§8.x.8
+  //    step 2). One card, two contexts: #jobsGrid (vacatures.html, full
+  //    board) and #homeVacanciesGrid (index.html, top-3 teaser). Each
+  //    caller keeps its own page-local nested-CTA class (.job-view-link /
+  //    .vac-link, classes.md) rather than a shared .go-link — both already
+  //    carry the 44px touch target, --gold-ink color and identical
+  //    hover/focus-visible (website/styles.css). Every API field is routed
+  //    through GSP.esc/encodeURIComponent (xss_static_check.py). ───────
+  function jobCardHTML(job, ctaClass, ctaLabel) {
+    const discipline = GSP.esc(job.department || '');
+    const metaRest = [job.seniority, job.location_type || job.location]
+      .filter(Boolean)
+      .map(GSP.esc);
+    // Anonymous/tbd-salary vacancies (WS4) have no salary_min/max — show
+    // "salary on request" instead of a blank gap next to the CTA.
+    const hasSalary = job.salary_min != null && job.salary_max != null;
+    // Shortened fallback copy ("Op aanvraag" / "On request") keeps this
+    // span narrow enough to sit next to the CTA on one row at 390px
+    // without wrapping (design-reviewer, jobCardHTML footer, WS1 review).
+    const salary = hasSalary
+      ? `€${Math.round(job.salary_min / 1000)}k – €${Math.round(job.salary_max / 1000)}k`
+      : `<span class="lang-nl">Op aanvraag</span><span class="lang-en">On request</span>`;
+    const href = `vacature.html?id=${encodeURIComponent(job.slug || job.id)}`;
+    return `
+      <div class="card-data" data-id="${GSP.esc(job.id)}" data-slug="${GSP.esc(job.slug || job.id)}" data-href="${href}">
+        <div class="card-data__meta-top">
+          <span class="card-data__discipline">${discipline}</span>${metaRest.length ? ' · ' + metaRest.join(' · ') : ''}
+        </div>
+        <h3>${GSP.esc(job.title)}</h3>
+        <p class="card-clamp-3">${GSP.esc(job.description || '')}</p>
+        <div class="card-data__meta" style="display:flex;align-items:center;justify-content:space-between;gap:var(--space-md)">
+          <span style="white-space:nowrap">${salary}</span>
+          <a href="${href}" class="${ctaClass}"><span class="lang-nl">${GSP.esc(ctaLabel.nl)}</span><span class="lang-en">${GSP.esc(ctaLabel.en)}</span></a>
+        </div>
+      </div>`;
+  }
+
+  // Empty state (§8.x.5): a real, current state — not a hypothetical
+  // placeholder — shown both when #jobsGrid has zero live vacancies and
+  // when #homeVacanciesGrid's fetch resolves to an empty list.
+  function jobCardEmpty(ctaClass) {
+    return `
+      <div class="card-data card-data--empty" style="grid-column:1/-1;max-width:420px;margin-inline:auto">
+        <span class="mark" aria-hidden="true">00</span>
+        <p style="font-family:var(--font-mono);font-size:var(--font-size-xs);text-transform:uppercase;letter-spacing:0.13em;color:var(--gold-ink);margin:var(--space-md) 0 var(--space-sm)">
+          <span class="lang-nl">Vacatures</span><span class="lang-en">Vacancies</span>
+        </p>
+        <h3 style="margin-bottom:var(--space-sm)">
+          <span class="lang-nl">Er staan nu geen vacatures open; nieuwe rollen zijn in voorbereiding</span><span class="lang-en">New roles are being opened right now</span>
+        </h3>
+        <p style="color:var(--gray-500);margin-bottom:var(--space-lg)">
+          <span class="lang-nl">Meld je aan voor de talentpool, dan nemen wij contact op zodra een passende rol binnenkomt.</span><span class="lang-en">Join the talent pool and we will reach out as soon as a suitable role comes in.</span>
+        </p>
+        <a href="kandidaten.html#talentpoolOptin" class="${ctaClass}">
+          <span class="lang-nl">Meld je aan voor de talentpool →</span><span class="lang-en">Join the talent pool →</span>
+        </a>
+      </div>`;
+  }
+
+  // Loading state (§8.x.6): flat --gray-50 blocks, no shimmer/pulse. The
+  // meta bar's frame (border, spacing) stays in place; only text becomes a
+  // placeholder block.
+  function jobCardSkeleton() {
+    return `
+      <div class="card-data card-data--loading" aria-hidden="true">
+        <div class="card-data__meta-top">
+          <span class="card-data__skeleton" style="display:inline-block;width:110px"></span>
+        </div>
+        <span class="card-data__skeleton" style="display:block;width:75%;height:1.4em;margin-bottom:var(--space-sm)"></span>
+        <span class="card-data__skeleton" style="display:block;width:100%;margin-bottom:4px"></span>
+        <span class="card-data__skeleton" style="display:block;width:92%;margin-bottom:4px"></span>
+        <span class="card-data__skeleton" style="display:block;width:55%;margin-bottom:var(--space-md)"></span>
+        <div style="display:flex;justify-content:space-between;margin-top:auto;padding-top:var(--space-md);border-top:1px solid var(--gray-100)">
+          <span class="card-data__skeleton" style="display:inline-block;width:64px"></span>
+          <span class="card-data__skeleton" style="display:inline-block;width:96px"></span>
+        </div>
+      </div>`;
+  }
+
+  // Error state (§8.x.1 archetype 3): left border-only accent in --error,
+  // never as text color. The retry re-runs the fetch — not a full page
+  // reload — so a keyboard/screen-reader user doesn't lose their place.
+  function jobCardError(ctaClass) {
+    return `
+      <div class="card-data card-data--error" style="grid-column:1/-1;max-width:420px;margin-inline:auto">
+        <p style="font-weight:600;margin-bottom:var(--space-md)">
+          <span class="lang-nl">Kon vacatures niet laden</span><span class="lang-en">Could not load vacancies</span>
+        </p>
+        <button type="button" class="${ctaClass}" data-action="retry-jobs" style="background:none;border:none;padding:0;cursor:pointer;font-family:inherit">
+          <span class="lang-nl">Opnieuw proberen →</span><span class="lang-en">Try again →</span>
+        </button>
+      </div>`;
+  }
+
   // ── Job Board ──────────────────────────────────────────
   function initJobBoard() {
     const grid = $('jobsGrid');
@@ -664,19 +764,16 @@ const GSP_WHATSAPP = '31617913965';
     let searchTimeout = null;
 
     function showLoading() {
-      const lang = localStorage.getItem('gsp_lang') || 'nl';
-      const text = lang === 'nl' ? 'Vacatures laden...' : 'Loading vacancies...';
-      grid.innerHTML = `<div style="grid-column:1/-1;text-align:center;padding:60px 20px"><div class="spinner" style="margin:0 auto 16px"></div><p style="color:var(--text-muted)">${text}</p></div>`;
+      grid.innerHTML = `
+        <p style="grid-column:1/-1;font-family:var(--font-mono);font-size:var(--font-size-xs);color:var(--gray-500);margin-bottom:var(--space-md)">
+          <span class="lang-nl">Vacatures laden…</span><span class="lang-en">Loading vacancies…</span>
+        </p>
+        ${jobCardSkeleton()}${jobCardSkeleton()}${jobCardSkeleton()}`;
     }
 
-    function showError(msg) {
-      const lang = localStorage.getItem('gsp_lang') || 'nl';
-      const text = msg || (lang === 'nl' ? 'Kon vacatures niet laden. Probeer het later opnieuw.' : 'Could not load vacancies. Please try again later.');
-      const retryLabel = lang === 'nl' ? 'Opnieuw proberen' : 'Retry';
-      grid.innerHTML = `<div style="grid-column:1/-1;text-align:center;padding:60px 20px"><i class="fas fa-exclamation-triangle" style="font-size:2rem;color:var(--gold);margin-bottom:12px"></i><p>${text}</p><button class="btn btn-ghost btn-sm" data-action="reload-page" style="margin-top:16px"><i class="fas fa-redo"></i> ${retryLabel}</button></div>`;
-      // WS-A.9b: wired here instead of an inline onclick="location.reload()"
-      // attribute (CSP).
-      grid.querySelector('[data-action="reload-page"]')?.addEventListener('click', () => location.reload());
+    function showError() {
+      grid.innerHTML = jobCardError('job-view-link');
+      grid.querySelector('[data-action="retry-jobs"]')?.addEventListener('click', fetchJobs);
     }
 
     async function fetchJobs() {
@@ -719,42 +816,29 @@ const GSP_WHATSAPP = '31617913965';
       }
 
       if (filtered.length === 0) {
-        const lang = localStorage.getItem('gsp_lang') || 'nl';
-        const noneAtAll = allJobs.length === 0;
-        let emptyMsg;
-        if (noneAtAll) {
-          emptyMsg = lang === 'nl'
-            ? '<p style="font-size:1.15rem;font-weight:600;color:var(--text)">Op dit moment werven we nieuwe rollen</p><p style="margin-top:10px;color:var(--text-secondary)">Stuur je CV in, dan matchen we je zodra de juiste positie binnenkomt.</p><a href="contact.html" class="btn btn-primary" style="margin-top:20px"><i class="fas fa-paper-plane"></i> Stuur je CV in</a>'
-            : '<p style="font-size:1.15rem;font-weight:600;color:var(--text)">We\'re currently sourcing new roles</p><p style="margin-top:10px;color:var(--text-secondary)">Send us your CV and we\'ll match you the moment the right position lands.</p><a href="contact.html" class="btn btn-primary" style="margin-top:20px"><i class="fas fa-paper-plane"></i> Submit your CV</a>';
+        if (allJobs.length === 0) {
+          // No live vacancies at all — the real, current empty state.
+          grid.innerHTML = jobCardEmpty('job-view-link');
         } else {
-          emptyMsg = lang === 'nl'
-            ? '<p style="font-size:1.1rem;font-weight:600;color:var(--text)">Geen vacatures voor deze filters</p><p style="margin-top:8px;color:var(--text-muted)">Pas de filters aan om meer rollen te zien.</p>'
-            : '<p style="font-size:1.1rem;font-weight:600;color:var(--text)">No roles match these filters</p><p style="margin-top:8px;color:var(--text-muted)">Adjust the filters to see more positions.</p>';
+          // Some vacancies exist but these filters exclude all of them —
+          // a distinct situation from "we have no roles" and not the
+          // talentpool-CTA empty state.
+          grid.innerHTML = `
+            <div style="grid-column:1/-1;text-align:center;padding:var(--space-2xl) var(--space-lg)">
+              <p style="font-weight:600">
+                <span class="lang-nl">Geen vacatures voor deze filters</span><span class="lang-en">No roles match these filters</span>
+              </p>
+              <p style="margin-top:var(--space-sm);color:var(--gray-500)">
+                <span class="lang-nl">Pas de filters aan om meer rollen te zien.</span><span class="lang-en">Adjust the filters to see more positions.</span>
+              </p>
+            </div>`;
         }
-        grid.innerHTML = `<div style="grid-column:1/-1;text-align:center;padding:60px 20px">${emptyMsg}</div>`;
         return;
       }
 
-      grid.innerHTML = filtered.map(job => `
-        <div class="job-card" data-id="${GSP.esc(job.id)}" data-slug="${GSP.esc(job.slug || job.id)}">
-          <h3>${GSP.esc(job.title)}</h3>
-          <div class="job-tags">
-            <span class="job-tag gold">${GSP.esc(job.department)}</span>
-            <span class="job-tag">${GSP.esc(job.seniority)}</span>
-            <span class="job-tag">${GSP.esc(job.location_type || 'On-site')}</span>
-          </div>
-          <p>${GSP.esc(job.description || '')}</p>
-          <div class="job-meta">
-            <span><i class="fas fa-euro-sign"></i> ${(job.salary_min != null && job.salary_max != null) ? `€${(job.salary_min / 1000).toFixed(0)}k – €${(job.salary_max / 1000).toFixed(0)}k` : `<span class="lang-nl">Salaris op aanvraag</span><span class="lang-en">Salary on request</span>`}</span>
-            <span><i class="fas fa-map-marker-alt"></i> ${GSP.esc(job.location_type || 'Netherlands')}</span>
-          </div>
-          <div class="job-links">
-            <a href="vacature.html?id=${encodeURIComponent(job.slug || job.id)}" class="job-view-link"><span class="lang-en">View details →</span><span class="lang-nl">Bekijk details →</span></a>
-          </div>
-        </div>
-      `).join('');
+      grid.innerHTML = filtered.map(job => jobCardHTML(job, 'job-view-link', { nl: 'Bekijk details →', en: 'View details →' })).join('');
 
-      grid.querySelectorAll('.job-card').forEach(card => {
+      grid.querySelectorAll('.card-data').forEach(card => {
         card.addEventListener('click', () => showJobDetail(parseInt(card.dataset.id)));
         // Stop the nested link's click from also bubbling to the card
         // handler above (which would open the detail modal at the same
@@ -824,6 +908,12 @@ const GSP_WHATSAPP = '31617913965';
   }
 
   // ── Homepage Vacancy Module ─────────────────────────────
+  // §8.x.1 archetype 3 / §8.x.5: on an empty list the section now shows
+  // the same compact empty-state datacard as #jobsGrid (talentpool CTA)
+  // instead of hiding — a homepage never silently drops a conversion
+  // chance. A fetch error keeps the existing behavior (hide the section):
+  // this band is supplementary, vacatures.html is the primary listing and
+  // is where the error state must be visible instead.
   function initHomeVacancies() {
     const section = $('homeVacancies');
     const grid = $('homeVacanciesGrid');
@@ -836,22 +926,22 @@ const GSP_WHATSAPP = '31617913965';
       })
       .then(data => {
         if (!Array.isArray(data) || data.length === 0) {
-          section.style.display = 'none';
+          grid.innerHTML = jobCardEmpty('vac-link');
+          section.style.display = '';
           return;
         }
         const jobs = data.slice(0, 3);
-        grid.innerHTML = jobs.map(job => `
-          <div class="vac-card">
-            <div class="vac-tags">
-              <span class="vac-chip">${GSP.esc(job.location_type || job.location || 'Netherlands')}</span>
-              ${job.seniority ? `<span class="vac-chip">${GSP.esc(job.seniority)}</span>` : ''}
-            </div>
-            <h3>${GSP.esc(job.title)}</h3>
-            <p class="vac-desc">${GSP.esc(job.department || '')}</p>
-            ${(job.salary_min && job.salary_max) ? `<div class="vac-salary">€${Number(job.salary_min).toLocaleString('nl-NL')} – €${Number(job.salary_max).toLocaleString('nl-NL')}</div>` : ''}
-            <a href="vacature.html?id=${encodeURIComponent(job.slug || job.id)}" class="vac-link"><span class="lang-en">View vacancy →</span><span class="lang-nl">Bekijk vacature →</span></a>
-          </div>
-        `).join('');
+        grid.innerHTML = jobs.map(job => jobCardHTML(job, 'vac-link', { nl: 'Bekijk vacature →', en: 'View vacancy →' })).join('');
+        grid.querySelectorAll('.card-data').forEach(card => {
+          card.addEventListener('click', () => {
+            const href = card.dataset.href;
+            if (href) window.location.href = href;
+          });
+          // Same stopPropagation pattern as the #jobsGrid card (see above)
+          // so the nested link's own navigation isn't doubled up by the
+          // card-level handler.
+          card.querySelector('.vac-link')?.addEventListener('click', (e) => e.stopPropagation());
+        });
         section.style.display = '';
       })
       .catch(() => {
@@ -1328,98 +1418,11 @@ const GSP_WHATSAPP = '31617913965';
       });
   }
 
-  // ── Testimonials Carousel ──────────────────────────────
-  function initTestimonials() {
-    const container = $('testimonials');
-    if (!container) return;
-
-    const cards = qsa('.testimonial-card', container);
-    if (cards.length < 2) return;
-
-    let currentIndex = 0;
-    let autoRotate = true;
-    let intervalId = null;
-
-    // Create carousel wrapper
-    const wrapper = document.createElement('div');
-    wrapper.className = 'testimonials-carousel';
-    wrapper.style.cssText = 'position:relative;overflow:hidden;width:100%;max-width:900px;margin:0 auto;min-height:200px';
-
-    // Move cards into carousel track
-    const track = document.createElement('div');
-    track.className = 'testimonials-track';
-    track.style.cssText = 'display:flex;transition:transform 0.5s ease-in-out';
-
-    cards.forEach(card => {
-      const slide = document.createElement('div');
-      slide.className = 'testimonial-slide';
-      slide.style.cssText = 'min-width:100%;box-sizing:border-box;padding:0 16px';
-      slide.appendChild(card.cloneNode(true));
-      track.appendChild(slide);
-      card.remove();
-    });
-
-    wrapper.appendChild(track);
-    container.appendChild(wrapper);
-
-    // Add navigation dots
-    const dotsContainer = document.createElement('div');
-    dotsContainer.className = 'testimonials-dots';
-    dotsContainer.style.cssText = 'display:flex;justify-content:center;gap:10px;margin-top:24px';
-
-    const dots = [];
-    for (let i = 0; i < cards.length; i++) {
-      const dot = document.createElement('button');
-      dot.className = 'testimonial-dot';
-      dot.setAttribute('aria-label', `Testimonial ${i + 1}`);
-      dot.style.cssText = 'width:10px;height:10px;border-radius:50%;border:none;background:var(--border);cursor:pointer;transition:var(--transition)';
-      if (i === 0) dot.style.background = 'var(--gold)';
-      dot.addEventListener('click', () => goToSlide(i));
-      dotsContainer.appendChild(dot);
-      dots.push(dot);
-    }
-    container.appendChild(dotsContainer);
-
-    function goToSlide(index) {
-      currentIndex = index;
-      track.style.transform = `translateX(-${currentIndex * 100}%)`;
-      dots.forEach((d, i) => {
-        d.style.background = i === currentIndex ? 'var(--gold)' : 'var(--border)';
-      });
-    }
-
-    function nextSlide() {
-      if (!autoRotate) return;
-      goToSlide((currentIndex + 1) % cards.length);
-    }
-
-    const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-
-    function startAutoRotate() {
-      stopAutoRotate();
-      if (prefersReducedMotion) return;
-      intervalId = setInterval(nextSlide, 5000);
-    }
-
-    function stopAutoRotate() {
-      if (intervalId) {
-        clearInterval(intervalId);
-        intervalId = null;
-      }
-    }
-
-    // Pause on hover, and on keyboard focus so keyboard users get time to read
-    wrapper.addEventListener('mouseenter', () => { autoRotate = false; });
-    wrapper.addEventListener('mouseleave', () => { autoRotate = true; });
-    wrapper.addEventListener('focusin', () => { autoRotate = false; });
-    wrapper.addEventListener('focusout', () => { autoRotate = true; });
-    dotsContainer.addEventListener('mouseenter', () => { autoRotate = false; });
-    dotsContainer.addEventListener('mouseleave', () => { autoRotate = true; });
-    dotsContainer.addEventListener('focusin', () => { autoRotate = false; });
-    dotsContainer.addEventListener('focusout', () => { autoRotate = true; });
-
-    startAutoRotate();
-  }
+  // Testimonials carousel removed (§8.x.7): initTestimonials() never found
+  // a #testimonials element (0 usage in HTML/JS, confirmed by the CSS
+  // census run in the styles.css step of this migration) and its CSS was
+  // already removed there — dead code, not called from DOMContentLoaded
+  // below.
 
   // ── Cookie Consent Banner ──────────────────────────────
   function initCookieConsent() {
@@ -1431,12 +1434,16 @@ const GSP_WHATSAPP = '31617913965';
 
     const banner = document.createElement('div');
     banner.id = 'cookieConsentBanner';
-    // Compact single-row corner card (not a full-width bar) so it never
-    // sits over a page's primary content at first paint — e.g. the
-    // vacatures filter bar or the contact form heading, both of which sit
-    // close to the fold on a 1440x900 first view. Kept to one line (text
-    // ellipsizes, full copy in the title attribute) so its footprint stays
-    // small enough not to reach up into that content.
+    // Compact corner card (not a full-width bar) so it never sits over a
+    // page's primary content at first paint, for example the vacatures
+    // filter bar or the contact form heading, which both sit close to the
+    // fold on a 1440x900 first view. The text itself is one ellipsized
+    // line (full copy in the title attribute), but the card is not one
+    // row: at 390px the flex row wraps into three (text, privacy link,
+    // accept button) and the card measures 358x144. That height is what
+    // applyBodyOffset() below publishes as --fixed-stack-offset, so the
+    // contact rail, the back-to-top button and the toast container move
+    // up by exactly that much while the banner stands.
     banner.style.cssText = `
       position:fixed;bottom:16px;right:16px;left:auto;z-index:10000;
       max-width:460px;width:calc(100% - 32px);
@@ -1459,11 +1466,18 @@ const GSP_WHATSAPP = '31617913965';
 
     document.body.appendChild(banner);
 
-    // Reserve space so the fixed corner card never sits on top of a tap
-    // target (e.g. a job card CTA) at the bottom-right of the page. Kept in
-    // sync with the card's real (now much smaller) height via offsetHeight.
+    // Two things, both keyed to the card's real height via offsetHeight:
+    // reserve space at the end of the document so the card never sits on
+    // top of a tap target in the page flow, and publish that height as
+    // --fixed-stack-offset so the other fixed bottom-corner elements (the
+    // contact rail, the back-to-top button, the toast container) sit
+    // above the banner instead of underneath it. Both run again on resize
+    // because the card re-wraps between one and three rows with the
+    // viewport width.
     const applyBodyOffset = () => {
-      document.body.style.paddingBottom = banner.offsetHeight + 'px';
+      const h = banner.offsetHeight;
+      document.body.style.paddingBottom = h + 'px';
+      document.documentElement.style.setProperty('--fixed-stack-offset', h + 'px');
     };
     applyBodyOffset();
     window.addEventListener('resize', applyBodyOffset);
@@ -1472,6 +1486,7 @@ const GSP_WHATSAPP = '31617913965';
       localStorage.setItem(CONSENT_KEY, 'true');
       window.removeEventListener('resize', applyBodyOffset);
       document.body.style.paddingBottom = '';
+      document.documentElement.style.setProperty('--fixed-stack-offset', '0px');
       banner.remove();
     });
   }
@@ -1486,7 +1501,7 @@ const GSP_WHATSAPP = '31617913965';
       btn.setAttribute('aria-label', 'Back to top');
       btn.innerHTML = '<i class="fas fa-arrow-up"></i>';
       btn.style.cssText = `
-        position:fixed;bottom:80px;right:20px;z-index:9999;
+        position:fixed;bottom:calc(80px + var(--fixed-stack-offset, 0px));right:20px;z-index:9999;
         width:44px;height:44px;border-radius:50%;
         background:var(--gold);color:var(--bg);border:none;
         cursor:pointer;box-shadow:var(--shadow-md);
@@ -1599,23 +1614,69 @@ const GSP_WHATSAPP = '31617913965';
     initContactForm();
     initTalentpoolOptin();
     initLiveStats();
-    initTestimonials();
     initBackToTop();
-    initWhatsappFloat();
+    initContactRail();
   });
 
-  // ── Floating WhatsApp Button ───────────────────────────
-  function initWhatsappFloat() {
+  // ── Contact rail (§8.x.4, sitewide) ────────────────────
+  // Replaces the floating WhatsApp bubble and separate mail button
+  // (formerly initWhatsappFloat(), a JS-injected .whatsapp-float plus the
+  // page's own static .mail-float) with one navy pill: two 48×48 items
+  // (WhatsApp, e-mail), mono glyphs ("WA" / "@", same convention as
+  // .mark.code), no pulse, never #25D366. Fixed bottom-left above 600px;
+  // at 600px and below the pill moves to the bottom-right and the mail
+  // item is hidden in CSS (.contact-rail__item--mail), leaving one 48x48
+  // tap target. E-mail stays reachable on narrow screens through the
+  // mailto link in the shared footer and through contact.html. The other
+  // fixed bottom-right elements (.back-to-top, .toast-container, the
+  // cookie banner) are kept clear of it by the offsets in styles.css and
+  // by --fixed-stack-offset. A page's static .mail-float anchor still needs to be
+  // removed from its HTML (§8.x.8 step 3, see templates.md) — this only
+  // adds the new element, it does not touch existing markup.
+  function initContactRail() {
     if (!GSP_WHATSAPP) return; // no number configured — never show a dead link
-    const existing = document.querySelector('.mail-float');
-    if (existing) existing.classList.add('has-whatsapp-sibling');
-    const a = document.createElement('a');
-    a.href = `https://wa.me/${GSP_WHATSAPP}?text=Hoi%20GSP%20Recruitment`;
-    a.className = 'whatsapp-float';
-    a.target = '_blank';
-    a.rel = 'noopener noreferrer';
-    a.setAttribute('aria-label', 'Chat via WhatsApp');
-    a.innerHTML = '<i class="fa-brands fa-whatsapp"></i>';
-    document.body.appendChild(a);
+    if (document.querySelector('.contact-rail')) return; // no double-inject
+
+    const lang = localStorage.getItem('gsp_lang') || 'nl';
+    // data-lang-nl/-en on a non-form element: initLang() (above) refreshes
+    // its aria-label on every language switch, same mechanism already used
+    // for form-field placeholders — see the `el.hasAttribute('aria-label')`
+    // branch there.
+    const ITEMS = [
+      {
+        cls: 'contact-rail__item',
+        href: `https://wa.me/${GSP_WHATSAPP}?text=Hoi%20GSP%20Recruitment`,
+        external: true,
+        glyph: 'WA',
+        label: 'WhatsApp',
+        aria: { nl: 'Stuur een WhatsApp-bericht', en: 'Send a WhatsApp message' }
+      },
+      {
+        cls: 'contact-rail__item contact-rail__item--mail',
+        href: 'mailto:info@gsprecruitment.nl',
+        external: false,
+        glyph: '@',
+        label: 'E-mail',
+        aria: { nl: 'Stuur een e-mail', en: 'Send an e-mail' }
+      }
+    ];
+
+    const nav = document.createElement('nav');
+    nav.className = 'contact-rail';
+    nav.setAttribute('aria-label', 'Direct contact');
+
+    ITEMS.forEach(item => {
+      const a = document.createElement('a');
+      a.className = item.cls;
+      a.href = item.href;
+      if (item.external) { a.target = '_blank'; a.rel = 'noopener noreferrer'; }
+      a.setAttribute('data-lang-nl', item.aria.nl);
+      a.setAttribute('data-lang-en', item.aria.en);
+      a.setAttribute('aria-label', item.aria[lang]);
+      a.innerHTML = `<span class="contact-rail__glyph" aria-hidden="true">${item.glyph}</span><span class="contact-rail__label">${item.label}</span>`; // xss-static-check: safe — item is the hardcoded ITEMS literal above, not API/user data
+      nav.appendChild(a);
+    });
+
+    document.body.appendChild(nav);
   }
 })();

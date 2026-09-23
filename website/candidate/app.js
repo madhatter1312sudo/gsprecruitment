@@ -68,6 +68,7 @@
       salary: { en: 'Salary Tool', nl: 'Salaristool' },
       matches: { en: 'My Matches', nl: 'Mijn Matches' },
       applications: { en: 'Applications', nl: 'Sollicitaties' },
+      'saved-jobs': { en: 'Saved', nl: 'Bewaard' },
       messages: { en: 'Messages', nl: 'Berichten' },
       settings: { en: 'Settings', nl: 'Instellingen' }
     };
@@ -188,10 +189,15 @@
             }
           }
         }
+
+        // Job-alert switch (WS5 #136) needs the same profile fetch, not a
+        // second round trip.
+        if (profile) loadJobAlerts(profile);
       } catch (err) {
         console.error('Dashboard load error:', err);
         Auth.renderLoadError(document.getElementById('topMatchesList'), loadDashboard);
         Auth.renderLoadError(document.getElementById('recentActivity'), loadDashboard);
+        Auth.renderLoadError(document.getElementById('jobAlertsSection'), loadDashboard);
       }
     }
 
@@ -496,20 +502,28 @@
 
     /* ================================================================
        API: Load Messages
+       WS5 #138: read-only, one-way notice lives in the section markup
+       (index.html); this only ever renders the list, never a composer.
        ================================================================ */
     async function loadMessages() {
+      const msgContainer = document.getElementById('messagesList');
       try {
         const res = await Auth.fetch('/v1/candidate/messages?limit=50');
         if (!res) return;
         const data = await res.json();
-        const msgContainer = document.querySelector('#section-messages .dashboard-grid > div:first-child');
         if (!data.messages || data.messages.length === 0) {
-          msgContainer.innerHTML = '<p style="color:var(--navy-200);text-align:center;padding:var(--space-2xl);">No messages yet.</p>';
+          msgContainer.innerHTML = `<p style="color:var(--navy-200);text-align:center;padding:var(--space-2xl);">
+            <span class="lang-nl">Hier verschijnen berichten van GSP.</span>
+            <span class="lang-en">Messages from GSP appear here.</span>
+          </p>`;
           return;
         }
         msgContainer.innerHTML = data.messages.map(m => {
           const isUnread = !m.opened_at && m.status !== 'draft';
-          const time = m.created_at ? new Date(m.created_at).toLocaleDateString() : '';
+          const isNl = document.documentElement.getAttribute('data-lang') === 'nl';
+          const time = m.created_at
+            ? new Date(m.created_at).toLocaleDateString(isNl ? 'nl-NL' : 'en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
+            : '';
           return `<div class="message-item ${isUnread ? 'unread' : ''}">
             <div class="avatar avatar-navy avatar-sm">${GSP.esc((m.sender_name || 'GS').slice(0,2).toUpperCase())}</div>
             <div style="flex:1;min-width:0;">
@@ -524,9 +538,243 @@
         }).join('');
       } catch (err) {
         console.error('Messages load error:', err);
-        const msgContainer = document.querySelector('#section-messages .dashboard-grid > div:first-child');
         Auth.renderLoadError(msgContainer, loadMessages);
       }
+    }
+
+    /* ================================================================
+       API: Saved Jobs (WS5 #137, SITE-DESIGN-SPEC.md §5 + §7.2a)
+       ================================================================ */
+    async function loadSavedJobs() {
+      const list = document.getElementById('savedJobsList');
+      try {
+        const res = await Auth.fetch('/v1/candidate/saved-jobs?limit=50');
+        if (!res) return;
+        const data = await res.json();
+        if (!data.items || data.items.length === 0) {
+          list.innerHTML = `<p style="color:var(--navy-200);text-align:center;padding:var(--space-2xl);">
+            <span class="lang-nl">Je hebt nog geen vacatures bewaard.</span>
+            <span class="lang-en">You haven't saved any vacancies yet.</span>
+          </p>`;
+          return;
+        }
+        const isNl = document.documentElement.getAttribute('data-lang') === 'nl';
+        list.innerHTML = data.items.map(j => {
+          const date = j.created_at
+            ? new Date(j.created_at).toLocaleDateString(isNl ? 'nl-NL' : 'en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
+            : '';
+          const location = [j.city, j.location_type].filter(Boolean).join(' · ');
+          const companyLine = j.anonymous_client === true ? '' : GSP.esc(j.company_name || '');
+          return `<div class="match-card">
+            <div class="match-info">
+              <h4><a href="../vacature.html?id=${encodeURIComponent(j.job_id)}" style="color:var(--white);text-decoration:none;">${GSP.esc(j.job_title || 'Job')}</a></h4>
+              ${companyLine ? `<p class="match-company">${companyLine}</p>` : ''}
+              <p>${GSP.esc(location)}</p>
+              <p style="font-size:var(--font-size-xs);color:var(--navy-400);">
+                <span class="lang-nl">Bewaard op ${GSP.esc(date)}</span>
+                <span class="lang-en">Saved on ${GSP.esc(date)}</span>
+              </p>
+            </div>
+            <button class="btn btn-sm btn-outline" data-action="unsave-job" data-id="${Number(j.job_id) || 0}">
+              <span class="lang-en">Remove</span>
+              <span class="lang-nl">Verwijderen</span>
+            </button>
+          </div>`;
+        }).join('');
+      } catch (err) {
+        console.error('Saved jobs load error:', err);
+        Auth.renderLoadError(list, loadSavedJobs);
+      }
+    }
+
+    window.unsaveJob = async function(jobId) {
+      const isNl = document.documentElement.getAttribute('data-lang') === 'nl';
+      const confirmMsg = isNl
+        ? 'Deze vacature verwijderen uit Bewaard?'
+        : 'Remove this vacancy from Saved?';
+      if (!window.confirm(confirmMsg)) return;
+      try {
+        const res = await Auth.fetch(`/v1/candidate/saved-jobs/${jobId}`, { method: 'DELETE' });
+        if (res && res.ok) {
+          Auth.toast(isNl ? 'Verwijderd' : 'Removed');
+          await loadSavedJobs();
+          // Dashboard counter drops by one without a full reload (WS5 #137 AC2).
+          const statEl = document.getElementById('statSaved');
+          if (statEl) {
+            const current = parseInt(statEl.textContent, 10) || 0;
+            statEl.textContent = Math.max(0, current - 1);
+          }
+        } else {
+          Auth.toast(isNl ? 'Verwijderen mislukt' : 'Failed to remove', 'error');
+        }
+      } catch (err) {
+        Auth.toast(isNl ? 'Fout bij verwijderen' : 'Error removing', 'error');
+      }
+    };
+
+    /* ================================================================
+       API: Job alerts (WS5 #136, SITE-DESIGN-SPEC.md §7.3.7)
+       `enabled` is what the candidate asked for; `eligible` is whether we
+       can act on it today. The switch shows `enabled` only and never
+       flips back on `eligible: false` -- a warning appears instead.
+       ================================================================ */
+    const jaSwitchLoading = document.getElementById('jobAlertsSwitchLoading');
+    const jaSwitchWrap = document.getElementById('jobAlertsSwitchWrap');
+    const jaSwitch = document.getElementById('jobAlertsSwitch');
+    const jaSince = document.getElementById('jobAlertsSince');
+    const jaWarning = document.getElementById('jobAlertsWarning');
+    const jaReason = document.getElementById('jobAlertsReason');
+    const jaAction = document.getElementById('jobAlertsAction');
+    const jaError = document.getElementById('jobAlertsError');
+    const jaRetryBtn = document.getElementById('jobAlertsRetryBtn');
+
+    // Kept from the last profile load so the switch's own change handler
+    // (which never re-fetches the profile) can re-derive the reason after
+    // a successful PUT without a second network round trip.
+    let jaLastProfile = null;
+
+    function jaReasonBranch(profile) {
+      // Same order as JOB_ALERT_ELIGIBILITY_SQL (core/retention.py), so
+      // the one line shown is always the first condition actually failing.
+      if (profile.consent_withdrawn_at) {
+        return {
+          nl: 'Je hebt je toestemming ingetrokken. Zonder toestemming kunnen wij geen vacatures sturen.',
+          en: 'You withdrew your consent. Without consent we cannot send vacancies.',
+          btnNl: 'Toestemming opnieuw geven', btnEn: 'Give consent again',
+        };
+      }
+      const lawfulIsPortal = profile.lawful_basis === 'portal_registratie';
+      if (!lawfulIsPortal) {
+        const until = profile.consent_talentpool_until ? new Date(profile.consent_talentpool_until) : null;
+        if (until && until.getTime() < Date.now()) {
+          return {
+            nl: 'Je toestemming voor de talentpool is verlopen.',
+            en: 'Your talent pool consent has expired.',
+            btnNl: 'Toestemming verlengen', btnEn: 'Renew consent',
+          };
+        }
+        if (profile.consent_scope !== 'matching_and_contact') {
+          return {
+            nl: 'Je toestemming staat op alleen matching. Voor alerts is ook toestemming voor contact nodig.',
+            en: 'Your consent is limited to matching. Alerts also need consent for contact.',
+            btnNl: 'Omvang aanpassen', btnEn: 'Adjust scope',
+          };
+        }
+      }
+      return {
+        nl: 'Wij kunnen op dit moment geen alerts sturen. Neem contact op als dit onverwacht is.',
+        en: 'We cannot send alerts right now. Contact us if this is unexpected.',
+        btnNl: null, btnEn: null,
+      };
+    }
+
+    function renderJobAlertsWarning(enabled, eligible, profile) {
+      if (!jaWarning) return;
+      if (!(enabled && !eligible)) {
+        jaWarning.style.display = 'none';
+        return;
+      }
+      const branch = jaReasonBranch(profile);
+      jaReason.innerHTML = `<span class="lang-nl">${GSP.esc(branch.nl)}</span><span class="lang-en">${GSP.esc(branch.en)}</span>`;
+      if (branch.btnNl) {
+        jaAction.innerHTML = `<button type="button" class="btn btn-sm btn-outline" data-action="navigate" data-section="profile">
+          <span class="lang-nl">${GSP.esc(branch.btnNl)}</span>
+          <span class="lang-en">${GSP.esc(branch.btnEn)}</span>
+        </button>`;
+      } else {
+        jaAction.innerHTML = `<a href="../contact.html" class="btn btn-sm btn-outline"><span class="lang-nl">Contact opnemen</span><span class="lang-en">Contact us</span></a>`;
+      }
+      jaWarning.style.display = 'block';
+    }
+
+    function applyJobAlertsState(enabled, eligible, optinAt, profile) {
+      jaLastProfile = profile;
+      if (jaSwitch) jaSwitch.checked = !!enabled;
+      if (jaSince) {
+        if (enabled && optinAt) {
+          const isNl = document.documentElement.getAttribute('data-lang') === 'nl';
+          const d = new Date(optinAt);
+          jaSince.textContent = isNl
+            ? `Aangezet op ${d.toLocaleDateString('nl-NL', { day: 'numeric', month: 'long', year: 'numeric' })}`
+            : `Turned on ${d.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}`;
+          jaSince.style.display = 'block';
+        } else {
+          jaSince.style.display = 'none';
+        }
+      }
+      renderJobAlertsWarning(enabled, eligible, profile);
+    }
+
+    async function loadJobAlerts(profile) {
+      if (!jaSwitch) return;
+      try {
+        applyJobAlertsState(
+          !!profile.job_alert_optin_at && !profile.job_alert_unsubscribed_at,
+          !!profile.job_alert_eligible,
+          profile.job_alert_optin_at,
+          profile,
+        );
+        if (jaSwitchLoading) jaSwitchLoading.style.display = 'none';
+        if (jaSwitchWrap) jaSwitchWrap.style.display = '';
+      } catch (err) {
+        console.error('Job alerts state error:', err);
+      }
+    }
+
+    // Last value the candidate actually asked for, kept outside the switch
+    // itself so a rollback (which flips jaSwitch.checked back) and a
+    // retry (which must resend the ORIGINAL request, not whatever the
+    // switch shows after the rollback) never disagree.
+    let jaDesired = null;
+
+    // Monotonic counter guarding against a double-toggle race: if the
+    // candidate flips the switch again (or hits retry) before the first
+    // PUT's response arrives, that first response is now stale and must
+    // not apply its state or its rollback over the second, newer toggle
+    // -- only the response whose seq still matches jaRequestSeq when it
+    // resolves is allowed to touch the switch. The switch itself is
+    // still never `disabled` (only `aria-busy`), so a candidate really
+    // can fire a second toggle while the first is in flight.
+    let jaRequestSeq = 0;
+
+    async function saveJobAlerts(desired) {
+      jaDesired = desired;
+      const seq = ++jaRequestSeq;
+      const isNl = document.documentElement.getAttribute('data-lang') === 'nl';
+      if (jaError) jaError.style.display = 'none';
+      jaSwitch.setAttribute('aria-busy', 'true');
+      try {
+        const res = await Auth.fetch('/v1/candidate/job-alerts', {
+          method: 'PUT',
+          body: JSON.stringify({ enabled: desired }),
+        });
+        if (seq !== jaRequestSeq) return; // superseded by a newer toggle -- ignore this stale response
+        if (res && res.ok) {
+          const row = await res.json();
+          if (seq !== jaRequestSeq) return; // superseded while awaiting res.json()
+          applyJobAlertsState(row.enabled, row.eligible, row.job_alert_optin_at, jaLastProfile || {});
+          Auth.toast(isNl ? 'Opgeslagen' : 'Saved');
+        } else {
+          jaSwitch.checked = !desired; // rollback -- optimistic toggle failed
+          if (jaError) jaError.style.display = 'block';
+        }
+      } catch (err) {
+        if (seq !== jaRequestSeq) return;
+        jaSwitch.checked = !desired;
+        if (jaError) jaError.style.display = 'block';
+      } finally {
+        if (seq === jaRequestSeq) jaSwitch.removeAttribute('aria-busy');
+      }
+    }
+
+    if (jaSwitch) {
+      jaSwitch.addEventListener('change', () => { saveJobAlerts(jaSwitch.checked); });
+    }
+
+    if (jaRetryBtn) {
+      jaRetryBtn.addEventListener('click', () => {
+        if (jaDesired !== null) saveJobAlerts(jaDesired);
+      });
     }
 
     /* ================================================================
@@ -600,6 +848,7 @@
       loadDashboard();
       loadMatches();
       loadApplications();
+      loadSavedJobs();
       loadMessages();
     });
 
@@ -622,6 +871,7 @@
       switch (el.dataset.action) {
         case 'navigate': navigateTo(el.dataset.section); break;
         case 'apply-job': applyToJob(Number(id) || 0); break;
+        case 'unsave-job': unsaveJob(Number(id) || 0); break;
         case 'toast-details-soon': Auth.toast('Details coming soon'); break;
         case 'toast-delete-account':
           Auth.toast('Contact info@gsprecruitment.nl to delete your account', 'warning');

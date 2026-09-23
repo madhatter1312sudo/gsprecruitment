@@ -111,6 +111,65 @@ class _FakeDB:
         return "OK"
 
 
+class _FakeTransaction:
+    """No-op stand-in for asyncpg's `conn.transaction()` context manager --
+    this unit suite has no real Postgres underneath it (see _FakeConn/
+    _FakePool below), so there is nothing to actually commit/roll back;
+    the real rollback behaviour is proven against a real database by
+    tests/integration/test_gdpr_erasure_integration.py's forced-failure
+    test instead."""
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return False  # never swallow an exception
+
+
+class _FakeConn:
+    """Routes asyncpg's conn.execute/fetch/fetchrow to the same _FakeDB
+    recorder+canned-response logic fetch_one/fetch_all/execute already
+    use, so erase_person()'s single-transaction write phase (routers/
+    gdpr.py, WS-E.7 follow-up issue #148 -- pool.acquire()+conn.transaction(),
+    same pattern as routers/retention_admin.py's _approve_one()) is
+    exercised for real, and every statement it issues still lands in the
+    same `db.statements` list the table-coverage assertions below read."""
+
+    def __init__(self, db):
+        self.db = db
+
+    async def execute(self, sql, *args):
+        return await self.db.execute(sql, *args)
+
+    async def fetch(self, sql, *args):
+        return await self.db.fetch_all(sql, *args)
+
+    async def fetchrow(self, sql, *args):
+        return await self.db.fetch_one(sql, *args)
+
+    def transaction(self):
+        return _FakeTransaction()
+
+
+class _FakeAcquire:
+    def __init__(self, db):
+        self.db = db
+
+    async def __aenter__(self):
+        return _FakeConn(self.db)
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return False
+
+
+class _FakePool:
+    def __init__(self, db):
+        self.db = db
+
+    def acquire(self):
+        return _FakeAcquire(self.db)
+
+
 @pytest.fixture()
 def fake_db(monkeypatch):
     import routers.gdpr as gdpr
@@ -119,6 +178,10 @@ def fake_db(monkeypatch):
     monkeypatch.setattr(gdpr, "fetch_one", db.fetch_one)
     monkeypatch.setattr(gdpr, "fetch_all", db.fetch_all)
     monkeypatch.setattr(gdpr, "execute", db.execute)
+
+    async def fake_get_pool():
+        return _FakePool(db)
+    monkeypatch.setattr(gdpr, "get_pool", fake_get_pool)
 
     # storage.is_configured() would otherwise try to read live R2 env vars
     # -- force the "not configured, no R2 paths referenced" branch, which
@@ -406,7 +469,7 @@ def test_admin_erase_refuses_admin_target_without_confirm(patch_users_lookup):
 
     with pytest.raises(HTTPException) as exc_info:
         asyncio.run(gdpr.admin_erase_person(
-            gdpr.AdminEraseRequest(email="target-admin@example.com", confirm=False),
+            gdpr.AdminEraseRequest(email="target-admin@example.com", confirm="target-admin@example.com"),
             current_user={"id": 1, "role": "admin"},
         ))
     assert exc_info.value.status_code == 409
@@ -419,7 +482,7 @@ def test_admin_erase_refuses_self_target_without_confirm(patch_users_lookup):
 
     with pytest.raises(HTTPException) as exc_info:
         asyncio.run(gdpr.admin_erase_person(
-            gdpr.AdminEraseRequest(email="me@example.com", confirm=False),
+            gdpr.AdminEraseRequest(email="me@example.com", confirm="me@example.com"),
             current_user={"id": 1, "role": "admin"},
         ))
     assert exc_info.value.status_code == 409
@@ -429,7 +492,8 @@ def test_admin_erase_refuses_self_target_without_confirm(patch_users_lookup):
 def test_admin_erase_allows_admin_target_with_confirm(patch_users_lookup):
     gdpr, calls = patch_users_lookup([{"id": 5, "role": "admin"}])
     result = asyncio.run(gdpr.admin_erase_person(
-        gdpr.AdminEraseRequest(email="target-admin@example.com", confirm=True),
+        gdpr.AdminEraseRequest(email="target-admin@example.com", confirm="target-admin@example.com",
+                               confirm_admin_or_self=True),
         current_user={"id": 1, "role": "admin"},
     ))
     assert result["status"] == "complete"
@@ -441,7 +505,7 @@ def test_admin_erase_allows_ordinary_sourced_person_without_confirm(patch_users_
     registered) -- the confirm gate must not block the common case."""
     gdpr, calls = patch_users_lookup([])
     result = asyncio.run(gdpr.admin_erase_person(
-        gdpr.AdminEraseRequest(email="sourced-only@example.com", confirm=False),
+        gdpr.AdminEraseRequest(email="sourced-only@example.com", confirm="sourced-only@example.com"),
         current_user={"id": 1, "role": "admin"},
     ))
     assert result["status"] == "complete"
@@ -469,7 +533,7 @@ def test_admin_erase_person_users_lookup_uses_trimmed_comparison(monkeypatch):
     monkeypatch.setattr(gdpr, "erase_person", fake_erase_person)
 
     asyncio.run(gdpr.admin_erase_person(
-        gdpr.AdminEraseRequest(email="target@example.com", confirm=False),
+        gdpr.AdminEraseRequest(email="target@example.com", confirm="target@example.com"),
         current_user={"id": 1, "role": "admin"},
     ))
     assert captured_sql, "expected a users lookup"

@@ -248,6 +248,14 @@ jobs:
       - name: CSP coverage check
         run: python3 scripts/verify_csp_coverage.py
 
+      # Grep-based, no browser (SITE-DESIGN-SPEC.md §8.x) -- runs before the
+      # Playwright install below on purpose, so a token violation fails fast
+      # without paying for a browser download first. Local runtime <0.1s;
+      # timeout is generous headroom, not a real budget.
+      - name: CSS token compliance check
+        timeout-minutes: 3
+        run: python3 scripts/css_tokens_check.py
+
       # Pinned to 1.61.0 -- the newest pip `playwright` release at time of
       # writing; app/package.json pins @playwright/test to ^1.61.1 (npm has
       # a 1.61.1 patch the pip package does not yet mirror). Same Chromium
@@ -267,3 +275,22 @@ jobs:
 
       - name: CSP / console-error browser check
         run: python3 scripts/csp_violation_check.py
+
+      # SITE-DESIGN-SPEC.md §7 admin-panel guards (chief-of-staff finding:
+      # these ran locally only, so "CI green" never covered the admin
+      # panel). All three use CHROMIUM_PATH if set, else fall back to
+      # Playwright's own installed browser -- same pattern already used by
+      # csp_violation_check.py above -- so they need no change to run here.
+      # Local runtime ~21-23s each; timeout-minutes gives headroom for a
+      # slower runner without letting a hang eat the job's whole budget.
+      - name: Admin sections check
+        timeout-minutes: 5
+        run: python3 scripts/admin_sections_check.py
+
+      - name: Admin UI (ui.js) check
+        timeout-minutes: 5
+        run: python3 scripts/admin_ui_check.py
+
+      - name: Admin pagination check
+        timeout-minutes: 5
+        run: python3 scripts/admin_pagination_check.py

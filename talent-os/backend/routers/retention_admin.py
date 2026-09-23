@@ -83,11 +83,12 @@ import json
 import logging
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
-from core.database import fetch_all, fetch_one, execute, get_pool
+from core.database import fetch_all, fetch_one, execute, fetch_val, get_pool
 from core.deps import require_role
+from core.listing import resolve_order_by
 from core import privacy, retention
 from services import scheduler as scheduler_service
 
@@ -229,10 +230,26 @@ class ReviewBulkRequest(BaseModel):
 REVIEW_APPROVE_CONFIRM = "APPROVE"
 
 
+# WS5 BV10 (see core/listing.py): only these keys reach ORDER BY.
+_REVIEW_SORT_COLUMNS = {
+    "id": "id",
+    "category": "category",
+    "status": "status",
+    "action": "action",
+    "term_expired_at": "term_expired_at",
+    "first_seen_at": "first_seen_at",
+    "last_seen_at": "last_seen_at",
+}
+
+
 @router.get("/review")
 async def list_review_items(
     status: str = "pending",
     category: Optional[str] = None,
+    limit: Optional[int] = Query(None, ge=1, le=1000, description="WS5 BV6: omit for the full set (the historical behaviour)."),
+    offset: int = Query(0, ge=0),
+    sort: Optional[str] = Query(None, description="Sortable column (WS5 BV10); default term_expired_at."),
+    order: Optional[str] = Query(None, description="'asc' or 'desc'; default 'asc'."),
     current_user: dict = Depends(require_role("admin")),
 ):
     """The monthly list itself — one row per person/subject currently (or
@@ -240,7 +257,22 @@ async def list_review_items(
     the owner asked for: category, term_expired_at (the date the term
     expired), and signal_missing_nl (which protective signal was absent).
     `status="all"` lists every status; the default `status="pending"`
-    matches what an admin screen's default view should show."""
+    matches what an admin screen's default view should show.
+
+    WS5 BV6: `limit`/`offset`/`total`. `limit` has no default on purpose.
+    The category-wide approve path (POST .../review/bulk with
+    `expected_count`) reads the number an admin saw against the number
+    the server finds; a default page size here would quietly turn "the
+    whole category" into "the first page of it", and the mismatch would
+    surface as a refused bulk call rather than as anything the admin
+    could act on. So a caller that passes nothing still gets every
+    matching row, exactly as before, and `total` (always the full count,
+    never the page length) is what a pager needs.
+    """
+    order_by = resolve_order_by(
+        sort, order, allowed=_REVIEW_SORT_COLUMNS,
+        default="term_expired_at ASC NULLS LAST, id ASC", tiebreaker="id ASC",
+    )
     where = []
     params: list = []
     if status != "all":
@@ -250,15 +282,29 @@ async def list_review_items(
         params.append(category)
         where.append(f"category = ${len(params)}")
     where_sql = f"WHERE {' AND '.join(where)}" if where else ""
+
+    total = await fetch_val(
+        f"SELECT COUNT(*) FROM retention_review_items {where_sql}", *params,
+    ) or 0
+
+    page_sql = ""
+    page_params = list(params)
+    if limit is not None:
+        page_params.append(limit)
+        page_sql = f" LIMIT ${len(page_params)}"
+    if offset:
+        page_params.append(offset)
+        page_sql += f" OFFSET ${len(page_params)}"
+
     rows = await fetch_all(
         f"""SELECT id, category, subject_table, subject_id, email, action, term_expired_at,
                    signal_missing_nl, status, first_seen_at, last_seen_at,
                    reappeared_after_rejection_at, purged_at
             FROM retention_review_items {where_sql}
-            ORDER BY term_expired_at ASC NULLS LAST, id ASC""",
-        *params,
+            ORDER BY {order_by}{page_sql}""",
+        *page_params,
     )
-    return {"items": rows}
+    return {"items": rows, "total": total, "limit": limit, "offset": offset}
 
 
 @router.get("/review/summary")
