@@ -3,7 +3,7 @@ Talent OS — Public API Router.
 Unauthenticated endpoints for site content, salary benchmarks, and lead submission.
 """
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
-from core.database import fetch_all, fetch_one, execute
+from core.database import fetch_all, fetch_one, execute, get_pool
 from core.config import settings
 from core.deps import get_optional_user
 from core.security import hash_token
@@ -465,8 +465,21 @@ async def talentpool_confirm(request: Request, data: TalentpoolConfirmRequest):
     wants_alerts = bool(pending["job_alerts"]) and pending["scope"] == "matching_and_contact"
 
     existing = await fetch_one(
-        "SELECT id, lawful_basis FROM candidates WHERE LOWER(email) = $1", pending["email"],
+        "SELECT id, lawful_basis, consent_withdrawn_at FROM candidates WHERE LOWER(email) = $1",
+        pending["email"],
     )
+    # Issue #110: confirming here is the person's own, new opt-in -- if
+    # they had previously withdrawn (consent_withdrawn_at set, e.g. via
+    # the public unsubscribe-all link or a talentpool withdrawal), this
+    # click must actually make the re-grant effective rather than being
+    # silently accepted-but-inert. was_withdrawn drives three things
+    # below, all in the same transaction as the UPDATE: clearing
+    # consent_withdrawn_at, deleting the suppression_list row the
+    # withdrawal created (reason='unsubscribe_all' -- the only withdrawal
+    # touchpoint that adds one), and an audit_log row for the re-grant.
+    # Job alerts (job_alert_optin_at/_unsubscribed_at) are untouched by
+    # any of this, same as always.
+    was_withdrawn = bool(existing.get("consent_withdrawn_at")) if existing else False
     if existing:
         # Security-audit B1. `should_set_talentpool_lawful_basis()` only
         # says yes for NULL or an existing 'opt_in_talentpool', so a
@@ -494,23 +507,41 @@ async def talentpool_confirm(request: Request, data: TalentpoolConfirmRequest):
         set_lawful_basis = privacy.should_set_talentpool_lawful_basis(existing["lawful_basis"]) or (
             is_referral and existing["lawful_basis"] == "toestemming_referral"
         )
-        row = await fetch_one(
-            """UPDATE candidates
-               SET consent_talentpool_at = $1, consent_talentpool_until = $2,
-                   consent_scope = $3, consent_source = $4, consent_reminder_sent_at = NULL,
-                   lawful_basis = CASE WHEN $5 THEN 'opt_in_talentpool' ELSE lawful_basis END,
-                   referral_confirmed_at = CASE WHEN $6 THEN COALESCE(referral_confirmed_at, NOW())
-                                                ELSE referral_confirmed_at END,
-                   job_alert_optin_at = CASE
-                       WHEN $7 AND job_alert_unsubscribed_at IS NULL
-                       THEN COALESCE(job_alert_optin_at, NOW())
-                       ELSE job_alert_optin_at END,
-                   updated_at = NOW()
-               WHERE id = $8
-               RETURNING id, lawful_basis, consent_talentpool_at, consent_talentpool_until""",
-            now, until, pending["scope"], pending["source"], set_lawful_basis,
-            is_referral, wants_alerts, existing["id"],
-        )
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            async with conn.transaction():
+                row = await conn.fetchrow(
+                    """UPDATE candidates
+                       SET consent_talentpool_at = $1, consent_talentpool_until = $2,
+                           consent_scope = $3, consent_source = $4, consent_reminder_sent_at = NULL,
+                           consent_withdrawn_at = NULL,
+                           lawful_basis = CASE WHEN $5 THEN 'opt_in_talentpool' ELSE lawful_basis END,
+                           referral_confirmed_at = CASE WHEN $6 THEN COALESCE(referral_confirmed_at, NOW())
+                                                        ELSE referral_confirmed_at END,
+                           job_alert_optin_at = CASE
+                               WHEN $7 AND job_alert_unsubscribed_at IS NULL
+                               THEN COALESCE(job_alert_optin_at, NOW())
+                               ELSE job_alert_optin_at END,
+                           updated_at = NOW()
+                       WHERE id = $8
+                       RETURNING id, lawful_basis, consent_talentpool_at, consent_talentpool_until""",
+                    now, until, pending["scope"], pending["source"], set_lawful_basis,
+                    is_referral, wants_alerts, existing["id"],
+                )
+                row = dict(row)
+                if was_withdrawn:
+                    await conn.execute(
+                        "DELETE FROM suppression_list WHERE email_hash = $1 AND reason = 'unsubscribe_all'",
+                        privacy.email_hash(pending["email"]),
+                    )
+                    await conn.execute(
+                        "INSERT INTO audit_log (action, actor_id, target_type, target_id, changes) VALUES ($1, $2, $3, $4, $5::jsonb)",
+                        "talentpool_consent_update", None, "candidate", existing["id"],
+                        json.dumps({
+                            "consent": True, "scope": pending["scope"], "source": pending["source"],
+                            "regrant": True,
+                        }),
+                    )
     else:
         # `full_name` krijgt hier het e-mailadres omdat
         # `candidates.full_name` NOT NULL is (migratie 000_baseline) en

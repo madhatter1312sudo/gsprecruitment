@@ -4,7 +4,7 @@ Endpoints for candidate-facing features: profile, CV, matches, applications,
 saved jobs, messages, salary benchmarks, dashboard.
 """
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, Form, status
-from core.database import fetch_one, fetch_all, execute, fetch_val
+from core.database import fetch_one, fetch_all, execute, fetch_val, get_pool
 from core.deps import get_verified_user, require_role
 from core import privacy
 from models.schemas import (
@@ -223,7 +223,18 @@ async def update_talentpool_consent(
     stronger, permanent "never contact again" signal SOP §3.3/§7.1
     checks everywhere else. A portal_registratie candidate keeps that
     basis and is not otherwise affected -- they can still use the portal,
-    only their talentpool preference is gone."""
+    only their talentpool preference is gone.
+
+    Issue #110: consent=True is also how a candidate who previously
+    withdrew (consent_withdrawn_at set) re-grants -- that is their own,
+    explicit new opt-in, so it must actually take effect. In one
+    transaction this clears consent_withdrawn_at, stamps the usual four
+    consent columns, deletes any suppression_list row this e-mail picked
+    up from the withdrawal (reason='unsubscribe_all' -- the only
+    withdrawal touchpoint that adds one; talentpool-consent(false) never
+    does), and writes the audit_log row. Job alerts are untouched
+    either way (job_alert_optin_at / job_alert_unsubscribed_at) -- a
+    talentpool re-grant is not a job-alerts re-opt-in."""
     if current_user["role"] != "candidate":
         raise HTTPException(status_code=403, detail="Only candidates can set talentpool consent")
 
@@ -234,24 +245,43 @@ async def update_talentpool_consent(
     if not candidate_id:
         raise HTTPException(status_code=404, detail="No candidate record found for this account")
 
-    candidate = await fetch_one("SELECT lawful_basis FROM candidates WHERE id = $1", candidate_id)
+    candidate = await fetch_one(
+        "SELECT lawful_basis, email, consent_withdrawn_at FROM candidates WHERE id = $1", candidate_id,
+    )
     current_lawful_basis = candidate["lawful_basis"] if candidate else None
+    was_withdrawn = bool(candidate["consent_withdrawn_at"]) if candidate else False
 
     if data.consent:
         now = datetime.now(timezone.utc)
         until = now + timedelta(days=365)  # 12 months, renewable on re-tick
         set_lawful_basis = privacy.should_set_talentpool_lawful_basis(current_lawful_basis)
-        row = await fetch_one(
-            """UPDATE candidates
-               SET consent_talentpool_at = $1, consent_talentpool_until = $2,
-                   consent_scope = $3, consent_source = 'portal', consent_reminder_sent_at = NULL,
-                   lawful_basis = CASE WHEN $4 THEN 'opt_in_talentpool' ELSE lawful_basis END,
-                   updated_at = NOW()
-               WHERE id = $5
-               RETURNING id, consent_talentpool_at, consent_talentpool_until, consent_scope,
-                         consent_source, lawful_basis""",
-            now, until, data.scope, set_lawful_basis, candidate_id,
-        )
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            async with conn.transaction():
+                row = await conn.fetchrow(
+                    """UPDATE candidates
+                       SET consent_talentpool_at = $1, consent_talentpool_until = $2,
+                           consent_scope = $3, consent_source = 'portal', consent_reminder_sent_at = NULL,
+                           consent_withdrawn_at = NULL,
+                           lawful_basis = CASE WHEN $4 THEN 'opt_in_talentpool' ELSE lawful_basis END,
+                           updated_at = NOW()
+                       WHERE id = $5
+                       RETURNING id, consent_talentpool_at, consent_talentpool_until, consent_scope,
+                                 consent_source, lawful_basis""",
+                    now, until, data.scope, set_lawful_basis, candidate_id,
+                )
+                row = dict(row)
+                if was_withdrawn and candidate.get("email"):
+                    await conn.execute(
+                        "DELETE FROM suppression_list WHERE email_hash = $1 AND reason = 'unsubscribe_all'",
+                        privacy.email_hash(candidate["email"]),
+                    )
+                await conn.execute(
+                    "INSERT INTO audit_log (action, actor_id, target_type, target_id, changes) VALUES ($1, $2, $3, $4, $5::jsonb)",
+                    "talentpool_consent_update", current_user["id"], "candidate", candidate_id,
+                    json.dumps({"consent": True, "scope": data.scope, "source": "portal", "regrant": was_withdrawn}),
+                )
+        return row
     else:
         withdraw = current_lawful_basis == "opt_in_talentpool"
         row = await fetch_one(

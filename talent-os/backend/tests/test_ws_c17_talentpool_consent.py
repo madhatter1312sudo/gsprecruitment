@@ -19,6 +19,63 @@ from starlette.requests import Request
 from core.security import hash_token
 
 
+# ── Shared fakes for the pool.acquire()+conn.transaction() paths ─────────
+# Issue #110: the consent=True (re-grant) paths in routers/candidate.py
+# and routers/public.py now run their UPDATE/DELETE/audit_log writes on
+# ONE held connection inside ONE transaction (same pattern as
+# routers/gdpr.py's erase_person(), already covered by
+# tests/test_gdpr_erasure.py's _FakeConn/_FakeTransaction/_FakeAcquire/
+# _FakePool). These are the same four fakes, generalised to route through
+# any object's own fetch_one/execute (and fetch_all, if it has one) so
+# the existing per-router fake DBs below can back get_pool() too, and
+# every statement issued inside the transaction still lands in the same
+# recorder those fakes already use.
+
+class _FakeTransaction:
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return False  # never swallow an exception
+
+
+class _FakeConn:
+    def __init__(self, db):
+        self.db = db
+
+    async def execute(self, sql, *args):
+        return await self.db.execute(sql, *args)
+
+    async def fetch(self, sql, *args):
+        fetch_all = getattr(self.db, "fetch_all", None)
+        return await fetch_all(sql, *args) if fetch_all else []
+
+    async def fetchrow(self, sql, *args):
+        return await self.db.fetch_one(sql, *args)
+
+    def transaction(self):
+        return _FakeTransaction()
+
+
+class _FakeAcquire:
+    def __init__(self, db):
+        self.db = db
+
+    async def __aenter__(self):
+        return _FakeConn(self.db)
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return False
+
+
+class _FakePool:
+    def __init__(self, db):
+        self.db = db
+
+    def acquire(self):
+        return _FakeAcquire(self.db)
+
+
 def _fake_request(ip: str = "9.9.9.9") -> Request:
     """Bare starlette Request -- slowapi's @limiter.limit decorator reads
     request.headers/request.client to key the limit, same helper as
@@ -36,17 +93,29 @@ def _fake_request(ip: str = "9.9.9.9") -> Request:
 # ── Candidate portal: POST /api/v1/candidate/talentpool-consent ──────────
 
 class _CandidateDB:
-    """Fakes the two queries update_talentpool_consent() issues: the
-    SELECT lawful_basis lookup and the UPDATE ... RETURNING."""
+    """Fakes the queries update_talentpool_consent() issues: the
+    SELECT lawful_basis/email/consent_withdrawn_at lookup, the UPDATE ...
+    RETURNING (consent=True runs on the fake pool/transaction below;
+    consent=False stays on plain fetch_one/execute, unchanged), and
+    (issue #110) the suppression_list DELETE + audit_log INSERT a
+    re-grant issues inside that same transaction."""
 
-    def __init__(self, lawful_basis):
+    def __init__(self, lawful_basis, email="jane@example.com", consent_withdrawn_at=None,
+                 suppressed=False):
         self.lawful_basis = lawful_basis
+        self.email = email
+        self.consent_withdrawn_at = consent_withdrawn_at
+        self.suppressed = suppressed
         self.updates = []
         self.audit = []
+        self.suppression_deletes = []
 
     async def fetch_one(self, sql, *args):
-        if sql.strip().startswith("SELECT lawful_basis FROM candidates"):
-            return {"lawful_basis": self.lawful_basis}
+        if sql.strip().startswith("SELECT lawful_basis"):
+            return {
+                "lawful_basis": self.lawful_basis, "email": self.email,
+                "consent_withdrawn_at": self.consent_withdrawn_at,
+            }
         if sql.strip().startswith("UPDATE candidates"):
             self.updates.append((sql, args))
             if "consent_talentpool_at = NULL" in sql:
@@ -65,6 +134,11 @@ class _CandidateDB:
         return None
 
     async def execute(self, sql, *args):
+        if sql.strip().startswith("DELETE FROM suppression_list"):
+            self.suppression_deletes.append((sql, args))
+            if self.suppressed:
+                self.suppressed = False
+            return "DELETE 1" if args and args[0] else "DELETE 0"
         self.audit.append((sql, args))
         return "OK"
 
@@ -79,6 +153,10 @@ def patch_candidate_router(monkeypatch):
         async def _fake_candidate_id(user_id):
             return candidate_id
         monkeypatch.setattr(candidate_router, "_get_candidate_id", _fake_candidate_id)
+
+        async def _fake_get_pool():
+            return _FakePool(db)
+        monkeypatch.setattr(candidate_router, "get_pool", _fake_get_pool)
         return candidate_router
     return _patch
 
@@ -105,7 +183,9 @@ def test_portal_consent_never_flips_portal_registratie_lawful_basis(patch_candid
     assert audit_sql.strip().startswith("INSERT INTO audit_log")
     assert audit_args[0] == "talentpool_consent_update"
     payload = json.loads(audit_args[4])
-    assert payload == {"consent": True, "scope": "matching_and_contact", "source": "portal"}
+    assert payload == {
+        "consent": True, "scope": "matching_and_contact", "source": "portal", "regrant": False,
+    }
 
 
 def test_portal_consent_sets_lawful_basis_when_currently_null(patch_candidate_router):
@@ -374,6 +454,10 @@ class _PublicDB:
         self.existing_candidate = existing_candidate
         self.suppressed = suppressed
         self.recent_pending = recent_pending
+        # issue #110: tracks DELETE FROM suppression_list calls issued
+        # inside talentpool_confirm()'s regrant transaction, separately
+        # from `executed` (which still sees them too, via conn.execute).
+        self.suppression_deletes = []
         # WS-4 (migrations/037): the job_orders lookup used both by
         # talentpool_optin() (validating an incoming job_id) and
         # talentpool_confirm() (re-checking it's still open at confirm
@@ -408,6 +492,8 @@ class _PublicDB:
         self.executed.append((sql, args))
         if "INSERT INTO talentpool_optin_requests" in sql:
             self.inserted_token_hash = args[1]
+        if sql.strip().startswith("DELETE FROM suppression_list"):
+            self.suppression_deletes.append((sql, args))
         return "OK"
 
 
@@ -417,6 +503,10 @@ def patch_public_router(monkeypatch):
         import routers.public as public_router
         monkeypatch.setattr(public_router, "fetch_one", db.fetch_one)
         monkeypatch.setattr(public_router, "execute", db.execute)
+
+        async def _fake_get_pool():
+            return _FakePool(db)
+        monkeypatch.setattr(public_router, "get_pool", _fake_get_pool)
 
         # WS3: _send_talentpool_confirm_email() now renders through
         # send_template() (services/email_templates.py's
@@ -806,7 +896,7 @@ class _AdminDB:
         self.audit = []
 
     async def fetch_one(self, sql, *args):
-        if sql.strip().startswith("SELECT id, lawful_basis FROM candidates"):
+        if sql.strip().startswith("SELECT id, lawful_basis"):
             return self.candidate
         if sql.strip().startswith("UPDATE candidates"):
             self.updates.append((sql, args))
@@ -926,6 +1016,166 @@ def test_admin_talentpool_consent_evidence_is_redacted_before_audit_log(patch_ad
     assert "jane.doe@example.com" not in payload["evidence"]
     assert "[redacted:" in payload["evidence"]
     assert "Signed form received from" in payload["evidence"]
+
+
+# ── Issue #110: talentpool consent re-grant after a withdrawal ───────────
+
+def test_admin_talentpool_consent_regrant_409s_and_writes_nothing(patch_admin_router):
+    """An admin cannot re-grant on the withdrawn person's behalf -- 409
+    before any write, same pattern as spec-presentation-consent."""
+    from fastapi import HTTPException
+    from models.schemas import AdminTalentpoolConsentUpdate
+    db = _AdminDB(candidate={
+        "id": 20, "lawful_basis": "opt_in_talentpool",
+        "consent_withdrawn_at": "2026-09-10T00:00:00Z",
+    })
+    router = patch_admin_router(db)
+    data = AdminTalentpoolConsentUpdate(consent=True, scope="matching_only", evidence="Belde op.")
+    with pytest.raises(HTTPException) as exc_info:
+        asyncio.run(router.admin_update_talentpool_consent(
+            candidate_id=20, data=data, current_user={"id": 3, "role": "admin"},
+        ))
+    assert exc_info.value.status_code == 409
+    assert exc_info.value.detail["code"] == "candidate_consent_withdrawn"
+    assert db.updates == []
+    assert db.audit == []
+
+
+def test_admin_talentpool_consent_withdrawal_still_works_after_prior_withdrawal(patch_admin_router):
+    """consent=false is unaffected by the new 409 guard -- an admin can
+    still record a further withdrawal (idempotent, same as before)."""
+    from models.schemas import AdminTalentpoolConsentUpdate
+    db = _AdminDB(candidate={
+        "id": 21, "lawful_basis": "opt_in_talentpool",
+        "consent_withdrawn_at": "2026-09-10T00:00:00Z",
+    })
+    router = patch_admin_router(db)
+    data = AdminTalentpoolConsentUpdate(consent=False, evidence="Nogmaals gevraagd te stoppen.")
+    row = asyncio.run(router.admin_update_talentpool_consent(
+        candidate_id=21, data=data, current_user={"id": 3, "role": "admin"},
+    ))
+    assert row["consent_talentpool_at"] is None
+
+
+def test_portal_consent_regrant_clears_withdrawn_and_removes_unsubscribe_suppression(patch_candidate_router):
+    """Issue #110: a candidate's own new opt-in after a withdrawal must
+    actually take effect -- consent_withdrawn_at clears, the
+    unsubscribe-all suppression row for their e-mail is deleted, and the
+    write happens on the transactional pool path."""
+    from models.schemas import TalentpoolConsentUpdate
+    db = _CandidateDB(
+        lawful_basis="opt_in_talentpool", email="regrant@example.com",
+        consent_withdrawn_at="2026-09-10T00:00:00Z", suppressed=True,
+    )
+    router = patch_candidate_router(db)
+    data = TalentpoolConsentUpdate(consent=True, scope="matching_and_contact")
+    row = asyncio.run(router.update_talentpool_consent(data, current_user=_user()))
+
+    assert row["consent_talentpool_until"] is not None
+
+    # UPDATE candidates clears consent_withdrawn_at in the same statement
+    # that stamps the new consent columns.
+    update_sql, _ = db.updates[0]
+    assert "consent_withdrawn_at = NULL" in update_sql
+    # job alerts are never touched by a talentpool re-grant.
+    assert "job_alert" not in update_sql
+
+    # the unsubscribe-all suppression row for this e-mail is removed.
+    assert len(db.suppression_deletes) == 1
+    del_sql, del_args = db.suppression_deletes[0]
+    assert "reason = 'unsubscribe_all'" in del_sql
+    from core import privacy
+    assert del_args == (privacy.email_hash("regrant@example.com"),)
+
+    # audit_log row records the re-grant.
+    audit_sql, audit_args = db.audit[0]
+    assert audit_args[0] == "talentpool_consent_update"
+    payload = json.loads(audit_args[4])
+    assert payload["regrant"] is True
+
+
+def test_portal_consent_regrant_without_prior_withdrawal_deletes_no_suppression(patch_candidate_router):
+    """The common case (no prior withdrawal) must not issue a
+    suppression_list DELETE at all -- only an actual re-grant does."""
+    from models.schemas import TalentpoolConsentUpdate
+    db = _CandidateDB(lawful_basis="opt_in_talentpool", consent_withdrawn_at=None)
+    router = patch_candidate_router(db)
+    data = TalentpoolConsentUpdate(consent=True, scope="matching_only")
+    asyncio.run(router.update_talentpool_consent(data, current_user=_user()))
+    assert db.suppression_deletes == []
+    audit_sql, audit_args = db.audit[0]
+    payload = json.loads(audit_args[4])
+    assert payload["regrant"] is False
+
+
+def test_talentpool_confirm_regrant_clears_withdrawn_and_removes_unsubscribe_suppression(patch_public_router):
+    """Issue #110, public double-opt-in confirm: same effective re-grant
+    as the portal, for an existing candidate who previously withdrew."""
+    from models.schemas import TalentpoolConfirmRequest
+    pending = {"id": 9, "email": "regrant2@example.com", "scope": "matching_and_contact",
+               "source": "kandidaten_page", "job_id": None, "job_alerts": False}
+    db = _PublicDB(
+        pending_row=pending,
+        existing_candidate={
+            "id": 101, "lawful_basis": "opt_in_talentpool",
+            "consent_withdrawn_at": "2026-09-10T00:00:00Z",
+        },
+    )
+    router = patch_public_router(db)
+    result = asyncio.run(
+        router.talentpool_confirm(request=_fake_request(), data=TalentpoolConfirmRequest(token="tok"))
+    )
+    assert result["consent_talentpool_until"] is not None
+
+    update_calls = [c for c in db.executed if c[0].strip().startswith("UPDATE candidates")]
+    assert len(update_calls) == 1
+    update_sql, _ = update_calls[0]
+    assert "consent_withdrawn_at = NULL" in update_sql
+
+    assert len(db.suppression_deletes) == 1
+    del_sql, del_args = db.suppression_deletes[0]
+    assert "reason = 'unsubscribe_all'" in del_sql
+    from core import privacy
+    assert del_args == (privacy.email_hash("regrant2@example.com"),)
+
+    audit_calls = [
+        c for c in db.executed
+        if c[0].strip().startswith("INSERT INTO audit_log") and c[1][0] == "talentpool_consent_update"
+    ]
+    assert len(audit_calls) == 1
+    payload = json.loads(audit_calls[0][1][4])
+    assert payload["regrant"] is True
+
+
+def test_talentpool_confirm_without_prior_withdrawal_deletes_no_suppression(patch_public_router):
+    from models.schemas import TalentpoolConfirmRequest
+    pending = {"id": 10, "email": "plain2@example.com", "scope": "matching_only",
+               "source": "kandidaten_page", "job_id": None, "job_alerts": False}
+    db = _PublicDB(
+        pending_row=pending,
+        existing_candidate={"id": 102, "lawful_basis": "gerechtvaardigd_belang"},
+    )
+    router = patch_public_router(db)
+    asyncio.run(router.talentpool_confirm(request=_fake_request(), data=TalentpoolConfirmRequest(token="tok")))
+    assert db.suppression_deletes == []
+    audit_calls = [
+        c for c in db.executed
+        if c[0].strip().startswith("INSERT INTO audit_log")
+    ]
+    assert audit_calls == []
+
+
+def test_talentpool_regrant_makes_candidate_selectable_again_by_matching_query():
+    """Regression guard for the 'selectable again' requirement: every
+    matching selector in routers/matches.py filters on
+    `consent_withdrawn_at IS NULL` -- clearing that column (proven by the
+    tests above) is exactly what makes a re-granted candidate selectable
+    again. This pins that predicate in the source the selector functions
+    build, so a future edit can't quietly drop it without failing here."""
+    import routers.matches as matches_router
+    import inspect
+    source = inspect.getsource(matches_router)
+    assert "consent_withdrawn_at IS NULL" in source
 
 
 # ── core/privacy.py shared helpers ────────────────────────────────────────

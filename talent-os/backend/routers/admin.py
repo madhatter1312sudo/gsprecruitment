@@ -998,10 +998,31 @@ async def admin_update_talentpool_consent(
         raise HTTPException(status_code=422, detail="scope is required when consent=true")
 
     candidate = await fetch_one(
-        "SELECT id, lawful_basis FROM candidates WHERE id = $1 AND deleted_at IS NULL", candidate_id,
+        "SELECT id, lawful_basis, consent_withdrawn_at FROM candidates WHERE id = $1 AND deleted_at IS NULL",
+        candidate_id,
     )
     if not candidate:
         raise HTTPException(status_code=404, detail="Candidate not found")
+
+    # Issue #110: an admin cannot re-grant talentpool consent on a
+    # withdrawn person's behalf -- same 409-before-any-write pattern as
+    # PATCH .../spec-presentation-consent above, but as a structured
+    # {"code", "message"} detail (WS5 BV3 shape) so the panel can show a
+    # specific message instead of one string for every 409. Only
+    # consent=true is blocked: consent=false (withdrawing further) is
+    # unaffected and keeps its existing behaviour below.
+    if data.consent and candidate.get("consent_withdrawn_at"):
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "candidate_consent_withdrawn",
+                "message": (
+                    "Deze kandidaat heeft eerder toestemming ingetrokken -- een beheerder kan "
+                    "talentpool-toestemming niet namens de kandidaat opnieuw verlenen. De kandidaat "
+                    "moet zelf opnieuw toestemming geven (portaal of publieke opt-in)."
+                ),
+            },
+        )
 
     if data.consent:
         now = datetime.now(timezone.utc)
