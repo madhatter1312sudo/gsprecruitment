@@ -1,6 +1,6 @@
 """Talent OS — Pydantic schemas for request/response models."""
 from pydantic import BaseModel, EmailStr, Field, field_validator, model_validator
-from typing import Optional, List, Any, Literal
+from typing import Optional, List, Any, Literal, get_args
 from datetime import datetime, date
 from decimal import Decimal
 import re
@@ -159,6 +159,74 @@ class AdminTalentpoolConsentUpdate(BaseModel):
     def _scope_in_set(cls, v):
         if v is not None and v not in TALENTPOOL_CONSENT_SCOPES:
             raise ValueError(f"scope must be one of {TALENTPOOL_CONSENT_SCOPES}")
+        return v
+
+
+# ── WS3b referral-bevestiging (migrations/041) ───────────────────────────
+
+class AdminReferralCreate(BaseModel):
+    """Admin: POST /api/v1/admin/candidates/referral.
+
+    Legt een door een mens aangedragen referral vast (SOP §1.3,
+    `lawful_basis = 'toestemming_referral'`) en stuurt de betrokkene één
+    bevestigingsmail met het Art. 14-blok in de referral-variant. Er
+    gebeurt verder niets met de gegevens tot de persoon zelf bevestigt.
+
+    `referred_by` is intern: de naam of relatie van degene die aandroeg,
+    zoals het Art. 14-blok die noemt ("via een aanbeveling van ..."). Het
+    staat daarmee wél in de mail aan de betrokkene -- dat is de bedoeling
+    van art. 14 (de bron noemen) -- maar nergens in Telegram of een
+    logregel.
+
+    `evidence` is verplicht, net als bij AdminTalentpoolConsentUpdate en
+    AdminSpecPresentationConsentUpdate hierboven, en om een sterkere
+    reden dan daar (CR R8). Dit endpoint legt toestemming vast die een
+    DERDE namens de betrokkene claimt -- de referrer zegt dat hij die
+    heeft, de betrokkene zelf heeft op dit moment nog niets gezegd. Art.
+    7 lid 1 legt de bewijslast voor die toestemming bij ons, en het was
+    van de drie toestemmingsendpoints juist het enige waar een beheerder
+    niets hoefde op te schrijven. Kort volstaat ("mondeling bevestigd
+    door X op 3 september, hij heeft haar gevraagd"), zolang er íets
+    staat.
+
+    `evidence` en `note` zijn allebei vrije tekst van de beheerder en
+    gaan nooit ongefilterd het audit_log in: routers/admin.py haalt ze
+    eerst door privacy.redact_emails()."""
+    full_name: str = Field(..., min_length=1, max_length=200)
+    email: EmailStr
+    referred_by: str = Field(..., min_length=1, max_length=200)
+    evidence: str = Field(..., min_length=1, max_length=2000)
+    note: Optional[str] = Field(None, max_length=2000)
+
+
+# ── WS3c job-alerts (migrations/041) ─────────────────────────────────────
+
+UNSUBSCRIBE_SCOPES = ("alerts", "all")
+
+
+class CandidateJobAlertsUpdate(BaseModel):
+    """Candidate portal: PUT /api/v1/candidate/job-alerts."""
+    enabled: bool
+
+
+class UnsubscribeRequest(BaseModel):
+    """Public: POST /api/public/unsubscribe.
+
+    `token` is het ruwe, per verzending unieke een-klik-token uit de
+    voettekst en de List-Unsubscribe-header van een job-alert; alleen de
+    sha256 ervan staat in job_alert_sends.token_hash. Optioneel in de
+    body omdat een RFC 8058 one-click POST hem ook als query-parameter
+    mag meesturen -- routers/public.py accepteert beide en behandelt een
+    ontbrekend token exact als een onbekend token (zelfde antwoord,
+    zelfde statuscode)."""
+    token: Optional[str] = None
+    scope: str = "alerts"
+
+    @field_validator("scope")
+    @classmethod
+    def _scope_in_set(cls, v):
+        if v not in UNSUBSCRIBE_SCOPES:
+            raise ValueError(f"scope must be one of {UNSUBSCRIBE_SCOPES}")
         return v
 
 
@@ -491,6 +559,22 @@ class CandidatePortalProfile(BaseModel):
     consent_talentpool_until: Optional[datetime] = None
     consent_scope: Optional[str] = None
     consent_source: Optional[str] = None
+    # WS5 BV4 (§7.3.7): the job-alert switch has a third reason for being
+    # off -- consent was withdrawn (a STOP, or an unsubscribe with
+    # scope=all) -- and the portal could not tell that apart from "never
+    # given" without these two. Same `candidates`-row origin and the same
+    # None-when-no-row-yet rule as the four above; `lawful_basis` is the
+    # column the retention and outreach guards read, so the portal states
+    # the ground it is actually processing on rather than guessing.
+    consent_withdrawn_at: Optional[datetime] = None
+    lawful_basis: Optional[str] = None
+    # WS5 issue #136 (§7.3.7): the job-alert switch's initial state, read
+    # once at page load rather than via the PUT-only /job-alerts endpoint.
+    # job_alert_eligible is the same JOB_ALERT_ELIGIBILITY_SQL computation
+    # the PUT response returns as `eligible`.
+    job_alert_optin_at: Optional[datetime] = None
+    job_alert_unsubscribed_at: Optional[datetime] = None
+    job_alert_eligible: bool = False
     created_at: datetime
     updated_at: Optional[datetime] = None
 
@@ -653,6 +737,39 @@ class HealthResponse(BaseModel):
     duplicate_profile_links: Optional[int] = None
 
 
+class RoutineHealth(BaseModel):
+    """One row per known scheduled routine (services/scheduler.ROUTINE_NAMES) --
+    GET /api/v1/admin/health/routines. Sourced from routine_runs
+    (migrations/044_routine_runs.py); a routine that has never run (or
+    never failed) reports None for the field(s) it has no row for yet.
+    No personal data -- a routine name, two timestamps and an exception
+    class name, nothing about a candidate/client/prospect."""
+    name: str
+    last_success_at: Optional[datetime] = None
+    last_error_at: Optional[datetime] = None
+    last_error_class: Optional[str] = None
+
+
+class RoutineHealthResponse(BaseModel):
+    """GET /api/v1/admin/health/routines -- admin-JWT only."""
+    routines: List[RoutineHealth]
+
+
+class SchedulerHealthResponse(BaseModel):
+    """GET /api/v1/admin/health/scheduler -- admin-JWT only. `running`
+    reflects the cross-worker Postgres advisory lock
+    (services/scheduler.SCHEDULER_LOCK_KEY), not this particular uvicorn
+    worker's own in-process state -- the app runs 4 workers and only the
+    one that won the lock actually starts APScheduler (see
+    services/scheduler.start_scheduler's docstring), so a request answered
+    by a different worker would otherwise misreport "not running" even
+    while the scheduler is alive elsewhere in the same process group."""
+    running: bool
+    timezone: str
+    registered_routines: List[str]
+    apollo_jobs_enabled: bool
+
+
 # ── Candidate Portal Schemas ────────────────────────────────────────────
 
 class CandidateMatchItem(BaseModel):
@@ -748,10 +865,24 @@ class CandidateSearchParams(BaseModel):
     offset: int = 0
 
 
+# WS5 BV8 (SITE-DESIGN-SPEC.md §7.6 besluit 2): the canonical pipeline
+# stages, in the order the UI offers them. migrations/043 puts the same
+# seven behind a CHECK constraint on pipeline_entries.stage; this Literal
+# is the API-boundary half of that pair, so an unknown stage is a 422 that
+# names the allowed values rather than a 500 out of Postgres. Both the
+# admin panel's PATCH and the client portal's add/PATCH go through it --
+# the two write paths that exist.
+PipelineStage = Literal["sourced", "new", "screening", "interview", "offer", "placed", "rejected"]
+
+# Derived, never a second hand-written copy (code-review F4): two lists of
+# the same seven values is two places to forget when an eighth is added.
+PIPELINE_STAGES = get_args(PipelineStage)
+
+
 class PipelineAdd(BaseModel):
     candidate_id: int
     job_id: int
-    stage: str = "sourced"
+    stage: PipelineStage = "sourced"
     notes: Optional[str] = None
 
 
@@ -1140,7 +1271,7 @@ class ClientAdminUpdate(BaseModel):
 # ── WS-C.5: Pipeline Stage History ───────────────────────────────────────
 
 class PipelineStageUpdate(BaseModel):
-    stage: str = Field(..., min_length=1, max_length=50)
+    stage: PipelineStage
 
 
 class PipelineStageHistoryItem(BaseModel):
@@ -1212,7 +1343,12 @@ class OneOffCost(BaseModel):
     model_config = {"extra": "forbid"}
 
     label: str = Field(..., min_length=1, max_length=120)
-    amount: Decimal = Field(..., ge=0, decimal_places=2, allow_inf_nan=False)
+    # Same NUMERIC(10,2) cap as _money_field() (99999999.99): a one-off
+    # cost is a placement money field like the rest, so a typo with one
+    # extra integer digit is rejected at the API boundary, not stored.
+    amount: Decimal = Field(
+        ..., ge=0, le=Decimal("99999999.99"), decimal_places=2, allow_inf_nan=False,
+    )
 
 
 class PlacementCreate(BaseModel):
