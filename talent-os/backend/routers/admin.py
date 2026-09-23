@@ -497,14 +497,16 @@ async def create_job_for_client(
     job = await fetch_one(
         """INSERT INTO job_orders
            (client_id, title, department, seniority, location_type, city,
-            salary_min, salary_max, description, requirements,
+            salary_min, salary_max, description, requirements, nice_to_have,
+            description_en, requirements_en, nice_to_have_en,
             employment_type, sponsorship_possible, status)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
            RETURNING *""",
         data.client_id, data.title, data.department, data.seniority,
         data.location_type, data.city, data.salary_min, data.salary_max,
-        data.description, data.requirements, data.employment_type,
-        data.sponsorship_possible, data.status,
+        data.description, data.requirements, data.nice_to_have,
+        data.description_en, data.requirements_en, data.nice_to_have_en,
+        data.employment_type, data.sponsorship_possible, data.status,
     )
 
     await execute(
@@ -549,7 +551,10 @@ async def update_any_job(
     idx = 1
     allowed = {
         "status", "title", "department", "seniority", "description",
-        "requirements", "fee_percentage", "urgency",
+        "requirements", "nice_to_have",
+        # issue #153 (migrations/046_job_orders_english_fields.py)
+        "description_en", "requirements_en", "nice_to_have_en",
+        "fee_percentage", "urgency",
         # WS-C.15 / WS-A.5 (migrations/016_job_orders_columns.py)
         "city", "company_display", "employment_type", "sponsorship_possible",
     }

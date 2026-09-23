@@ -62,7 +62,15 @@ DATA_PATH = Path(__file__).resolve().parent.parent / "data" / "pool_vacancies.js
 JOB_FIELDS = (
     "title", "department", "seniority", "location_type", "city",
     "salary_min", "salary_max", "salary_currency", "description",
-    "requirements", "nice_to_have", "urgency", "employment_type",
+    "requirements", "nice_to_have",
+    # issue #153 (migrations/046_job_orders_english_fields.py): nullable
+    # English twin of description/requirements/nice_to_have. Accepted here
+    # when a JSON row carries them (vac.get(f, ...) below already defaults
+    # a missing key to None, same as every other optional field), but this
+    # issue writes no English copy -- the 27 rows in pool_vacancies.json
+    # are unchanged, so these three keys are absent from every row today.
+    "description_en", "requirements_en", "nice_to_have_en",
+    "urgency", "employment_type",
     "sponsorship_possible", "company_display",
 )
 

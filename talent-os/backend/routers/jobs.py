@@ -43,14 +43,16 @@ async def create_job(data: JobOrderCreate):
         """INSERT INTO job_orders
            (client_id, title, department, seniority, location_type, city,
             salary_min, salary_max, salary_currency, description, requirements,
-            nice_to_have, urgency, company_display, employment_type,
+            nice_to_have, description_en, requirements_en, nice_to_have_en,
+            urgency, company_display, employment_type,
             sponsorship_possible)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
            RETURNING *""",
         data.client_id, data.title, data.department, data.seniority,
         data.location_type, data.city, data.salary_min, data.salary_max,
         data.salary_currency, data.description, data.requirements,
-        data.nice_to_have, data.urgency, data.company_display,
+        data.nice_to_have, data.description_en, data.requirements_en,
+        data.nice_to_have_en, data.urgency, data.company_display,
         data.employment_type, data.sponsorship_possible,
     )
     return row
@@ -61,7 +63,8 @@ async def update_job(job_id: int, updates: JobOrderUpdate):
     """Partial update of a job order."""
     allowed = {"status", "title", "department", "seniority", "location_type",
                "salary_min", "salary_max", "salary_currency", "description",
-               "requirements", "nice_to_have", "urgency",
+               "requirements", "nice_to_have", "description_en",
+               "requirements_en", "nice_to_have_en", "urgency",
                "city", "company_display", "employment_type", "sponsorship_possible"}
     set_parts = []
     values = []
@@ -100,7 +103,12 @@ public_jobs_router = APIRouter(prefix="/api/public/jobs", tags=["public-jobs"])
 PUBLIC_JOB_COLUMNS = (
     "j.id, j.title, j.department, j.seniority, j.location_type, j.city, "
     "j.salary_min, j.salary_max, j.salary_currency, "
-    "j.description, j.requirements, j.nice_to_have, j.status, j.urgency, j.created_at, "
+    "j.description, j.requirements, j.nice_to_have, "
+    # issue #153 (migrations/046): nullable English twin of the three text
+    # fields above -- null for every job order until someone writes an
+    # English text through the admin/client job routes.
+    "j.description_en, j.requirements_en, j.nice_to_have_en, "
+    "j.status, j.urgency, j.created_at, "
     "j.company_display, j.employment_type, j.sponsorship_possible, "
     "COALESCE(cl.is_internal, false) AS anonymous_client"
 )

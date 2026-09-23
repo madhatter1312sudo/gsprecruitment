@@ -260,6 +260,17 @@
             ],
             "title": "Description"
           },
+          "description_en": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description En"
+          },
           "employment_type": {
             "anyOf": [
               {
@@ -287,6 +298,28 @@
             ],
             "title": "Location Type"
           },
+          "nice_to_have": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Nice To Have"
+          },
+          "nice_to_have_en": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Nice To Have En"
+          },
           "requirements": {
             "anyOf": [
               {
@@ -297,6 +330,17 @@
               }
             ],
             "title": "Requirements"
+          },
+          "requirements_en": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Requirements En"
           },
           "salary_max": {
             "anyOf": [
@@ -405,6 +449,17 @@
             ],
             "title": "Description"
           },
+          "description_en": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description En"
+          },
           "employment_type": {
             "anyOf": [
               {
@@ -432,6 +487,28 @@
             ],
             "title": "Fee Percentage"
           },
+          "nice_to_have": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Nice To Have"
+          },
+          "nice_to_have_en": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Nice To Have En"
+          },
           "requirements": {
             "anyOf": [
               {
@@ -442,6 +519,17 @@
               }
             ],
             "title": "Requirements"
+          },
+          "requirements_en": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Requirements En"
           },
           "seniority": {
             "anyOf": [
@@ -2949,6 +3037,17 @@
             ],
             "title": "Description"
           },
+          "description_en": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description En"
+          },
           "location_type": {
             "anyOf": [
               {
@@ -2971,6 +3070,17 @@
             ],
             "title": "Nice To Have"
           },
+          "nice_to_have_en": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Nice To Have En"
+          },
           "requirements": {
             "anyOf": [
               {
@@ -2981,6 +3091,17 @@
               }
             ],
             "title": "Requirements"
+          },
+          "requirements_en": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Requirements En"
           },
           "salary_currency": {
             "default": "EUR",
@@ -3061,6 +3182,17 @@
             ],
             "title": "Description"
           },
+          "description_en": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description En"
+          },
           "location_type": {
             "anyOf": [
               {
@@ -3083,6 +3215,17 @@
             ],
             "title": "Nice To Have"
           },
+          "nice_to_have_en": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Nice To Have En"
+          },
           "requirements": {
             "anyOf": [
               {
@@ -3093,6 +3236,17 @@
               }
             ],
             "title": "Requirements"
+          },
+          "requirements_en": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Requirements En"
           },
           "salary_currency": {
             "anyOf": [
@@ -3509,6 +3663,17 @@
             ],
             "title": "Description"
           },
+          "description_en": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description En"
+          },
           "employment_type": {
             "anyOf": [
               {
@@ -3547,6 +3712,17 @@
             ],
             "title": "Nice To Have"
           },
+          "nice_to_have_en": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Nice To Have En"
+          },
           "requirements": {
             "anyOf": [
               {
@@ -3557,6 +3733,17 @@
               }
             ],
             "title": "Requirements"
+          },
+          "requirements_en": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Requirements En"
           },
           "salary_currency": {
             "default": "EUR",
@@ -3665,6 +3852,17 @@
             ],
             "title": "Description"
           },
+          "description_en": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description En"
+          },
           "employment_type": {
             "anyOf": [
               {
@@ -3703,6 +3901,17 @@
             ],
             "title": "Nice To Have"
           },
+          "nice_to_have_en": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Nice To Have En"
+          },
           "requirements": {
             "anyOf": [
               {
@@ -3713,6 +3922,17 @@
               }
             ],
             "title": "Requirements"
+          },
+          "requirements_en": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Requirements En"
           },
           "salary_currency": {
             "anyOf": [
