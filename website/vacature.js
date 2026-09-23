@@ -86,8 +86,53 @@ function buildJobPostingLd(job) {
   return ld;
 }
 
+// ─── Job body: Dutch/English text twin (issue #153) ────────────────────
+// Pure function (no DOM access besides GSP.esc), same testing pattern as
+// buildJobPostingLd() above -- scripts/test_job_body_html.mjs exercises it
+// directly with fixture jobs. Requires GSP.esc (website/gsp-util.js,
+// loaded before this file in vacature.html); a Node caller must
+// require('../website/gsp-util.js') first, which defines global.GSP the
+// same way the browser's <script src="gsp-util.js"> tag does.
+const JOB_BODY_SECTIONS = [
+  { nlKey: 'description', enKey: 'description_en', hEn: 'About the role', hNl: 'Over de rol' },
+  { nlKey: 'requirements', enKey: 'requirements_en', hEn: "What we're looking for", hNl: 'Wat we zoeken' },
+  { nlKey: 'nice_to_have', enKey: 'nice_to_have_en', hEn: 'Nice to have', hNl: 'Mooi meegenomen' },
+];
+
+const JOB_BODY_FALLBACK_EN = 'Only available in Dutch.';
+const JOB_BODY_FALLBACK_NL = 'Alleen beschikbaar in het Engels.';
+
+function buildJobBodyHtml(job) {
+  const parts = [];
+  for (const section of JOB_BODY_SECTIONS) {
+    const nlText = job[section.nlKey];
+    const enText = job[section.enKey];
+    if (!nlText && !enText) continue; // nothing to say in either language
+
+    // Each paragraph gets its own lang-en/lang-nl class (unlike the single
+    // shared, language-less <p> this replaces) so the Dutch paragraph
+    // never renders unmarked under the English heading when there is no
+    // English text yet -- the defect this issue fixes.
+    const enParagraph = enText
+      ? `<p class="lang-en">${GSP.esc(enText)}</p>`
+      : `<p class="lang-en gsp-lang-fallback">${JOB_BODY_FALLBACK_EN}</p>`;
+    const nlParagraph = nlText
+      ? `<p class="lang-nl">${GSP.esc(nlText)}</p>`
+      : `<p class="lang-nl gsp-lang-fallback">${JOB_BODY_FALLBACK_NL}</p>`;
+
+    parts.push(
+      `<h2 class="lang-en">${section.hEn}</h2><h2 class="lang-nl">${section.hNl}</h2>` +
+      enParagraph + nlParagraph
+    );
+  }
+  return parts.join('');
+}
+
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { buildJobPostingLd, jobPostingEmploymentType, jobPostingLocation, jobPostingValidThrough };
+  module.exports = {
+    buildJobPostingLd, jobPostingEmploymentType, jobPostingLocation, jobPostingValidThrough,
+    buildJobBodyHtml,
+  };
 }
 
 // ─── Anonymous-client apply panel (WS4) ────────────────────────────────
@@ -271,11 +316,17 @@ if (typeof window !== 'undefined') {
     if (employmentTypeLabel) metaHtml.push(`<div class="meta-item"><strong><span class="lang-en">Type</span><span class="lang-nl">Type</span></strong>${GSP.esc(employmentTypeLabel)}</div>`);
     if (job.sponsorship_possible) metaHtml.push(`<div class="meta-item"><strong><span class="lang-en">Sponsorship</span><span class="lang-nl">Sponsoring</span></strong><span class="lang-en">Visa sponsorship possible</span><span class="lang-nl">Visumsponsoring mogelijk</span></div>`);
     document.getElementById('jobMeta').innerHTML = metaHtml.join('');
-    const bodyHtml = [];
-    if (job.description) bodyHtml.push(`<h2 class="lang-en">About the role</h2><h2 class="lang-nl">Over de rol</h2><p>${GSP.esc(job.description)}</p>`);
-    if (job.requirements) bodyHtml.push(`<h2 class="lang-en">What we're looking for</h2><h2 class="lang-nl">Wat we zoeken</h2><p>${GSP.esc(job.requirements)}</p>`);
-    if (job.responsibilities) bodyHtml.push(`<h2 class="lang-en">Responsibilities</h2><h2 class="lang-nl">Verantwoordelijkheden</h2><p>${GSP.esc(job.responsibilities)}</p>`);
-    document.getElementById('jobBody').innerHTML = bodyHtml.join('');
+    // English text twin (issue #153): each section carries a Dutch field
+    // (always the field the 27 pool vacancies and every earlier job order
+    // have) and a nullable English twin (job.*_en, migrations/046). When
+    // the English twin is present it is shown under the English heading;
+    // when it is absent (every row today) the English heading gets a
+    // visibly marked fallback instead of the Dutch paragraph unmarked --
+    // the "current unmarked mix" the issue calls out is exactly a
+    // language-less <p> shared between both headings, so every paragraph
+    // below is built with its own explicit lang-en/lang-nl class.
+    const bodyHtml = buildJobBodyHtml(job);
+    document.getElementById('jobBody').innerHTML = bodyHtml;
     // Inject JSON-LD for Google. jobDetailJsonLd is a <script type="application/ld+json">
     // (not a div): textContent is never HTML-parsed, so job.* values here
     // cannot break out into markup even though they are not esc()'d.

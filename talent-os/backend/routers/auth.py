@@ -5,7 +5,10 @@ password reset, profile read/update. Rate-limited.
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import RedirectResponse
 from core.database import fetch_one, fetch_all, execute
-from core.security import hash_password, verify_password, create_access_token, decode_token, hash_token
+from core.security import (
+    hash_password, verify_password, create_access_token, decode_token, hash_token,
+    PasswordTooLongError,
+)
 from core.deps import get_current_user, get_optional_user, require_role, _token_predates_password_change
 from core.mfa import mfa_required_for_user, issue_mfa_pending_token
 from core import privacy
@@ -33,6 +36,15 @@ from core.ratelimit import limiter
 logger = logging.getLogger("talent_os.auth")
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
+
+# Fixed dummy hash (issue #178) -- generated once at import time from a
+# constant string, never from real input. login() below verifies against
+# this when the e-mail is unknown, so both branches do exactly one bcrypt
+# check; without it, an unknown address short-circuited before ever
+# calling bcrypt and answered in ~0ms against ~270ms for a known one,
+# letting an attacker enumerate accounts by timing. This hash never
+# authenticates anything real.
+_DUMMY_PASSWORD_HASH = hash_password("gsp-dummy-password-for-login-timing-safety")
 
 
 # ── Helper ──────────────────────────────────────────────────────────────
@@ -95,6 +107,22 @@ def _build_token_response(user: dict) -> dict:
     }
 
 
+def _hash_password_or_422(password: str) -> str:
+    """hash_password() wrapped for the four request-body callers below.
+    models/schemas.py already rejects a >72-UTF-8-byte password with a 422
+    before it reaches here, so PasswordTooLongError should not normally
+    fire on this path -- this is the second gate (issue #177), keeping the
+    response a 4xx instead of an unhandled 500 if it ever does."""
+    try:
+        return hash_password(password)
+    except PasswordTooLongError:
+        raise HTTPException(
+            status_code=422,
+            detail="Wachtwoord mag maximaal 72 bytes zijn (UTF-8-codering) / "
+                   "Password may be at most 72 bytes (UTF-8 encoding)",
+        )
+
+
 # ── Register ────────────────────────────────────────────────────────────
 
 @router.post("/register", response_model=TokenResponse, status_code=201)
@@ -111,7 +139,7 @@ async def register(request: Request, data: UserRegister):
             detail="An account with this email already exists",
         )
 
-    password_hash = hash_password(data.password)
+    password_hash = _hash_password_or_422(data.password)
 
     # WS-E.2: created unverified (is_verified defaults to FALSE on the
     # table); the verification token is issued and hashed via
@@ -216,6 +244,15 @@ async def login(request: Request, data: UserLogin):
             detail="Invalid email or password",
             headers={"Retry-After": str(retry_after)},
         )
+
+    if not user:
+        # Unknown e-mail: verify against the fixed dummy hash so this
+        # branch still does one bcrypt check, matching the known-user
+        # branch's timing (issue #178). The result is discarded -- there
+        # is nothing real to accept or reject here. `or` short-circuits
+        # the check below, so this is the only bcrypt call this branch
+        # makes.
+        verify_password(data.password, _DUMMY_PASSWORD_HASH)
 
     if not user or not verify_password(data.password, user["password_hash"]):
         if user:
@@ -431,7 +468,7 @@ async def set_password(request: Request, data: SetPasswordRequest):
     if not user:
         raise HTTPException(status_code=400, detail="Invalid or expired set-password link")
 
-    new_hash = hash_password(data.new_password)
+    new_hash = _hash_password_or_422(data.new_password)
     await execute(
         """UPDATE users
            SET password_hash = $1, is_verified = TRUE, email_verified_at = NOW(),
@@ -493,7 +530,7 @@ async def reset_password(request: Request, data: ResetPasswordRequest):
     if not user:
         raise HTTPException(status_code=400, detail="Invalid or expired reset token")
 
-    new_hash = hash_password(data.new_password)
+    new_hash = _hash_password_or_422(data.new_password)
     await execute(
         """UPDATE users
            SET password_hash = $1, reset_token = NULL, reset_token_expires_at = NULL,
@@ -574,7 +611,7 @@ async def change_password(
     if not verify_password(data.current_password, user["password_hash"]):
         raise HTTPException(status_code=400, detail="Current password is incorrect")
 
-    new_hash = hash_password(data.new_password)
+    new_hash = _hash_password_or_422(data.new_password)
     await execute(
         """UPDATE users
            SET password_hash = $1, password_changed_at = NOW(),

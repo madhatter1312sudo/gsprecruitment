@@ -169,12 +169,28 @@
         </div>
       </div>
       <div class="form-group">
-        <label>Omschrijving</label>
+        <label>Omschrijving (NL)</label>
         <textarea id="newJobDescription" rows="4" class="a-textarea"></textarea>
       </div>
       <div class="form-group">
-        <label>Eisen</label>
+        <label>Description (EN)</label>
+        <textarea id="newJobDescriptionEn" rows="4" class="a-textarea" placeholder="Optioneel -- leeg = geen Engelse tekst, vacature.js toont dan een zichtbare NL-only markering"></textarea>
+      </div>
+      <div class="form-group">
+        <label>Eisen (NL)</label>
         <textarea id="newJobRequirements" rows="3" class="a-textarea"></textarea>
+      </div>
+      <div class="form-group">
+        <label>Requirements (EN)</label>
+        <textarea id="newJobRequirementsEn" rows="3" class="a-textarea" placeholder="Optioneel"></textarea>
+      </div>
+      <div class="form-group">
+        <label>Pre / mooi meegenomen (NL)</label>
+        <textarea id="newJobNiceToHave" rows="3" class="a-textarea"></textarea>
+      </div>
+      <div class="form-group">
+        <label>Nice to have (EN)</label>
+        <textarea id="newJobNiceToHaveEn" rows="3" class="a-textarea" placeholder="Optioneel"></textarea>
       </div>
       <div class="form-group">
         <label class="d-flex align-items-center gap-2 fw-normal">
@@ -208,7 +224,11 @@
       salary_min: salaryMin ? Number(salaryMin) : null,
       salary_max: salaryMax ? Number(salaryMax) : null,
       description: document.getElementById('newJobDescription')?.value?.trim() || null,
+      description_en: document.getElementById('newJobDescriptionEn')?.value?.trim() || null,
       requirements: document.getElementById('newJobRequirements')?.value?.trim() || null,
+      requirements_en: document.getElementById('newJobRequirementsEn')?.value?.trim() || null,
+      nice_to_have: document.getElementById('newJobNiceToHave')?.value?.trim() || null,
+      nice_to_have_en: document.getElementById('newJobNiceToHaveEn')?.value?.trim() || null,
       sponsorship_possible: !!document.getElementById('newJobSponsorship')?.checked,
     };
 
