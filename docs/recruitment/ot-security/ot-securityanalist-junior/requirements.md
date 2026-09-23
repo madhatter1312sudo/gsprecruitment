@@ -1,4 +1,4 @@
-# Requirement sheet — OT-securityanalist (junior)
+# Requirement sheet: OT-securityanalist (junior)
 
 Discipline: OT-cybersecurity
 Slug/job-id: `ot-securityanalist-junior` (interim job-id; de platform-API bevat nog geen vacatures, dit is de seedfile-bron)
@@ -6,7 +6,7 @@ Datum opgesteld: 23-09-2026
 
 ## Product-side of plant-side
 
-**Plant-side.** De rol volgt meldingen op vanuit monitoringtools en onderzoekt afwijkend verkeer 'in OT-netwerken' bij productieomgevingen — operationele monitoring van bestaande installaties, geen productontwikkeling. Plant-side.
+**Plant-side.** De rol volgt meldingen op vanuit monitoringtools en onderzoekt afwijkend verkeer 'in OT-netwerken' bij productieomgevingen; operationele monitoring van bestaande installaties, geen productontwikkeling. Plant-side.
 
 ## Knock-outs
 
@@ -22,7 +22,7 @@ Datum opgesteld: 23-09-2026
 Op juniorniveau is dit geen ervaringseis maar een motivatie-eis: de kandidaat moet kunnen uitleggen waarom juist OT-security aantrekt, niet security in het algemeen. Herken dit aan een concrete, specifieke interesse (bijvoorbeeld een project, artikel of cursus over industriële systemen), niet een algemene IT-security-ambitie.
 
 **Basiskennis van netwerken en beveiligingsconcepten**
-Vraag naar basisbegrippen zoals segmentatie, firewalls of het OSI-model, toegepast op een eenvoudig voorbeeld — geen diepgaande expertise, wel een werkend fundament.
+Vraag naar basisbegrippen zoals segmentatie, firewalls of het OSI-model, toegepast op een eenvoudig voorbeeld, geen diepgaande expertise, wel een werkend fundament.
 
 **Bereidheid om onder begeleiding meldingen te onderzoeken en te documenteren**
 Dit is een expliciete verwachting: de rol is leren-door-doen onder toezicht, niet zelfstandig onderzoek. Toets of de kandidaat comfortabel is met gestructureerde begeleiding in plaats van volledige autonomie te verwachten.
@@ -52,16 +52,16 @@ Op juniorniveau betekent dit dat de kandidaat weet dat de norm bestaat en in gro
 
 niet beschikbaar (geen band in het record; 23-09-2026)
 
-## Locatie — de praktijk
+## Locatie: de praktijk
 
-Standplaats Best, hybride. Het record specificeert geen vast aantal thuiswerkdagen; OT-werk vereist regelmatig fysieke aanwezigheid op de productielocatie voor toegang tot industriële netwerken die niet op afstand bereikbaar zijn — vraag dit in het eerste gesprek concreet uit. Vorm: detachering.
+Standplaats Best, hybride. Het record specificeert geen vast aantal thuiswerkdagen; OT-werk vereist regelmatig fysieke aanwezigheid op de productielocatie voor toegang tot industriële netwerken die niet op afstand bereikbaar zijn; vraag dit in het eerste gesprek concreet uit. Vorm: detachering.
 
-## Klant — screeningseisen
+## Klant: screeningseisen
 
 Niet vastgelegd. Er is geen account manager-notitie over eventuele klant-screeningseisen (bijvoorbeeld een
 Verklaring Omtrent het Gedrag of een veiligheidsonderzoek) in het record.
 
-## Klant — ongeschreven voorkeuren
+## Klant: ongeschreven voorkeuren
 
 Niet vastgelegd. Er is geen account manager-notitie over deze vacature in het record; wij vermelden hier geen
 voorkeur die niet is vastgelegd.
@@ -70,9 +70,9 @@ voorkeur die niet is vastgelegd.
 
 ## English summary
 
-**OT-securityanalist (junior)** — discipline: OT cybersecurity. Slug/interim job-id: `ot-securityanalist-junior`.
+**OT-securityanalist (junior)**, discipline: OT cybersecurity. Slug/interim job-id: `ot-securityanalist-junior`.
 
-**Product-side or plant-side: plant-side.** De rol volgt meldingen op vanuit monitoringtools en onderzoekt afwijkend verkeer 'in OT-netwerken' bij productieomgevingen — operationele monitoring van bestaande installaties, geen productontwikkeling. Plant-side.
+**Product-side or plant-side: plant-side.** The role follows up alerts from monitoring tools and investigates abnormal traffic 'in OT networks' at production environments; operational monitoring of existing installations, not product development. Plant-side.
 
 Knock-outs: relevant degree, the stated years of hands-on experience, the language level as stated in the record,
 and no visa sponsorship for this role (sponsorship_possible: false).
@@ -81,6 +81,6 @@ Must-haves are interpreted from the vacancy text, not restated as a keyword list
 imply for this role are listed above; IEC 62443 is named in the record without a specific part, so we do not claim
 a part the text does not state.
 
-Salary band: niet beschikbaar (geen band in het record; 23-09-2026).
+Salary band: not available (no band in the record; 23-09-2026).
 Location: Best, Hybride, detachering.
 Client screening requirements: not recorded. Client's unwritten preferences: not recorded.

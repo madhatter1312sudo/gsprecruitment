@@ -1,4 +1,4 @@
-# Requirement sheet — Verificatie-engineer mechatronica (medior)
+# Requirement sheet: Verificatie-engineer mechatronica (medior)
 
 Discipline: Test en verificatie
 Slug/job-id: `verificatie-engineer-mechatronica-medior` (interim job-id; de platform-API bevat nog geen vacatures, dit is de seedfile-bron)
@@ -6,7 +6,7 @@ Datum opgesteld: 23-09-2026
 
 ## Teststrategie versus testuitvoering
 
-Deze rol combineert **verificatietrajectplanning en uitvoering**: de kandidaat vertaalt zelfstandig systeemrequirements naar verificatietests (planning) en voert die uit op prototypes (uitvoering). De vacaturetekst vraagt expliciet dat de kandidaat 'zelfstandig een verificatietraject opzet en uitvoert' — dus beide kanten, op het niveau van één systeem of deelsysteem, niet op projectbrede teststrategie zoals bij een QA-lead.
+Deze rol combineert **verificatietrajectplanning en uitvoering**: de kandidaat vertaalt zelfstandig systeemrequirements naar verificatietests (planning) en voert die uit op prototypes (uitvoering). De vacaturetekst vraagt expliciet dat de kandidaat 'zelfstandig een verificatietraject opzet en uitvoert'; dus beide kanten, op het niveau van één systeem of deelsysteem, niet op projectbrede teststrategie zoals bij een QA-lead.
 
 ## Knock-outs
 
@@ -40,7 +40,7 @@ Een gestructureerde koppeling tussen ontwerp- en verificatiefasen; zie de sectie
 ## Normen
 
 **V-model (methodiek, nice-to-have)**
-Het V-model koppelt elke ontwerpfase aan een corresponderende verificatie- of validatiefase. Voor deze rol betekent affiniteit ermee dat de kandidaat begrijpt waarom een verificatietest direct herleidbaar moet zijn naar de requirement die hij toetst, niet dat een specifieke norm wordt gecertificeerd — het record vraagt dit niet als voorwaarde.
+Het V-model koppelt elke ontwerpfase aan een corresponderende verificatie- of validatiefase. Voor deze rol betekent affiniteit ermee dat de kandidaat begrijpt waarom een verificatietest direct herleidbaar moet zijn naar de requirement die hij toetst, niet dat een specifieke norm wordt gecertificeerd; het record vraagt dit niet als voorwaarde.
 
 ## Drie vragen die een fit van een near-fit scheiden
 
@@ -54,16 +54,16 @@ Het V-model koppelt elke ontwerpfase aan een corresponderende verificatie- of va
 
 €48.000–€65.000 bruto per jaar, detachering
 
-## Locatie — de praktijk
+## Locatie: de praktijk
 
-Standplaats Eindhoven, volledig on-site. Geen hybride- of thuiswerkregeling in het record; reken op dagelijks reizen naar Eindhoven of verhuizing — relevant bij een HIL-opstelling of testrig die niet op afstand bediend kan worden. Vorm: detachering.
+Standplaats Eindhoven, volledig on-site. Geen hybride- of thuiswerkregeling in het record; reken op dagelijks reizen naar Eindhoven of verhuizing; relevant bij een HIL-opstelling of testrig die niet op afstand bediend kan worden. Vorm: detachering.
 
 ## Shift- of oproeppatroon
 
 Niet vastgelegd. Het record noemt geen shift- of oproeppatroon voor deze vacature; wij vermelden hier geen patroon
 dat niet in de tekst staat.
 
-## Klant — ongeschreven voorkeuren
+## Klant: ongeschreven voorkeuren
 
 Niet vastgelegd. Er is geen account manager-notitie over deze vacature in het record; wij vermelden hier geen
 voorkeur die niet is vastgelegd.
@@ -72,9 +72,9 @@ voorkeur die niet is vastgelegd.
 
 ## English summary
 
-**Verificatie-engineer mechatronica (medior)** — discipline: test and verification. Slug/interim job-id: `verificatie-engineer-mechatronica-medior`.
+**Verificatie-engineer mechatronica (medior)**, discipline: test and verification. Slug/interim job-id: `verificatie-engineer-mechatronica-medior`.
 
-**Strategy versus execution:** Deze rol combineert **verificatietrajectplanning en uitvoering**: de kandidaat vertaalt zelfstandig systeemrequirements naar verificatietests (planning) en voert die uit op prototypes (uitvoering). De vacaturetekst vraagt expliciet dat de kandidaat 'zelfstandig een verificatietraject opzet en uitvoert' — dus beide kanten, op het niveau van één systeem of deelsysteem, niet op projectbrede teststrategie zoals bij een QA-lead.
+**Strategy versus execution:** This role combines **verification-trajectory planning and execution**: the candidate independently translates system requirements into verification tests (planning) and carries them out on prototypes (execution). The vacancy text explicitly asks that the candidate 'independently sets up and carries out a verification trajectory', so both sides, at the level of one system or subsystem, not project-wide test strategy as with a QA-lead.
 
 Knock-outs: relevant degree, the stated years of hands-on experience, the language level as stated in the record,
 and no visa sponsorship for this role (sponsorship_possible: false).
@@ -82,6 +82,6 @@ and no visa sponsorship for this role (sponsorship_possible: false).
 Must-haves are interpreted from the vacancy text, not restated as a keyword list. Named standards/certifications and
 what they imply for this role are listed above.
 
-Salary band: €48.000–€65.000 bruto per jaar, detachering.
+Salary band: €48,000–€65,000 gross per year, secondment.
 Location: Eindhoven, On-site, detachering.
 Shift/on-call pattern: not recorded. Client's unwritten preferences: not recorded.

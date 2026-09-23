@@ -1,4 +1,4 @@
-# Requirement sheet — QA-lead embedded (senior)
+# Requirement sheet: QA-lead embedded (senior)
 
 Discipline: Test en verificatie
 Slug/job-id: `qa-lead-embedded-senior` (interim job-id; de platform-API bevat nog geen vacatures, dit is de seedfile-bron)
@@ -40,7 +40,7 @@ Het record noemt geen specifieke norm; dit is een indicatie van affiniteit, geen
 ## Normen
 
 **ISTQB Advanced (certificering, nice-to-have)**
-ISTQB Advanced toetst gevorderde testmanagement- en testontwerpvaardigheden, zoals risicogebaseerd testen en teststrategie-ontwikkeling. Voor een QA-lead-rol is dit relevant ondersteunend bewijs, maar het record vraagt het niet als voorwaarde — aantoonbare coördinerende praktijkervaring weegt zwaarder.
+ISTQB Advanced toetst gevorderde testmanagement- en testontwerpvaardigheden, zoals risicogebaseerd testen en teststrategie-ontwikkeling. Voor een QA-lead-rol is dit relevant ondersteunend bewijs, maar het record vraagt het niet als voorwaarde; aantoonbare coördinerende praktijkervaring weegt zwaarder.
 
 **Functionele veiligheid (geen specifieke norm genoemd)**
 Het record noemt 'functionele veiligheid en de rol van QA daarin' als nice-to-have zonder een norm zoals IEC 61508 of ISO 26262 te benoemen. Wij vermelden dit als domeinaffiniteit, geen certificeringseis.
@@ -57,7 +57,7 @@ Het record noemt 'functionele veiligheid en de rol van QA daarin' als nice-to-ha
 
 €62.000–€84.000 bruto per jaar, interim
 
-## Locatie — de praktijk
+## Locatie: de praktijk
 
 Standplaats Veldhoven, hybride. Het record specificeert geen vast aantal thuiswerkdagen; vraag in het eerste gesprek hoeveel dagen fysieke aanwezigheid bij testopstellingen of het team nodig is. Vorm: interim-opdracht.
 
@@ -66,7 +66,7 @@ Standplaats Veldhoven, hybride. Het record specificeert geen vast aantal thuiswe
 Niet vastgelegd. Het record noemt geen shift- of oproeppatroon voor deze vacature; wij vermelden hier geen patroon
 dat niet in de tekst staat.
 
-## Klant — ongeschreven voorkeuren
+## Klant: ongeschreven voorkeuren
 
 Niet vastgelegd. Er is geen account manager-notitie over deze vacature in het record; wij vermelden hier geen
 voorkeur die niet is vastgelegd.
@@ -75,9 +75,9 @@ voorkeur die niet is vastgelegd.
 
 ## English summary
 
-**QA-lead embedded (senior)** — discipline: test and verification. Slug/interim job-id: `qa-lead-embedded-senior`.
+**QA-lead embedded (senior)**, discipline: test and verification. Slug/interim job-id: `qa-lead-embedded-senior`.
 
-**Strategy versus execution:** Deze rol is **volledig strategiebepalend op projectniveau**: de kandidaat bepaalt de teststrategie voor een of meerdere projecten, bewaakt testdekking en proceskwaliteit, en stuurt testers en testautomatiseringsengineers aan op inhoud. Uitvoering ligt bij de testers en testautomatiseringsengineers die de QA-lead aanstuurt; de QA-lead zelf voert geen tests uit maar is verantwoordelijk voor risico-inschatting, planning-afstemming en procesverbetering.
+**Strategy versus execution:** This role is **entirely strategy-setting at project level**: the candidate sets the test strategy for one or more projects, safeguards test coverage and process quality, and directs testers and test-automation engineers on content. Execution sits with the testers and test-automation engineers the QA lead directs; the QA lead does not run tests but is responsible for risk assessment, aligning with planning, and process improvement.
 
 Knock-outs: relevant degree, the stated years of hands-on experience, the language level as stated in the record,
 and no visa sponsorship for this role (sponsorship_possible: false).
@@ -85,6 +85,6 @@ and no visa sponsorship for this role (sponsorship_possible: false).
 Must-haves are interpreted from the vacancy text, not restated as a keyword list. Named standards/certifications and
 what they imply for this role are listed above.
 
-Salary band: €62.000–€84.000 bruto per jaar, interim.
+Salary band: €62,000–€84,000 gross per year, interim assignment.
 Location: Veldhoven, Hybride, interim.
 Shift/on-call pattern: not recorded. Client's unwritten preferences: not recorded.

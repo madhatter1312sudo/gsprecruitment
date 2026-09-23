@@ -1,4 +1,4 @@
-# Interviewvragenbank — HIL-testautomatiseringsengineer (senior)
+# Interviewvragenbank: HIL-testautomatiseringsengineer (senior)
 
 Discipline: Test en verificatie
 Slug/job-id: `hil-testautomatiseringsengineer-senior`
@@ -39,13 +39,13 @@ Deze senior, strategiebepalende rol draagt verantwoordelijkheid voor de HIL-test
 
 ## English summary
 
-**Interview question bank — HIL-testautomatiseringsengineer (senior)**, slug `hil-testautomatiseringsengineer-senior`.
+**Interview question bank: HIL-testautomatiseringsengineer (senior)**, slug `hil-testautomatiseringsengineer-senior`.
 
-Briefing: Deze senior, strategiebepalende rol draagt verantwoordelijkheid voor de HIL-teststrategie en -infrastructuur van embedded en mechatronische systemen, en begeleidt mediorcollega's bij de uitvoering. De briefing scheidt expliciet het bepalen van de teststrategie (senior) van de uitvoering (medior/junior).
+Briefing: This senior, strategy-setting role carries responsibility for the HIL test strategy and infrastructure of embedded and mechatronic systems, and mentors medior colleagues on execution. The briefing explicitly separates setting the test strategy (senior) from execution (medior/junior).
 
 Five probing questions with senior-level model answers are listed above, separating strategic test-design reasoning
 from execution and diagnosis on the actual test setup.
 
 Risks to test:
-- Iemand met zeven jaar ervaring die vooral zelf tests heeft uitgevoerd en nooit een teststrategie heeft bepaald of een opstelling vanaf nul heeft ingericht.
-- Overclaimen van veiligheidscertificering: toets of de kandidaat 'functionele veiligheid' als brede affiniteit beschrijft of als concrete normkennis presenteert die het record niet onderbouwt.
+- Someone with seven years of experience who has mainly executed tests themselves and never set a test strategy or set up a rig from scratch.
+- Overclaiming safety certification: test whether the candidate describes 'functional safety' as a broad affinity or presents specific standards knowledge that the record does not support.

@@ -1,4 +1,4 @@
-# Interviewvragenbank — Control engineer Simulink/servo (medior)
+# Interviewvragenbank: Control engineer Simulink/servo (medior)
 
 Discipline: Mechatronica en besturingssoftware
 Slug/job-id: `control-engineer-simulink-servo-medior`
@@ -32,21 +32,21 @@ De rol combineert modelgebaseerd regelontwerp in Simulink met het daadwerkelijk 
 
 ## Twee risico's om op te testen
 
-- Iemand die alleen in Simulink heeft gesimuleerd en nooit zelf een opstelling heeft afgesteld — vraag expliciet naar meetdata, niet naar modelresultaten.
-- Iemand die regeltechniek geïsoleerd bespreekt zonder de mechanische en software-context te kennen — toets of de kandidaat kan aangeven waar een regelkeuze een andere discipline raakt.
+- Iemand die alleen in Simulink heeft gesimuleerd en nooit zelf een opstelling heeft afgesteld; vraag expliciet naar meetdata, niet naar modelresultaten.
+- Iemand die regeltechniek geïsoleerd bespreekt zonder de mechanische en software-context te kennen; toets of de kandidaat kan aangeven waar een regelkeuze een andere discipline raakt.
 
 ---
 
 ## English summary
 
-**Interview question bank — Control engineer Simulink/servo (medior)**, slug `control-engineer-simulink-servo-medior`.
+**Interview question bank: Control engineer Simulink/servo (medior)**, slug `control-engineer-simulink-servo-medior`.
 
-Briefing: De rol combineert modelgebaseerd regelontwerp in Simulink met het daadwerkelijk afstellen van servo-assen op een fysieke opstelling bij een machinebouwer of semicon-toeleverancier in de Brainport-regio. De briefing richt zich op het onderscheid tussen theoretische regeltechniek en de praktijk van meten, afstellen en documenteren op een opstelling die niet zich als een simulatiemodel gedraagt.
+Briefing: The role combines model-based control design in Simulink with the actual tuning of servo axes on a physical rig at a machine builder or semicon supplier in the Brainport region. The briefing focuses on the distinction between theoretical control engineering and the practice of measuring, tuning and documenting on a rig that does not behave like a simulation model.
 
 Five probing questions with senior-level model answers are listed above, covering control-design trade-offs,
 diagnosis on physical hardware, mechanical/control interaction, robustness over the machine's lifetime, and (for the
 senior variant) mentoring and honest handling of unspecified safety requirements.
 
 Risks to test:
-- Iemand die alleen in Simulink heeft gesimuleerd en nooit zelf een opstelling heeft afgesteld — vraag expliciet naar meetdata, niet naar modelresultaten.
-- Iemand die regeltechniek geïsoleerd bespreekt zonder de mechanische en software-context te kennen — toets of de kandidaat kan aangeven waar een regelkeuze een andere discipline raakt.
+- Someone who has only simulated in Simulink and never tuned a rig themselves; ask explicitly for measurement data, not model results.
+- Someone who discusses control engineering in isolation without knowing the mechanical and software context; test whether the candidate can point out where a control choice touches another discipline.

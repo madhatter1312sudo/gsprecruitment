@@ -1,4 +1,4 @@
-# Interviewvragenbank — OT-securityanalist (junior)
+# Interviewvragenbank: OT-securityanalist (junior)
 
 Discipline: OT-cybersecurity (plant-side)
 Slug/job-id: `ot-securityanalist-junior`
@@ -28,24 +28,24 @@ Deze junior, plant-side rol monitort en onderzoekt afwijkingen in industriële n
 
 ### 5. Hoe zou je een bevinding documenteren zodat een collega die het later leest, precies begrijpt wat je hebt gezien?
 
-**Modelantwoord (seniorniveau):** Een goed antwoord noemt tijdstip, betrokken systemen, wat er precies is waargenomen (met bewijs zoals een schermafbeelding of logregel), en wat al wel en nog niet is onderzocht — feitelijk en navolgbaar, geen interpretatie voorgesteld als vaststaand feit.
+**Modelantwoord (seniorniveau):** Een goed antwoord noemt tijdstip, betrokken systemen, wat er precies is waargenomen (met bewijs zoals een schermafbeelding of logregel), en wat al wel en nog niet is onderzocht; feitelijk en navolgbaar, geen interpretatie voorgesteld als vaststaand feit.
 
 ## Twee risico's om op te testen
 
 - Kandidaten die OT-security zien als een label voor generieke IT-security-ambities zonder specifieke interesse in industriële systemen.
-- Kandidaten die zelfstandig willen ingrijpen in plaats van te escaleren — dit past niet bij een beginnersrol in een omgeving waar een verkeerde ingreep de productie kan raken.
+- Kandidaten die zelfstandig willen ingrijpen in plaats van te escaleren; dit past niet bij een beginnersrol in een omgeving waar een verkeerde ingreep de productie kan raken.
 
 ---
 
 ## English summary
 
-**Interview question bank — OT-securityanalist (junior)**, slug `ot-securityanalist-junior`, plant-side.
+**Interview question bank: OT-securityanalist (junior)**, slug `ot-securityanalist-junior`, plant-side.
 
-Briefing: Deze junior, plant-side rol monitort en onderzoekt afwijkingen in industriële netwerken bij productie-omgevingen, onder begeleiding van ervaren collega's. De briefing richt zich op basisbegrip van netwerken en beveiligingsconcepten, leerhouding, en het onderscheiden van IT- en OT-denken.
+Briefing: This junior, plant-side role monitors and investigates deviations in industrial networks at production environments, under supervision from experienced colleagues. The briefing focuses on basic understanding of networks and security concepts, learning attitude, and distinguishing IT thinking from OT thinking.
 
 Five probing questions with senior-level model answers are listed above, separating OT-specific reasoning from
 IT-security habits applied uncritically to industrial systems.
 
 Risks to test:
-- Kandidaten die OT-security zien als een label voor generieke IT-security-ambities zonder specifieke interesse in industriële systemen.
-- Kandidaten die zelfstandig willen ingrijpen in plaats van te escaleren — dit past niet bij een beginnersrol in een omgeving waar een verkeerde ingreep de productie kan raken.
+- Candidates who see OT security as a label for generic IT-security ambitions without specific interest in industrial systems.
+- Candidates who want to intervene independently instead of escalating; this does not fit a starter role in an environment where a wrong intervention can affect production.

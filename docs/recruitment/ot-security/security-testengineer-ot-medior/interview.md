@@ -1,4 +1,4 @@
-# Interviewvragenbank — Security-testengineer OT (medior)
+# Interviewvragenbank: Security-testengineer OT (medior)
 
 Discipline: OT-cybersecurity (plant-side)
 Slug/job-id: `security-testengineer-ot-medior`
@@ -32,20 +32,20 @@ Deze mediorrol test de beveiliging van industriële besturingssystemen bij produ
 
 ## Twee risico's om op te testen
 
-- Kandidaten die testmethoden uit een IT-context ongewijzigd toepassen op OT zonder het verstoringsrisico te onderkennen — toets expliciet met de scanvraag.
-- Kandidaten die kwetsbaarheden rapporteren maar de opvolging niet als eigen verantwoordelijkheid zien — vraag door op verificatie na reparatie.
+- Kandidaten die testmethoden uit een IT-context ongewijzigd toepassen op OT zonder het verstoringsrisico te onderkennen; toets expliciet met de scanvraag.
+- Kandidaten die kwetsbaarheden rapporteren maar de opvolging niet als eigen verantwoordelijkheid zien; vraag door op verificatie na reparatie.
 
 ---
 
 ## English summary
 
-**Interview question bank — Security-testengineer OT (medior)**, slug `security-testengineer-ot-medior`, plant-side.
+**Interview question bank: Security-testengineer OT (medior)**, slug `security-testengineer-ot-medior`, plant-side.
 
-Briefing: Deze mediorrol test de beveiliging van industriële besturingssystemen bij productieomgevingen, zonder de productiecontinuïteit te verstoren, en volgt op of gevonden kwetsbaarheden daadwerkelijk worden opgelost. De briefing richt zich op veilig testen in OT, testplannen afgeleid van IEC 62443, en heldere rapportage naar gemengde doelgroepen.
+Briefing: This medior role tests the security of industrial control systems at production environments, without disrupting production continuity, and follows up on whether found vulnerabilities are actually fixed. The briefing focuses on safe testing in OT, test plans derived from IEC 62443, and clear reporting to mixed audiences.
 
 Five probing questions with senior-level model answers are listed above, separating OT-specific reasoning from
 IT-security habits applied uncritically to industrial systems.
 
 Risks to test:
-- Kandidaten die testmethoden uit een IT-context ongewijzigd toepassen op OT zonder het verstoringsrisico te onderkennen — toets expliciet met de scanvraag.
-- Kandidaten die kwetsbaarheden rapporteren maar de opvolging niet als eigen verantwoordelijkheid zien — vraag door op verificatie na reparatie.
+- Candidates who apply IT testing methods unchanged to OT without recognising the disruption risk; test explicitly with the scanning question.
+- Candidates who report vulnerabilities but do not see follow-up as their own responsibility; probe for verification after a fix.

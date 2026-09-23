@@ -1,4 +1,4 @@
-# Interviewvragenbank — HIL-testautomatiseringsengineer (medior)
+# Interviewvragenbank: HIL-testautomatiseringsengineer (medior)
 
 Discipline: Test en verificatie
 Slug/job-id: `hil-testautomatiseringsengineer-medior`
@@ -12,7 +12,7 @@ Deze mediorrol bouwt en onderhoudt geautomatiseerde tests op HIL-opstellingen vo
 
 ### 1. Hoe koppel je een Simulink-model aan de fysieke I/O van een HIL-opstelling?
 
-**Modelantwoord (seniorniveau):** Een senior antwoord beschrijft het definiëren van signaalinterfaces tussen het model en de fysieke aansluitingen (bijvoorbeeld via een real-time target zoals dSPACE), het valideren van signaaltiming en -schaling, en het testen van de koppeling zelf voordat er functionele tests op draaien — niet alleen 'het model aansluiten' als black box behandelen.
+**Modelantwoord (seniorniveau):** Een senior antwoord beschrijft het definiëren van signaalinterfaces tussen het model en de fysieke aansluitingen (bijvoorbeeld via een real-time target zoals dSPACE), het valideren van signaaltiming en -schaling, en het testen van de koppeling zelf voordat er functionele tests op draaien, niet alleen 'het model aansluiten' als black box behandelen.
 
 ### 2. Een testset groeit ongecontroleerd en duurt steeds langer om te draaien. Hoe pak je dit aan?
 
@@ -24,7 +24,7 @@ Deze mediorrol bouwt en onderhoudt geautomatiseerde tests op HIL-opstellingen vo
 
 ### 4. Wanneer voeg je een test toe op basis van een requirement, en wanneer op basis van een eerder gevonden defect?
 
-**Modelantwoord (seniorniveau):** Een sterk antwoord legt uit dat requirements-gebaseerde tests de basisdekking vormen (elke eis heeft minstens één test), terwijl defect-gebaseerde tests regressie voorkomen op specifieke, eerder gefaalde scenario's — beide zijn nodig, met een andere onderbouwing.
+**Modelantwoord (seniorniveau):** Een sterk antwoord legt uit dat requirements-gebaseerde tests de basisdekking vormen (elke eis heeft minstens één test), terwijl defect-gebaseerde tests regressie voorkomen op specifieke, eerder gefaalde scenario's; beide zijn nodig, met een andere onderbouwing.
 
 ### 5. Hoe zorg je dat een collega die niet bij het bouwen van de testopstelling was, deze zelfstandig kan onderhouden?
 
@@ -39,13 +39,13 @@ Deze mediorrol bouwt en onderhoudt geautomatiseerde tests op HIL-opstellingen vo
 
 ## English summary
 
-**Interview question bank — HIL-testautomatiseringsengineer (medior)**, slug `hil-testautomatiseringsengineer-medior`.
+**Interview question bank: HIL-testautomatiseringsengineer (medior)**, slug `hil-testautomatiseringsengineer-medior`.
 
-Briefing: Deze mediorrol bouwt en onderhoudt geautomatiseerde tests op HIL-opstellingen voor embedded en mechatronische systemen, en werkt mee aan de testinfrastructuur zelf. De briefing scheidt de uitvoerende taak (tests draaien, resultaten analyseren) van de beperkte strategische taak (testdekking prioriteren binnen een gegeven kader).
+Briefing: This medior role builds and maintains automated tests on HIL rigs for embedded and mechatronic systems, and helps improve the test infrastructure itself. The briefing separates the executing task (running tests, analysing results) from the limited strategic task (prioritising test coverage within a given framework).
 
 Five probing questions with senior-level model answers are listed above, separating strategic test-design reasoning
 from execution and diagnosis on the actual test setup.
 
 Risks to test:
-- Kandidaten die alleen bestaande tests hebben gedraaid en nooit zelf een testset hebben uitgebreid of onderhouden.
-- Kandidaten die de infrastructuur-verantwoordelijkheid onderschatten en zichzelf puur als testuitvoerder zien.
+- Candidates who have only run existing tests and never themselves expanded or maintained a test set.
+- Candidates who underestimate the infrastructure responsibility and see themselves purely as test executors.

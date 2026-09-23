@@ -1,4 +1,4 @@
-# Requirement sheet — HIL-testautomatiseringsengineer (junior)
+# Requirement sheet: HIL-testautomatiseringsengineer (junior)
 
 Discipline: Test en verificatie
 Slug/job-id: `hil-testautomatiseringsengineer-junior` (interim job-id; de platform-API bevat nog geen vacatures, dit is de seedfile-bron)
@@ -51,16 +51,16 @@ Geen normen worden met naam genoemd in de vacaturetekst voor deze rol.
 
 €38.000–€50.000 bruto per jaar, vast
 
-## Locatie — de praktijk
+## Locatie: de praktijk
 
-Standplaats Veldhoven, volledig on-site. Geen hybride- of thuiswerkregeling in het record; reken op dagelijks reizen naar Veldhoven of verhuizing — relevant bij een HIL-opstelling of testrig die niet op afstand bediend kan worden. Vorm: vaste aanstelling.
+Standplaats Veldhoven, volledig on-site. Geen hybride- of thuiswerkregeling in het record; reken op dagelijks reizen naar Veldhoven of verhuizing; relevant bij een HIL-opstelling of testrig die niet op afstand bediend kan worden. Vorm: vaste aanstelling.
 
 ## Shift- of oproeppatroon
 
 Niet vastgelegd. Het record noemt geen shift- of oproeppatroon voor deze vacature; wij vermelden hier geen patroon
 dat niet in de tekst staat.
 
-## Klant — ongeschreven voorkeuren
+## Klant: ongeschreven voorkeuren
 
 Niet vastgelegd. Er is geen account manager-notitie over deze vacature in het record; wij vermelden hier geen
 voorkeur die niet is vastgelegd.
@@ -69,9 +69,9 @@ voorkeur die niet is vastgelegd.
 
 ## English summary
 
-**HIL-testautomatiseringsengineer (junior)** — discipline: test and verification. Slug/interim job-id: `hil-testautomatiseringsengineer-junior`.
+**HIL-testautomatiseringsengineer (junior)**, discipline: test and verification. Slug/interim job-id: `hil-testautomatiseringsengineer-junior`.
 
-**Strategy versus execution:** Deze rol is volledig **uitvoering**: onder begeleiding testscripts schrijven, geautomatiseerde tests draaien op de HIL-opstelling en resultaten documenteren. De vacaturetekst noemt geen strategische verantwoordelijkheid (teststrategie bepalen, testdekking prioriteren); dat ligt bij senior collega's. Verwacht geen kandidaat die zelfstandig beslist wát getest wordt, wel iemand die betrouwbaar uitvoert wat is opgedragen en meedenkt over de uitbreiding van testdekking onder begeleiding.
+**Strategy versus execution:** This role is entirely **execution**: writing test scripts under supervision, running automated tests on the HIL rig and documenting results. The vacancy text names no strategic responsibility (setting test strategy, prioritising test coverage); that sits with senior colleagues. Do not expect a candidate who independently decides what gets tested, but someone who reliably executes what is assigned and thinks along on expanding test coverage under supervision.
 
 Knock-outs: relevant degree, the stated years of hands-on experience, the language level as stated in the record,
 and no visa sponsorship for this role (sponsorship_possible: false).
@@ -79,6 +79,6 @@ and no visa sponsorship for this role (sponsorship_possible: false).
 Must-haves are interpreted from the vacancy text, not restated as a keyword list. Named standards/certifications and
 what they imply for this role are listed above.
 
-Salary band: €38.000–€50.000 bruto per jaar, vast.
+Salary band: €38,000–€50,000 gross per year, permanent.
 Location: Veldhoven, On-site, vast.
 Shift/on-call pattern: not recorded. Client's unwritten preferences: not recorded.

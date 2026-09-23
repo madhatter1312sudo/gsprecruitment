@@ -1,4 +1,4 @@
-# Interviewvragenbank — PLC/motion engineer (medior)
+# Interviewvragenbank: PLC/motion engineer (medior)
 
 Discipline: Mechatronica en besturingssoftware
 Slug/job-id: `plc-motion-engineer-medior`
@@ -32,21 +32,21 @@ Deze mediorrol combineert zelfstandig PLC-programmeren met motion control en inb
 
 ## Twee risico's om op te testen
 
-- Iemand die motion control alleen kent van geconfigureerde bibliotheekblokken en nooit zelf een as heeft afgesteld — vraag door op eigen afstelervaring.
-- Iemand die veiligheidsgerelateerde besturing als 'gewone' logica behandelt — toets of de kandidaat het verschil in eisen herkent, ook zonder certificering te claimen.
+- Iemand die motion control alleen kent van geconfigureerde bibliotheekblokken en nooit zelf een as heeft afgesteld; vraag door op eigen afstelervaring.
+- Iemand die veiligheidsgerelateerde besturing als 'gewone' logica behandelt; toets of de kandidaat het verschil in eisen herkent, ook zonder certificering te claimen.
 
 ---
 
 ## English summary
 
-**Interview question bank — PLC/motion engineer (medior)**, slug `plc-motion-engineer-medior`.
+**Interview question bank: PLC/motion engineer (medior)**, slug `plc-motion-engineer-medior`.
 
-Briefing: Deze mediorrol combineert zelfstandig PLC-programmeren met motion control en inbedrijfstelling op locatie bij machinebouwers in de Brainport-regio. De briefing richt zich op zelfstandige probleemoplossing, protocolbegrip en de omgang met veiligheidsgerelateerde besturing als die aan de orde is.
+Briefing: This medior role combines independent PLC programming with motion control and on-site commissioning at machine builders in the Brainport region. The briefing focuses on independent problem-solving, protocol understanding, and handling safety-related control where relevant.
 
 Five probing questions with senior-level model answers are listed above, covering control-design trade-offs,
 diagnosis on physical hardware, mechanical/control interaction, robustness over the machine's lifetime, and (for the
 senior variant) mentoring and honest handling of unspecified safety requirements.
 
 Risks to test:
-- Iemand die motion control alleen kent van geconfigureerde bibliotheekblokken en nooit zelf een as heeft afgesteld — vraag door op eigen afstelervaring.
-- Iemand die veiligheidsgerelateerde besturing als 'gewone' logica behandelt — toets of de kandidaat het verschil in eisen herkent, ook zonder certificering te claimen.
+- Someone who only knows motion control from configured library blocks and has never tuned an axis themselves; ask about hands-on tuning experience.
+- Someone who treats safety-related control as 'ordinary' logic; test whether the candidate recognises the difference in requirements, even without claiming certification.

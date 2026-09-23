@@ -1,4 +1,4 @@
-# Requirement sheet — HIL-testautomatiseringsengineer (senior)
+# Requirement sheet: HIL-testautomatiseringsengineer (senior)
 
 Discipline: Test en verificatie
 Slug/job-id: `hil-testautomatiseringsengineer-senior` (interim job-id; de platform-API bevat nog geen vacatures, dit is de seedfile-bron)
@@ -40,7 +40,7 @@ Waardevol omdat HIL-testen vaak voortbouwt op dezelfde modellen die in de ontwik
 ## Normen
 
 **Functionele veiligheid (geen specifieke norm genoemd)**
-Het record noemt alleen 'functionele veiligheid en de rol van testen daarin' als nice-to-have, zonder een norm zoals ISO 26262 of IEC 61508 te benoemen. Wij vermelden dit als domeinaffiniteit, niet als certificeringseis — een claim over een specifieke norm zou verder gaan dan het record toelaat.
+Het record noemt alleen 'functionele veiligheid en de rol van testen daarin' als nice-to-have, zonder een norm zoals ISO 26262 of IEC 61508 te benoemen. Wij vermelden dit als domeinaffiniteit, niet als certificeringseis; een claim over een specifieke norm zou verder gaan dan het record toelaat.
 
 ## Drie vragen die een fit van een near-fit scheiden
 
@@ -54,16 +54,16 @@ Het record noemt alleen 'functionele veiligheid en de rol van testen daarin' als
 
 €62.000–€84.000 bruto per jaar, interim
 
-## Locatie — de praktijk
+## Locatie: de praktijk
 
-Standplaats Best, volledig on-site. Geen hybride- of thuiswerkregeling in het record; reken op dagelijks reizen naar Best of verhuizing — relevant bij een HIL-opstelling of testrig die niet op afstand bediend kan worden. Vorm: interim-opdracht.
+Standplaats Best, volledig on-site. Geen hybride- of thuiswerkregeling in het record; reken op dagelijks reizen naar Best of verhuizing; relevant bij een HIL-opstelling of testrig die niet op afstand bediend kan worden. Vorm: interim-opdracht.
 
 ## Shift- of oproeppatroon
 
 Niet vastgelegd. Het record noemt geen shift- of oproeppatroon voor deze vacature; wij vermelden hier geen patroon
 dat niet in de tekst staat.
 
-## Klant — ongeschreven voorkeuren
+## Klant: ongeschreven voorkeuren
 
 Niet vastgelegd. Er is geen account manager-notitie over deze vacature in het record; wij vermelden hier geen
 voorkeur die niet is vastgelegd.
@@ -72,9 +72,9 @@ voorkeur die niet is vastgelegd.
 
 ## English summary
 
-**HIL-testautomatiseringsengineer (senior)** — discipline: test and verification. Slug/interim job-id: `hil-testautomatiseringsengineer-senior`.
+**HIL-testautomatiseringsengineer (senior)**, discipline: test and verification. Slug/interim job-id: `hil-testautomatiseringsengineer-senior`.
 
-**Strategy versus execution:** Deze rol is **strategiebepalend**: de kandidaat bepaalt de teststrategie, richt nieuwe HIL-opstellingen in, zorgt dat testdekking aansluit op systeemrisico's, en bewaakt de kwaliteit en onderhoudbaarheid van de testinfrastructuur op langere termijn. Uitvoering (scripts schrijven, tests draaien) wordt gedelegeerd aan mediorcollega's die de senior begeleidt; de senior is verantwoordelijk voor het wát en waarom, niet primair voor het zelf typen van elk testscript.
+**Strategy versus execution:** This role is **strategy-setting**: the candidate determines the test strategy, sets up new HIL rigs, ensures test coverage matches system risk, and safeguards the quality and maintainability of the test infrastructure long term. Execution (writing scripts, running tests) is delegated to medior colleagues whom the senior mentors; the senior is responsible for the what and why, not primarily for typing every test script themselves.
 
 Knock-outs: relevant degree, the stated years of hands-on experience, the language level as stated in the record,
 and no visa sponsorship for this role (sponsorship_possible: false).
@@ -82,6 +82,6 @@ and no visa sponsorship for this role (sponsorship_possible: false).
 Must-haves are interpreted from the vacancy text, not restated as a keyword list. Named standards/certifications and
 what they imply for this role are listed above.
 
-Salary band: €62.000–€84.000 bruto per jaar, interim.
+Salary band: €62,000–€84,000 gross per year, interim assignment.
 Location: Best, On-site, interim.
 Shift/on-call pattern: not recorded. Client's unwritten preferences: not recorded.

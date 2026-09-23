@@ -1,4 +1,4 @@
-# Interviewvragenbank — OT security engineer IEC 62443 (medior)
+# Interviewvragenbank: OT security engineer IEC 62443 (medior)
 
 Discipline: OT-cybersecurity (plant-side)
 Slug/job-id: `ot-security-engineer-iec-62443-medior`
@@ -12,7 +12,7 @@ Deze plant-side rol beveiligt operationele technologie bij productieomgevingen e
 
 ### 1. Waarom kun je een IT-patchbeleid niet zomaar toepassen op een PLC-omgeving?
 
-**Modelantwoord (seniorniveau):** Een senior antwoord noemt dat PLC's en SCADA-systemen vaak niet zijn gebouwd om reboots of onderbroken beschikbaarheid te verdragen, dat patches leverancierscertificering kunnen breken, en dat een productieonderbreking direct fysieke of financiële schade veroorzaakt — daarom vraagt patchen in OT een geplande onderhoudsstop en leveranciersvalidatie, niet automatische uitrol.
+**Modelantwoord (seniorniveau):** Een senior antwoord noemt dat PLC's en SCADA-systemen vaak niet zijn gebouwd om reboots of onderbroken beschikbaarheid te verdragen, dat patches leverancierscertificering kunnen breken, en dat een productieonderbreking direct fysieke of financiële schade veroorzaakt; daarom vraagt patchen in OT een geplande onderhoudsstop en leveranciersvalidatie, niet automatische uitrol.
 
 ### 2. Hoe stel je een zonerings- en conduitmodel op voor een bestaand, ongesegmenteerd industrieel netwerk?
 
@@ -24,7 +24,7 @@ Deze plant-side rol beveiligt operationele technologie bij productieomgevingen e
 
 ### 4. Wat is het verschil tussen een kwetsbaarheid en een risico in een OT-context?
 
-**Modelantwoord (seniorniveau):** Een senior antwoord legt uit dat een kwetsbaarheid een technisch zwak punt is, terwijl risico de kans op misbruik combineert met de impact op productie, veiligheid of milieu — een kwetsbaarheid in een geïsoleerd, goed bewaakt systeem kan een laag risico zijn, en andersom.
+**Modelantwoord (seniorniveau):** Een senior antwoord legt uit dat een kwetsbaarheid een technisch zwak punt is, terwijl risico de kans op misbruik combineert met de impact op productie, veiligheid of milieu; een kwetsbaarheid in een geïsoleerd, goed bewaakt systeem kan een laag risico zijn, en andersom.
 
 ### 5. Hoe documenteer je een bevinding zodat die bruikbaar is voor een audit én begrijpelijk voor een operator?
 
@@ -32,20 +32,20 @@ Deze plant-side rol beveiligt operationele technologie bij productieomgevingen e
 
 ## Twee risico's om op te testen
 
-- IT-security-achtergrond die OT-continuïteitseisen onderschat — toets expliciet met de vraag over patchen en stilleggen van een lijn.
-- Kandidaten die IEC 62443 alleen kennen als naam, niet als toegepast zonerings- of risicomodel — vraag door op een concrete toepassing, niet op de norm in abstracto.
+- IT-security-achtergrond die OT-continuïteitseisen onderschat; toets expliciet met de vraag over patchen en stilleggen van een lijn.
+- Kandidaten die IEC 62443 alleen kennen als naam, niet als toegepast zonerings- of risicomodel; vraag door op een concrete toepassing, niet op de norm in abstracto.
 
 ---
 
 ## English summary
 
-**Interview question bank — OT security engineer IEC 62443 (medior)**, slug `ot-security-engineer-iec-62443-medior`, plant-side.
+**Interview question bank: OT security engineer IEC 62443 (medior)**, slug `ot-security-engineer-iec-62443-medior`, plant-side.
 
-Briefing: Deze plant-side rol beveiligt operationele technologie bij productieomgevingen en machinebouwers in de Brainport-regio, met IEC 62443 als leidraad. De briefing richt zich op het onderscheid tussen IT- en OT-beveiliging, het uitvoeren van risicoanalyses op bestaande installaties, en het balanceren van beveiliging met bedrijfscontinuïteit.
+Briefing: This plant-side role secures operational technology at production environments and machine builders in the Brainport region, with IEC 62443 as the guiding standard. The briefing focuses on the distinction between IT and OT security, carrying out risk assessments on existing installations, and balancing security with business continuity.
 
 Five probing questions with senior-level model answers are listed above, separating OT-specific reasoning from
 IT-security habits applied uncritically to industrial systems.
 
 Risks to test:
-- IT-security-achtergrond die OT-continuïteitseisen onderschat — toets expliciet met de vraag over patchen en stilleggen van een lijn.
-- Kandidaten die IEC 62443 alleen kennen als naam, niet als toegepast zonerings- of risicomodel — vraag door op een concrete toepassing, niet op de norm in abstracto.
+- IT-security background that underestimates OT continuity requirements; test explicitly with the patching question.
+- Candidates who only know IEC 62443 by name, not as an applied zoning or risk model; probe for a concrete application, not the standard in the abstract.

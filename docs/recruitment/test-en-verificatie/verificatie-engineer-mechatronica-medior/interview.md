@@ -1,4 +1,4 @@
-# Interviewvragenbank — Verificatie-engineer mechatronica (medior)
+# Interviewvragenbank: Verificatie-engineer mechatronica (medior)
 
 Discipline: Test en verificatie
 Slug/job-id: `verificatie-engineer-mechatronica-medior`
@@ -16,7 +16,7 @@ Deze mediorrol vertaalt systeemrequirements naar verificatietests en voert die u
 
 ### 2. Een verificatietest toont een afwijking die zowel door mechanica als door software veroorzaakt kan zijn. Hoe herleid je de oorzaak?
 
-**Modelantwoord (seniorniveau):** Een sterk antwoord beschrijft het isoleren van variabelen — bijvoorbeeld de software vastzetten en alleen mechanische parameters variëren, of andersom — en het samen met de betrokken disciplines interpreteren van de resultaten, in plaats van te gokken welke discipline verantwoordelijk is.
+**Modelantwoord (seniorniveau):** Een sterk antwoord beschrijft het isoleren van variabelen, bijvoorbeeld de software vastzetten en alleen mechanische parameters variëren, of andersom, en het samen met de betrokken disciplines interpreteren van de resultaten, in plaats van te gokken welke discipline verantwoordelijk is.
 
 ### 3. Je ontdekt tijdens het opstellen van verificatietests dat twee requirements elkaar tegenspreken. Wat doe je?
 
@@ -33,19 +33,19 @@ Deze mediorrol vertaalt systeemrequirements naar verificatietests en voert die u
 ## Twee risico's om op te testen
 
 - Kandidaten die verificatie behandelen als eenmalig 'werkt het wel of niet' zonder aandacht voor meetonzekerheid of acceptatiecriteria.
-- Kandidaten die tegenstrijdige requirements zelf oplossen in plaats van te signaleren — dit ondermijnt de traceerbaarheid die de rol vereist.
+- Kandidaten die tegenstrijdige requirements zelf oplossen in plaats van te signaleren; dit ondermijnt de traceerbaarheid die de rol vereist.
 
 ---
 
 ## English summary
 
-**Interview question bank — Verificatie-engineer mechatronica (medior)**, slug `verificatie-engineer-mechatronica-medior`.
+**Interview question bank: Verificatie-engineer mechatronica (medior)**, slug `verificatie-engineer-mechatronica-medior`.
 
-Briefing: Deze mediorrol vertaalt systeemrequirements naar verificatietests en voert die uit op prototypes van mechatronische systemen. De briefing scheidt het opzetten van het verificatietraject (planning: welke test, welke meetmethode) van de uitvoering op de fysieke opstelling en het analyseren van resultaten.
+Briefing: This medior role translates system requirements into verification tests and carries them out on prototypes of mechatronic systems. The briefing separates setting up the verification trajectory (planning: which test, which measurement method) from execution on the physical rig and analysing results.
 
 Five probing questions with senior-level model answers are listed above, separating strategic test-design reasoning
 from execution and diagnosis on the actual test setup.
 
 Risks to test:
-- Kandidaten die verificatie behandelen als eenmalig 'werkt het wel of niet' zonder aandacht voor meetonzekerheid of acceptatiecriteria.
-- Kandidaten die tegenstrijdige requirements zelf oplossen in plaats van te signaleren — dit ondermijnt de traceerbaarheid die de rol vereist.
+- Candidates who treat verification as a one-off 'does it work or not' without attention to measurement uncertainty or acceptance criteria.
+- Candidates who resolve conflicting requirements themselves instead of flagging them; this undermines the traceability the role requires.

@@ -1,4 +1,4 @@
-# Interviewvragenbank — Mechatronisch systeemontwerper (senior)
+# Interviewvragenbank: Mechatronisch systeemontwerper (senior)
 
 Discipline: Mechatronica en besturingssoftware
 Slug/job-id: `mechatronisch-systeemontwerper-senior`
@@ -16,7 +16,7 @@ Deze senior rol draagt eindverantwoordelijkheid voor het systeemontwerp van mech
 
 ### 2. Een validatietest op systeemniveau faalt, maar alle deeltests waren geslaagd. Hoe pak je dit aan?
 
-**Modelantwoord (seniorniveau):** Een sterk antwoord richt zich op interactie-effecten tussen deelsystemen die in geïsoleerde tests niet zichtbaar waren — bijvoorbeeld gedeelde stroomvoorziening, elektromagnetische interferentie, of timing tussen deelsystemen — in plaats van de deeltests te herhalen.
+**Modelantwoord (seniorniveau):** Een sterk antwoord richt zich op interactie-effecten tussen deelsystemen die in geïsoleerde tests niet zichtbaar waren, bijvoorbeeld gedeelde stroomvoorziening, elektromagnetische interferentie, of timing tussen deelsystemen, in plaats van de deeltests te herhalen.
 
 ### 3. Hoe leg je een ontwerpbeslissing vast zodat die over een jaar nog navolgbaar is, ook als de context is vergeten?
 
@@ -32,21 +32,21 @@ Deze senior rol draagt eindverantwoordelijkheid voor het systeemontwerp van mech
 
 ## Twee risico's om op te testen
 
-- Iemand met zeven jaar ervaring die alleen componenten of deelsystemen heeft ontworpen, niet het systeem als geheel — vraag door op eindverantwoordelijkheid.
-- Iemand die documentatie als bijzaak behandelt — toets concreet of eerdere beslissingen navolgbaar zijn vastgelegd.
+- Iemand met zeven jaar ervaring die alleen componenten of deelsystemen heeft ontworpen, niet het systeem als geheel; vraag door op eindverantwoordelijkheid.
+- Iemand die documentatie als bijzaak behandelt; toets concreet of eerdere beslissingen navolgbaar zijn vastgelegd.
 
 ---
 
 ## English summary
 
-**Interview question bank — Mechatronisch systeemontwerper (senior)**, slug `mechatronisch-systeemontwerper-senior`.
+**Interview question bank: Mechatronisch systeemontwerper (senior)**, slug `mechatronisch-systeemontwerper-senior`.
 
-Briefing: Deze senior rol draagt eindverantwoordelijkheid voor het systeemontwerp van mechatronische deelsystemen, inclusief het begeleiden van mediorcollega's en het aansturen van validatie. De briefing richt zich op systeemniveau-afwegingen, coaching en navolgbare besluitvorming.
+Briefing: This senior role carries end responsibility for the system design of mechatronic subsystems, including mentoring medior colleagues and directing validation. The briefing focuses on system-level trade-offs, coaching and traceable decision-making.
 
 Five probing questions with senior-level model answers are listed above, covering control-design trade-offs,
 diagnosis on physical hardware, mechanical/control interaction, robustness over the machine's lifetime, and (for the
 senior variant) mentoring and honest handling of unspecified safety requirements.
 
 Risks to test:
-- Iemand met zeven jaar ervaring die alleen componenten of deelsystemen heeft ontworpen, niet het systeem als geheel — vraag door op eindverantwoordelijkheid.
-- Iemand die documentatie als bijzaak behandelt — toets concreet of eerdere beslissingen navolgbaar zijn vastgelegd.
+- Someone with seven years of experience who has only designed components or subsystems, not the system as a whole; ask about end responsibility.
+- Someone who treats documentation as a side task; test concretely whether earlier decisions are traceably recorded.

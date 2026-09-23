@@ -1,4 +1,4 @@
-# Interviewvragenbank — OT security engineer IEC 62443 (senior)
+# Interviewvragenbank: OT security engineer IEC 62443 (senior)
 
 Discipline: OT-cybersecurity (plant-side)
 Slug/job-id: `ot-security-engineer-iec-62443-senior`
@@ -28,24 +28,24 @@ Deze senior, plant-side rol draagt verantwoordelijkheid voor de OT-beveiligingss
 
 ### 5. Wat betekent NIS2 concreet voor een klant die voorheen geen wettelijke meldplicht had?
 
-**Modelantwoord (seniorniveau):** Een goed antwoord noemt dat de klant onder NIS2 een zorgplicht krijgt voor het treffen van passende beveiligingsmaatregelen en een meldplicht bij significante incidenten binnen een wettelijke termijn, en dat dit de urgentie van een OT-beveiligingsarchitectuur kan verhogen — zonder te claimen dat de kandidaat een juridisch oordeel geeft.
+**Modelantwoord (seniorniveau):** Een goed antwoord noemt dat de klant onder NIS2 een zorgplicht krijgt voor het treffen van passende beveiligingsmaatregelen en een meldplicht bij significante incidenten binnen een wettelijke termijn, en dat dit de urgentie van een OT-beveiligingsarchitectuur kan verhogen, zonder te claimen dat de kandidaat een juridisch oordeel geeft.
 
 ## Twee risico's om op te testen
 
-- Iemand die zeven jaar 'security' ervaring heeft maar grotendeels IT-gericht is — toets expliciet OT-specifieke architectuurervaring.
-- Overclaimen van NIS2-kennis als juridisch advies in plaats van technische context — bewaak dat de kandidaat naar juridische expertise verwijst waar nodig.
+- Iemand die zeven jaar 'security' ervaring heeft maar grotendeels IT-gericht is; toets expliciet OT-specifieke architectuurervaring.
+- Overclaimen van NIS2-kennis als juridisch advies in plaats van technische context; bewaak dat de kandidaat naar juridische expertise verwijst waar nodig.
 
 ---
 
 ## English summary
 
-**Interview question bank — OT security engineer IEC 62443 (senior)**, slug `ot-security-engineer-iec-62443-senior`, plant-side.
+**Interview question bank: OT security engineer IEC 62443 (senior)**, slug `ot-security-engineer-iec-62443-senior`, plant-side.
 
-Briefing: Deze senior, plant-side rol draagt verantwoordelijkheid voor de OT-beveiligingsstrategie bij productieomgevingen en machinebouwers, gebaseerd op IEC 62443. De briefing richt zich op architectuurkeuzes, advisering over kosten-risico-afwegingen, en het onderhouden van de strategie bij veranderende installaties en dreigingen.
+Briefing: This senior, plant-side role carries responsibility for the OT security strategy at production environments and machine builders, based on IEC 62443. The briefing focuses on architecture choices, advising on cost-risk trade-offs, and maintaining the strategy as installations and threats change.
 
 Five probing questions with senior-level model answers are listed above, separating OT-specific reasoning from
 IT-security habits applied uncritically to industrial systems.
 
 Risks to test:
-- Iemand die zeven jaar 'security' ervaring heeft maar grotendeels IT-gericht is — toets expliciet OT-specifieke architectuurervaring.
-- Overclaimen van NIS2-kennis als juridisch advies in plaats van technische context — bewaak dat de kandidaat naar juridische expertise verwijst waar nodig.
+- Someone with seven years of 'security' experience that is largely IT-focused; test explicitly for OT-specific architecture experience.
+- Overclaiming NIS2 knowledge as legal advice rather than technical context; make sure the candidate refers to legal expertise where needed.

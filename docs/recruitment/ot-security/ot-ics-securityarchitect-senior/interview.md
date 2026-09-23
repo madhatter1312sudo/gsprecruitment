@@ -1,4 +1,4 @@
-# Interviewvragenbank — OT/ICS-securityarchitect (senior)
+# Interviewvragenbank: OT/ICS-securityarchitect (senior)
 
 Discipline: OT-cybersecurity (plant-side)
 Slug/job-id: `ot-ics-securityarchitect-senior`
@@ -32,20 +32,20 @@ Deze senior, plant-side rol ontwerpt de beveiligingsarchitectuur voor industrië
 
 ## Twee risico's om op te testen
 
-- Architectuurkennis die alleen op papier bestaat, zonder ervaring met daadwerkelijke implementatie in een productieomgeving — vraag door op een concreet, opgeleverd voorbeeld.
-- Onderschatting van de operationele impact van beveiligingsmaatregelen op productiecontinuïteit — toets met de vraag over noodtoegang.
+- Architectuurkennis die alleen op papier bestaat, zonder ervaring met daadwerkelijke implementatie in een productieomgeving; vraag door op een concreet, opgeleverd voorbeeld.
+- Onderschatting van de operationele impact van beveiligingsmaatregelen op productiecontinuïteit; toets met de vraag over noodtoegang.
 
 ---
 
 ## English summary
 
-**Interview question bank — OT/ICS-securityarchitect (senior)**, slug `ot-ics-securityarchitect-senior`, plant-side.
+**Interview question bank: OT/ICS-securityarchitect (senior)**, slug `ot-ics-securityarchitect-senior`, plant-side.
 
-Briefing: Deze senior, plant-side rol ontwerpt de beveiligingsarchitectuur voor industriële besturingssystemen bij productieomgevingen en machinebouwers, en fungeert als poortwachter voor nieuwe systemen en leveranciers. De briefing richt zich op architectuurkeuzes, leveranciersbeoordeling en samenwerking tussen OT, IT en engineering.
+Briefing: This senior, plant-side role designs the security architecture for industrial control systems at production environments and machine builders, and acts as gatekeeper for new systems and suppliers. The briefing focuses on architecture choices, supplier assessment, and collaboration between OT, IT and engineering.
 
 Five probing questions with senior-level model answers are listed above, separating OT-specific reasoning from
 IT-security habits applied uncritically to industrial systems.
 
 Risks to test:
-- Architectuurkennis die alleen op papier bestaat, zonder ervaring met daadwerkelijke implementatie in een productieomgeving — vraag door op een concreet, opgeleverd voorbeeld.
-- Onderschatting van de operationele impact van beveiligingsmaatregelen op productiecontinuïteit — toets met de vraag over noodtoegang.
+- Architecture knowledge that exists only on paper, without experience of actual implementation in a production environment; ask for a concrete, delivered example.
+- Underestimating the operational impact of security measures on production continuity; test with the emergency-access question.

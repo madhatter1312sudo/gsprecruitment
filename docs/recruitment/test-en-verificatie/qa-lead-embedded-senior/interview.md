@@ -1,4 +1,4 @@
-# Interviewvragenbank — QA-lead embedded (senior)
+# Interviewvragenbank: QA-lead embedded (senior)
 
 Discipline: Test en verificatie
 Slug/job-id: `qa-lead-embedded-senior`
@@ -24,7 +24,7 @@ Deze senior, strategiebepalende rol draagt verantwoordelijkheid voor de teststra
 
 ### 4. Hoe meet je of testautomatisering voor een project daadwerkelijk waarde toevoegt?
 
-**Modelantwoord (seniorniveau):** Een sterk antwoord noemt indicatoren zoals afname van doorlooptijd tot feedback, gevonden regressies die anders gemist zouden zijn, en onderhoudslast van de testset zelf — automatisering die veel onderhoud kost voor weinig gevonden defecten is geen automatische winst.
+**Modelantwoord (seniorniveau):** Een sterk antwoord noemt indicatoren zoals afname van doorlooptijd tot feedback, gevonden regressies die anders gemist zouden zijn, en onderhoudslast van de testset zelf; automatisering die veel onderhoud kost voor weinig gevonden defecten is geen automatische winst.
 
 ### 5. Hoe zou je functionele veiligheid meewegen in de QA-aanpak van een project, ook zonder een voorgeschreven norm?
 
@@ -39,13 +39,13 @@ Deze senior, strategiebepalende rol draagt verantwoordelijkheid voor de teststra
 
 ## English summary
 
-**Interview question bank — QA-lead embedded (senior)**, slug `qa-lead-embedded-senior`.
+**Interview question bank: QA-lead embedded (senior)**, slug `qa-lead-embedded-senior`.
 
-Briefing: Deze senior, strategiebepalende rol draagt verantwoordelijkheid voor de teststrategie en kwaliteitsborging van embedded softwareontwikkeling op projectniveau. De briefing scheidt expliciet het bepalen van strategie, risico en proces (QA-lead) van de uitvoering die bij testers en testautomatiseringsengineers ligt.
+Briefing: This senior, strategy-setting role carries responsibility for the test strategy and quality assurance of embedded software development at project level. The briefing explicitly separates setting strategy, risk and process (QA lead) from execution, which sits with testers and test-automation engineers.
 
 Five probing questions with senior-level model answers are listed above, separating strategic test-design reasoning
 from execution and diagnosis on the actual test setup.
 
 Risks to test:
-- Iemand met zeven jaar ervaring die vooral zelf heeft getest en nooit een teststrategie voor een project heeft bepaald of verdedigd tegen planningsdruk.
-- Overclaimen van veiligheidscertificering: toets of 'functionele veiligheid' als brede affiniteit wordt beschreven of als concrete normkennis die het record niet onderbouwt.
+- Someone with seven years of experience who has mainly tested themselves and never set or defended a project's test strategy against planning pressure.
+- Overclaiming safety certification: test whether 'functional safety' is described as a broad affinity or as specific standards knowledge that the record does not support.

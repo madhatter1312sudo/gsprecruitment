@@ -1,4 +1,4 @@
-# Requirement sheet — Softwaretester C++ (medior)
+# Requirement sheet: Softwaretester C++ (medior)
 
 Discipline: Test en verificatie
 Slug/job-id: `softwaretester-cpp-medior` (interim job-id; de platform-API bevat nog geen vacatures, dit is de seedfile-bron)
@@ -40,7 +40,7 @@ Ondersteunend bewijs van gestructureerde testkennis; zie de sectie normen hieron
 ## Normen
 
 **ISTQB (certificering, nice-to-have)**
-ISTQB is een internationaal erkend certificeringsprogramma voor softwaretesten dat gestructureerde testtechnieken en terminologie toetst. Voor deze rol betekent een ISTQB-achtergrond dat de kandidaat vertrouwd is met formele testontwerptechnieken (bijvoorbeeld equivalentieklassen, grenswaardeanalyse), maar het record vraagt dit niet als voorwaarde — praktijkervaring met C++-testen weegt zwaarder.
+ISTQB is een internationaal erkend certificeringsprogramma voor softwaretesten dat gestructureerde testtechnieken en terminologie toetst. Voor deze rol betekent een ISTQB-achtergrond dat de kandidaat vertrouwd is met formele testontwerptechnieken (bijvoorbeeld equivalentieklassen, grenswaardeanalyse), maar het record vraagt dit niet als voorwaarde; praktijkervaring met C++-testen weegt zwaarder.
 
 ## Drie vragen die een fit van een near-fit scheiden
 
@@ -54,7 +54,7 @@ ISTQB is een internationaal erkend certificeringsprogramma voor softwaretesten d
 
 €48.000–€65.000 bruto per jaar, vast
 
-## Locatie — de praktijk
+## Locatie: de praktijk
 
 Standplaats Helmond, hybride. Het record specificeert geen vast aantal thuiswerkdagen; vraag in het eerste gesprek hoeveel dagen fysieke aanwezigheid bij testopstellingen of het team nodig is. Vorm: vaste aanstelling.
 
@@ -63,7 +63,7 @@ Standplaats Helmond, hybride. Het record specificeert geen vast aantal thuiswerk
 Niet vastgelegd. Het record noemt geen shift- of oproeppatroon voor deze vacature; wij vermelden hier geen patroon
 dat niet in de tekst staat.
 
-## Klant — ongeschreven voorkeuren
+## Klant: ongeschreven voorkeuren
 
 Niet vastgelegd. Er is geen account manager-notitie over deze vacature in het record; wij vermelden hier geen
 voorkeur die niet is vastgelegd.
@@ -72,9 +72,9 @@ voorkeur die niet is vastgelegd.
 
 ## English summary
 
-**Softwaretester C++ (medior)** — discipline: test and verification. Slug/interim job-id: `softwaretester-cpp-medior`.
+**Softwaretester C++ (medior)**, discipline: test and verification. Slug/interim job-id: `softwaretester-cpp-medior`.
 
-**Strategy versus execution:** Deze rol combineert **testplanning binnen een project en uitvoering**: de kandidaat stelt zelf testplannen en testgevallen op op basis van requirements, en voert zowel handmatige als geautomatiseerde tests uit. Dit is projectniveau-strategie (welke tests, in welke volgorde, welke risicogebieden eerst), niet organisatiebrede teststrategie zoals bij de QA-lead-rol. De vacaturetekst vraagt expliciet vroege signalering van risicogebieden, wat verder gaat dan pure uitvoering.
+**Strategy versus execution:** This role combines **project-level test planning and execution**: the candidate independently draws up test plans and test cases based on requirements, and carries out both manual and automated tests. This is project-level strategy (which tests, in what order, which risk areas first), not organisation-wide test strategy as with the QA-lead role. The vacancy text explicitly asks for early flagging of risk areas, which goes beyond pure execution.
 
 Knock-outs: relevant degree, the stated years of hands-on experience, the language level as stated in the record,
 and no visa sponsorship for this role (sponsorship_possible: false).
@@ -82,6 +82,6 @@ and no visa sponsorship for this role (sponsorship_possible: false).
 Must-haves are interpreted from the vacancy text, not restated as a keyword list. Named standards/certifications and
 what they imply for this role are listed above.
 
-Salary band: €48.000–€65.000 bruto per jaar, vast.
+Salary band: €48,000–€65,000 gross per year, permanent.
 Location: Helmond, Hybride, vast.
 Shift/on-call pattern: not recorded. Client's unwritten preferences: not recorded.

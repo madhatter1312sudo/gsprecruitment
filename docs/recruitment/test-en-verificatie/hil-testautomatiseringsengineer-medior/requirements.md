@@ -1,4 +1,4 @@
-# Requirement sheet — HIL-testautomatiseringsengineer (medior)
+# Requirement sheet: HIL-testautomatiseringsengineer (medior)
 
 Discipline: Test en verificatie
 Slug/job-id: `hil-testautomatiseringsengineer-medior` (interim job-id; de platform-API bevat nog geen vacatures, dit is de seedfile-bron)
@@ -53,16 +53,16 @@ Geen normen worden met naam genoemd in de vacaturetekst voor deze rol.
 
 €48.000–€65.000 bruto per jaar, detachering
 
-## Locatie — de praktijk
+## Locatie: de praktijk
 
-Standplaats Eindhoven, volledig on-site. Geen hybride- of thuiswerkregeling in het record; reken op dagelijks reizen naar Eindhoven of verhuizing — relevant bij een HIL-opstelling of testrig die niet op afstand bediend kan worden. Vorm: detachering.
+Standplaats Eindhoven, volledig on-site. Geen hybride- of thuiswerkregeling in het record; reken op dagelijks reizen naar Eindhoven of verhuizing; relevant bij een HIL-opstelling of testrig die niet op afstand bediend kan worden. Vorm: detachering.
 
 ## Shift- of oproeppatroon
 
 Niet vastgelegd. Het record noemt geen shift- of oproeppatroon voor deze vacature; wij vermelden hier geen patroon
 dat niet in de tekst staat.
 
-## Klant — ongeschreven voorkeuren
+## Klant: ongeschreven voorkeuren
 
 Niet vastgelegd. Er is geen account manager-notitie over deze vacature in het record; wij vermelden hier geen
 voorkeur die niet is vastgelegd.
@@ -71,9 +71,9 @@ voorkeur die niet is vastgelegd.
 
 ## English summary
 
-**HIL-testautomatiseringsengineer (medior)** — discipline: test and verification. Slug/interim job-id: `hil-testautomatiseringsengineer-medior`.
+**HIL-testautomatiseringsengineer (medior)**, discipline: test and verification. Slug/interim job-id: `hil-testautomatiseringsengineer-medior`.
 
-**Strategy versus execution:** Deze rol combineert **uitvoering en beperkte strategie**: de kandidaat bouwt en onderhoudt zelfstandig testen, breidt de testdekking uit 'op basis van requirements en eerder gevonden defecten', en werkt mee aan de testinfrastructuur zelf. Dat is meer dan uitvoering alleen, maar de vacaturetekst noemt geen verantwoordelijkheid voor de teststrategie van het hele project (dat is de senior/qa-lead-rol); de medior prioriteert binnen een gegeven kader, bepaalt het kader niet.
+**Strategy versus execution:** This role combines **execution and limited strategy**: the candidate independently builds and maintains tests, expands test coverage 'based on requirements and previously found defects', and helps improve the test infrastructure itself. That is more than execution alone, but the vacancy text names no responsibility for the project's overall test strategy (that is the senior/QA-lead role); the medior prioritises within a given framework, not set the framework.
 
 Knock-outs: relevant degree, the stated years of hands-on experience, the language level as stated in the record,
 and no visa sponsorship for this role (sponsorship_possible: false).
@@ -81,6 +81,6 @@ and no visa sponsorship for this role (sponsorship_possible: false).
 Must-haves are interpreted from the vacancy text, not restated as a keyword list. Named standards/certifications and
 what they imply for this role are listed above.
 
-Salary band: €48.000–€65.000 bruto per jaar, detachering.
+Salary band: €48,000–€65,000 gross per year, secondment.
 Location: Eindhoven, On-site, detachering.
 Shift/on-call pattern: not recorded. Client's unwritten preferences: not recorded.

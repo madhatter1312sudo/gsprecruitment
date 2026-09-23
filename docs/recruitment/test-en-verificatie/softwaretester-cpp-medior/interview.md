@@ -1,4 +1,4 @@
-# Interviewvragenbank — Softwaretester C++ (medior)
+# Interviewvragenbank: Softwaretester C++ (medior)
 
 Discipline: Test en verificatie
 Slug/job-id: `softwaretester-cpp-medior`
@@ -39,13 +39,13 @@ Deze mediorrol test embedded en desktopsoftware in C++, met verantwoordelijkheid
 
 ## English summary
 
-**Interview question bank — Softwaretester C++ (medior)**, slug `softwaretester-cpp-medior`.
+**Interview question bank: Softwaretester C++ (medior)**, slug `softwaretester-cpp-medior`.
 
-Briefing: Deze mediorrol test embedded en desktopsoftware in C++, met verantwoordelijkheid voor testplanning op projectniveau én uitvoering. De briefing scheidt het opstellen van testplannen en het vroeg signaleren van risicogebieden (planning) van het daadwerkelijk uitvoeren van handmatige en geautomatiseerde tests (uitvoering).
+Briefing: This medior role tests embedded and desktop software in C++, with responsibility for both project-level test planning and execution. The briefing separates drawing up test plans and early flagging of risk areas (planning) from actually carrying out manual and automated tests (execution).
 
 Five probing questions with senior-level model answers are listed above, separating strategic test-design reasoning
 from execution and diagnosis on the actual test setup.
 
 Risks to test:
-- Kandidaten met generieke testervaring die geen C++-specifieke foutcategorieën kunnen noemen.
-- Kandidaten die alleen reactief testen (wachten op code) en geen voorbeeld hebben van vroege risicosignalering.
+- Candidates with generic testing experience who cannot name any C++-specific defect categories.
+- Candidates who only test reactively (waiting for code) and have no example of early risk signalling.

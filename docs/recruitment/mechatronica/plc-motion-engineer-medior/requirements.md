@@ -1,4 +1,4 @@
-# Requirement sheet — PLC/motion engineer (medior)
+# Requirement sheet: PLC/motion engineer (medior)
 
 Discipline: Mechatronica en besturingssoftware
 Slug/job-id: `plc-motion-engineer-medior` (interim job-id; de platform-API bevat nog geen vacatures, dit is de seedfile-bron)
@@ -51,24 +51,24 @@ Deze norm stelt eisen aan de veiligheidsbetrouwbaarheid van machinebesturing (Pe
 
 niet beschikbaar (geen band in het record; 23-09-2026)
 
-## Locatie — de praktijk
+## Locatie: de praktijk
 
 Standplaats Veldhoven, volledig on-site. Geen hybride- of thuiswerkregeling in het record; reken op dagelijks reizen naar Veldhoven of verhuizing. Voor kandidaten buiten de Brainport-regio is dit een reëel knelpunt, niet een formaliteit. Vorm: detachering.
 
-## Klant — ongeschreven voorkeuren
+## Klant: ongeschreven voorkeuren
 
 Niet vastgelegd. Er is geen account manager-notitie over deze vacature in het record; wij vermelden hier geen voorkeur
 die niet is vastgelegd.
 
 ## PLC-only versus control-software
 
-Deze rol is de PLC-programmeerfunctie zelf, inclusief motion control — het duidelijkste PLC-only-profiel in deze discipline, in tegenstelling tot de regeltechniek- of systeemontwerprollen.
+Deze rol is de PLC-programmeerfunctie zelf, inclusief motion control; het duidelijkste PLC-only-profiel in deze discipline, in tegenstelling tot de regeltechniek- of systeemontwerprollen.
 
 ---
 
 ## English summary
 
-**PLC/motion engineer (medior)** — discipline: mechatronics and control software. Slug/interim job-id:
+**PLC/motion engineer (medior)**, discipline: mechatronics and control software. Slug/interim job-id:
 `plc-motion-engineer-medior`.
 
 Knock-outs: relevant degree, the stated years of hands-on control-engineering experience, the language level as stated
@@ -78,8 +78,8 @@ Must-haves are interpreted from the vacancy text, not restated as a keyword list
 practice and how to recognise it in a CV or conversation. Nice-to-haves and named standards (if any) are listed above
 with what they imply for this role.
 
-Salary band: niet beschikbaar (geen band in het record; 23-09-2026).
-Location: Veldhoven, On-site, detachering — see the location-reality section above for
+Salary band: not available (no band in the record; 23-09-2026).
+Location: Veldhoven, On-site, detachering. See the location-reality section above for
 commute/relocation implications.
 
 Client's unwritten preferences: not recorded (no account-manager note in the record).

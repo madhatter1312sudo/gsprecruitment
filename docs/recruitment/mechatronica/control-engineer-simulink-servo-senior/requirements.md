@@ -1,4 +1,4 @@
-# Requirement sheet — Control engineer Simulink/servo (senior)
+# Requirement sheet: Control engineer Simulink/servo (senior)
 
 Discipline: Mechatronica en besturingssoftware
 Slug/job-id: `control-engineer-simulink-servo-senior` (interim job-id; de platform-API bevat nog geen vacatures, dit is de seedfile-bron)
@@ -8,7 +8,7 @@ Datum opgesteld: 23-09-2026
 
 1. WO- of HBO-diploma in werktuigbouwkunde, mechatronica of elektrotechniek.
 2. Minimaal zeven jaar aantoonbare ervaring met regeltechniek voor servoaandrijvingen; medior-ervaring van drie tot vijf jaar voldoet niet aan deze eis.
-3. Nederlands én Engels op technisch niveau — het record vraagt hier beide talen, niet 'of' zoals bij de mediorvariant.
+3. Nederlands én Engels op technisch niveau; het record vraagt hier beide talen, niet 'of' zoals bij de mediorvariant.
 4. Sponsorschap van een werkvergunning is voor deze vacature niet mogelijk (sponsorship_possible: false in het record).
 
 ## Must-haves (geïnterpreteerd)
@@ -20,7 +20,7 @@ Dit is geen ervaringsjaren-afvinken: de kandidaat moet kunnen uitleggen waarom e
 De rol vraagt om mediorcollega's te begeleiden, dus de kandidaat moet kunnen aantonen dat hij of zij eerder kennis heeft overgedragen, niet alleen zelf heeft opgeleverd. Vraag naar een concreet voorbeeld van een collega die een probleem niet zelfstandig oploste en hoe dat werd aangepakt.
 
 **Precisiemechanica en de wisselwerking met regeltechniek**
-Sterke kennis hier betekent dat de kandidaat vroeg kan signaleren waar mechanisch ontwerp en regeltechniek elkaar raken — bijvoorbeeld resonantie of speling die de haalbare bandbreedte beperkt — vóórdat dit in de opstelling zichtbaar wordt.
+Sterke kennis hier betekent dat de kandidaat vroeg kan signaleren waar mechanisch ontwerp en regeltechniek elkaar raken, bijvoorbeeld resonantie of speling die de haalbare bandbreedte beperkt, vóórdat dit in de opstelling zichtbaar wordt.
 
 **Valideren van regelgedrag op een fysieke opstelling, zelfstandig**
 Op seniorniveau betekent dit dat de kandidaat het validatietraject zelf opzet en niet alleen uitvoert wat een ander heeft bedacht.
@@ -36,7 +36,7 @@ Het record noemt geen specifieke norm; dit is een indicatie van affiniteit met v
 ## Normen
 
 **Functionele veiligheid (geen specifieke norm genoemd)**
-Het record noemt alleen 'functionele veiligheid in bewegende systemen' als nice-to-have, zonder een norm zoals ISO 13849 of IEC 62061 te benoemen. Wij vermelden dit als domeinaffiniteit, niet als certificeringseis — een claim over een specifieke norm zou hier verder gaan dan het record toelaat.
+Het record noemt alleen 'functionele veiligheid in bewegende systemen' als nice-to-have, zonder een norm zoals ISO 13849 of IEC 62061 te benoemen. Wij vermelden dit als domeinaffiniteit, niet als certificeringseis; een claim over een specifieke norm zou hier verder gaan dan het record toelaat.
 
 ## Drie vragen die een fit van een near-fit scheiden
 
@@ -50,11 +50,11 @@ Het record noemt alleen 'functionele veiligheid in bewegende systemen' als nice-
 
 niet beschikbaar (geen band in het record; 23-09-2026)
 
-## Locatie — de praktijk
+## Locatie: de praktijk
 
 Standplaats Veldhoven, volledig on-site. Geen hybride- of thuiswerkregeling in het record; reken op dagelijks reizen naar Veldhoven of verhuizing. Voor kandidaten buiten de Brainport-regio is dit een reëel knelpunt, niet een formaliteit. Vorm: detachering.
 
-## Klant — ongeschreven voorkeuren
+## Klant: ongeschreven voorkeuren
 
 Niet vastgelegd. Er is geen account manager-notitie over deze vacature in het record; wij vermelden hier geen voorkeur
 die niet is vastgelegd.
@@ -67,7 +67,7 @@ Deze rol is regeltechniek/systeemontwerp, geen PLC-programmeerfunctie. Zie de PL
 
 ## English summary
 
-**Control engineer Simulink/servo (senior)** — discipline: mechatronics and control software. Slug/interim job-id:
+**Control engineer Simulink/servo (senior)**, discipline: mechatronics and control software. Slug/interim job-id:
 `control-engineer-simulink-servo-senior`.
 
 Knock-outs: relevant degree, the stated years of hands-on control-engineering experience, the language level as stated
@@ -77,8 +77,8 @@ Must-haves are interpreted from the vacancy text, not restated as a keyword list
 practice and how to recognise it in a CV or conversation. Nice-to-haves and named standards (if any) are listed above
 with what they imply for this role.
 
-Salary band: niet beschikbaar (geen band in het record; 23-09-2026).
-Location: Veldhoven, On-site, detachering — see the location-reality section above for
+Salary band: not available (no band in the record; 23-09-2026).
+Location: Veldhoven, On-site, detachering. See the location-reality section above for
 commute/relocation implications.
 
 Client's unwritten preferences: not recorded (no account-manager note in the record).

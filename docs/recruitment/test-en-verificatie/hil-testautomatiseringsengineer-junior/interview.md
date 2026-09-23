@@ -1,4 +1,4 @@
-# Interviewvragenbank — HIL-testautomatiseringsengineer (junior)
+# Interviewvragenbank: HIL-testautomatiseringsengineer (junior)
 
 Discipline: Test en verificatie
 Slug/job-id: `hil-testautomatiseringsengineer-junior`
@@ -16,7 +16,7 @@ Deze junior, uitvoerende rol test embedded en mechatronische systemen op een HIL
 
 ### 2. Een geautomatiseerde test faalt onverwacht. Wat is je eerste stap?
 
-**Modelantwoord (seniorniveau):** Een sterk antwoord beschrijft eerst controleren of het testscript zelf correct is (geen scriptfout), vervolgens de testomgeving en -data controleren, en pas daarna concluderen dat het systeem onder test een echte afwijking vertoont — in plaats van meteen een bug in het geteste systeem aan te nemen.
+**Modelantwoord (seniorniveau):** Een sterk antwoord beschrijft eerst controleren of het testscript zelf correct is (geen scriptfout), vervolgens de testomgeving en -data controleren, en pas daarna concluderen dat het systeem onder test een echte afwijking vertoont, in plaats van meteen een bug in het geteste systeem aan te nemen.
 
 ### 3. Waarom zou je dezelfde test meerdere keren herhalen voordat je een resultaat als betrouwbaar beschouwt?
 
@@ -28,7 +28,7 @@ Deze junior, uitvoerende rol test embedded en mechatronische systemen op een HIL
 
 ### 5. Hoe documenteer je een testresultaat zodat een collega het kan reproduceren?
 
-**Modelantwoord (seniorniveau):** Een goed antwoord noemt het vastleggen van de exacte testconfiguratie, invoerdata, verwachte versus waargenomen uitkomst, en de versie van het geteste systeem — genoeg detail om de test exact te herhalen zonder de oorspronkelijke tester te hoeven raadplegen.
+**Modelantwoord (seniorniveau):** Een goed antwoord noemt het vastleggen van de exacte testconfiguratie, invoerdata, verwachte versus waargenomen uitkomst, en de versie van het geteste systeem; genoeg detail om de test exact te herhalen zonder de oorspronkelijke tester te hoeven raadplegen.
 
 ## Twee risico's om op te testen
 
@@ -39,13 +39,13 @@ Deze junior, uitvoerende rol test embedded en mechatronische systemen op een HIL
 
 ## English summary
 
-**Interview question bank — HIL-testautomatiseringsengineer (junior)**, slug `hil-testautomatiseringsengineer-junior`.
+**Interview question bank: HIL-testautomatiseringsengineer (junior)**, slug `hil-testautomatiseringsengineer-junior`.
 
-Briefing: Deze junior, uitvoerende rol test embedded en mechatronische systemen op een HIL-opstelling onder begeleiding van ervaren collega's. De briefing richt zich op basisbegrip van scripting, het samenspel tussen simulatie en fysieke hardware, en leerhouding bij onverwachte resultaten.
+Briefing: This junior, execution-focused role tests embedded and mechatronic systems on a HIL rig under supervision from experienced colleagues. The briefing focuses on basic understanding of scripting, the interplay between simulation and physical hardware, and learning attitude when results are unexpected.
 
 Five probing questions with senior-level model answers are listed above, separating strategic test-design reasoning
 from execution and diagnosis on the actual test setup.
 
 Risks to test:
-- Kandidaten die alleen handmatig testen en 'automatisering' als buzzword gebruiken zonder eigen scriptvoorbeeld.
-- Kandidaten die een falende test meteen als bug in het systeem bestempelen zonder eerst het testscript zelf te controleren.
+- Candidates who only test manually and use 'automation' as a buzzword without their own script example.
+- Candidates who immediately label a failing test as a bug in the system without first checking the test script itself.

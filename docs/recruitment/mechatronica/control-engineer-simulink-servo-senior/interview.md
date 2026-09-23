@@ -1,4 +1,4 @@
-# Interviewvragenbank — Control engineer Simulink/servo (senior)
+# Interviewvragenbank: Control engineer Simulink/servo (senior)
 
 Discipline: Mechatronica en besturingssoftware
 Slug/job-id: `control-engineer-simulink-servo-senior`
@@ -24,7 +24,7 @@ Deze senior rol draagt verantwoordelijkheid voor het regeltechnisch ontwerp van 
 
 ### 4. Wat is voor jou het verschil tussen een regelaar die 'werkt' en een regelaar die robuust is over de levensduur van de machine?
 
-**Modelantwoord (seniorniveau):** Een sterk antwoord noemt marges voor slijtage, temperatuurdrift van componenten, en variatie tussen machine-exemplaren, en beschrijft hoe daarvoor wordt getest — bijvoorbeeld door parameters over een range van omstandigheden te valideren in plaats van eenmalig op één opstelling.
+**Modelantwoord (seniorniveau):** Een sterk antwoord noemt marges voor slijtage, temperatuurdrift van componenten, en variatie tussen machine-exemplaren, en beschrijft hoe daarvoor wordt getest, bijvoorbeeld door parameters over een range van omstandigheden te valideren in plaats van eenmalig op één opstelling.
 
 ### 5. Hoe zou je functionele veiligheid meewegen in het ontwerp van een bewegingsas, ook als er geen expliciete norm is voorgeschreven?
 
@@ -32,21 +32,21 @@ Deze senior rol draagt verantwoordelijkheid voor het regeltechnisch ontwerp van 
 
 ## Twee risico's om op te testen
 
-- Iemand met zeven jaar ervaring die nooit collega's heeft begeleid — de rol vereist expliciet coaching, niet alleen senioriteit in jaren.
+- Iemand met zeven jaar ervaring die nooit collega's heeft begeleid; de rol vereist expliciet coaching, niet alleen senioriteit in jaren.
 - Overclaimen van veiligheidscertificering: toets of de kandidaat 'functionele veiligheid' als brede affiniteit beschrijft of als concrete normkennis presenteert die het record niet onderbouwt.
 
 ---
 
 ## English summary
 
-**Interview question bank — Control engineer Simulink/servo (senior)**, slug `control-engineer-simulink-servo-senior`.
+**Interview question bank: Control engineer Simulink/servo (senior)**, slug `control-engineer-simulink-servo-senior`.
 
-Briefing: Deze senior rol draagt verantwoordelijkheid voor het regeltechnisch ontwerp van servoaandrijvingen én voor het begeleiden van mediorcollega's. De briefing richt zich op onderbouwde ontwerpkeuzes, vroege signalering van mechanisch-regeltechnische raakvlakken en het vermogen om kennis over te dragen, niet alleen zelf te presteren.
+Briefing: This senior role carries responsibility for the control-engineering design of servo drives and for mentoring medior colleagues. The briefing focuses on well-founded design choices, early flagging of mechanical/control interfaces, and the ability to transfer knowledge, not just to perform.
 
 Five probing questions with senior-level model answers are listed above, covering control-design trade-offs,
 diagnosis on physical hardware, mechanical/control interaction, robustness over the machine's lifetime, and (for the
 senior variant) mentoring and honest handling of unspecified safety requirements.
 
 Risks to test:
-- Iemand met zeven jaar ervaring die nooit collega's heeft begeleid — de rol vereist expliciet coaching, niet alleen senioriteit in jaren.
-- Overclaimen van veiligheidscertificering: toets of de kandidaat 'functionele veiligheid' als brede affiniteit beschrijft of als concrete normkennis presenteert die het record niet onderbouwt.
+- Someone with seven years of experience who has never mentored colleagues; the role explicitly requires coaching, not just seniority in years.
+- Overclaiming safety certification: test whether the candidate describes 'functional safety' as a broad affinity or presents specific standards knowledge that the record does not support.

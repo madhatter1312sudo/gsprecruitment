@@ -1,4 +1,4 @@
-# Requirement sheet — OT/ICS-securityarchitect (senior)
+# Requirement sheet: OT/ICS-securityarchitect (senior)
 
 Discipline: OT-cybersecurity
 Slug/job-id: `ot-ics-securityarchitect-senior` (interim job-id; de platform-API bevat nog geen vacatures, dit is de seedfile-bron)
@@ -57,16 +57,16 @@ Verbreedt de wettelijke zorg- en meldplicht voor cyberincidenten; relevant voor 
 
 niet beschikbaar (geen band in het record; 23-09-2026)
 
-## Locatie — de praktijk
+## Locatie: de praktijk
 
-Standplaats Veldhoven, hybride. Het record specificeert geen vast aantal thuiswerkdagen; OT-werk vereist regelmatig fysieke aanwezigheid op de productielocatie voor toegang tot industriële netwerken die niet op afstand bereikbaar zijn — vraag dit in het eerste gesprek concreet uit. Vorm: vaste aanstelling.
+Standplaats Veldhoven, hybride. Het record specificeert geen vast aantal thuiswerkdagen; OT-werk vereist regelmatig fysieke aanwezigheid op de productielocatie voor toegang tot industriële netwerken die niet op afstand bereikbaar zijn; vraag dit in het eerste gesprek concreet uit. Vorm: vaste aanstelling.
 
-## Klant — screeningseisen
+## Klant: screeningseisen
 
 Niet vastgelegd. Er is geen account manager-notitie over eventuele klant-screeningseisen (bijvoorbeeld een
 Verklaring Omtrent het Gedrag of een veiligheidsonderzoek) in het record.
 
-## Klant — ongeschreven voorkeuren
+## Klant: ongeschreven voorkeuren
 
 Niet vastgelegd. Er is geen account manager-notitie over deze vacature in het record; wij vermelden hier geen
 voorkeur die niet is vastgelegd.
@@ -75,9 +75,9 @@ voorkeur die niet is vastgelegd.
 
 ## English summary
 
-**OT/ICS-securityarchitect (senior)** — discipline: OT cybersecurity. Slug/interim job-id: `ot-ics-securityarchitect-senior`.
+**OT/ICS-securityarchitect (senior)**, discipline: OT cybersecurity. Slug/interim job-id: `ot-ics-securityarchitect-senior`.
 
-**Product-side or plant-side: plant-side.** De rol ontwerpt beveiligingsarchitectuur (zonering, monitoring, toegangsbeheer) voor OT-netwerken bij productieomgevingen en machinebouwers, afgestemd op 'de praktijk van bestaande installaties', en beoordeelt nieuwe systemen/leveranciers vóór opname in de omgeving. Het zwaartepunt ligt op het beveiligen van de operationele omgeving zelf, niet op het bouwen van een verkoopbaar product.
+**Product-side or plant-side: plant-side.** The role designs security architecture (zoning, monitoring, access management) for OT networks at production environments and machine builders, aligned with 'the practice of existing installations', and assesses new systems/suppliers before they are admitted to the environment. The focus is on securing the operational environment itself, not building a sellable product. Plant-side.
 
 Knock-outs: relevant degree, the stated years of hands-on experience, the language level as stated in the record,
 and no visa sponsorship for this role (sponsorship_possible: false).
@@ -86,6 +86,6 @@ Must-haves are interpreted from the vacancy text, not restated as a keyword list
 imply for this role are listed above; IEC 62443 is named in the record without a specific part, so we do not claim
 a part the text does not state.
 
-Salary band: niet beschikbaar (geen band in het record; 23-09-2026).
+Salary band: not available (no band in the record; 23-09-2026).
 Location: Veldhoven, Hybride, vast.
 Client screening requirements: not recorded. Client's unwritten preferences: not recorded.

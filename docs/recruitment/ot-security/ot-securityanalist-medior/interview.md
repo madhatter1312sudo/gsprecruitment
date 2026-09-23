@@ -1,4 +1,4 @@
-# Interviewvragenbank — OT-securityanalist (medior)
+# Interviewvragenbank: OT-securityanalist (medior)
 
 Discipline: OT-cybersecurity (plant-side)
 Slug/job-id: `ot-securityanalist-medior`
@@ -24,7 +24,7 @@ Deze mediorrol analyseert en bewaakt de beveiliging van industriële netwerken b
 
 ### 4. Hoe zorg je dat een bevinding herleidbaar en audit-bestendig is?
 
-**Modelantwoord (seniorniveau):** Een sterk antwoord noemt tijdstempels, bronvermelding van de data, koppeling aan de relevante norm-eis, en een duidelijke scheiding tussen feit en interpretatie — zodat een auditor de bevinding kan natrekken zonder de analist te hoeven raadplegen.
+**Modelantwoord (seniorniveau):** Een sterk antwoord noemt tijdstempels, bronvermelding van de data, koppeling aan de relevante norm-eis, en een duidelijke scheiding tussen feit en interpretatie, zodat een auditor de bevinding kan natrekken zonder de analist te hoeven raadplegen.
 
 ### 5. Hoe stem je met een OT-collega af als jouw analyse een maatregel adviseert die zij als onwerkbaar zien?
 
@@ -32,20 +32,20 @@ Deze mediorrol analyseert en bewaakt de beveiliging van industriële netwerken b
 
 ## Twee risico's om op te testen
 
-- Kandidaten met puur IT-SIEM-ervaring die aannemen dat OT-alerting hetzelfde werkt — toets expliciet met de SIEM-aanpassingsvraag.
-- Kandidaten die documentatie behandelen als bijzaak — vraag concreet door op een eerdere audit-ervaring.
+- Kandidaten met puur IT-SIEM-ervaring die aannemen dat OT-alerting hetzelfde werkt; toets expliciet met de SIEM-aanpassingsvraag.
+- Kandidaten die documentatie behandelen als bijzaak; vraag concreet door op een eerdere audit-ervaring.
 
 ---
 
 ## English summary
 
-**Interview question bank — OT-securityanalist (medior)**, slug `ot-securityanalist-medior`, plant-side.
+**Interview question bank: OT-securityanalist (medior)**, slug `ot-securityanalist-medior`, plant-side.
 
-Briefing: Deze mediorrol analyseert en bewaakt de beveiliging van industriële netwerken bij productieomgevingen, met IEC 62443 als referentiekader voor audit-bestendige documentatie. De briefing richt zich op incidentanalyse, OT-specifieke tooling, en samenwerking tussen OT en IT bij opvolging.
+Briefing: This medior role analyses and monitors the security of industrial networks at production environments, with IEC 62443 as the reference framework for audit-proof documentation. The briefing focuses on incident analysis, OT-specific tooling, and collaboration between OT and IT on follow-up.
 
 Five probing questions with senior-level model answers are listed above, separating OT-specific reasoning from
 IT-security habits applied uncritically to industrial systems.
 
 Risks to test:
-- Kandidaten met puur IT-SIEM-ervaring die aannemen dat OT-alerting hetzelfde werkt — toets expliciet met de SIEM-aanpassingsvraag.
-- Kandidaten die documentatie behandelen als bijzaak — vraag concreet door op een eerdere audit-ervaring.
+- Candidates with purely IT-SIEM experience who assume OT alerting works the same way; test explicitly with the SIEM-adaptation question.
+- Candidates who treat documentation as a side task; probe concretely for a previous audit experience.
