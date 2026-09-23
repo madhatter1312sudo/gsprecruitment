@@ -1968,6 +1968,29 @@ def main():
         if page.query_selector('#editUserName') is not None:
             failures.append("escape: 'Weggooien' bevestigen sloot het formulier niet")
 
+        # ---- openMenus pruning (issue #182) ----
+        # renderUsers() re-renders the tbody via GSP.mount() (innerHTML
+        # replacement) on every loadUsers() call, so each reload creates a
+        # fresh #user-menu-91 node. Opening the menu after each reload
+        # registers the new node with ui.registerMenu() -- without pruning,
+        # the old detached nodes would stay in ui.js's openMenus array
+        # forever. ui.openMenuCount() is the read-only accessor added for
+        # this check (openMenus itself is not exposed).
+        for _ in range(5):
+            page.evaluate("() => Admin.loadUsers()")
+            page.wait_for_timeout(150)
+            page.evaluate("() => Admin.toggleUserMenu(91)")
+        menu_count = page.evaluate("() => ui.openMenuCount()")
+        # Bounded to the menus actually rendered right now, not to the
+        # number of reloads: only #user-menu-91's latest node is still
+        # connected to the document after five reload-and-reopen cycles.
+        if menu_count != 1:
+            failures.append(f"ui: openMenus bleef niet begrensd na 5 lijstherladingen -- verwacht 1 geregistreerd menu, kreeg {menu_count}")
+        if not page.is_visible('#user-menu-91'):
+            failures.append("ui: menu 91 sloot na de herhaalde lijstherladingen terwijl het geregistreerd bleef")
+        page.evaluate("() => Admin.closeMenus()")
+        page.wait_for_timeout(100)
+
         # ---- Opdrachtgevers ----
         errors_before = len(console_errors)
         page.click('.nav-link[data-section="clients"]')
