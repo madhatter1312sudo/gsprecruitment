@@ -4,6 +4,9 @@
 **Scope:** 5 top competitor recruitment agencies in the Netherlands  
 **Methodology:** Website analysis, portal inspection, UX evaluation (from publicly accessible pages)
 
+
+> Update september 2026: de analyse van diensten, vacatures en websiteontwerp van acht Nederlandse IT-recruiters staat in `docs/strategy/competitor-analysis-2026-09.md`.
+
 ---
 
 ## Table of Contents
