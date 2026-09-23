@@ -249,11 +249,18 @@ if (typeof window !== 'undefined') {
     document.getElementById('jobTitle').textContent = job.title;
     const EMPLOYMENT_TYPE_LABEL = { vast: { en: 'Permanent', nl: 'Vast' }, detachering: { en: 'Secondment', nl: 'Detachering' }, interim: { en: 'Interim', nl: 'Interim' } };
     const employmentTypeLabel = EMPLOYMENT_TYPE_LABEL[job.employment_type] ? EMPLOYMENT_TYPE_LABEL[job.employment_type][lang] : job.employment_type;
-    const locationLabel = job.location_type && String(job.location_type).toLowerCase() === 'remote'
+    // location_type label map (#152 defect E): keys are lowercase, lookup
+    // is case-insensitive against the stored values ("On-site", "Hybride").
+    // An unmapped value falls back to the raw value, same as before.
+    const LOCATION_TYPE_LABEL = { 'on-site': { nl: 'Op locatie', en: 'On-site' }, hybride: { nl: 'Hybride', en: 'Hybrid' } };
+    const locationTypeKey = job.location_type ? String(job.location_type).toLowerCase() : '';
+    const locationLabel = locationTypeKey === 'remote'
       ? (lang === 'nl' ? 'Remote' : 'Remote')
-      : [job.city, job.location_type].filter(Boolean).join(' · ');
+      : [job.city, LOCATION_TYPE_LABEL[locationTypeKey] ? LOCATION_TYPE_LABEL[locationTypeKey][lang] : job.location_type].filter(Boolean).join(' · ');
+    // Currency per STYLE.md (#152 defect F): no currency code, no "k" --
+    // €1.234 in Dutch (period thousands separator), €1,234 in English.
     const salaryLabel = (job.salary_min != null && job.salary_max != null)
-      ? `${job.salary_currency || 'EUR'} ${Number(job.salary_min).toLocaleString(lang === 'nl' ? 'nl-NL' : 'en-US')} – ${Number(job.salary_max).toLocaleString(lang === 'nl' ? 'nl-NL' : 'en-US')}`
+      ? `€${Number(job.salary_min).toLocaleString(lang === 'nl' ? 'nl-NL' : 'en-US')} – €${Number(job.salary_max).toLocaleString(lang === 'nl' ? 'nl-NL' : 'en-US')}`
       : '';
     const metaHtml = [];
     if (company !== 'confidential') metaHtml.push(`<div class="meta-item"><strong><span class="lang-en">Company</span><span class="lang-nl">Bedrijf</span></strong>${GSP.esc(company)}</div>`);
