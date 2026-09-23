@@ -1,0 +1,170 @@
+{
+  "eindhoven": {
+    "embedded-software": {
+      "city": "Eindhoven",
+      "discipline_label": "Embedded software (C/C++)",
+      "title_nl": "Embedded software vacatures Eindhoven | GSP Recruitment",
+      "title_en": "Embedded Software Jobs Eindhoven | GSP Recruitment",
+      "meta_nl": "Embedded C/C++-vacatures in Eindhoven, bij opdrachtgevers rond High Tech Campus en de Brainport-toeleveringsketen. Bekijk openstaande functies of laat je profiel achter.",
+      "meta_en": "Embedded C/C++ roles in Eindhoven, with employers around High Tech Campus and the Brainport supply chain. View open roles or leave your profile.",
+      "intro_nl": "Eindhoven is het zwaartepunt van embedded softwarewerk in Brainport. Op en rond High Tech Campus zitten NXP Semiconductors en Philips Research, en de stad is hoofdkantoor van engineeringdienstverleners als Prodrive Technologies, Sioux Technologies, ICT Group en Alten Nederland. De vraag loopt van RTOS-firmware voor high-tech machines tot embedded Linux/Yocto-platformen voor machinebouwers. Wij werven doorlopend voor opdrachtgevers in deze keten, anoniem tot een eerste gesprek. Bekijk de openstaande vacatures of laat je profiel achter.",
+      "intro_en": "Eindhoven is Brainport's centre of gravity for embedded software. High Tech Campus hosts NXP Semiconductors and Philips Research, and the city is headquarters to engineering firms such as Prodrive Technologies, Sioux Technologies, ICT Group and Alten Nederland. Demand ranges from RTOS firmware for high-tech machines to embedded Linux/Yocto platforms for machine builders. We recruit continuously for clients in this chain, anonymous until a first conversation."
+    },
+    "mechatronica-besturingssoftware": {
+      "city": "Eindhoven",
+      "discipline_label": "Mechatronica en besturingssoftware",
+      "title_nl": "Mechatronica vacatures Eindhoven | GSP Recruitment",
+      "title_en": "Mechatronics Jobs Eindhoven | GSP Recruitment",
+      "meta_nl": "Mechatronica- en regeltechniekvacatures in Eindhoven, bij precisiebedrijven als VDL ETG, NTS Group en Frencken Mechatronics. Bekijk openstaande functies of laat je profiel achter.",
+      "meta_en": "Mechatronics and control-software roles in Eindhoven, with precision firms such as VDL ETG, NTS Group and Frencken Mechatronics. View open roles or leave your profile.",
+      "intro_nl": "Eindhoven telt een dichte cluster precisiebedrijven die mechanica, elektronica en software samenbrengen: VDL Enabling Technologies Group aan De Schakel, NTS Group met een vestiging voor cleanroom-mechatronische assemblies, IBS Precision Engineering voor ultrahoge-precisiemeetsystemen, Anteryon voor opto-mechatronische systemen op Brainport Industries Campus, en Frencken Mechatronics. Prodrive Technologies en Sioux Technologies voeren mechatronica als eigen praktijk naast software en elektronica. Wij werven doorlopend voor opdrachtgevers in deze keten, anoniem tot een eerste gesprek. Bekijk de openstaande vacatures of laat je profiel achter.",
+      "intro_en": "Eindhoven holds a dense cluster of precision firms combining mechanics, electronics and software: VDL Enabling Technologies Group, NTS Group's cleanroom mechatronic assemblies, IBS Precision Engineering's ultra-high-precision measurement systems, Anteryon's opto-mechatronic systems at Brainport Industries Campus, and Frencken Mechatronics. Prodrive Technologies and Sioux Technologies run mechatronics as their own practice alongside software and electronics. We recruit continuously for clients in this chain, anonymous until a first conversation."
+    },
+    "ot-cybersecurity": {
+      "city": "Eindhoven",
+      "discipline_label": "OT-cybersecurity",
+      "title_nl": "OT-cybersecurity vacatures Eindhoven | GSP Recruitment",
+      "title_en": "OT Cybersecurity Jobs Eindhoven | GSP Recruitment",
+      "meta_nl": "OT- en ICS-securityvacatures met binding aan Eindhoven en Brainport, van chipbeveiliging bij NXP tot regionale weerbaarheid via het Cyber Weerbaarheidscentrum Brainport. Bekijk vacatures of laat je profiel achter.",
+      "meta_en": "OT and ICS security roles connected to Eindhoven and Brainport, from chip security at NXP to regional resilience via the Cyber Weerbaarheidscentrum Brainport. View roles or leave your profile.",
+      "intro_nl": "OT-securityspecialisten zijn dunner gezaaid in Brainport zelf dan embedded- of mechatronicaprofielen, maar Eindhoven heeft wel een concrete plek in dit veld: NXP Semiconductors op High Tech Campus heeft een eigen Competence Centre for Crypto Security. Daarnaast is de non-profitstichting Cyber Weerbaarheidscentrum Brainport, met OT-security als speerpunt voor de hightech maakindustrie, in de regio actief. Wij werven doorlopend voor opdrachtgevers in deze keten, anoniem tot een eerste gesprek. Bekijk de openstaande vacatures of laat je profiel achter.",
+      "intro_en": "OT security specialists are spread more thinly across Brainport itself than embedded or mechatronics profiles, but Eindhoven has a concrete anchor: NXP Semiconductors at High Tech Campus runs its own Competence Centre for Crypto Security. The non-profit Cyber Weerbaarheidscentrum Brainport, focused on OT security for high-tech manufacturing, is also active in the region."
+    },
+    "test-en-verificatie": {
+      "city": "Eindhoven",
+      "discipline_label": "Test en verificatie",
+      "title_nl": "Test en verificatie vacatures Eindhoven | GSP Recruitment",
+      "title_en": "Test and Verification Jobs Eindhoven | GSP Recruitment",
+      "meta_nl": "Test- en verificatievacatures in Eindhoven, van systeemverificatie bij Thermo Fisher NanoPort tot testautomatisering bij Sioux en Polteq. Bekijk openstaande functies of laat je profiel achter.",
+      "meta_en": "Test and verification roles in Eindhoven, from system verification at Thermo Fisher's NanoPort site to test automation at Sioux and Polteq. View open roles or leave your profile.",
+      "intro_nl": "Eindhoven combineert één duidelijk in-house voorbeeld met gespecialiseerde dienstverleners: Thermo Fisher Scientific bouwt en verifieert transmissie-elektronenmicroscopen op de NanoPort-site, waar testengineers assemblage, calibratie en performance-verificatie doen. Daarnaast zit hier Polteq, de grootste onafhankelijke softwaretestspecialist van Nederland en België, naast Sogeti Nederland, Sioux Technologies en ICT Group, die test en verificatie als onderdeel van systeemontwikkeling leveren. Wij werven doorlopend voor opdrachtgevers in deze keten, anoniem tot een eerste gesprek. Bekijk de openstaande vacatures of laat je profiel achter.",
+      "intro_en": "Eindhoven combines one clear in-house case with specialised service providers: Thermo Fisher Scientific builds and verifies transmission electron microscopes at its NanoPort site, where test engineers handle assembly, calibration and performance verification. The city also hosts Polteq, the largest independent software-testing specialist in the Netherlands and Belgium, alongside Sogeti Nederland, Sioux Technologies and ICT Group."
+    }
+  },
+  "veldhoven": {
+    "embedded-software": {
+      "city": "Veldhoven",
+      "discipline_label": "Embedded software (C/C++)",
+      "title_nl": "Embedded software vacatures Veldhoven | GSP Recruitment",
+      "title_en": "Embedded Software Jobs Veldhoven | GSP Recruitment",
+      "meta_nl": "Embedded C/C++-vacatures in Veldhoven, in de directe omgeving van ASML's hoofdkantoor. Bekijk openstaande functies of laat je profiel achter.",
+      "meta_en": "Embedded C/C++ roles in Veldhoven, in the direct vicinity of ASML's headquarters. View open roles or leave your profile.",
+      "intro_nl": "Veldhoven draait grotendeels om één naam: ASML, met wereldwijd hoofdkantoor in de stad, bouwt lithografiesystemen voor chipproductie waarin real-time embedded software een kernrol speelt. De vraag hier is doorgaans senior en gespecialiseerd, met RTOS-architectuur en timinganalyse als terugkerend thema in onze eigen vacatures voor deze stad. Wij werven doorlopend voor opdrachtgevers in deze keten, anoniem tot een eerste gesprek. Bekijk de openstaande vacatures.",
+      "intro_en": "Veldhoven revolves largely around one name: ASML, headquartered in the city, builds lithography systems for chip production in which real-time embedded software plays a core role. Demand here tends to be senior and specialised, with RTOS architecture and timing analysis recurring themes in our own vacancies for this city. View open roles."
+    },
+    "mechatronica-besturingssoftware": {
+      "city": "Veldhoven",
+      "discipline_label": "Mechatronica en besturingssoftware",
+      "title_nl": "Mechatronica vacatures Veldhoven | GSP Recruitment",
+      "title_en": "Mechatronics Jobs Veldhoven | GSP Recruitment",
+      "meta_nl": "Mechatronica- en regeltechniekvacatures in Veldhoven, bij ASML en expertisecentrum MI-Partners. Bekijk openstaande functies of laat je profiel achter.",
+      "meta_en": "Mechatronics and control-software roles in Veldhoven, at ASML and specialist firm MI-Partners. View open roles or leave your profile.",
+      "intro_nl": "Naast ASML, met hoofdkantoor in Veldhoven en zware mechatronica- en motion-controlinhoud in zijn lithografiesystemen, zit hier MI-Partners: een expertisecentrum voor mechatronica dat hightech mechatronische producten en systemen ontwikkelt voor opdrachtgevers wereldwijd. De vraag varieert van servoregeltechniek tot systeemontwerp op precisieniveau. Wij werven doorlopend voor opdrachtgevers in deze keten, anoniem tot een eerste gesprek. Bekijk de openstaande vacatures of laat je profiel achter.",
+      "intro_en": "Alongside ASML, headquartered in Veldhoven with heavy mechatronics and motion-control content in its lithography systems, the city hosts MI-Partners: a mechatronics centre of expertise developing high-tech mechatronic products and systems for clients worldwide. Demand ranges from servo control engineering to precision-level system design. We recruit continuously for clients in this chain, anonymous until a first conversation."
+    },
+    "ot-cybersecurity": {
+      "city": "Veldhoven",
+      "discipline_label": "OT-cybersecurity",
+      "title_nl": "OT-cybersecurity vacatures Veldhoven | GSP Recruitment",
+      "title_en": "OT Cybersecurity Jobs Veldhoven | GSP Recruitment",
+      "meta_nl": "OT- en ICS-securityvacatures met binding aan Veldhoven, bij opdrachtgevers in de high-tech maakindustrie rond ASML. Bekijk openstaande functies of laat je profiel achter.",
+      "meta_en": "OT and ICS security roles connected to Veldhoven, with clients in the high-tech manufacturing sector around ASML. View open roles or leave your profile.",
+      "intro_nl": "OT-securityspecialisten werken in de praktijk vaak vanuit landelijk opererende securitybedrijven, niet vanuit een lokaal Veldhovens kantoor; wij werven wel met regelmaat voor OT/ICS-securityrollen bij opdrachtgevers in de high-tech maakindustrie rond ASML in Veldhoven. Precies dat soort omgevingen, met veel bewegende machines en industriële besturingssystemen, vraagt om IEC 62443-kennis. Wij werven doorlopend, anoniem tot een eerste gesprek. Bekijk de openstaande vacatures.",
+      "intro_en": "OT security specialists in practice often work from nationally operating security firms rather than a local Veldhoven office; we do recruit regularly for OT/ICS security roles at clients in the high-tech manufacturing environment around ASML in Veldhoven. That kind of environment, with extensive machinery and industrial control systems, calls for IEC 62443 expertise."
+    },
+    "test-en-verificatie": {
+      "city": "Veldhoven",
+      "discipline_label": "Test en verificatie",
+      "title_nl": "Test en verificatie vacatures Veldhoven | GSP Recruitment",
+      "title_en": "Test and Verification Jobs Veldhoven | GSP Recruitment",
+      "meta_nl": "Test- en verificatievacatures in Veldhoven, van junior testfuncties tot senior HIL-testautomatisering bij opdrachtgevers rond ASML. Bekijk openstaande functies of laat je profiel achter.",
+      "meta_en": "Test and verification roles in Veldhoven, from junior test positions to senior HIL test automation at clients around ASML. View open roles or leave your profile.",
+      "intro_nl": "In Veldhoven werven wij op meerdere niveaus voor test en verificatie, van junior testfuncties tot een senior QA-lead-rol. De opdrachtgevers zitten in de high-tech maakindustrie rond ASML, waar complexe systemen uitgebreide verificatie vragen voordat ze de fabriek verlaten. De rollen lopen van eerste teststappen tot het bewaken van de kwaliteit over een compleet systeem. Wij werven doorlopend, anoniem tot een eerste gesprek. Bekijk de openstaande vacatures.",
+      "intro_en": "In Veldhoven we recruit at multiple levels for test and verification, from junior test positions to a senior QA lead role. Clients sit in the high-tech manufacturing sector around ASML, where complex systems require extensive verification before leaving the factory. The roles span from first testing steps to guarding quality across a complete system."
+    }
+  },
+  "helmond": {
+    "embedded-software": {
+      "city": "Helmond",
+      "discipline_label": "Embedded software (C/C++)",
+      "title_nl": "Embedded software vacatures Helmond | GSP Recruitment",
+      "title_en": "Embedded Software Jobs Helmond | GSP Recruitment",
+      "meta_nl": "Embedded softwarevacatures in Helmond, in de omgeving van Automotive Campus, voor senior embedded Linux/Yocto-rollen. Bekijk openstaande functies of laat je profiel achter.",
+      "meta_en": "Embedded software roles in Helmond, near Automotive Campus, for senior embedded Linux/Yocto positions. View open roles or leave your profile.",
+      "intro_nl": "Helmond is in Brainport vooral bekend van Automotive Campus, de internationale hotspot voor smart mobility waar onder meer TNO, VDL en TASS samenwerken aan slimme en autonome voertuigen. Wij werven voor embedded softwarerollen in Helmond, doorgaans embedded Linux/Yocto-werk op seniorniveau, bij opdrachtgevers in de machinebouw- en toeleveringsketen van de regio; de opdrachtgever blijft anoniem tot een eerste gesprek. Bekijk de openstaande vacatures of laat je profiel achter.",
+      "intro_en": "Within Brainport, Helmond is best known for Automotive Campus, the international smart-mobility hotspot where organisations such as TNO, VDL and TASS collaborate on connected and autonomous vehicles. We recruit for embedded software roles in Helmond, typically embedded Linux/Yocto work at senior level, with clients in the region's machine-building and supply chain; the client remains anonymous until a first conversation."
+    },
+    "mechatronica-besturingssoftware": {
+      "city": "Helmond",
+      "discipline_label": "Mechatronica en besturingssoftware",
+      "title_nl": "Mechatronica vacatures Helmond | GSP Recruitment",
+      "title_en": "Mechatronics Jobs Helmond | GSP Recruitment",
+      "meta_nl": "Mechatronicavacatures in Helmond, in de omgeving van Automotive Campus, voor medior mechatronisch systeemontwerp. Bekijk openstaande functies of laat je profiel achter.",
+      "meta_en": "Mechatronics roles in Helmond, near Automotive Campus, for medior mechatronic system design. View open roles or leave your profile.",
+      "intro_nl": "Automotive Campus in Helmond brengt kennisinstellingen en bedrijven samen rond smart mobility, elektrische en autonome voertuigen; dat maakt de stad een vindplaats voor mechatronica die mechanica, elektronica en software combineert. Wij werven voor mechatronicarollen in Helmond, doorgaans op medior niveau, bij opdrachtgevers in de machinebouw- en toeleveringsketen van de regio, anoniem tot een eerste gesprek. Bekijk de openstaande vacatures of laat je profiel achter.",
+      "intro_en": "Automotive Campus in Helmond brings together knowledge institutes and companies around smart mobility, electric and autonomous vehicles, making the city a source for mechatronics work combining mechanics, electronics and software. We recruit for mechatronics roles in Helmond, typically at medior level, with clients in the region's machine-building and supply chain, anonymous until a first conversation."
+    },
+    "ot-cybersecurity": {
+      "city": "Helmond",
+      "discipline_label": "OT-cybersecurity",
+      "title_nl": "OT-cybersecurity vacatures Helmond | GSP Recruitment",
+      "title_en": "OT Cybersecurity Jobs Helmond | GSP Recruitment",
+      "meta_nl": "OT- en ICS-securityvacatures met binding aan Helmond, van medior securityanalist tot senior IEC 62443-engineer. Bekijk openstaande functies of laat je profiel achter.",
+      "meta_en": "OT and ICS security roles connected to Helmond, from medior security analyst to senior IEC 62443 engineer. View open roles or leave your profile.",
+      "intro_nl": "Helmond is een van de weinige Brainport-steden waar wij doorlopend voor OT-securityrollen werven, van medior securityanalist tot senior IEC 62443-engineer. OT-securityspecialisten zijn landelijk verspreid, niet geconcentreerd in één stad; onze opdrachtgevers in Helmond zitten in de industriële maakketen waar IEC 62443-kennis direct van toepassing is. Anoniem tot een eerste gesprek. Bekijk de openstaande vacatures of laat je profiel achter.",
+      "intro_en": "Helmond is one of the few Brainport cities where we recruit continuously for OT security roles, from medior security analyst to senior IEC 62443 engineer. OT security specialists are spread nationally, not concentrated in one city; our Helmond clients sit in the industrial manufacturing chain where IEC 62443 applies directly."
+    },
+    "test-en-verificatie": {
+      "city": "Helmond",
+      "discipline_label": "Test en verificatie",
+      "title_nl": "Test en verificatie vacatures Helmond | GSP Recruitment",
+      "title_en": "Test and Verification Jobs Helmond | GSP Recruitment",
+      "meta_nl": "Test- en verificatievacatures in Helmond, voor medior verificatie-engineer mechatronica bij opdrachtgevers in de regio. Bekijk openstaande functies of laat je profiel achter.",
+      "meta_en": "Test and verification roles in Helmond, for a medior mechatronics verification engineer at regional clients. View open roles or leave your profile.",
+      "intro_nl": "Onze rollen in Helmond voor deze discipline draaien om verificatie-engineering op medior niveau: het testen en valideren van mechatronische deelsystemen voordat ze een productielijn ingaan. De opdrachtgever zit in de machinebouw- en toeleveringsketen van de regio en blijft anoniem tot een eerste gesprek. Wij werven doorlopend voor vergelijkbare profielen in Helmond en de bredere Brainport-regio. Bekijk de openstaande vacatures of laat je profiel achter.",
+      "intro_en": "Our roles in Helmond for this discipline centre on verification engineering at medior level: testing and validating mechatronic subsystems before they go into a production line. The client sits in the region's machine-building and supply chain and remains anonymous until a first conversation. We recruit continuously for similar profiles in Helmond and the wider Brainport region."
+    }
+  },
+  "best": {
+    "embedded-software": {
+      "city": "Best",
+      "discipline_label": "Embedded software (C/C++)",
+      "title_nl": "Embedded software vacatures Best | GSP Recruitment",
+      "title_en": "Embedded Software Jobs Best | GSP Recruitment",
+      "meta_nl": "Embedded firmwarevacatures in Best, voor motion-controltoepassingen bij opdrachtgevers in de machinebouw- en semicon-toeleveringsketen. Bekijk openstaande functies of laat je profiel achter.",
+      "meta_en": "Embedded firmware roles in Best, for motion-control applications at clients in the machine-building and semicon supply chain. View open roles or leave your profile.",
+      "intro_nl": "Best ligt midden in de Brainport-toeleveringsketen voor machinebouw en semicon-toeleveranciers. Wij werven hier doorgaans op medior niveau voor firmware-engineering motion control: C-firmware voor aansturing van servomotoren en regellussen, met EtherCAT of CANopen als koppeling naar de overkoepelende besturing, in nauwe samenwerking met mechatronica-engineers op de opstelling. De opdrachtgever blijft anoniem tot een eerste gesprek. Bekijk de openstaande vacatures of laat je profiel achter.",
+      "intro_en": "Best sits within Brainport's machine-building and semicon supply chain. We typically recruit here at medior level for motion-control firmware engineering: C firmware for servo motor drives and control loops, using EtherCAT or CANopen to link with the overarching control system, working alongside mechatronics engineers. The client remains anonymous until a first conversation."
+    },
+    "mechatronica-besturingssoftware": {
+      "city": "Best",
+      "discipline_label": "Mechatronica en besturingssoftware",
+      "title_nl": "Mechatronica vacatures Best | GSP Recruitment",
+      "title_en": "Mechatronics Jobs Best | GSP Recruitment",
+      "meta_nl": "Junior mechatronicavacatures in Best, bij opdrachtgevers in de machinebouw- en semicon-toeleveringsketen van Brainport. Bekijk openstaande functies of laat je profiel achter.",
+      "meta_en": "Junior mechatronics roles in Best, at clients in Brainport's machine-building and semicon supply chain. View open roles or leave your profile.",
+      "intro_nl": "In Best werven wij op dit moment op junior niveau voor mechatronica: een instapfunctie voor wie net van een technische opleiding komt en wil leren hoe mechanica, elektronica en software in een mechatronisch systeem samenkomen. De opdrachtgever zit in de machinebouw- en semicon-toeleveringsketen van de regio en blijft anoniem tot een eerste gesprek. Bekijk de openstaande vacature of laat je profiel achter.",
+      "intro_en": "In Best we are currently recruiting at junior level for mechatronics: an entry role for someone fresh from technical education who wants to learn how mechanics, electronics and software come together in a mechatronic system. The client sits in the region's machine-building and semicon supply chain and remains anonymous until a first conversation."
+    },
+    "ot-cybersecurity": {
+      "city": "Best",
+      "discipline_label": "OT-cybersecurity",
+      "title_nl": "OT-cybersecurity vacatures Best | GSP Recruitment",
+      "title_en": "OT Cybersecurity Jobs Best | GSP Recruitment",
+      "meta_nl": "Junior OT-securityvacatures in Best, bij opdrachtgevers in de industriële toeleveringsketen van Brainport. Bekijk openstaande functies of laat je profiel achter.",
+      "meta_en": "Junior OT security roles in Best, at clients in Brainport's industrial supply chain. View open roles or leave your profile.",
+      "intro_nl": "Onze OT-securityrollen in Best liggen doorgaans op instapniveau: een junior securityanalist die de eerste stappen zet in het beveiligen van industriële besturingssystemen. OT-securityspecialisten zijn landelijk verspreid en niet geconcentreerd in Brainport zelf; de opdrachtgever hier zit in de industriële toeleveringsketen van de regio en blijft anoniem tot een eerste gesprek. Bekijk de openstaande vacatures of laat je profiel achter.",
+      "intro_en": "Our OT security roles in Best are typically entry-level: a junior security analyst taking their first steps in securing industrial control systems. OT security specialists are spread nationally rather than concentrated in Brainport itself; the client here sits in the region's industrial supply chain and remains anonymous until a first conversation."
+    },
+    "test-en-verificatie": {
+      "city": "Best",
+      "discipline_label": "Test en verificatie",
+      "title_nl": "Test en verificatie vacatures Best | GSP Recruitment",
+      "title_en": "Test and Verification Jobs Best | GSP Recruitment",
+      "meta_nl": "Senior HIL-testautomatiseringsvacatures in Best, bij opdrachtgevers in de machinebouw- en semicon-toeleveringsketen. Bekijk openstaande functies of laat je profiel achter.",
+      "meta_en": "Senior HIL test automation roles in Best, at clients in the machine-building and semicon supply chain. View open roles or leave your profile.",
+      "intro_nl": "Best is de vestigingsplaats van onze rollen in test en verificatie, doorgaans op seniorniveau in HIL-testautomatisering, waarbij hardware-in-the-loop-opstellingen worden gebruikt om systemen te testen voordat ze in bedrijf gaan. De opdrachtgever zit in de machinebouw- en semicon-toeleveringsketen van de regio en blijft anoniem tot een eerste gesprek. Bekijk de openstaande vacatures of laat je profiel achter, net als bij onze andere vacatures in Best.",
+      "intro_en": "Best is where our roles in test and verification are based, typically HIL test automation work at senior level, using hardware-in-the-loop setups to test systems before they go into operation. The client sits in the region's machine-building and semicon supply chain and remains anonymous until a first conversation, as with our other Best vacancies."
+    }
+  }
+}

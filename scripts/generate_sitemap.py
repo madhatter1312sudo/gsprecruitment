@@ -60,7 +60,28 @@ STATIC_PAGES = [
     ("privacy", "privacy.html", "monthly", "0.3"),
     ("privacy-kandidaten", "privacy-kandidaten.html", "monthly", "0.3"),
     ("blog/", "blog/index.html", "weekly", "0.7"),
+    ("salarisgids", "salarisgids.html", "monthly", "0.6"),
 ]
+
+# City x discipline landing pages (design-spec-batch.md item 6,
+# scripts/build_landing_pages.py). Listed explicitly, same as every other
+# static page above -- this generator has no file-tree discovery step.
+_LANDING_CITIES = ["eindhoven", "veldhoven", "helmond", "best"]
+_LANDING_DISCIPLINES = [
+    "embedded-software",
+    "mechatronica-besturingssoftware",
+    "ot-cybersecurity",
+    "test-en-verificatie",
+]
+for _city in _LANDING_CITIES:
+    for _discipline in _LANDING_DISCIPLINES:
+        STATIC_PAGES.append((
+            f"vacatures/{_city}/{_discipline}",
+            f"vacatures/{_city}/{_discipline}.html",
+            "weekly",
+            "0.6",
+        ))
+del _city, _discipline, _LANDING_CITIES, _LANDING_DISCIPLINES
 
 
 @dataclass
