@@ -196,10 +196,16 @@
         "type": "object"
       },
       "AdminEraseRequest": {
+        "description": "WS5 BV9 (SITE-DESIGN-SPEC.md \u00a77.6 besluit 3, \u00a77.7 BV9).\n\n`confirm` used to be a boolean that defaulted to False and only ever\nmattered for the admin/self guard below -- which meant the plain case\n(erase a sourced person) needed no confirmation of any kind: one\nfield, one call, irreversible. The typed-address threshold the admin\npanel applies is a UI measure, and a UI measure binds only that UI,\nnot a routine or a second client hitting the same endpoint. So the\nfield now carries the address itself, and the endpoint refuses when\nit does not match `email` after strip()/lower(). Every caller is now\nheld to the same threshold and the panel repeats the rule instead of\ncarrying it alone.\n\nThe admin/self question is a genuinely different one -- \"this address\nalso owns platform access, are you sure\" -- so it keeps its own\nfield, `confirm_admin_or_self`, rather than being folded into the\nsame yes. Two questions, two answers.\n\nThe match itself is checked in the endpoint below, not in a pydantic\nvalidator: a validator's ValidationError carries the offending input\nback to the caller (pydantic puts the whole payload in `input`), and\nthat would put two e-mail addresses into every 422 body and into\nwhatever logs or error trackers see it. The endpoint refuses with a\nstructured detail that names neither.\n\n`confirm` carries an empty-string default rather than being required\nfor the same reason (security-audit, MEDIUM): a missing required\nfield never reaches the route at all, and FastAPI's own 422 for it\nechoes the whole request body back -- including `email`. Defaulting\nit to \"\" hands every case to the route's check below, which refuses\nan empty confirmation just as firmly and names no address. It is a\ndefault that can never be a valid confirmation: no e-mail address is\nthe empty string.",
         "properties": {
           "confirm": {
-            "default": false,
+            "default": "",
             "title": "Confirm",
+            "type": "string"
+          },
+          "confirm_admin_or_self": {
+            "default": false,
+            "title": "Confirm Admin Or Self",
             "type": "boolean"
           },
           "email": {
@@ -1113,6 +1119,18 @@
             ],
             "title": "Consent Talentpool Until"
           },
+          "consent_withdrawn_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Consent Withdrawn At"
+          },
           "created_at": {
             "format": "date-time",
             "title": "Created At",
@@ -1196,6 +1214,35 @@
             "title": "Id",
             "type": "integer"
           },
+          "job_alert_eligible": {
+            "default": false,
+            "title": "Job Alert Eligible",
+            "type": "boolean"
+          },
+          "job_alert_optin_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Job Alert Optin At"
+          },
+          "job_alert_unsubscribed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Job Alert Unsubscribed At"
+          },
           "languages": {
             "default": [],
             "items": {
@@ -1203,6 +1250,17 @@
             },
             "title": "Languages",
             "type": "array"
+          },
+          "lawful_basis": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lawful Basis"
           },
           "linkedin_url": {
             "anyOf": [
@@ -4163,6 +4221,7 @@
           "amount": {
             "anyOf": [
               {
+                "maximum": 99999999.99,
                 "minimum": 0.0,
                 "type": "number"
               },
@@ -4233,6 +4292,15 @@
           },
           "stage": {
             "default": "sourced",
+            "enum": [
+              "sourced",
+              "new",
+              "screening",
+              "interview",
+              "offer",
+              "placed",
+              "rejected"
+            ],
             "title": "Stage",
             "type": "string"
           }
@@ -4247,8 +4315,15 @@
       "PipelineStageUpdate": {
         "properties": {
           "stage": {
-            "maxLength": 50,
-            "minLength": 1,
+            "enum": [
+              "sourced",
+              "new",
+              "screening",
+              "interview",
+              "offer",
+              "placed",
+              "rejected"
+            ],
             "title": "Stage",
             "type": "string"
           }
@@ -5335,6 +5410,72 @@
         "title": "ReviewDecisionRequest",
         "type": "object"
       },
+      "RoutineHealth": {
+        "description": "One row per known scheduled routine (services/scheduler.ROUTINE_NAMES) --\nGET /api/v1/admin/health/routines. Sourced from routine_runs\n(migrations/044_routine_runs.py); a routine that has never run (or\nnever failed) reports None for the field(s) it has no row for yet.\nNo personal data -- a routine name, two timestamps and an exception\nclass name, nothing about a candidate/client/prospect.",
+        "properties": {
+          "last_error_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Error At"
+          },
+          "last_error_class": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Error Class"
+          },
+          "last_success_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Success At"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "RoutineHealth",
+        "type": "object"
+      },
+      "RoutineHealthResponse": {
+        "description": "GET /api/v1/admin/health/routines -- admin-JWT only.",
+        "properties": {
+          "routines": {
+            "items": {
+              "$ref": "#/components/schemas/RoutineHealth"
+            },
+            "title": "Routines",
+            "type": "array"
+          }
+        },
+        "required": [
+          "routines"
+        ],
+        "title": "RoutineHealthResponse",
+        "type": "object"
+      },
       "SalaryBenchmarkResponse": {
         "properties": {
           "currency": {
@@ -5417,6 +5558,38 @@
           "job_id"
         ],
         "title": "SavedJobCreate",
+        "type": "object"
+      },
+      "SchedulerHealthResponse": {
+        "description": "GET /api/v1/admin/health/scheduler -- admin-JWT only. `running`\nreflects the cross-worker Postgres advisory lock\n(services/scheduler.SCHEDULER_LOCK_KEY), not this particular uvicorn\nworker's own in-process state -- the app runs 4 workers and only the\none that won the lock actually starts APScheduler (see\nservices/scheduler.start_scheduler's docstring), so a request answered\nby a different worker would otherwise misreport \"not running\" even\nwhile the scheduler is alive elsewhere in the same process group.",
+        "properties": {
+          "apollo_jobs_enabled": {
+            "title": "Apollo Jobs Enabled",
+            "type": "boolean"
+          },
+          "registered_routines": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Registered Routines",
+            "type": "array"
+          },
+          "running": {
+            "title": "Running",
+            "type": "boolean"
+          },
+          "timezone": {
+            "title": "Timezone",
+            "type": "string"
+          }
+        },
+        "required": [
+          "running",
+          "timezone",
+          "registered_routines",
+          "apollo_jobs_enabled"
+        ],
+        "title": "SchedulerHealthResponse",
         "type": "object"
       },
       "SetPasswordRequest": {
@@ -8712,6 +8885,42 @@
               "title": "Offset",
               "type": "integer"
             }
+          },
+          {
+            "description": "Sortable column (WS5 BV10); default created_at.",
+            "in": "query",
+            "name": "sort",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Sortable column (WS5 BV10); default created_at.",
+              "title": "Sort"
+            }
+          },
+          {
+            "description": "'asc' or 'desc'; default 'desc'.",
+            "in": "query",
+            "name": "order",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "'asc' or 'desc'; default 'desc'.",
+              "title": "Order"
+            }
           }
         ],
         "responses": {
@@ -9540,7 +9749,7 @@
     },
     "/api/v1/admin/gdpr/erase": {
       "post": {
-        "description": "Art. 17 for people who were only ever sourced (LinkedIn/GitHub/\nreferral/meetup/Apollo), never registered a portal account. Same\nerase_person() routine as self-service erasure.\n\nGuard: erasing an admin account (any matching users row with\nrole='admin'), or the calling admin's own account, through this\nendpoint would delete platform-admin access as a side effect of what\nlooks like a routine PII-erasure request. Refuse unless the caller\nexplicitly opts in with confirm=true.",
+        "description": "Art. 17 for people who were only ever sourced (LinkedIn/GitHub/\nreferral/meetup/Apollo), never registered a portal account. Same\nerase_person() routine as self-service erasure.\n\nGuard: erasing an admin account (any matching users row with\nrole='admin'), or the calling admin's own account, through this\nendpoint would delete platform-admin access as a side effect of what\nlooks like a routine PII-erasure request. Refuse unless the caller\nexplicitly opts in with confirm_admin_or_self=true (WS5 BV9 renamed\nthis from the old boolean `confirm`, which now carries the typed\naddress -- see AdminEraseRequest).",
         "operationId": "admin_erase_person_api_v1_admin_gdpr_erase_post",
         "requestBody": {
           "content": {
@@ -9605,6 +9814,60 @@
           }
         ],
         "summary": "Get Admin Health",
+        "tags": [
+          "admin-portal"
+        ]
+      }
+    },
+    "/api/v1/admin/health/routines": {
+      "get": {
+        "description": "Per-routine last success timestamp and last error class, from\nroutine_runs (services/scheduler.py's _tracked() wrapper writes one\nrow per scheduler tick). Lists every routine in\nservices/scheduler.ROUTINE_NAMES, including one that has never run --\nit just reports None fields rather than being omitted.",
+        "operationId": "get_routine_health_api_v1_admin_health_routines_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RoutineHealthResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Routine Health",
+        "tags": [
+          "admin-portal"
+        ]
+      }
+    },
+    "/api/v1/admin/health/scheduler": {
+      "get": {
+        "description": "Whether the in-process APScheduler is running somewhere in this\napp's worker pool, plus its registered routine names. `running` reads\nthe cross-worker Postgres advisory lock\n(services/scheduler.SCHEDULER_LOCK_KEY) rather than this worker's own\n`scheduler.running` flag -- uvicorn runs 4 workers and only the one\nthat won the lock ever calls scheduler.start() (services/scheduler.py\nstart_scheduler), so this request may well be answered by a worker\nthat never touched the scheduler at all. A single bigint advisory\nlock key below 2^31 is stored in pg_locks with classid=0 and objid\nequal to the key (Postgres splits the 64-bit key into the two\n32-bit columns for the single-argument pg_try_advisory_lock form).",
+        "operationId": "get_scheduler_health_api_v1_admin_health_scheduler_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SchedulerHealthResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Scheduler Health",
         "tags": [
           "admin-portal"
         ]
@@ -9717,6 +9980,42 @@
               ],
               "description": "1-based page number; overrides offset when given (offset = (page-1)*limit).",
               "title": "Page"
+            }
+          },
+          {
+            "description": "Sortable column (WS5 BV10); default created_at.",
+            "in": "query",
+            "name": "sort",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Sortable column (WS5 BV10); default created_at.",
+              "title": "Sort"
+            }
+          },
+          {
+            "description": "'asc' or 'desc'; default 'desc'.",
+            "in": "query",
+            "name": "order",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "'asc' or 'desc'; default 'desc'.",
+              "title": "Order"
             }
           }
         ],
@@ -10416,6 +10715,132 @@
         ]
       }
     },
+    "/api/v1/admin/pipeline": {
+      "get": {
+        "description": "WS5 BV1 (\u00a77.3.4): the admin panel's pipeline tab needs an entry_id\nbefore it can call PATCH .../{entry_id}/stage or GET .../history, and\nuntil now no admin route listed pipeline entries at all -- the only\nlist route was GET /api/v1/client/pipeline, scoped to the client\nbehind the JWT and therefore unusable with an admin token.\n\nSame row shape as that client route, literally: one shared SELECT\nlist and one shared projection in core/pipeline.py, so the two cannot\ndrift. `client_id` is part of that shape already (it comes out of\n`pe.*`); what this route adds is that it can be filtered on,\nalongside candidate_id, job_id and stage, instead of being pinned to\nthe caller's own client.\n\n`full_name` is returned unconditionally here (gate_name=False), which\nis a deliberate difference from the client route and a product\ndecision of the chief-of-staff. The presentation-consent gate is a\ndisclosure control aimed at an employer: it decides whether a\ncandidate may be NAMED TO A CLIENT for a role they agreed to. It is\nnot an internal access control, and applying it here withheld nothing\n-- the same admin token reads full_name unconditionally from\nGET /candidates and GET /candidates/{kind}/{id} -- while leaving the\npanel's pipeline tab showing a blank where a name belongs. No new\ncategory of personal data reaches an admin through this route that\nVERWERKINGSREGISTER.md's admin-access rows do not already cover; the\nclient route keeps the gate, unchanged.",
+        "operationId": "admin_list_pipeline_api_v1_admin_pipeline_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "candidate_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Candidate Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "client_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Client Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "job_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job Id"
+            }
+          },
+          {
+            "description": "Exact stage match, same filter as GET /api/v1/client/pipeline.",
+            "in": "query",
+            "name": "stage",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Exact stage match, same filter as GET /api/v1/client/pipeline.",
+              "title": "Stage"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Admin List Pipeline",
+        "tags": [
+          "admin-portal"
+        ]
+      }
+    },
     "/api/v1/admin/pipeline/{entry_id}/history": {
       "get": {
         "operationId": "admin_get_pipeline_stage_history_api_v1_admin_pipeline__entry_id__history_get",
@@ -10605,6 +11030,42 @@
               "minimum": 0,
               "title": "Offset",
               "type": "integer"
+            }
+          },
+          {
+            "description": "Sortable column (WS5 BV10); default created_at.",
+            "in": "query",
+            "name": "sort",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Sortable column (WS5 BV10); default created_at.",
+              "title": "Sort"
+            }
+          },
+          {
+            "description": "'asc' or 'desc'; default 'desc'.",
+            "in": "query",
+            "name": "order",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "'asc' or 'desc'; default 'desc'.",
+              "title": "Order"
             }
           }
         ],
@@ -11169,7 +11630,7 @@
     },
     "/api/v1/admin/retention/review": {
       "get": {
-        "description": "The monthly list itself \u2014 one row per person/subject currently (or\npreviously, with status != 'pending') queued, carrying exactly what\nthe owner asked for: category, term_expired_at (the date the term\nexpired), and signal_missing_nl (which protective signal was absent).\n`status=\"all\"` lists every status; the default `status=\"pending\"`\nmatches what an admin screen's default view should show.",
+        "description": "The monthly list itself \u2014 one row per person/subject currently (or\npreviously, with status != 'pending') queued, carrying exactly what\nthe owner asked for: category, term_expired_at (the date the term\nexpired), and signal_missing_nl (which protective signal was absent).\n`status=\"all\"` lists every status; the default `status=\"pending\"`\nmatches what an admin screen's default view should show.\n\nWS5 BV6: `limit`/`offset`/`total`. `limit` has no default on purpose.\nThe category-wide approve path (POST .../review/bulk with\n`expected_count`) reads the number an admin saw against the number\nthe server finds; a default page size here would quietly turn \"the\nwhole category\" into \"the first page of it\", and the mismatch would\nsurface as a refused bulk call rather than as anything the admin\ncould act on. So a caller that passes nothing still gets every\nmatching row, exactly as before, and `total` (always the full count,\nnever the page length) is what a pager needs.",
         "operationId": "list_review_items_api_v1_admin_retention_review_get",
         "parameters": [
           {
@@ -11196,6 +11657,73 @@
                 }
               ],
               "title": "Category"
+            }
+          },
+          {
+            "description": "WS5 BV6: omit for the full set (the historical behaviour).",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 1000,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "WS5 BV6: omit for the full set (the historical behaviour).",
+              "title": "Limit"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Sortable column (WS5 BV10); default term_expired_at.",
+            "in": "query",
+            "name": "sort",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Sortable column (WS5 BV10); default term_expired_at.",
+              "title": "Sort"
+            }
+          },
+          {
+            "description": "'asc' or 'desc'; default 'asc'.",
+            "in": "query",
+            "name": "order",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "'asc' or 'desc'; default 'asc'.",
+              "title": "Order"
             }
           }
         ],
@@ -11758,6 +12286,42 @@
               "minimum": 0,
               "title": "Offset",
               "type": "integer"
+            }
+          },
+          {
+            "description": "Sortable column (WS5 BV10); default created_at.",
+            "in": "query",
+            "name": "sort",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Sortable column (WS5 BV10); default created_at.",
+              "title": "Sort"
+            }
+          },
+          {
+            "description": "'asc' or 'desc'; default 'desc'.",
+            "in": "query",
+            "name": "order",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "'asc' or 'desc'; default 'desc'.",
+              "title": "Order"
             }
           }
         ],
@@ -13197,6 +13761,144 @@
           }
         ],
         "summary": "List Own Client Contacts",
+        "tags": [
+          "client-contacts-portal"
+        ]
+      },
+      "post": {
+        "description": "Create a contact for the caller's own client. Same validation and\naudit trail as the admin create route.",
+        "operationId": "create_own_client_contact_api_v1_client_contacts_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClientContactCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create Own Client Contact",
+        "tags": [
+          "client-contacts-portal"
+        ]
+      }
+    },
+    "/api/v1/client/contacts/{contact_id}": {
+      "delete": {
+        "description": "Soft delete -- sets deleted_at, never a real DELETE (same GDPR\nprovenance/audit-trail reasons as the admin route). Scoped to the\ncaller's own client; another client's contact 404s.",
+        "operationId": "delete_own_client_contact_api_v1_client_contacts__contact_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "contact_id",
+            "required": true,
+            "schema": {
+              "title": "Contact Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Delete Own Client Contact",
+        "tags": [
+          "client-contacts-portal"
+        ]
+      },
+      "patch": {
+        "description": "Edit a contact belonging to the caller's own client. A contact of\nanother client (or no client profile at all) 404s -- never a 403\nthat would confirm the contact exists.",
+        "operationId": "update_own_client_contact_api_v1_client_contacts__contact_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "contact_id",
+            "required": true,
+            "schema": {
+              "title": "Contact Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClientContactUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Update Own Client Contact",
         "tags": [
           "client-contacts-portal"
         ]

@@ -1,6 +1,6 @@
 """Talent OS — Pydantic schemas for request/response models."""
 from pydantic import BaseModel, EmailStr, Field, field_validator, model_validator
-from typing import Optional, List, Any, Literal
+from typing import Optional, List, Any, Literal, get_args
 from datetime import datetime, date
 from decimal import Decimal
 import re
@@ -559,6 +559,22 @@ class CandidatePortalProfile(BaseModel):
     consent_talentpool_until: Optional[datetime] = None
     consent_scope: Optional[str] = None
     consent_source: Optional[str] = None
+    # WS5 BV4 (§7.3.7): the job-alert switch has a third reason for being
+    # off -- consent was withdrawn (a STOP, or an unsubscribe with
+    # scope=all) -- and the portal could not tell that apart from "never
+    # given" without these two. Same `candidates`-row origin and the same
+    # None-when-no-row-yet rule as the four above; `lawful_basis` is the
+    # column the retention and outreach guards read, so the portal states
+    # the ground it is actually processing on rather than guessing.
+    consent_withdrawn_at: Optional[datetime] = None
+    lawful_basis: Optional[str] = None
+    # WS5 issue #136 (§7.3.7): the job-alert switch's initial state, read
+    # once at page load rather than via the PUT-only /job-alerts endpoint.
+    # job_alert_eligible is the same JOB_ALERT_ELIGIBILITY_SQL computation
+    # the PUT response returns as `eligible`.
+    job_alert_optin_at: Optional[datetime] = None
+    job_alert_unsubscribed_at: Optional[datetime] = None
+    job_alert_eligible: bool = False
     created_at: datetime
     updated_at: Optional[datetime] = None
 
@@ -721,6 +737,39 @@ class HealthResponse(BaseModel):
     duplicate_profile_links: Optional[int] = None
 
 
+class RoutineHealth(BaseModel):
+    """One row per known scheduled routine (services/scheduler.ROUTINE_NAMES) --
+    GET /api/v1/admin/health/routines. Sourced from routine_runs
+    (migrations/044_routine_runs.py); a routine that has never run (or
+    never failed) reports None for the field(s) it has no row for yet.
+    No personal data -- a routine name, two timestamps and an exception
+    class name, nothing about a candidate/client/prospect."""
+    name: str
+    last_success_at: Optional[datetime] = None
+    last_error_at: Optional[datetime] = None
+    last_error_class: Optional[str] = None
+
+
+class RoutineHealthResponse(BaseModel):
+    """GET /api/v1/admin/health/routines -- admin-JWT only."""
+    routines: List[RoutineHealth]
+
+
+class SchedulerHealthResponse(BaseModel):
+    """GET /api/v1/admin/health/scheduler -- admin-JWT only. `running`
+    reflects the cross-worker Postgres advisory lock
+    (services/scheduler.SCHEDULER_LOCK_KEY), not this particular uvicorn
+    worker's own in-process state -- the app runs 4 workers and only the
+    one that won the lock actually starts APScheduler (see
+    services/scheduler.start_scheduler's docstring), so a request answered
+    by a different worker would otherwise misreport "not running" even
+    while the scheduler is alive elsewhere in the same process group."""
+    running: bool
+    timezone: str
+    registered_routines: List[str]
+    apollo_jobs_enabled: bool
+
+
 # ── Candidate Portal Schemas ────────────────────────────────────────────
 
 class CandidateMatchItem(BaseModel):
@@ -816,10 +865,24 @@ class CandidateSearchParams(BaseModel):
     offset: int = 0
 
 
+# WS5 BV8 (SITE-DESIGN-SPEC.md §7.6 besluit 2): the canonical pipeline
+# stages, in the order the UI offers them. migrations/043 puts the same
+# seven behind a CHECK constraint on pipeline_entries.stage; this Literal
+# is the API-boundary half of that pair, so an unknown stage is a 422 that
+# names the allowed values rather than a 500 out of Postgres. Both the
+# admin panel's PATCH and the client portal's add/PATCH go through it --
+# the two write paths that exist.
+PipelineStage = Literal["sourced", "new", "screening", "interview", "offer", "placed", "rejected"]
+
+# Derived, never a second hand-written copy (code-review F4): two lists of
+# the same seven values is two places to forget when an eighth is added.
+PIPELINE_STAGES = get_args(PipelineStage)
+
+
 class PipelineAdd(BaseModel):
     candidate_id: int
     job_id: int
-    stage: str = "sourced"
+    stage: PipelineStage = "sourced"
     notes: Optional[str] = None
 
 
@@ -1208,7 +1271,7 @@ class ClientAdminUpdate(BaseModel):
 # ── WS-C.5: Pipeline Stage History ───────────────────────────────────────
 
 class PipelineStageUpdate(BaseModel):
-    stage: str = Field(..., min_length=1, max_length=50)
+    stage: PipelineStage
 
 
 class PipelineStageHistoryItem(BaseModel):
@@ -1280,7 +1343,12 @@ class OneOffCost(BaseModel):
     model_config = {"extra": "forbid"}
 
     label: str = Field(..., min_length=1, max_length=120)
-    amount: Decimal = Field(..., ge=0, decimal_places=2, allow_inf_nan=False)
+    # Same NUMERIC(10,2) cap as _money_field() (99999999.99): a one-off
+    # cost is a placement money field like the rest, so a typo with one
+    # extra integer digit is rejected at the API boundary, not stored.
+    amount: Decimal = Field(
+        ..., ge=0, le=Decimal("99999999.99"), decimal_places=2, allow_inf_nan=False,
+    )
 
 
 class PlacementCreate(BaseModel):

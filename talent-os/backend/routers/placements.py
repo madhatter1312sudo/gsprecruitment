@@ -38,6 +38,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 
 from core.database import fetch_one, fetch_all, fetch_val, execute
 from core.deps import require_role
+from core.listing import resolve_order_by
 from core.margin import compute_margin
 from models.schemas import PlacementCreate, PlacementUpdate, PlacementStatusUpdate, PlacementResponse
 
@@ -142,6 +143,20 @@ async def _validate_references(candidate_id: int, job_id: int, client_id: int) -
 
 # ── CRUD ───────────────────────────────────────────────────────────────
 
+# WS5 BV10 (see core/listing.py): only these keys reach ORDER BY.
+_PLACEMENT_SORT_COLUMNS = {
+    "id": "id",
+    "status": "status",
+    "candidate_id": "candidate_id",
+    "job_id": "job_id",
+    "client_id": "client_id",
+    "start_date": "start_date",
+    "end_date": "end_date",
+    "created_at": "created_at",
+    "updated_at": "updated_at",
+}
+
+
 @router.get("")
 async def list_placements(
     status: Optional[str] = Query(None),
@@ -150,8 +165,13 @@ async def list_placements(
     client_id: Optional[int] = Query(None),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
+    sort: Optional[str] = Query(None, description="Sortable column (WS5 BV10); default created_at."),
+    order: Optional[str] = Query(None, description="'asc' or 'desc'; default 'desc'."),
     current_user: dict = Depends(require_role("admin")),
 ):
+    order_by = resolve_order_by(
+        sort, order, allowed=_PLACEMENT_SORT_COLUMNS, default="created_at DESC", tiebreaker="id DESC",
+    )
     conditions = ["deleted_at IS NULL"]
     filter_args = []
     for col, val in (("status", status), ("candidate_id", candidate_id),
@@ -166,7 +186,7 @@ async def list_placements(
     page_args = list(filter_args) + [limit, offset]
     rows = await fetch_all(
         f"""SELECT * FROM placements WHERE {where_clause}
-            ORDER BY created_at DESC LIMIT ${len(page_args) - 1} OFFSET ${len(page_args)}""",
+            ORDER BY {order_by} LIMIT ${len(page_args) - 1} OFFSET ${len(page_args)}""",
         *page_args,
     )
     items = [PlacementResponse.model_validate(_coerce_one_off_costs(r)) for r in rows]

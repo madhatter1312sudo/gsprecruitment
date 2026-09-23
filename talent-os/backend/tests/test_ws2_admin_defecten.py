@@ -537,6 +537,59 @@ def test_client_analytics_groups_source_breakdown_by_family(monkeypatch):
     assert "apollo_bulk" not in result.source_breakdown
 
 
+class _FakeOfferRateDB:
+    """routers/client.py's offer_rate calculation -- total_applied is
+    distinguished from total_offered only by the `status = 'offered'`
+    clause in the SQL text, same lookup style as _FakeAnalyticsDB."""
+
+    def __init__(self, total_applied, total_offered):
+        self.total_applied = total_applied
+        self.total_offered = total_offered
+
+    async def fetch_one(self, sql, *params):
+        return {"id": 1}
+
+    async def fetch_all(self, sql, *params):
+        return []
+
+    async def fetch_val(self, sql, *params):
+        if "status = 'offered'" in sql:
+            return self.total_offered
+        if "FROM matches m JOIN job_orders j" in sql:
+            return self.total_applied
+        return 0
+
+
+def test_client_analytics_offer_rate_none_when_no_applications(monkeypatch):
+    """No applications at all -- offer_rate must stay None ('n.v.t.'),
+    never a fabricated 0."""
+    import routers.client as client_router
+
+    db = _FakeOfferRateDB(total_applied=0, total_offered=0)
+    monkeypatch.setattr(client_router, "fetch_one", db.fetch_one)
+    monkeypatch.setattr(client_router, "fetch_all", db.fetch_all)
+    monkeypatch.setattr(client_router, "fetch_val", db.fetch_val)
+
+    result = asyncio.run(client_router.get_client_analytics(current_user={"id": 1, "role": "client"}))
+    assert result.offer_rate is None
+
+
+def test_client_analytics_offer_rate_genuine_zero_is_not_none(monkeypatch):
+    """Applications exist but none were offered -- a genuine 0,0%, which
+    must render as 0,0%, not be collapsed into the 'n.v.t.' no-data
+    state."""
+    import routers.client as client_router
+
+    db = _FakeOfferRateDB(total_applied=5, total_offered=0)
+    monkeypatch.setattr(client_router, "fetch_one", db.fetch_one)
+    monkeypatch.setattr(client_router, "fetch_all", db.fetch_all)
+    monkeypatch.setattr(client_router, "fetch_val", db.fetch_val)
+
+    result = asyncio.run(client_router.get_client_analytics(current_user={"id": 1, "role": "client"}))
+    assert result.offer_rate == 0.0
+    assert result.offer_rate is not None
+
+
 # ── 4. GET /v1/admin/health: duplicate_profile_links ──────────────────────
 
 def test_health_detail_reports_duplicate_profile_links(monkeypatch):

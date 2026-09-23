@@ -14,7 +14,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, EmailStr
 
-from core.database import fetch_one, fetch_all, execute
+from core.database import fetch_one, fetch_all, execute, fetch_val, get_pool
 from core.deps import get_current_user, require_role
 from core import privacy
 from services import storage
@@ -26,8 +26,16 @@ admin_router = APIRouter(prefix="/api/v1/admin/gdpr", tags=["gdpr-admin"])
 suppression_router = APIRouter(prefix="/api/v1/admin/suppression", tags=["suppression"])
 
 
-async def _log_request(request_type: str, email: str, summary: str) -> None:
-    await execute(
+async def _log_request(request_type: str, email: str, summary: str, *, execute=None) -> None:
+    """`execute` defaults to the pool-based core.database.execute (resolved
+    at call time via globals(), not a bound default value, so a test's
+    monkeypatch.setattr(gdpr, "execute", ...) still takes effect) -- the
+    two plain callers below (export/withdraw-consent) use that default.
+    erase_person() passes its own transaction-bound execute so this insert
+    lands inside the same transaction as the rest of the erasure (see
+    erase_person()'s own comment on why)."""
+    _execute = execute if execute is not None else globals()["execute"]
+    await _execute(
         """INSERT INTO data_subject_requests (request_type, request_email, status, completed_at, response_summary)
            VALUES ($1, $2, 'completed', NOW(), $3)""",
         request_type, email, summary,
@@ -267,7 +275,9 @@ def _redact_value(value, needle_lower: str, replacement: str):
     return value, False
 
 
-async def _redact_audit_log_email(email: str, replacement: str) -> int:
+async def _redact_audit_log_email(
+    email: str, replacement: str, *, fetch_all=None, execute=None,
+) -> int:
     """audit_log.changes carries the real e-mail in a handful of actions
     (outreach_draft_approved/rejected's target_email, prospect_create's
     payload dump, ...) -- WS-E.7 requires those replaced with a hash, not
@@ -282,8 +292,17 @@ async def _redact_audit_log_email(email: str, replacement: str) -> int:
     only the e-mail inside it, wiping out every other key (actor,
     target_type, ...). A row that somehow already comes back decoded
     (e.g. a future jsonb codec, or a dict passed in directly by a test)
-    is passed through unchanged."""
-    rows = await fetch_all(
+    is passed through unchanged.
+
+    `fetch_all`/`execute` default to the pool-based core.database
+    functions (resolved at call time via globals(), so a test's
+    monkeypatch.setattr(gdpr, "fetch_all"/"execute", ...) still takes
+    effect) -- erase_person() passes its own transaction-bound versions so
+    every UPDATE here lands inside the same transaction as the rest of the
+    erasure (see erase_person()'s own comment on why)."""
+    _fetch_all = fetch_all if fetch_all is not None else globals()["fetch_all"]
+    _execute = execute if execute is not None else globals()["execute"]
+    rows = await _fetch_all(
         "SELECT id, changes FROM audit_log WHERE changes IS NOT NULL AND changes::text ILIKE $1",
         f"%{email}%",
     )
@@ -297,7 +316,7 @@ async def _redact_audit_log_email(email: str, replacement: str) -> int:
                 pass  # not valid JSON -- fall back to plain-string redaction below
         new_changes, changed = _redact_value(changes, email.lower(), replacement)
         if changed:
-            await execute(
+            await _execute(
                 "UPDATE audit_log SET changes = $2::jsonb WHERE id = $1",
                 row["id"], json.dumps(new_changes),
             )
@@ -307,6 +326,7 @@ async def _redact_audit_log_email(email: str, replacement: str) -> int:
 
 async def _anonymize_by_id(
     select_sql: str, update_sql: str, select_param, email_hash: str,
+    *, fetch_all=None, execute=None,
 ) -> int:
     """Fetch matching row ids (select_sql, filtered to select_param as $1
     -- normally email_norm, but any value select_sql's $1 expects works,
@@ -329,11 +349,22 @@ async def _anonymize_by_id(
     select_param=scope_id) directly, with no e-mail condition at all, so
     the subject row is matched regardless of any whitespace/case mismatch
     between the address this call was given and what that row actually
-    has on file -- see erase_person()'s own call sites below."""
-    rows = await fetch_all(select_sql, select_param)
+    has on file -- see erase_person()'s own call sites below.
+
+    `fetch_all`/`execute` default to the pool-based core.database
+    functions (resolved at call time via globals(), so a test's
+    monkeypatch.setattr(gdpr, "fetch_all"/"execute", ...) still takes
+    effect, and the direct-call unit test in tests/test_gdpr_erasure.py
+    keeps working unchanged) -- erase_person() passes its own
+    transaction-bound versions so every UPDATE here lands inside the same
+    transaction as the rest of the erasure (WS-E.7 follow-up, issue #148:
+    see erase_person()'s own comment on why)."""
+    _fetch_all = fetch_all if fetch_all is not None else globals()["fetch_all"]
+    _execute = execute if execute is not None else globals()["execute"]
+    rows = await _fetch_all(select_sql, select_param)
     for row in rows:
         anon = f"erased-{email_hash[:16]}-{row['id']}@erased.invalid"
-        await execute(update_sql, row["id"], anon)
+        await _execute(update_sql, row["id"], anon)
     return len(rows)
 
 
@@ -521,201 +552,293 @@ async def erase_person(
 
     deleted_paths, failed_paths = await _delete_cv_files(user_ids, profile_rows + list(candidate_rows))
 
-    # candidates and users both carry a unique constraint on email
-    # (uq_candidates_email, users.email UNIQUE) — per-row placeholders via
-    # _anonymize_by_id avoid a duplicate-key violation if more than one
-    # row happens to match.
-    # WS-C.7 (migrations/029_placements.py): nationality/needs_work_permit/
-    # kennismigrant_status/ruling_30pct_status/ind_case_number fall under
-    # the same 7-year "geplaatste kandidaat" retention floor as the rest of
-    # a placed candidate's PII (core/retention.py) -- they exist only to
-    # support a placement, so they're nulled here alongside every other
-    # candidates.* PII column, not retained separately.
-    # Security-audit B5 (WS3b/WS3c, migrations/041): the five columns that
-    # migration added were not in this list, so an Art. 17 erasure left
-    # them standing. `referred_by` is the worst of them -- it is the NAME
-    # OF A THIRD PERSON, free text an admin typed, and it survived a
-    # "delete everything you have about me" untouched. The three
-    # job-alert timestamps are behavioural data about this person (that
-    # they asked for alerts, when, and when we last mailed them) with
-    # nothing left to support once the row is anonymised.
+    # WS-E.7 follow-up (issue #148): every write below -- every anonymising
+    # UPDATE, every DELETE, the suppression_list insert and the audit_log/
+    # data_subject_requests rows at the end -- runs on ONE held connection
+    # inside ONE transaction, so a mid-way failure (a bad constraint, a
+    # dropped connection, ...) leaves every one of these tables exactly as
+    # it was before this call, never a half-erased person. Before this
+    # fix each statement ran on its own pooled connection, auto-committed
+    # independently.
     #
-    # `job_alert_unsubscribed_at` is deliberately NOT cleared: it is the
-    # one column here that means "do not send this person anything", the
-    # same direction as the suppression-list row this erasure writes.
-    # Nulling it would be the only change in this statement that makes a
-    # message more likely rather than less.
-    _CANDIDATES_ANONYMIZE_UPDATE_SQL = """UPDATE candidates SET
-             full_name = 'Erased', email = $2, phone = NULL, linkedin_url = NULL,
-             github_url = NULL, portfolio_url = NULL, cv_text = NULL, cv_file_path = NULL,
-             education = NULL, nationality = NULL, needs_work_permit = NULL,
-             kennismigrant_status = NULL, ruling_30pct_status = NULL, ind_case_number = NULL,
-             referred_by = NULL, referral_confirmed_at = NULL,
-             job_alert_optin_at = NULL, job_alert_last_sent_at = NULL,
-             deleted_at = NOW(), consent_withdrawn_at = COALESCE(consent_withdrawn_at, NOW())
-           WHERE id = $1"""
-    # Round 6 re-check: id-only when this call is scoped to candidates,
-    # e-mail-wide (TRIM'd) only when unscoped, untouched entirely when
-    # scoped to a DIFFERENT identity table -- see the matching comment
-    # above candidate_rows/user_ids for why.
-    if scope_table == "candidates":
-        await _anonymize_by_id(
-            "SELECT id FROM candidates WHERE id = $1", _CANDIDATES_ANONYMIZE_UPDATE_SQL, scope_id, email_hash,
-        )
-    elif scope_table is None:
-        await _anonymize_by_id(
-            "SELECT id FROM candidates WHERE LOWER(TRIM(email)) = $1", _CANDIDATES_ANONYMIZE_UPDATE_SQL,
-            email_norm, email_hash,
-        )
-    # WS-C.16 extra: anonymise the FK-linked candidates rows the e-mail
-    # match above wouldn't have reached (see extra_ids above) -- reuses
-    # _anonymize_by_id with an id list instead of an e-mail as the $1
-    # filter, same per-row placeholder reasoning.
+    # _delete_cv_files() above stays OUTSIDE the transaction, deliberately:
+    # it does real R2/network calls that cannot be rolled back and must
+    # not hold a database transaction (and the connection backing it) open
+    # for however long that network round-trip takes. Its own failures are
+    # already tracked separately (failed_paths -> completion_status
+    # "partial", logged, and reported to the caller) and were never
+    # atomic with the DB writes even before this fix -- unchanged here.
     #
-    # Dezelfde UPDATE als hierboven, letterlijk dezelfde constante en niet
-    # een tweede kopie ervan. Twee woordelijke kopieën betekenen: wie er
-    # een kolom aan toevoegt, moet aan twee plekken denken, en de tweede
-    # wordt alleen geraakt door een pad (een FK-gekoppelde rij met een
-    # afwijkend adres) dat zelden in beeld komt. Alleen de SELECT
-    # verschilt, en dat is ook het enige dat hoort te verschillen.
-    if extra_ids:
-        await _anonymize_by_id(
-            "SELECT id FROM candidates WHERE id = ANY($1::int[])",
-            _CANDIDATES_ANONYMIZE_UPDATE_SQL,
-            extra_ids, email_hash,
-        )
-    for uid in user_ids:
-        await execute(
-            """UPDATE candidate_profiles SET
-                 phone = NULL, linkedin_url = NULL, github_url = NULL, portfolio_url = NULL,
-                 current_company = NULL, current_title = NULL, location = NULL, education = NULL,
-                 salary_expectation_min = NULL, salary_expectation_max = NULL, notice_period_days = NULL,
-                 cv_text = NULL, cv_file_path = NULL
-               WHERE user_id = $1""",
-            uid,
-        )
-        await execute("DELETE FROM push_tokens WHERE user_id = $1", uid)
-    _USERS_ANONYMIZE_UPDATE_SQL = "UPDATE users SET full_name = 'Erased', email = $2, deleted_at = NOW() WHERE id = $1"
-    if scope_table == "users":
-        await _anonymize_by_id("SELECT id FROM users WHERE id = $1", _USERS_ANONYMIZE_UPDATE_SQL, scope_id, email_hash)
-    elif scope_table is None:
-        await _anonymize_by_id(
-            "SELECT id FROM users WHERE LOWER(TRIM(email)) = $1", _USERS_ANONYMIZE_UPDATE_SQL, email_norm, email_hash,
-        )
+    # No separate "failed attempt" audit_log row is written outside this
+    # transaction either: this routine has never had one (a raised
+    # exception has always propagated straight to the caller, converted to
+    # a 500 by FastAPI), and the acceptance test for this very fix (a
+    # forced failure on the LAST statement must leave audit_log -- along
+    # with every other touched table -- completely unchanged) requires
+    # exactly that: the success audit_log row is part of the same
+    # atomic unit as everything else, not written separately after the
+    # fact, so it rolls back with the rest on any failure instead of
+    # surviving as a misleading "gdpr_erasure" row for a person who, per
+    # every other table, was never actually erased.
+    #
+    # Concurrency: two erase_person() calls for the SAME address running
+    # at once must not corrupt the result. Rather than take a row lock on
+    # each of the dozen-plus tables this function touches individually (in
+    # whatever order they happen to run in, across three different
+    # identity tables depending on scope_table), the transaction opens by
+    # taking a single Postgres advisory transaction lock keyed on this
+    # address's hash (pg_advisory_xact_lock -- scoped to the transaction,
+    # released automatically on COMMIT or ROLLBACK, no separate unlock
+    # call to remember). A second concurrent call for the same address
+    # simply blocks here until the first one finishes, then proceeds.
+    # Note that the identity SELECTs above ran BEFORE this lock, so the
+    # second call still holds the row ids it collected while the address
+    # was plaintext, and replays the same UPDATEs/DELETEs by id after the
+    # first call's COMMIT. That is safe because every write here is
+    # idempotent: _anonymize_by_id's per-row placeholder is a
+    # deterministic function of (row id, email_hash), the DELETEs delete
+    # nothing the second time, and the NULL-outs write the same NULLs.
+    # The observable residue of a genuine race is a later deleted_at
+    # stamp, one redundant audit-trail row from the plain INSERTs at the
+    # end (audit_log, data_subject_requests via _log_request), and a
+    # possibly spurious "partial" from the R2 delete, which runs outside
+    # the lock; never a corruption of already-erased PII.
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            await conn.execute("SELECT pg_advisory_xact_lock(hashtext($1)::bigint)", email_hash)
 
-    # pipeline_entries.notes is free text a client wrote about a specific
-    # candidate (routers/client.py) -- keyed by candidate_id, not e-mail,
-    # so it isn't reached by any of the LOWER(email)=... updates above.
-    for cid in candidate_ids:
-        await execute("UPDATE pipeline_entries SET notes = NULL WHERE candidate_id = $1", cid)
+            async def _tx_fetch_all(sql, *args):
+                return [dict(r) for r in await conn.fetch(sql, *args)]
 
-    # Security-audit B5: job_alert_sends (migrations/041) is a per-send
-    # log keyed by candidate_id -- which vacancies this person was mailed
-    # and when. Its ON DELETE CASCADE only fires on a HARD delete of the
-    # candidates row, and erase_person() never hard-deletes: it anonymises
-    # in place. So without this, an erased person's send history (and a
-    # live unsubscribe token pointing at their row) outlived the erasure.
-    # Deleted rather than nulled: there is nothing in this table that is
-    # not about this person, and no retention floor claims it.
-    if candidate_ids:
-        await execute("DELETE FROM job_alert_sends WHERE candidate_id = ANY($1::int[])", candidate_ids)
+            async def _tx_execute(sql, *args):
+                return await conn.execute(sql, *args)
 
-    await _anonymize_by_id(
-        "SELECT id FROM quiz_submissions WHERE LOWER(TRIM(email)) = $1",
-        "UPDATE quiz_submissions SET email = $2, referrer_host = NULL WHERE id = $1",
-        email_norm, email_hash,
-    )
-    await _anonymize_by_id(
-        "SELECT id FROM contact_submissions WHERE LOWER(TRIM(email)) = $1",
-        "UPDATE contact_submissions SET name = 'Erased', email = $2, phone = NULL, referrer_host = NULL WHERE id = $1",
-        email_norm, email_hash,
-    )
-    await _anonymize_by_id(
-        "SELECT id FROM outreach_drafts WHERE LOWER(TRIM(target_email)) = $1",
-        "UPDATE outreach_drafts SET target_email = $2, target_name = 'Erased' WHERE id = $1",
-        email_norm, email_hash,
-    )
-    await _anonymize_by_id(
-        "SELECT id FROM outreach_messages WHERE LOWER(TRIM(recipient_email)) = $1",
-        "UPDATE outreach_messages SET recipient_email = $2 WHERE id = $1",
-        email_norm, email_hash,
-    )
-    # A prospect contact person can share the same address as a candidate
-    # (or simply be the subject of their own erasure request) — anonymise
-    # the contact identity and set opt_out_at, same as add_suppression().
-    _CLIENT_PROSPECTS_ANONYMIZE_UPDATE_SQL = (
-        "UPDATE client_prospects SET contact_name = 'Erased', contact_email = $2, contact_linkedin = NULL, "
-        "opt_out_at = COALESCE(opt_out_at, NOW()) WHERE id = $1"
-    )
-    if scope_table == "client_prospects":
-        await _anonymize_by_id(
-            "SELECT id FROM client_prospects WHERE id = $1",
-            _CLIENT_PROSPECTS_ANONYMIZE_UPDATE_SQL, scope_id, email_hash,
-        )
-    elif scope_table is None:
-        await _anonymize_by_id(
-            "SELECT id FROM client_prospects WHERE LOWER(TRIM(contact_email)) = $1",
-            _CLIENT_PROSPECTS_ANONYMIZE_UPDATE_SQL, email_norm, email_hash,
-        )
-    await _anonymize_by_id(
-        "SELECT id FROM data_subject_requests WHERE LOWER(TRIM(request_email)) = $1",
-        "UPDATE data_subject_requests SET request_email = $2 WHERE id = $1",
-        email_norm, email_hash,
-    )
-    audit_redacted = await _redact_audit_log_email(email_norm, email_hash)
+            # candidates and users both carry a unique constraint on email
+            # (uq_candidates_email, users.email UNIQUE) — per-row placeholders via
+            # _anonymize_by_id avoid a duplicate-key violation if more than one
+            # row happens to match.
+            # WS-C.7 (migrations/029_placements.py): nationality/needs_work_permit/
+            # kennismigrant_status/ruling_30pct_status/ind_case_number fall under
+            # the same 7-year "geplaatste kandidaat" retention floor as the rest of
+            # a placed candidate's PII (core/retention.py) -- they exist only to
+            # support a placement, so they're nulled here alongside every other
+            # candidates.* PII column, not retained separately.
+            # Security-audit B5 (WS3b/WS3c, migrations/041): the five columns that
+            # migration added were not in this list, so an Art. 17 erasure left
+            # them standing. `referred_by` is the worst of them -- it is the NAME
+            # OF A THIRD PERSON, free text an admin typed, and it survived a
+            # "delete everything you have about me" untouched. The three
+            # job-alert timestamps are behavioural data about this person (that
+            # they asked for alerts, when, and when we last mailed them) with
+            # nothing left to support once the row is anonymised.
+            #
+            # `job_alert_unsubscribed_at` is deliberately NOT cleared: it is the
+            # one column here that means "do not send this person anything", the
+            # same direction as the suppression-list row this erasure writes.
+            # Nulling it would be the only change in this statement that makes a
+            # message more likely rather than less.
+            _CANDIDATES_ANONYMIZE_UPDATE_SQL = """UPDATE candidates SET
+                     full_name = 'Erased', email = $2, phone = NULL, linkedin_url = NULL,
+                     github_url = NULL, portfolio_url = NULL, cv_text = NULL, cv_file_path = NULL,
+                     education = NULL, nationality = NULL, needs_work_permit = NULL,
+                     kennismigrant_status = NULL, ruling_30pct_status = NULL, ind_case_number = NULL,
+                     referred_by = NULL, referral_confirmed_at = NULL,
+                     job_alert_optin_at = NULL, job_alert_last_sent_at = NULL,
+                     deleted_at = NOW(), consent_withdrawn_at = COALESCE(consent_withdrawn_at, NOW())
+                   WHERE id = $1"""
+            # Round 6 re-check: id-only when this call is scoped to candidates,
+            # e-mail-wide (TRIM'd) only when unscoped, untouched entirely when
+            # scoped to a DIFFERENT identity table -- see the matching comment
+            # above candidate_rows/user_ids for why.
+            if scope_table == "candidates":
+                await _anonymize_by_id(
+                    "SELECT id FROM candidates WHERE id = $1", _CANDIDATES_ANONYMIZE_UPDATE_SQL, scope_id, email_hash,
+                    fetch_all=_tx_fetch_all, execute=_tx_execute,
+                )
+            elif scope_table is None:
+                await _anonymize_by_id(
+                    "SELECT id FROM candidates WHERE LOWER(TRIM(email)) = $1", _CANDIDATES_ANONYMIZE_UPDATE_SQL,
+                    email_norm, email_hash,
+                    fetch_all=_tx_fetch_all, execute=_tx_execute,
+                )
+            # WS-C.16 extra: anonymise the FK-linked candidates rows the e-mail
+            # match above wouldn't have reached (see extra_ids above) -- reuses
+            # _anonymize_by_id with an id list instead of an e-mail as the $1
+            # filter, same per-row placeholder reasoning.
+            #
+            # Dezelfde UPDATE als hierboven, letterlijk dezelfde constante en niet
+            # een tweede kopie ervan. Twee woordelijke kopieën betekenen: wie er
+            # een kolom aan toevoegt, moet aan twee plekken denken, en de tweede
+            # wordt alleen geraakt door een pad (een FK-gekoppelde rij met een
+            # afwijkend adres) dat zelden in beeld komt. Alleen de SELECT
+            # verschilt, en dat is ook het enige dat hoort te verschillen.
+            if extra_ids:
+                await _anonymize_by_id(
+                    "SELECT id FROM candidates WHERE id = ANY($1::int[])",
+                    _CANDIDATES_ANONYMIZE_UPDATE_SQL,
+                    extra_ids, email_hash,
+                    fetch_all=_tx_fetch_all, execute=_tx_execute,
+                )
+            for uid in user_ids:
+                await _tx_execute(
+                    """UPDATE candidate_profiles SET
+                         phone = NULL, linkedin_url = NULL, github_url = NULL, portfolio_url = NULL,
+                         current_company = NULL, current_title = NULL, location = NULL, education = NULL,
+                         salary_expectation_min = NULL, salary_expectation_max = NULL, notice_period_days = NULL,
+                         cv_text = NULL, cv_file_path = NULL
+                       WHERE user_id = $1""",
+                    uid,
+                )
+                await _tx_execute("DELETE FROM push_tokens WHERE user_id = $1", uid)
+            _USERS_ANONYMIZE_UPDATE_SQL = "UPDATE users SET full_name = 'Erased', email = $2, deleted_at = NOW() WHERE id = $1"
+            if scope_table == "users":
+                await _anonymize_by_id(
+                    "SELECT id FROM users WHERE id = $1", _USERS_ANONYMIZE_UPDATE_SQL, scope_id, email_hash,
+                    fetch_all=_tx_fetch_all, execute=_tx_execute,
+                )
+            elif scope_table is None:
+                await _anonymize_by_id(
+                    "SELECT id FROM users WHERE LOWER(TRIM(email)) = $1", _USERS_ANONYMIZE_UPDATE_SQL, email_norm, email_hash,
+                    fetch_all=_tx_fetch_all, execute=_tx_execute,
+                )
 
-    # H3 (retention-kolommen, security-audit round 5): retention_review_items
-    # carries a plaintext e-mail column of its own (migrations/
-    # 036_retention_review_queue.py) -- an erasure (this call, from any of
-    # the three callers) must scrub that too, including when it is
-    # triggered by the person's OWN Art. 17 request via the self-service
-    # portal, not only when the retention flow purges the row that
-    # prompted it (routers/retention_admin.py's `_approve_one()` already
-    # nulls the row it just acted on directly; this catches every OTHER
-    # row -- a different category, or a stale one never approved -- that
-    # still carries the same address).
-    await execute(
-        "UPDATE retention_review_items SET email = NULL WHERE LOWER(TRIM(email)) = $1", email_norm,
-    )
+            # pipeline_entries.notes is free text a client wrote about a specific
+            # candidate (routers/client.py) -- keyed by candidate_id, not e-mail,
+            # so it isn't reached by any of the LOWER(email)=... updates above.
+            #
+            # security-audit (WS5 BV8, HIGH): this statement is the reason
+            # migrations/043's normalisation has a catch-all. It writes to a
+            # pipeline_entries row without touching `stage`, and a NOT VALID CHECK
+            # still applies to such a write -- so a row left outside the seven
+            # would abort the erasure exactly here. Before this fix that abort
+            # would have left users and candidates already anonymised on their
+            # own separately-committed connections, and everything below this
+            # line not yet -- exactly the half-erased state the single
+            # transaction wrapping this whole function (see the comment at the
+            # top of it) now makes impossible: this statement failing now rolls
+            # back the candidates/users/candidate_profiles/push_tokens writes
+            # above it too.
+            for cid in candidate_ids:
+                await _tx_execute("UPDATE pipeline_entries SET notes = NULL WHERE candidate_id = $1", cid)
 
-    # WS-C.17 security-audit follow-up (LOW, post-APPROVED): a lapsed
-    # talentpool consent is erased the same way as any other retention
-    # purge (since WS-E.10, only via routers/retention_admin.py's
-    # review-approve endpoint, once an admin approves the queued row),
-    # but it is
-    # NOT the same thing as an opt-out/STOP or an admin/self-service
-    # erasure -- the person didn't ask to never be contacted again, their
-    # 12-month consent just ran out after the renewal reminder went
-    # unanswered. Adding them to suppression_list would silently block
-    # the exact re-signup this flow's own reminder e-mail invites, so
-    # this one reason is the sole exception to "every erasure adds a
-    # suppression entry".
-    if not reason.startswith("retention_purge:talentpool_consent"):
-        await execute(
-            """INSERT INTO suppression_list (email_hash, email_domain, reason, created_by)
-               VALUES ($1, $2, $3, $4)
-               ON CONFLICT (email_hash) DO NOTHING""",
-            email_hash, email_domain, "gdpr_erasure", actor_id,
-        )
+            # Security-audit B5: job_alert_sends (migrations/041) is a per-send
+            # log keyed by candidate_id -- which vacancies this person was mailed
+            # and when. Its ON DELETE CASCADE only fires on a HARD delete of the
+            # candidates row, and erase_person() never hard-deletes: it anonymises
+            # in place. So without this, an erased person's send history (and a
+            # live unsubscribe token pointing at their row) outlived the erasure.
+            # Deleted rather than nulled: there is nothing in this table that is
+            # not about this person, and no retention floor claims it.
+            if candidate_ids:
+                await _tx_execute("DELETE FROM job_alert_sends WHERE candidate_id = ANY($1::int[])", candidate_ids)
 
-    completion_status = "partial" if failed_paths else "complete"
-    await execute(
-        "INSERT INTO audit_log (action, actor_id, target_type, target_id, changes) VALUES ($1, $2, $3, $4, $5::jsonb)",
-        "gdpr_erasure", actor_id, "person", user_ids[0] if user_ids else None,
-        json.dumps({
-            "email_hash": email_hash,
-            "reason": reason,
-            "status": completion_status,
-            "cv_files_deleted": deleted_paths,
-            "cv_files_failed": failed_paths,
-            "audit_log_rows_redacted": audit_redacted,
-        }),
-    )
-    await _log_request(
-        "erasure", f"erased-{email_hash[:16]}@erased.invalid",
-        f"Erasure ({reason}) -- email_hash={email_hash}"
-        + ("" if not failed_paths else f" -- WARNING: {len(failed_paths)} CV file(s)/prefix could not be deleted, see audit_log"),
-    )
+            await _anonymize_by_id(
+                "SELECT id FROM quiz_submissions WHERE LOWER(TRIM(email)) = $1",
+                "UPDATE quiz_submissions SET email = $2, referrer_host = NULL WHERE id = $1",
+                email_norm, email_hash,
+                fetch_all=_tx_fetch_all, execute=_tx_execute,
+            )
+            await _anonymize_by_id(
+                "SELECT id FROM contact_submissions WHERE LOWER(TRIM(email)) = $1",
+                "UPDATE contact_submissions SET name = 'Erased', email = $2, phone = NULL, referrer_host = NULL WHERE id = $1",
+                email_norm, email_hash,
+                fetch_all=_tx_fetch_all, execute=_tx_execute,
+            )
+            await _anonymize_by_id(
+                "SELECT id FROM outreach_drafts WHERE LOWER(TRIM(target_email)) = $1",
+                "UPDATE outreach_drafts SET target_email = $2, target_name = 'Erased' WHERE id = $1",
+                email_norm, email_hash,
+                fetch_all=_tx_fetch_all, execute=_tx_execute,
+            )
+            await _anonymize_by_id(
+                "SELECT id FROM outreach_messages WHERE LOWER(TRIM(recipient_email)) = $1",
+                "UPDATE outreach_messages SET recipient_email = $2 WHERE id = $1",
+                email_norm, email_hash,
+                fetch_all=_tx_fetch_all, execute=_tx_execute,
+            )
+            # A prospect contact person can share the same address as a candidate
+            # (or simply be the subject of their own erasure request) — anonymise
+            # the contact identity and set opt_out_at, same as add_suppression().
+            _CLIENT_PROSPECTS_ANONYMIZE_UPDATE_SQL = (
+                "UPDATE client_prospects SET contact_name = 'Erased', contact_email = $2, contact_linkedin = NULL, "
+                "opt_out_at = COALESCE(opt_out_at, NOW()) WHERE id = $1"
+            )
+            if scope_table == "client_prospects":
+                await _anonymize_by_id(
+                    "SELECT id FROM client_prospects WHERE id = $1",
+                    _CLIENT_PROSPECTS_ANONYMIZE_UPDATE_SQL, scope_id, email_hash,
+                    fetch_all=_tx_fetch_all, execute=_tx_execute,
+                )
+            elif scope_table is None:
+                await _anonymize_by_id(
+                    "SELECT id FROM client_prospects WHERE LOWER(TRIM(contact_email)) = $1",
+                    _CLIENT_PROSPECTS_ANONYMIZE_UPDATE_SQL, email_norm, email_hash,
+                    fetch_all=_tx_fetch_all, execute=_tx_execute,
+                )
+            await _anonymize_by_id(
+                "SELECT id FROM data_subject_requests WHERE LOWER(TRIM(request_email)) = $1",
+                "UPDATE data_subject_requests SET request_email = $2 WHERE id = $1",
+                email_norm, email_hash,
+                fetch_all=_tx_fetch_all, execute=_tx_execute,
+            )
+            audit_redacted = await _redact_audit_log_email(
+                email_norm, email_hash, fetch_all=_tx_fetch_all, execute=_tx_execute,
+            )
+
+            # H3 (retention-kolommen, security-audit round 5): retention_review_items
+            # carries a plaintext e-mail column of its own (migrations/
+            # 036_retention_review_queue.py) -- an erasure (this call, from any of
+            # the three callers) must scrub that too, including when it is
+            # triggered by the person's OWN Art. 17 request via the self-service
+            # portal, not only when the retention flow purges the row that
+            # prompted it (routers/retention_admin.py's `_approve_one()` already
+            # nulls the row it just acted on directly; this catches every OTHER
+            # row -- a different category, or a stale one never approved -- that
+            # still carries the same address).
+            await _tx_execute(
+                "UPDATE retention_review_items SET email = NULL WHERE LOWER(TRIM(email)) = $1", email_norm,
+            )
+
+            # WS-C.17 security-audit follow-up (LOW, post-APPROVED): a lapsed
+            # talentpool consent is erased the same way as any other retention
+            # purge (since WS-E.10, only via routers/retention_admin.py's
+            # review-approve endpoint, once an admin approves the queued row),
+            # but it is
+            # NOT the same thing as an opt-out/STOP or an admin/self-service
+            # erasure -- the person didn't ask to never be contacted again, their
+            # 12-month consent just ran out after the renewal reminder went
+            # unanswered. Adding them to suppression_list would silently block
+            # the exact re-signup this flow's own reminder e-mail invites, so
+            # this one reason is the sole exception to "every erasure adds a
+            # suppression entry".
+            if not reason.startswith("retention_purge:talentpool_consent"):
+                await _tx_execute(
+                    """INSERT INTO suppression_list (email_hash, email_domain, reason, created_by)
+                       VALUES ($1, $2, $3, $4)
+                       ON CONFLICT (email_hash) DO NOTHING""",
+                    email_hash, email_domain, "gdpr_erasure", actor_id,
+                )
+
+            completion_status = "partial" if failed_paths else "complete"
+            await _tx_execute(
+                "INSERT INTO audit_log (action, actor_id, target_type, target_id, changes) VALUES ($1, $2, $3, $4, $5::jsonb)",
+                "gdpr_erasure", actor_id, "person", user_ids[0] if user_ids else None,
+                json.dumps({
+                    "email_hash": email_hash,
+                    "reason": reason,
+                    "status": completion_status,
+                    "cv_files_deleted": deleted_paths,
+                    "cv_files_failed": failed_paths,
+                    "audit_log_rows_redacted": audit_redacted,
+                }),
+            )
+            await _log_request(
+                "erasure", f"erased-{email_hash[:16]}@erased.invalid",
+                f"Erasure ({reason}) -- email_hash={email_hash}"
+                + ("" if not failed_paths else f" -- WARNING: {len(failed_paths)} CV file(s)/prefix could not be deleted, see audit_log"),
+                execute=_tx_execute,
+            )
 
     if failed_paths:
         logger.warning(
@@ -753,8 +876,43 @@ async def erase_my_account(current_user: dict = Depends(get_current_user)):
 # ── Admin: erase a sourced person who never had a portal account ─────────
 
 class AdminEraseRequest(BaseModel):
+    """WS5 BV9 (SITE-DESIGN-SPEC.md §7.6 besluit 3, §7.7 BV9).
+
+    `confirm` used to be a boolean that defaulted to False and only ever
+    mattered for the admin/self guard below -- which meant the plain case
+    (erase a sourced person) needed no confirmation of any kind: one
+    field, one call, irreversible. The typed-address threshold the admin
+    panel applies is a UI measure, and a UI measure binds only that UI,
+    not a routine or a second client hitting the same endpoint. So the
+    field now carries the address itself, and the endpoint refuses when
+    it does not match `email` after strip()/lower(). Every caller is now
+    held to the same threshold and the panel repeats the rule instead of
+    carrying it alone.
+
+    The admin/self question is a genuinely different one -- "this address
+    also owns platform access, are you sure" -- so it keeps its own
+    field, `confirm_admin_or_self`, rather than being folded into the
+    same yes. Two questions, two answers.
+
+    The match itself is checked in the endpoint below, not in a pydantic
+    validator: a validator's ValidationError carries the offending input
+    back to the caller (pydantic puts the whole payload in `input`), and
+    that would put two e-mail addresses into every 422 body and into
+    whatever logs or error trackers see it. The endpoint refuses with a
+    structured detail that names neither.
+
+    `confirm` carries an empty-string default rather than being required
+    for the same reason (security-audit, MEDIUM): a missing required
+    field never reaches the route at all, and FastAPI's own 422 for it
+    echoes the whole request body back -- including `email`. Defaulting
+    it to "" hands every case to the route's check below, which refuses
+    an empty confirmation just as firmly and names no address. It is a
+    default that can never be a valid confirmation: no e-mail address is
+    the empty string.
+    """
     email: EmailStr
-    confirm: bool = False
+    confirm: str = ""
+    confirm_admin_or_self: bool = False
 
 
 @admin_router.post("/erase")
@@ -770,21 +928,36 @@ async def admin_erase_person(
     role='admin'), or the calling admin's own account, through this
     endpoint would delete platform-admin access as a side effect of what
     looks like a routine PII-erasure request. Refuse unless the caller
-    explicitly opts in with confirm=true."""
+    explicitly opts in with confirm_admin_or_self=true (WS5 BV9 renamed
+    this from the old boolean `confirm`, which now carries the typed
+    address -- see AdminEraseRequest)."""
     email_norm = privacy.normalize_email(payload.email)
+    # WS5 BV9: the typed-address threshold, before anything else happens
+    # and before any lookup tells the caller whether the address exists.
+    if privacy.normalize_email(payload.confirm) != email_norm:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "erase_confirm_must_match_email",
+                "message": (
+                    "confirm must repeat the e-mail address in `email` exactly. "
+                    "Case and surrounding whitespace are ignored; nothing else is."
+                ),
+            },
+        )
     matching_users = await fetch_all(
         "SELECT id, role FROM users WHERE LOWER(TRIM(email)) = $1", email_norm,
     )
     is_admin_or_self = any(
         u["role"] == "admin" or u["id"] == current_user["id"] for u in matching_users
     )
-    if is_admin_or_self and not payload.confirm:
+    if is_admin_or_self and not payload.confirm_admin_or_self:
         raise HTTPException(
             status_code=409,
             detail={
                 "code": "erase_admin_or_self_requires_confirm",
                 "message": "This e-mail matches an admin account or your own account. "
-                            "Resend with confirm: true to proceed.",
+                            "Resend with confirm_admin_or_self: true to proceed.",
             },
         )
     return await erase_person(payload.email, actor_id=current_user["id"], reason="admin request")
@@ -848,4 +1021,10 @@ async def list_suppression(
         "ORDER BY created_at DESC LIMIT $1 OFFSET $2",
         limit, offset,
     )
-    return {"items": rows}
+    # WS5 BV5: `total` next to `items`, the same shape every other admin
+    # list route returns, so §7.3.5 can page instead of offering a "Meer
+    # laden" button that can never say how much is left. A count of rows
+    # on the suppression list is not personal data -- the rows themselves
+    # carry only a hash and a domain, and this stays behind the admin JWT.
+    total = await fetch_val("SELECT COUNT(*) FROM suppression_list") or 0
+    return {"items": rows, "total": total, "limit": limit, "offset": offset}

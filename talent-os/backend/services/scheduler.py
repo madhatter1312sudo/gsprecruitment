@@ -61,6 +61,66 @@ scheduler = AsyncIOScheduler(timezone=TIMEZONE)
 _lock_conn: Optional[asyncpg.Connection] = None
 
 
+# ── Routine health (issue #127) ─────────────────────────────────────────
+#
+# The fixed set of cron job ids start_scheduler() registers below, in
+# registration order -- including the two Apollo jobs even when
+# settings.apollo_sync_enabled is false, so GET /api/v1/admin/health/routines
+# (routers/admin.py) can list every known routine and report "never run"
+# for one that isn't currently enabled, rather than silently omitting it.
+# Kept here, next to start_scheduler(), as the one place that names them,
+# instead of a second hand-maintained list in routers/admin.py.
+ROUTINE_NAMES = [
+    "apollo_search_and_sync",
+    "apollo_enrich_batch",
+    "matching",
+    "draft_outreach",
+    "draft_blog_post",
+    "talentpool_optin_requests_cleanup",
+    "job_alert_sends_cleanup",
+    "talentpool_reminder",
+    "dormant_account_warning",
+    "job_alert",
+    "retention_review",
+]
+
+
+async def _record_routine_run(routine_name: str, status: str, error_class: Optional[str] = None) -> None:
+    """Write one row to routine_runs (migrations/044_routine_runs.py).
+    Called only from _tracked() below, on every scheduler tick that
+    actually ran (never on a dry run a system_settings flag skipped --
+    that is not an attempt, and would make a disabled routine look
+    "failing" instead of "off"). Never raises itself: a metrics write
+    failing must never mask the job's own result or crash the scheduler."""
+    try:
+        await execute(
+            "INSERT INTO routine_runs (routine_name, status, error_class) VALUES ($1, $2, $3)",
+            routine_name, status, error_class,
+        )
+    except Exception:
+        logger.exception("_record_routine_run: failed to record run for %s", routine_name)
+
+
+def _tracked(routine_name: str, func):
+    """Wrap a job coroutine function so every scheduler tick (success or
+    exception) writes one routine_runs row before returning/re-raising.
+    Exceptions are always re-raised unchanged afterwards -- APScheduler's
+    own "job raised an exception" logging must keep working exactly as it
+    did before this wrapper existed."""
+
+    async def _runner(*args, **kwargs):
+        try:
+            result = await func(*args, **kwargs)
+            await _record_routine_run(routine_name, "success")
+            return result
+        except Exception as exc:
+            await _record_routine_run(routine_name, "error", type(exc).__name__)
+            raise
+
+    _runner.__name__ = getattr(func, "__name__", routine_name)
+    return _runner
+
+
 async def _flag_enabled(key: str) -> bool:
     """Read a system_settings boolean flag. Missing key == enabled.
 
@@ -1329,11 +1389,11 @@ async def start_scheduler() -> None:
     apollo_jobs_registered = 0
     if settings.apollo_sync_enabled:
         scheduler.add_job(
-            apollo_search_and_sync, CronTrigger(hour=6, minute=0),
+            _tracked("apollo_search_and_sync", apollo_search_and_sync), CronTrigger(hour=6, minute=0),
             id="apollo_search_and_sync", replace_existing=True,
         )
         scheduler.add_job(
-            apollo_enrich_batch, CronTrigger(hour=6, minute=30),
+            _tracked("apollo_enrich_batch", apollo_enrich_batch), CronTrigger(hour=6, minute=30),
             id="apollo_enrich_batch", replace_existing=True,
         )
         apollo_jobs_registered = 2
@@ -1341,27 +1401,28 @@ async def start_scheduler() -> None:
         logger.info("scheduler: apollo_sync_enabled=false, not registering Apollo jobs")
 
     scheduler.add_job(
-        matching, CronTrigger(hour=7, minute=0),
+        _tracked("matching", matching), CronTrigger(hour=7, minute=0),
         id="matching", replace_existing=True,
     )
     scheduler.add_job(
-        draft_outreach, CronTrigger(hour=7, minute=30),
+        _tracked("draft_outreach", draft_outreach), CronTrigger(hour=7, minute=30),
         id="draft_outreach", replace_existing=True,
     )
     scheduler.add_job(
-        draft_blog_post, CronTrigger(day_of_week="mon", hour=5, minute=0),
+        _tracked("draft_blog_post", draft_blog_post), CronTrigger(day_of_week="mon", hour=5, minute=0),
         id="draft_blog_post", replace_existing=True,
     )
     scheduler.add_job(
-        talentpool_optin_requests_cleanup_job, CronTrigger(hour=4, minute=0),
+        _tracked("talentpool_optin_requests_cleanup", talentpool_optin_requests_cleanup_job),
+        CronTrigger(hour=4, minute=0),
         id="talentpool_optin_requests_cleanup", replace_existing=True,
     )
     scheduler.add_job(
-        job_alert_sends_cleanup_job, CronTrigger(hour=4, minute=20),
+        _tracked("job_alert_sends_cleanup", job_alert_sends_cleanup_job), CronTrigger(hour=4, minute=20),
         id="job_alert_sends_cleanup", replace_existing=True,
     )
     scheduler.add_job(
-        talentpool_reminder_job, CronTrigger(hour=4, minute=30),
+        _tracked("talentpool_reminder", talentpool_reminder_job), CronTrigger(hour=4, minute=30),
         id="talentpool_reminder", replace_existing=True,
     )
     # WS3b/WS3c. Beide worden ALTIJD geregistreerd, ook met hun
@@ -1377,11 +1438,11 @@ async def start_scheduler() -> None:
     # 08:00 zit na de matching van 07:00, zodat de digest van vandaag de
     # matches van vanochtend meeneemt in plaats van die van gisteren.
     scheduler.add_job(
-        dormant_account_warning_job, CronTrigger(hour=4, minute=45),
+        _tracked("dormant_account_warning", dormant_account_warning_job), CronTrigger(hour=4, minute=45),
         id="dormant_account_warning", replace_existing=True,
     )
     scheduler.add_job(
-        job_alert_job, CronTrigger(hour=8, minute=0),
+        _tracked("job_alert", job_alert_job), CronTrigger(hour=8, minute=0),
         id="job_alert", replace_existing=True,
     )
     # WS-E.10 (owner decision): monthly, not daily -- this job only ever
@@ -1389,7 +1450,7 @@ async def start_scheduler() -> None:
     # docstring), never purges, so there is no HARD RULE left to re-check
     # on every cron tick the way a daily purge job would have to.
     scheduler.add_job(
-        retention_review_job, CronTrigger(day=1, hour=4, minute=0),
+        _tracked("retention_review", retention_review_job), CronTrigger(day=1, hour=4, minute=0),
         id="retention_review", replace_existing=True,
     )
 
@@ -1419,23 +1480,26 @@ async def shutdown_scheduler() -> None:
             _lock_conn = None
 
 
+# Manual runs of a cron routine are wrapped with the same routine name as
+# start_scheduler() uses, so a "run now" from the admin panel shows up in
+# routine_runs and on /api/v1/admin/health/routines like a scheduler tick.
 JOBS_BY_NAME = {
-    "sourcing": apollo_search_and_sync,
-    "enrich": apollo_enrich_batch,
-    "matching": matching,
-    "drafting": draft_outreach,
-    "blog": draft_blog_post,
-    "retention_review": retention_review_job,
-    "talentpool_optin_cleanup": talentpool_optin_requests_cleanup_job,
+    "sourcing": _tracked("apollo_search_and_sync", apollo_search_and_sync),
+    "enrich": _tracked("apollo_enrich_batch", apollo_enrich_batch),
+    "matching": _tracked("matching", matching),
+    "drafting": _tracked("draft_outreach", draft_outreach),
+    "blog": _tracked("draft_blog_post", draft_blog_post),
+    "retention_review": _tracked("retention_review", retention_review_job),
+    "talentpool_optin_cleanup": _tracked("talentpool_optin_requests_cleanup", talentpool_optin_requests_cleanup_job),
     # WS3b/WS3c: handmatig te draaien via POST /api/v1/admin/outreach/run/
     # {job_name}, net als de andere jobs hier. Handmatig draaien omzeilt
     # géén schakelaar: allebei lezen ze settings (en job_alert ook de
     # DB-vlag) binnenin, dus een admin die dit aanroept met de
     # schakelaars uit krijgt dezelfde droogloop als de cron -- dezelfde
     # les als de security-audit-opmerking bij apollo_search_and_sync.
-    "dormant_warning": dormant_account_warning_job,
-    "job_alerts": job_alert_job,
-    "job_alert_sends_cleanup": job_alert_sends_cleanup_job,
+    "dormant_warning": _tracked("dormant_account_warning", dormant_account_warning_job),
+    "job_alerts": _tracked("job_alert", job_alert_job),
+    "job_alert_sends_cleanup": _tracked("job_alert_sends_cleanup", job_alert_sends_cleanup_job),
     # Manual-trigger only — deliberately NOT added to start_scheduler()'s
     # cron jobs below. One-shot Apollo bulk-harvest (services/harvest.py)
     # and its outreach-draft catch-up, both run via routers/outreach.py's
