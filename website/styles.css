@@ -1759,6 +1759,11 @@ input[type="checkbox"] { accent-color: var(--gold); }
 html[data-lang="nl"] .lang-en { display: none; }
 html[data-lang="en"] .lang-nl { display: none; }
 
+/* ── English-text fallback marker (issue #153) ──────────
+   A vacancy body section whose English field is still null shows this
+   instead of the Dutch paragraph unmarked under an English heading. */
+.gsp-lang-fallback { color: var(--text-muted, #6b7280); font-style: italic; }
+
 /* ── Audience switch (Werkgevers / Kandidaten) ──────────── */
 .audience-switch {
   display: inline-flex;
