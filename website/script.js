@@ -671,7 +671,29 @@ const GSP_WHATSAPP = '31617913965';
   //    carry the 44px touch target, --gold-ink color and identical
   //    hover/focus-visible (website/styles.css). Every API field is routed
   //    through GSP.esc/encodeURIComponent (xss_static_check.py). ───────
-  function jobCardHTML(job, ctaClass, ctaLabel) {
+  // Freshness line ("Geplaatst N dagen geleden"), design-spec-batch.md
+  // item 1b. created_at is the field the public API actually returns (see
+  // vacature.js's buildJobPostingLd(), which already reads job.created_at
+  // as the JobPosting datePosted); published_at does not exist on this
+  // API today but is preferred if it's ever added. Handles a missing
+  // field and an unparseable date the same way.
+  function freshnessLabel(job, lang) {
+    const raw = job.created_at || job.published_at;
+    const d = raw ? new Date(raw) : null;
+    if (!d || isNaN(d.getTime())) {
+      return { nl: 'Geplaatst datum onbekend', en: 'Posting date unknown' };
+    }
+    const days = Math.max(0, Math.floor((Date.now() - d.getTime()) / 86400000));
+    if (days === 0) return { nl: 'Vandaag geplaatst', en: 'Posted today' };
+    if (days === 1) return { nl: 'Gisteren geplaatst', en: 'Posted yesterday' };
+    if (days <= 30) return { nl: `Geplaatst ${days} dagen geleden`, en: `Posted ${days} days ago` };
+    // Older than 30 days: an exact date reads more honestly than
+    // "30+ dagen geleden", mono-timestamp treatment like the rest of the site.
+    const dateStr = d.toLocaleDateString(lang === 'nl' ? 'nl-NL' : 'en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+    return { nl: `Geplaatst op ${dateStr}`, en: `Posted on ${dateStr}` };
+  }
+
+  function jobCardHTML(job, ctaClass, ctaLabel, lang) {
     const discipline = GSP.esc(job.department || '');
     // location_type label map (#152 defect E): lookup is case-insensitive
     // against the stored values ("On-site", "Hybride"); an unmapped value
@@ -695,11 +717,13 @@ const GSP_WHATSAPP = '31617913965';
       ? `<span class="lang-nl">€${Number(job.salary_min).toLocaleString('nl-NL')} – €${Number(job.salary_max).toLocaleString('nl-NL')}</span><span class="lang-en">€${Number(job.salary_min).toLocaleString('en-US')} – €${Number(job.salary_max).toLocaleString('en-US')}</span>`
       : `<span class="lang-nl">Op aanvraag</span><span class="lang-en">On request</span>`;
     const href = `vacature.html?id=${encodeURIComponent(job.slug || job.id)}`;
+    const fresh = freshnessLabel(job, lang);
     return `
       <div class="card-data" data-id="${GSP.esc(job.id)}" data-slug="${GSP.esc(job.slug || job.id)}" data-href="${href}">
         <div class="card-data__meta-top">
           <span class="card-data__discipline">${discipline}</span>${metaRest.length ? ' · ' + metaRest.join(' · ') : ''}
         </div>
+        <div class="card-data__freshness"><span class="lang-nl">${GSP.esc(fresh.nl)}</span><span class="lang-en">${GSP.esc(fresh.en)}</span></div>
         <h3>${GSP.esc(job.title)}</h3>
         <p class="card-clamp-3">${GSP.esc(job.description || '')}</p>
         <div class="card-data__meta" style="display:flex;align-items:center;justify-content:space-between;gap:var(--space-md)">
@@ -740,6 +764,7 @@ const GSP_WHATSAPP = '31617913965';
         <div class="card-data__meta-top">
           <span class="card-data__skeleton" style="display:inline-block;width:110px"></span>
         </div>
+        <span class="card-data__skeleton" style="display:inline-block;width:130px;margin-top:2px;margin-bottom:var(--space-sm)"></span>
         <span class="card-data__skeleton" style="display:block;width:75%;height:1.4em;margin-bottom:var(--space-sm)"></span>
         <span class="card-data__skeleton" style="display:block;width:100%;margin-bottom:4px"></span>
         <span class="card-data__skeleton" style="display:block;width:92%;margin-bottom:4px"></span>
@@ -774,6 +799,15 @@ const GSP_WHATSAPP = '31617913965';
     const levelFilter = $('levelFilter');
     const searchInput = $('searchInput');
     if (!grid) return;
+
+    // Pre-fill from the homepage hero search's query params (design-spec-
+    // batch.md item 2) so the existing filter logic below (already reading
+    // these two elements' .value) picks them up with no other change.
+    const urlParams = new URLSearchParams(window.location.search);
+    const urlQ = urlParams.get('q');
+    const urlDept = urlParams.get('dept');
+    if (urlQ && searchInput) searchInput.value = urlQ;
+    if (urlDept && deptFilter) deptFilter.value = urlDept;
 
     let allJobs = [];
     let searchTimeout = null;
@@ -851,7 +885,8 @@ const GSP_WHATSAPP = '31617913965';
         return;
       }
 
-      grid.innerHTML = filtered.map(job => jobCardHTML(job, 'job-view-link', { nl: 'Bekijk details →', en: 'View details →' })).join('');
+      const jobsLang = localStorage.getItem('gsp_lang') || 'nl';
+      grid.innerHTML = filtered.map(job => jobCardHTML(job, 'job-view-link', { nl: 'Bekijk details →', en: 'View details →' }, jobsLang)).join('');
 
       grid.querySelectorAll('.card-data').forEach(card => {
         card.addEventListener('click', () => showJobDetail(parseInt(card.dataset.id)));
@@ -951,7 +986,8 @@ const GSP_WHATSAPP = '31617913965';
           return;
         }
         const jobs = data.slice(0, 3);
-        grid.innerHTML = jobs.map(job => jobCardHTML(job, 'vac-link', { nl: 'Bekijk vacature →', en: 'View vacancy →' })).join('');
+        const homeLang = localStorage.getItem('gsp_lang') || 'nl';
+        grid.innerHTML = jobs.map(job => jobCardHTML(job, 'vac-link', { nl: 'Bekijk vacature →', en: 'View vacancy →' }, homeLang)).join('');
         grid.querySelectorAll('.card-data').forEach(card => {
           card.addEventListener('click', () => {
             const href = card.dataset.href;
@@ -967,6 +1003,44 @@ const GSP_WHATSAPP = '31617913965';
       .catch(() => {
         section.style.display = 'none';
       });
+  }
+
+  // ── Hero live vacancy count (design-spec-batch.md item 2) ─────────────
+  // Hidden until loaded, never a fake or guessed number; stays hidden on a
+  // fetch failure and on zero (a public zero next to the primary CTA
+  // undercuts trust more than showing nothing).
+  function initHeroVacancyCount() {
+    const el = $('heroVacancyCount');
+    if (!el) return; // no-op on pages without the hero search block
+    fetchTimeout(`${API}/api/public/jobs`)
+      .then(res => res.ok ? res.json() : Promise.reject())
+      .then(data => {
+        const count = Array.isArray(data) ? data.length : null;
+        if (count == null || count === 0) return; // stay hidden
+        const nlEl = el.querySelector('.lang-nl');
+        const enEl = el.querySelector('.lang-en');
+        if (nlEl) nlEl.textContent = `${count} ${count === 1 ? 'vacature' : 'vacatures'} in Brainport`;
+        if (enEl) enEl.textContent = `${count} ${count === 1 ? 'vacancy' : 'vacancies'} in Brainport`;
+        el.style.display = 'block';
+      })
+      .catch(() => { /* stay hidden, never show a stale or fake number */ });
+  }
+
+  // ── Hero search (design-spec-batch.md item 2) ──────────────────────────
+  // Not a live filter, a link-builder to vacatures.html, which reads the
+  // q/dept params on load (initJobBoard() above).
+  function initHeroSearch() {
+    const form = $('heroSearchForm');
+    if (!form) return; // no-op on pages without the hero search block
+    form.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const q = $('heroSearchInput')?.value.trim() || '';
+      const dept = $('heroSearchDept')?.value || '';
+      const params = new URLSearchParams();
+      if (q) params.set('q', q);
+      if (dept) params.set('dept', dept);
+      window.location.href = 'vacatures.html' + (params.toString() ? '?' + params.toString() : '');
+    });
   }
 
   // ── Salary Calculator ──────────────────────────────────
@@ -1629,6 +1703,8 @@ const GSP_WHATSAPP = '31617913965';
     initCookieConsent();
     initJobBoard();
     initHomeVacancies();
+    initHeroSearch();
+    initHeroVacancyCount();
     initSalaryCalc();
     initQuiz();
     initContactForm();

@@ -35,7 +35,15 @@
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" crossorigin>
 <link rel="stylesheet" href="styles.css">
 <style>
-.job-detail { max-width: 720px; margin: 0 auto; padding: 0 24px; }
+/* Clears the 76px fixed header the same way .page-hero does on every other
+   page (design review, FIX FIRST item 2) -- without it the breadcrumb, H1
+   and the new salary line (item 1a) load underneath the header. Same
+   values as .page-hero's own padding-top in styles.css: 132px desktop,
+   108px at the same <=768px breakpoint .page-hero uses there. */
+.job-detail { max-width: 720px; margin: 0 auto; padding: 132px 24px 0; }
+@media (max-width: 768px) {
+  .job-detail { padding-top: 108px; }
+}
 .job-detail h2 { margin-top: 40px; }
 .job-detail .meta-row { display: flex; flex-wrap: wrap; gap: 16px; margin: 20px 0 32px; }
 .job-detail .meta-item { padding: 8px 16px; background: var(--bg-alt); border-radius: var(--radius-sm); font-size: 0.9rem; }
@@ -87,6 +95,7 @@
 <section class="job-detail" id="jobDetail" style="display:none">
   <div class="eyebrow" id="jobBreadcrumb"><a href="vacatures.html"><span class="lang-en">← Back to vacancies</span><span class="lang-nl">← Terug naar vacatures</span></a></div>
   <h1 id="jobTitle"></h1>
+  <div class="job-salary-line" id="jobSalaryLine"></div>
   <div class="meta-row" id="jobMeta"></div>
   <div id="jobBody"></div>
   <div class="cta-box">
@@ -125,6 +134,12 @@
 <script src="gsp-util.js"></script>
 <script src="vacature.js"></script>
 </main>
+<div class="apply-sticky" id="applySticky" aria-hidden="true">
+  <span class="apply-sticky__salary" id="applyStickySalary"></span>
+  <a href="#" class="btn btn-gold apply-sticky__cta" id="applyStickyCta">
+    <span class="lang-nl">Solliciteer</span><span class="lang-en">Apply</span>
+  </a>
+</div>
 <footer class="footer">
   <div class="container">
     <div class="footer-grid footer-grid-5">
