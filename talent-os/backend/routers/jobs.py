@@ -91,19 +91,31 @@ public_jobs_router = APIRouter(prefix="/api/public/jobs", tags=["public-jobs"])
 # city / company_display / employment_type / sponsorship_possible added by
 # migrations/016_job_orders_columns.py (WS-C.15 / WS-A.5); company_display
 # is projected through _public_job_row() below so a NULL becomes the literal
-# "confidential" instead of leaking null to the frontend.
+# "confidential" instead of leaking null to the frontend. anonymous_client
+# (WS-4, migrations/037) is the hiring client's clients.is_internal, joined
+# in below -- NOT derived from company_display, which a real, named client
+# can also leave blank. Both list_public_jobs and get_public_job build this
+# same SELECT so the two endpoints can never drift apart on what a "job"
+# looks like to the public.
 PUBLIC_JOB_COLUMNS = (
-    "id, title, department, seniority, location_type, city, "
-    "salary_min, salary_max, salary_currency, "
-    "description, requirements, nice_to_have, status, urgency, created_at, "
-    "company_display, employment_type, sponsorship_possible"
+    "j.id, j.title, j.department, j.seniority, j.location_type, j.city, "
+    "j.salary_min, j.salary_max, j.salary_currency, "
+    "j.description, j.requirements, j.nice_to_have, j.status, j.urgency, j.created_at, "
+    "j.company_display, j.employment_type, j.sponsorship_possible, "
+    "COALESCE(cl.is_internal, false) AS anonymous_client"
 )
+PUBLIC_JOB_FROM = "FROM job_orders j LEFT JOIN clients cl ON cl.id = j.client_id"
+# Shared eligibility filter for both endpoints -- open, non-demo, not
+# soft-deleted (migrations/016's is_demo backfill; deleted_at was missing
+# here before WS-4, so a soft-deleted job stayed live on the public board
+# and in the sitemap -- see routers/client.py delete_client_job).
+PUBLIC_JOB_WHERE = "j.status = 'open' AND j.is_demo = false AND j.deleted_at IS NULL"
 
 
 def _public_job_row(row: dict) -> dict:
-    """Project a raw job_orders row for the public API: NULL company_display
-    becomes 'confidential' (GSP is a faceless/anonymous-opdrachtgever agency
-    by design, see CLAUDE.md)."""
+    """Project a raw job_orders row (already joined to clients) for the
+    public API: NULL company_display becomes 'confidential' (GSP is a
+    faceless/anonymous-opdrachtgever agency by design, see CLAUDE.md)."""
     row = dict(row)
     row["company_display"] = row.get("company_display") or "confidential"
     return row
@@ -111,12 +123,29 @@ def _public_job_row(row: dict) -> dict:
 
 @public_jobs_router.get("")
 async def list_public_jobs(request: Request):
-    """List open, non-demo job orders for the public job board. is_demo
-    rows (migrations/012's 6 seed vacancies) are excluded by default so the
-    public board never shows placeholder data as a real opening."""
+    """List open, non-demo, non-deleted job orders for the public job
+    board. is_demo rows (migrations/012's 6 seed vacancies) are excluded by
+    default so the public board never shows placeholder data as a real
+    opening."""
     rows = await fetch_all(
-        f"SELECT {PUBLIC_JOB_COLUMNS} FROM job_orders "
-        "WHERE status = 'open' AND is_demo = false "
-        "ORDER BY created_at DESC LIMIT 50",
+        f"SELECT {PUBLIC_JOB_COLUMNS} {PUBLIC_JOB_FROM} "
+        f"WHERE {PUBLIC_JOB_WHERE} "
+        "ORDER BY j.created_at DESC LIMIT 50",
     )
     return [_public_job_row(r) for r in rows]
+
+
+@public_jobs_router.get("/{job_id}")
+async def get_public_job(job_id: int):
+    """Single-job detail, same projection as a list item. Returns the
+    identical 404 body for a closed, demo, soft-deleted, or non-existent
+    job -- deliberately: nothing about the response may let a caller tell
+    those cases apart."""
+    row = await fetch_one(
+        f"SELECT {PUBLIC_JOB_COLUMNS} {PUBLIC_JOB_FROM} "
+        f"WHERE j.id = $1 AND {PUBLIC_JOB_WHERE}",
+        job_id,
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return _public_job_row(row)

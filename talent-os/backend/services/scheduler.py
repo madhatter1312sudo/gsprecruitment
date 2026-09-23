@@ -12,6 +12,7 @@ A human must approve a draft via routers/outreach.py before it is sent.
 """
 import json
 import logging
+import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
@@ -21,6 +22,9 @@ from apscheduler.triggers.cron import CronTrigger
 
 from core.config import settings
 from core.database import fetch_all, fetch_one, fetch_val, execute
+from core.matching import MATCH_SUGGESTION_MIN_STORED_SCORE
+from core.security import hash_token
+from core import privacy
 from core import retention
 from services.apollo_client import ApolloClient
 from services import outreach_ai
@@ -57,8 +61,76 @@ scheduler = AsyncIOScheduler(timezone=TIMEZONE)
 _lock_conn: Optional[asyncpg.Connection] = None
 
 
+# ── Routine health (issue #127) ─────────────────────────────────────────
+#
+# The fixed set of cron job ids start_scheduler() registers below, in
+# registration order -- including the two Apollo jobs even when
+# settings.apollo_sync_enabled is false, so GET /api/v1/admin/health/routines
+# (routers/admin.py) can list every known routine and report "never run"
+# for one that isn't currently enabled, rather than silently omitting it.
+# Kept here, next to start_scheduler(), as the one place that names them,
+# instead of a second hand-maintained list in routers/admin.py.
+ROUTINE_NAMES = [
+    "apollo_search_and_sync",
+    "apollo_enrich_batch",
+    "matching",
+    "draft_outreach",
+    "draft_blog_post",
+    "talentpool_optin_requests_cleanup",
+    "job_alert_sends_cleanup",
+    "talentpool_reminder",
+    "dormant_account_warning",
+    "job_alert",
+    "retention_review",
+]
+
+
+async def _record_routine_run(routine_name: str, status: str, error_class: Optional[str] = None) -> None:
+    """Write one row to routine_runs (migrations/044_routine_runs.py).
+    Called only from _tracked() below, on every scheduler tick that
+    actually ran (never on a dry run a system_settings flag skipped --
+    that is not an attempt, and would make a disabled routine look
+    "failing" instead of "off"). Never raises itself: a metrics write
+    failing must never mask the job's own result or crash the scheduler."""
+    try:
+        await execute(
+            "INSERT INTO routine_runs (routine_name, status, error_class) VALUES ($1, $2, $3)",
+            routine_name, status, error_class,
+        )
+    except Exception:
+        logger.exception("_record_routine_run: failed to record run for %s", routine_name)
+
+
+def _tracked(routine_name: str, func):
+    """Wrap a job coroutine function so every scheduler tick (success or
+    exception) writes one routine_runs row before returning/re-raising.
+    Exceptions are always re-raised unchanged afterwards -- APScheduler's
+    own "job raised an exception" logging must keep working exactly as it
+    did before this wrapper existed."""
+
+    async def _runner(*args, **kwargs):
+        try:
+            result = await func(*args, **kwargs)
+            await _record_routine_run(routine_name, "success")
+            return result
+        except Exception as exc:
+            await _record_routine_run(routine_name, "error", type(exc).__name__)
+            raise
+
+    _runner.__name__ = getattr(func, "__name__", routine_name)
+    return _runner
+
+
 async def _flag_enabled(key: str) -> bool:
-    """Read a system_settings boolean flag. Missing key == enabled."""
+    """Read a system_settings boolean flag. Missing key == enabled.
+
+    Die default blijft staan: geen enkele andere vlag hoeft eerst te
+    worden aangemaakt om "aan" te zijn, en hem hier omdraaien zou elke
+    bestaande aanroeper stilletjes uitzetten. Voor `job_alerts_enabled`
+    is de oplossing daarom dat de RIJ bestaat: migratie 042 zet hem
+    idempotent op 'false', zodat de tweede rem uit
+    docs/VERWERKINGSREGISTER.md rij 20 en core/config.py er echt is en
+    niet alleen beschreven wordt."""
     value = await fetch_val("SELECT value FROM system_settings WHERE key = $1", key)
     if value is None:
         return True
@@ -119,11 +191,17 @@ async def apollo_search_and_sync() -> dict:
                     company = person["employment_history"][0].get("company_name", "")
 
                 try:
+                    # Stamp pool_origin='apollo' here too (see
+                    # services/harvest.py's harvest_candidates for the
+                    # fuller comment) -- routers/retention_admin.py's
+                    # Apollo-pool-purge selector reads this column and
+                    # otherwise never sees anything sourced after
+                    # migrations/022_apollo_pool_flag.py's one-time backfill.
                     row = await fetch_one(
                         """INSERT INTO candidates
                            (full_name, email, current_company, current_title, location,
-                            skills, source, sourced_by_agent, is_passive)
-                           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+                            skills, source, sourced_by_agent, is_passive, pool_origin)
+                           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'apollo')
                            ON CONFLICT (email) DO NOTHING
                            RETURNING id""",
                         name, email, company,
@@ -231,7 +309,8 @@ async def draft_outreach() -> dict:
         """SELECT m.candidate_id, m.job_id, m.match_score,
                   c.full_name, c.email, c.current_company,
                   j.title AS job_title, j.description AS job_description,
-                  cl.company_name AS job_company
+                  cl.company_name AS job_company,
+                  COALESCE(cl.is_internal, false) AS job_client_internal
            FROM matches m
            JOIN candidates c ON c.id = m.candidate_id
            JOIN job_orders j ON j.id = m.job_id
@@ -272,6 +351,16 @@ async def draft_outreach() -> dict:
     errors = 0
     for row in candidates:
         try:
+            # WS-4 (migrations/037): the client for this job is one of
+            # GSP's own internal rows (demo client or the anonymous-
+            # opdrachtgever pool client) -- never draft outreach that
+            # names or implies a real hiring company for it. job_company
+            # becomes the literal 'anonieme opdrachtgever', and the
+            # prompt itself (outreach_ai._build_user_prompt) is told the
+            # client is anonymous so it won't invent or guess a name.
+            job_company = (
+                "anonieme opdrachtgever" if row["job_client_internal"] else row["job_company"]
+            )
             draft = await outreach_ai.draft_email(
                 target={
                     "name": row["full_name"],
@@ -279,8 +368,9 @@ async def draft_outreach() -> dict:
                 },
                 context={
                     "job_title": row["job_title"],
-                    "job_company": row["job_company"],
+                    "job_company": job_company,
                     "job_description": row["job_description"],
+                    "anonymous_client": row["job_client_internal"],
                 },
                 language="nl",
             )
@@ -385,63 +475,20 @@ async def draft_blog_post() -> dict:
     return {"status": "success", "slug": slug, "topic": topic}
 
 
-# ── Job 6: daily 04:00 — retention purge (WS-E.8) ───────────────────────
+# ── Job 6: monthly (1st, 04:00) — retention review queue (WS-E.10) ──────
 #
-# core/retention.py is the single source of truth for the table (rows,
-# anchor columns, actions). This module only orchestrates: for each row
-# that is schema_ready and has a category handler below, count matching
-# rows and, when actually purging, act on them via the same
-# erase_person()-style logic (anonymise) or a plain DELETE (hard_delete)
-# the table calls for. A row that is not schema_ready or has no handler
-# (retain/infra_only categories) is reported but never queried or touched
-# — see core/retention.py's docstring for why each of those isn't
-# actionable yet.
-#
-# HARD RULE (WS-E.8 task): this job must never delete/anonymise anything
-# in dry_run=True mode — that mode issues reads only (fetch_all/fetch_one),
-# never execute(). The daily cron always calls it with
-# dry_run=not settings.retention_purge_enabled, so a fresh/staging deploy
-# (RETENTION_PURGE_ENABLED unset/false) only ever logs counts.
-
-async def _count_sourced_no_response(lawful_basis: str) -> list:
-    # security-auditor follow-up (WS-E.8): status='sourced' alone isn't
-    # proof of "no reaction" -- a candidate can pick up a match, a
-    # pipeline entry, a reply, or a portal account without candidates.status
-    # ever being written past 'sourced' by any current code path. The four
-    # NOT EXISTS guards in retention.SOURCED_NO_RESPONSE_SQL make "no
-    # reaction" check the actual signal tables instead of trusting one
-    # column. That query lives in core/retention.py (not duplicated here)
-    # so the selector this job runs and the one core/retention.py
-    # documents/tests can never drift apart.
-    return await fetch_all(retention.SOURCED_NO_RESPONSE_SQL, lawful_basis)
-
-
-async def _purge_sourced_no_response(lawful_basis: str, reason: str) -> int:
-    from routers.gdpr import erase_person
-
-    rows = await _count_sourced_no_response(lawful_basis)
-    for row in rows:
-        if row["email"]:
-            await erase_person(row["email"], actor_id=None, reason=reason)
-    return len(rows)
-
-
-async def _count_talentpool_expired() -> list:
-    # WS-C.17: mirrors _count_sourced_no_response -- reads the shared
-    # selector from core/retention.py so the query this job runs and the
-    # one that module documents can never drift apart.
-    return await fetch_all(retention.TALENTPOOL_EXPIRED_SQL)
-
-
-async def _purge_talentpool_expired(reason: str) -> int:
-    from routers.gdpr import erase_person
-
-    rows = await _count_talentpool_expired()
-    for row in rows:
-        if row["email"]:
-            await erase_person(row["email"], actor_id=None, reason=reason)
-    return len(rows)
-
+# Owner decision (WS-E.10): every "no reaction" signal this table can
+# check lives in a channel this backend does not reliably record (a phone
+# call, a LinkedIn thread, a reply landing in someone's own mailbox). This
+# job therefore never deletes or anonymises anything by itself -- it only
+# queues who core/retention.py's guarded selectors say is due into
+# retention_review_items (migrations/036_retention_review_queue.py) for a
+# human to approve or reject, once a month
+# (GET/POST /api/v1/admin/retention/review*, routers/retention_admin.py).
+# core/retention.py's selectors and guards (who ends up on the list) are
+# read here, never duplicated -- see that module for those. An actual
+# purge only ever happens from an approved retention_review_items row --
+# see routers/retention_admin.py's module docstring.
 
 # ── Talentpool renewal reminder (WS-C.17, security-audit follow-up H3c) ──
 #
@@ -463,33 +510,7 @@ TALENTPOOL_REMINDER_SQL = """
 """
 
 
-def _talentpool_reminder_email_body(name: str) -> str:
-    link = "https://gsprecruitment.nl/kandidaten#talentpoolOptin"
-    greeting = name or ""
-    return f"""Beste {greeting},
-
-Je staat in de talentpool van GSP Recruitment. Over ongeveer een maand loopt je toestemming af (bewaartermijn 12 maanden). Wil je verlengd blijven staan, meld je dan hier opnieuw aan:
-{link}
-
-Doe je niets, dan verwijderen wij je gegevens uit de talentpool zodra de termijn is verstreken.
-
-Met vriendelijke groet,
-GSP Recruitment
-info@gsprecruitment.nl
-
----
-
-Dear {greeting},
-
-You are in GSP Recruitment's talent pool. Your consent expires in about a month (12-month retention period). To stay in the pool, sign up again here:
-{link}
-
-If you do nothing, we will remove your data from the talent pool once the period has passed.
-
-Kind regards,
-GSP Recruitment
-info@gsprecruitment.nl
-"""
+_TALENTPOOL_REMINDER_LINK = "https://gsprecruitment.nl/kandidaten#talentpoolOptin"
 
 
 async def talentpool_reminder_job() -> dict:
@@ -503,10 +524,9 @@ async def talentpool_reminder_job() -> dict:
     rows = await fetch_all(TALENTPOOL_REMINDER_SQL)
     sent = 0
     for row in rows:
-        ok = await email_service.send_email(
-            to_email=row["email"],
-            subject="Je talentpool-aanmelding loopt bijna af — GSP Recruitment",
-            body_text=_talentpool_reminder_email_body(row.get("full_name") or ""),
+        ok = await email_service.send_template(
+            "talentpool_reminder", row["email"],
+            {"full_name": row.get("full_name") or "", "link": _TALENTPOOL_REMINDER_LINK},
         )
         if ok:
             await execute(
@@ -550,144 +570,788 @@ async def _purge_stale_talentpool_optin_requests() -> int:
     return len(rows)
 
 
-async def _count_prospect_no_response() -> list:
-    # security-auditor follow-up (LOW): no code path updates
-    # client_prospects.status once a draft is sent or answered (routers/
-    # outreach.py never writes back to client_prospects) -- status='new'
-    # therefore does NOT by itself mean "no reaction" here either, same
-    # gap as sourced_no_response above. outreach_drafts has no replied_at
-    # column of its own (only outreach_messages does, once a draft is
-    # approved and actually sent), so the reply guard in
-    # retention.PROSPECT_NO_RESPONSE_SQL runs against outreach_messages; a
-    # sent-but-not-yet-replied draft is still caught by the second NOT
-    # EXISTS so a prospect mid-conversation isn't wiped out from under an
-    # in-flight thread. client_prospects.status still only ever moves by
-    # manual admin action (no automatic transition exists anywhere in
-    # this codebase) -- this guard compensates for that gap rather than
-    # fixing it.
-    return await fetch_all(retention.PROSPECT_NO_RESPONSE_SQL)
+async def talentpool_optin_requests_cleanup_job() -> dict:
+    """Daily cron entry point (04:00). Unlike the ten retention-table rows
+    above, talentpool_optin_requests (migrations/030_talentpool_consent.py)
+    is not part of this PR's WS-E.10 redesign: it holds only e-mail + a
+    token hash for the public double-opt-in flow, is purged purely on age
+    (7 days -- see the constant's own comment above), and does not depend
+    on any of the "did anything real happen" guards that motivated moving
+    the other ten categories to a human-approved monthly review (there is
+    no guard here that could be wrong about a missed signal, because there
+    is no signal to miss: an unconfirmed opt-in link is either confirmed
+    within 7 days or it isn't). It therefore keeps running automatically,
+    same as before this branch."""
+    count = await _purge_stale_talentpool_optin_requests()
+    if count:
+        await execute(
+            "INSERT INTO audit_log (action, actor_id, target_type, target_id, changes) "
+            "VALUES ($1, NULL, $2, NULL, $3::jsonb)",
+            "retention_purge", "talentpool_optin_requests",
+            json.dumps({"category": "talentpool_optin_requests", "count": count, "action": "hard_delete"}),
+        )
+    logger.info("talentpool_optin_requests_cleanup_job: purged=%s", count)
+    return {"status": "purged", "count": count}
 
 
-async def _purge_prospect_no_response() -> int:
-    rows = await _count_prospect_no_response()
-    ids = [r["id"] for r in rows]
-    if ids:
-        await execute("DELETE FROM client_prospects WHERE id = ANY($1::int[])", ids)
-    return len(rows)
+# ── Slapend account: waarschuwing vooraf (WS3b) ─────────────────────────
+#
+# core/retention.py's PORTAL_ACCOUNT_INACTIVE_SQL zet een kandidaataccount
+# pas op de maandelijkse beoordelingslijst als het 18 maanden ongebruikt
+# is EN `users.dormant_warning_sent_at` minstens 30 dagen oud is. Die
+# kolom bestaat sinds migrations/039, maar tot dit spoor schreef niets
+# hem: de selector kon dus per definitie nooit iemand opleveren
+# (bewust fail-closed -- "geen verwijderlijst zonder verstuurde
+# waarschuwing"). Deze job is de ontbrekende helft.
+#
+# Vorm exact die van talentpool_reminder_job hierboven: selecteer wie aan
+# de beurt is, verstuur, stempel de kolom pas als de verzending lukte, en
+# nooit twee keer binnen dezelfde cyclus.
+#
+# De selector zelf staat in core/retention.py, naast
+# PORTAL_ACCOUNT_INACTIVE_SQL: het zijn twee helften van één belofte en ze
+# horen niet in twee bestanden te staan. Zie daar ook waarom het venster
+# geen bovengrens heeft en waarom twee keer waarschuwen desondanks niet
+# kan.
+
+# Tussen de waarschuwing en de beoordelingslijst zitten 30 dagen
+# (PORTAL_ACCOUNT_INACTIVE_SQL: `dormant_warning_sent_at < NOW() - 30
+# days`). De datum in de mail is verzenddatum + deze 30 dagen, niet een
+# los getal in de templatetekst.
+DORMANT_WARNING_GRACE_DAYS = 30
+DORMANT_WARNING_CAP = 200
+
+# Het kandidaatportaal is één pagina met een inlogmodal
+# (website/candidate/index.html plus website/candidate/script.js); er is
+# geen login.html. Een waarschuwingsmail die zegt "log in om je account te
+# houden" en dan naar een 404 wijst, is erger dan geen mail. Via
+# settings.frontend_url en niet als letterlijke host, zoals elke andere
+# link die deze module verstuurt.
+_DORMANT_WARNING_PATH = "/candidate/"
 
 
-async def _count_leads_quiz() -> int:
-    quiz = await fetch_all("SELECT id FROM quiz_submissions WHERE created_at <= (NOW() - INTERVAL '12 months')")
-    contact = await fetch_all("SELECT id FROM contact_submissions WHERE created_at <= (NOW() - INTERVAL '12 months')")
-    return len(quiz) + len(contact)
+def _dormant_warning_link() -> str:
+    return f"{settings.frontend_url}{_DORMANT_WARNING_PATH}"
 
 
-async def _purge_leads_quiz() -> int:
-    quiz = await fetch_all("SELECT id FROM quiz_submissions WHERE created_at <= (NOW() - INTERVAL '12 months')")
-    contact = await fetch_all("SELECT id FROM contact_submissions WHERE created_at <= (NOW() - INTERVAL '12 months')")
-    if quiz:
-        await execute("DELETE FROM quiz_submissions WHERE id = ANY($1::int[])", [r["id"] for r in quiz])
-    if contact:
-        await execute("DELETE FROM contact_submissions WHERE id = ANY($1::int[])", [r["id"] for r in contact])
-    return len(quiz) + len(contact)
+async def _stamp_dormant_warning_skipped(user_id: int, email: Optional[str], reason: str) -> None:
+    """"Aan de beurt geweest, geen mail verstuurd." Stempelt
+    `users.dormant_warning_skipped_at` en schrijft de audit-regel die
+    daarbij hoort.
+
+    Twee aanroepers, één patroon: een adres op de blokkeerlijst
+    (`reason='suppression_list'`, B3) en een adres dat na
+    DORMANT_WARNING_MAX_ATTEMPTS pogingen niet te bezorgen bleek
+    (`reason='undeliverable'`, C2). In beide gevallen geldt hetzelfde:
+    er gaat geen bericht uit, maar dat is geen grond om de gegevens
+    onbeperkt te bewaren -- deze stempel is wat
+    `core/retention.py PORTAL_ACCOUNT_INACTIVE_SQL` 30 dagen later op de
+    maandelijkse beoordelingslijst zet.
+
+    Nooit het adres in de audit-regel, alleen de sha256 (core/privacy.py),
+    zoals elke andere regel die een adres aanraakt. json.dumps, nooit een
+    ruwe dict (commit 72b4bcd)."""
+    await execute(
+        "UPDATE users SET dormant_warning_skipped_at = NOW() WHERE id = $1", user_id,
+    )
+    await execute(
+        "INSERT INTO audit_log (action, actor_id, target_type, target_id, changes) "
+        "VALUES ($1, NULL, $2, $3, $4::jsonb)",
+        "dormant_warning_suppressed", "user", user_id,
+        json.dumps({
+            "reason": reason,
+            "email_hash": privacy.email_hash(email) if email else None,
+        }),
+    )
 
 
-async def _category_result(row: "retention.RetentionRow", dry_run: bool) -> dict:
-    """Count (dry_run) or count-then-act (not dry_run) for one retention
-    table row. Never queries a column that doesn't exist yet
-    (schema_ready=False short-circuits before any DB call) and never
-    calls execute() when dry_run=True."""
-    if row.action in ("retain", "infra_only"):
-        return {"key": row.key, "status": "not_applicable", "count": None}
-    if not row.schema_ready:
-        return {"key": row.key, "status": "schema_not_ready", "count": None}
+async def dormant_account_warning_job() -> dict:
+    """Dagelijks (04:45). Waarschuwt kandidaataccounts die minstens 17
+    maanden niet zijn gebruikt dat ze na 18 maanden op de maandelijkse
+    verwijderlijst komen, en stempelt `users.dormant_warning_sent_at`
+    zodat dezelfde persoon per inactiviteitscyclus één keer wordt
+    gewaarschuwd.
 
-    try:
-        if row.key == "sourced_no_response":
-            if dry_run:
-                count = len(await _count_sourced_no_response("gerechtvaardigd_belang"))
-            else:
-                count = await _purge_sourced_no_response(
-                    "gerechtvaardigd_belang", f"retention_purge:{row.key}",
-                )
-        elif row.key == "referral":
-            if dry_run:
-                count = len(await _count_sourced_no_response("toestemming_referral"))
-            else:
-                count = await _purge_sourced_no_response(
-                    "toestemming_referral", f"retention_purge:{row.key}",
-                )
-        elif row.key == "talentpool_consent":
-            if dry_run:
-                count = len(await _count_talentpool_expired())
-            else:
-                count = await _purge_talentpool_expired(f"retention_purge:{row.key}")
-        elif row.key == "prospect_no_response":
-            count = len(await _count_prospect_no_response()) if dry_run else await _purge_prospect_no_response()
-        elif row.key == "leads_quiz":
-            count = await _count_leads_quiz() if dry_run else await _purge_leads_quiz()
+    `accounts_due` is het aantal dat vandaag aan de beurt is, geteld vóór
+    het dagplafond DORMANT_WARNING_CAP (CR L2) -- anders zou een
+    droogloop bij een achterstand van duizenden accounts netjes "200"
+    melden en precies het getal verbergen waar de eigenaar naar kijkt.
+
+    Droogloop is de default: met DORMANT_WARNING_ENABLED uit
+    (core/config.py) selecteert en telt deze job wel, maar verstuurt hij
+    niets en stempelt hij niets. Dat laatste is essentieel en geen
+    detail: zou hij in droogloop wél stempelen, dan zou
+    PORTAL_ACCOUNT_INACTIVE_SQL 30 dagen later accounts op de
+    verwijderlijst zetten waar nooit iemand een waarschuwing over heeft
+    gekregen."""
+    from services.email_service import email_service
+
+    due_row = await fetch_one(retention.DORMANT_WARNING_COUNT_SQL)
+    accounts_due = due_row["due"] if due_row else 0
+    rows = await fetch_all(retention.DORMANT_WARNING_SQL, DORMANT_WARNING_CAP)
+
+    # Dezelfde blokkeerlijstcontrole als job_alert_job
+    # (_job_alert_suppressed_ids), en om dezelfde reden: wie STOP heeft
+    # gestuurd, krijgt geen bericht meer, op geen enkele grondslag -- ook
+    # geen waarschuwing over zijn eigen account.
+    #
+    # B3: zo'n rij wordt NIET uit deze lijst gefilterd maar mailloos
+    # afgehandeld. Wegfilteren gebeurde ná de LIMIT van de selector, dus
+    # de rij werd nooit gestempeld, bleef onder `ORDER BY last_login_at
+    # ASC` vooraan staan en verbruikte morgen weer een plek onder het
+    # dagplafond; bij een paar honderd geblokkeerde accounts bereikte de
+    # job niemand anders meer. En een STOP is een verbod op berichten,
+    # geen toestemming om de gegevens onbeperkt te bewaren: zonder stempel
+    # kwam zo'n account ook nooit op de maandelijkse beoordelingslijst.
+    # `dormant_warning_skipped_at` zegt "aan de beurt geweest, geen mail
+    # verstuurd" en telt in PORTAL_ACCOUNT_INACTIVE_SQL gelijk met
+    # `dormant_warning_sent_at`, met dezelfde 30 dagen ertussen.
+    suppressed_ids = await _job_alert_suppressed_ids(rows)
+    to_warn = [r for r in rows if r["id"] not in suppressed_ids]
+    to_skip = [r for r in rows if r["id"] in suppressed_ids]
+
+    if not settings.dormant_warning_enabled:
+        # Een droogloop stempelt niets, ook `dormant_warning_skipped_at`
+        # niet: die stempel start dezelfde klok van 30 dagen als een
+        # verstuurde waarschuwing, en een droogloop mag geen enkele klok
+        # starten.
+        logger.info(
+            "dormant_account_warning_job: DORMANT_WARNING_ENABLED=false, dry run -- "
+            "accounts_due=%s, selected=%s, suppressed=%s, nothing sent or stamped",
+            accounts_due, len(rows), len(to_skip),
+        )
+        return {
+            "status": "dry_run", "accounts_due": accounts_due, "selected": len(rows),
+            "sent": 0, "suppressed": len(to_skip), "failed": 0,
+        }
+
+    suppressed = 0
+    for row in to_skip:
+        await _stamp_dormant_warning_skipped(row["id"], row["email"], "suppression_list")
+        suppressed += 1
+
+    deadline = (datetime.now(timezone.utc) + timedelta(days=DORMANT_WARNING_GRACE_DAYS)).date().isoformat()
+    link = _dormant_warning_link()
+    sent = 0
+    failed = 0
+    for row in to_warn:
+        ok = await email_service.send_template(
+            "dormant_warning", row["email"],
+            {
+                "full_name": row.get("full_name") or "",
+                "link": link,
+                "deadline": deadline,
+                # R4: de datum van de laatste login, niet een maandental.
+                # Met een ondergrens van 17 maanden en geen bovengrens is
+                # elk getal in de tekst voor een deel van de ontvangers
+                # onwaar; deze datum klopt voor iedereen en is bovendien
+                # het enige waaraan de ontvanger kan herkennen over welk
+                # account dit gaat.
+                "last_login": row["last_login_at"].date().isoformat() if row["last_login_at"] else "",
+            },
+        )
+        if ok:
+            await execute(
+                "UPDATE users SET dormant_warning_sent_at = NOW() WHERE id = $1", row["id"],
+            )
+            sent += 1
         else:
-            return {"key": row.key, "status": "no_handler", "count": None}
-    except Exception:
-        logger.exception("run_retention_purge: category %s failed", row.key)
-        return {"key": row.key, "status": "error", "count": None}
-
-    return {"key": row.key, "status": "counted" if dry_run else "purged", "count": count}
-
-
-async def run_retention_purge(dry_run: bool = True) -> dict:
-    """WS-E.8. Walks core/retention.RETENTION_TABLE and, per category,
-    either counts matching rows (dry_run=True — no writes at all, ever)
-    or purges them (dry_run=False — anonymise via erase_person()-style
-    logic or hard-delete, per the row's `action`) and writes one
-    audit_log row per *purged* category with counts only — never an
-    e-mail address or name (json.dumps, never a raw dict — commit
-    72b4bcd)."""
-    results = []
-    for row in retention.RETENTION_TABLE:
-        result = await _category_result(row, dry_run)
-        results.append(result)
-        if not dry_run and result["status"] == "purged":
-            await execute(
-                "INSERT INTO audit_log (action, actor_id, target_type, target_id, changes) "
-                "VALUES ($1, NULL, $2, NULL, $3::jsonb)",
-                "retention_purge", "retention_category",
-                json.dumps({"category": row.key, "count": result["count"], "action": row.action}),
+            # B4: de teller ophogen, niet de verzendstempel zetten. Zonder
+            # teller kwam een structureel onbezorgbaar adres elke dag
+            # terug op dezelfde plek onder het dagplafond en schoof het de
+            # hele achterstand voor zich uit;
+            # _DORMANT_WARNING_WHERE_SQL laat de rij na drie pogingen
+            # vallen, en elke login zet de teller terug op 0.
+            #
+            # C2: `dormant_warning_attempt_at` erbij, de backoff van
+            # DORMANT_WARNING_RETRY_DAYS -- anders zijn drie mislukkingen
+            # drie opeenvolgende dagen en verklaart een storing van twee
+            # etmalen een werkend adres onbezorgbaar.
+            attempt = await fetch_one(
+                "UPDATE users SET dormant_warning_attempts = dormant_warning_attempts + 1, "
+                "dormant_warning_attempt_at = NOW() WHERE id = $1 "
+                "RETURNING dormant_warning_attempts", row["id"],
             )
-
-    # M2: talentpool_optin_requests isn't one of RETENTION_TABLE's ten
-    # documented rows (see that table's docstring above) -- counted/purged
-    # alongside them but reported under its own key, not mixed into
-    # `categories`.
-    if dry_run:
-        optin_count = len(await _count_stale_talentpool_optin_requests())
-    else:
-        optin_count = await _purge_stale_talentpool_optin_requests()
-        if optin_count:
-            await execute(
-                "INSERT INTO audit_log (action, actor_id, target_type, target_id, changes) "
-                "VALUES ($1, NULL, $2, NULL, $3::jsonb)",
-                "retention_purge", "talentpool_optin_requests",
-                json.dumps({"category": "talentpool_optin_requests", "count": optin_count, "action": "hard_delete"}),
-            )
-    talentpool_optin_purge = {
-        "status": "counted" if dry_run else "purged", "count": optin_count,
-    }
+            failed += 1
+            # C2: bij de laatste poging valt de rij niet alleen uit de
+            # selector maar wordt hij ook mailloos AFGEHANDELD, precies
+            # zoals een adres op de blokkeerlijst. Zonder deze regel
+            # stempelde niets zo'n account ooit, werd
+            # PORTAL_ACCOUNT_INACTIVE_SQL nooit bereikt en bewaarden wij
+            # de gegevens van iemand die wij niet kunnen bereiken tot in
+            # het oneindige -- de enige categorie die stilletjes buiten de
+            # bewaartermijn van §1.4 rij 6 viel.
+            if attempt and attempt["dormant_warning_attempts"] >= retention.DORMANT_WARNING_MAX_ATTEMPTS:
+                await _stamp_dormant_warning_skipped(row["id"], row["email"], "undeliverable")
+                suppressed += 1
+            # Nooit het adres in een logregel -- het id is genoeg, en
+            # services/email_service.py schreef zelf al een email_log-rij
+            # op core.privacy.email_hash().
+            logger.warning("dormant_account_warning_job: failed to send warning to user id=%s", row["id"])
 
     logger.info(
-        "run_retention_purge: dry_run=%s results=%s talentpool_optin_requests=%s",
-        dry_run, {r["key"]: (r["status"], r["count"]) for r in results}, talentpool_optin_purge,
+        "dormant_account_warning_job: accounts_due=%s selected=%s sent=%s suppressed=%s failed=%s",
+        accounts_due, len(rows), sent, suppressed, failed,
     )
-    return {"dry_run": dry_run, "categories": results, "talentpool_optin_requests_purge": talentpool_optin_purge}
+    return {
+        "status": "success", "accounts_due": accounts_due, "selected": len(rows),
+        "sent": sent, "suppressed": suppressed, "failed": failed,
+    }
 
 
-async def retention_purge_job() -> dict:
-    """Cron entry point — always defers to the RETENTION_PURGE_ENABLED env
-    flag (core/config.py), never runs a real purge just because the daily
-    trigger fired. The admin endpoint (routers/retention_admin.py) is the
-    only way to force a real run regardless of this flag, and even there
-    only with confirm='PURGE'."""
-    return await run_retention_purge(dry_run=not settings.retention_purge_enabled)
+# ── Vacature-alerts (WS3c) ──────────────────────────────────────────────
+#
+# HARDE GRENS, en de reden dat dit blok zo uitgebreid is: outreach blijft
+# draft-only. Deze job is geen uitzondering daarop maar valt buiten die
+# categorie, en het verschil zit in de selectie hieronder, niet in een
+# belofte in een commentaarregel.
+#
+#   - Outreach (draft_outreach hierboven) richt zich op een GESOURCETE
+#     persoon: iemand die niets heeft gedaan, wiens gegevens wij hebben
+#     gevonden. Daar mag nooit automatisch een bericht naartoe; er wordt
+#     een `outreach_drafts`-rij met status='draft' geschreven en een mens
+#     verstuurt hem na goedkeuring (routers/outreach.py).
+#   - Deze job richt zich uitsluitend op iemand die ZELF heeft gezegd dat
+#     hij deze mail wil: `candidates.job_alert_optin_at` is gezet, en er
+#     zijn precies twee paden die dat doen, allebei een eigen handeling
+#     van de betrokkene (PUT /api/v1/candidate/job-alerts in zijn eigen
+#     portaal, of het `job_alerts`-vinkje dat hij bij zijn dubbele
+#     opt-in aanvinkte en daarna per e-mail bevestigde). Geen sourcing-
+#     pad, geen import, geen beheerder en geen routine kan die kolom
+#     vullen.
+#
+# Daarom draagt elke alert ook een een-klik-afmeldlink en de
+# List-Unsubscribe-headers, en outreach-drafts niet: dit is het enige
+# terugkerende bericht dat deze codebase verstuurt.
+#
+# De selectie hieronder maakt dat waar in plaats van te beloven:
+#   job_alert_optin_at IS NOT NULL          -- eigen aanmelding, zie boven
+#   job_alert_unsubscribed_at IS NULL       -- niet afgemeld
+#   consent_withdrawn_at IS NULL            -- toestemming niet ingetrokken
+#   deleted_at IS NULL                      -- niet (zacht) verwijderd
+#   consent_scope='matching_and_contact'    -- toestemming die contact dekt
+#     OF lawful_basis='portal_registratie'  -- eigen portaalaccount (art. 13)
+#   toestemming nog geldig                  -- consent_talentpool_until in de
+#                                              toekomst, tenzij portaalaccount
+#   niet op de suppressielijst              -- STOP ontvangen, in Python
+#                                              gehasht via core/privacy.py
+#
+# Die voorlaatste regel is de toestemmingsgeldigheid, en hij staat samen
+# met de rest van de geschiktheidsvoorwaarden in core/retention.py als
+# JOB_ALERT_ELIGIBILITY_SQL -- naast TALENTPOOL_EXPIRED_SQL, waarmee hij
+# zijn belangrijkste clausule deelt, en bereikbaar voor de tweede lezer
+# (routers/candidate.py's portaalschakelaar) zonder dat die deze hele
+# module hoeft te importeren. Zie daar wat elke regel doet.
+
+JOB_ALERT_CANDIDATE_SQL = f"""
+    SELECT c.id, c.email, c.full_name, c.job_alert_last_sent_at
+      FROM candidates c
+     WHERE c.job_alert_optin_at IS NOT NULL
+       AND c.job_alert_unsubscribed_at IS NULL
+       AND {retention.JOB_ALERT_ELIGIBILITY_SQL}
+     ORDER BY c.job_alert_last_sent_at ASC NULLS FIRST, c.id ASC
+     LIMIT $1
+"""
+
+# Matches die nieuw genoeg zijn om te melden: sinds de vorige digest van
+# deze kandidaat, of -- als die er nooit was -- de laatste 7 dagen, zodat
+# een verse aanmelder geen jaar aan oude matches in één mail krijgt.
+# `j.city` is de locatiekolom (migrations/016); job_orders heeft geen
+# slug, de publieke vacaturepagina werkt op id (website/script.js,
+# website/vacature.js). De geschiktheidsfilter is letterlijk
+# routers/jobs.py's PUBLIC_JOB_WHERE -- een alert mag nooit naar een
+# vacature wijzen die het publieke bord zelf niet toont.
+JOB_ALERT_MATCHES_SQL = """
+    SELECT j.id, j.title, j.city, m.match_score
+      FROM matches m
+      JOIN job_orders j ON j.id = m.job_id
+     WHERE m.candidate_id = $1
+       AND m.status = 'suggested'
+       AND m.match_score >= $2
+       AND m.created_at > COALESCE($3, NOW() - INTERVAL '7 days')
+       AND {public_job_where}
+     ORDER BY m.match_score DESC
+     LIMIT $4
+"""
+
+JOB_ALERT_RUN_CAP = 200
+JOB_ALERT_MAX_JOBS = 5
+
+
+def job_alert_matches_sql() -> str:
+    """JOB_ALERT_MATCHES_SQL met routers/jobs.py's eigen PUBLIC_JOB_WHERE
+    ingevuld. Lazy import, net als `from routers.matches import ...` in
+    matching() hierboven: routers/* importeren bij het laden van deze
+    module zou een importcyclus opleveren (routers importeren services)."""
+    from routers.jobs import PUBLIC_JOB_WHERE
+
+    return JOB_ALERT_MATCHES_SQL.format(public_job_where=PUBLIC_JOB_WHERE)
+
+
+def _job_alert_unsubscribe_links(token: str, oneclick_token: str) -> tuple:
+    """(voettekstlink voor een mens, one-click-URL voor de
+    List-Unsubscribe-header).
+
+    Twee URL's met TWEE VERSCHILLENDE tokens (B1), en dat verschil is de
+    hele beveiliging:
+
+      - de voettekstlink draagt `token` in het URL-FRAGMENT, precies zoals
+        de talentpool-bevestigingslink sinds de WS-C.17 security-audit
+        (H1) doet -- een fragment bereikt de server nooit en staat dus
+        niet in een access log of een Referer-header. Dit is het enige
+        token waarmee `scope=all` bereikbaar is: toestemming intrekken en
+        het adres op de blokkeerlijst, onomkeerbaar;
+      - de List-Unsubscribe-URL kan geen fragment gebruiken: RFC 8058
+        schrijft een POST-bare https-URL voor en een fragment zou daar
+        simpelweg verdwijnen. Daar staat `oneclick_token` dus in de
+        querystring, en belandt daarmee in elke access-, proxy- en
+        edge-logregel die het verzoek passeert.
+
+    Zolang dat één en hetzelfde token was, kon wie een one-click-URL uit
+    een log haalde datzelfde token in de body plakken en `scope=all`
+    bereiken. Nu draagt `job_alert_sends` beide hashes apart en dwingt
+    routers/public.py's unsubscribe() voor een treffer op
+    `oneclick_token_hash` altijd `alerts` af, wat de body, de querystring
+    of de opgegeven scope ook zegt. Een gelekt one-click-token kan daarmee
+    niet méér dan waarvoor het is uitgegeven. Dat restrisico -- en wat
+    ervan overblijft -- staat in docs/VERWERKINGSREGISTER.md §1.2.
+    """
+    footer = f"{settings.frontend_url}/unsubscribe#token={token}"
+    one_click = f"{settings.api_base_url}/api/public/unsubscribe?token={oneclick_token}&scope=alerts"
+    return footer, one_click
+
+
+async def _job_alert_suppressed_ids(rows: list) -> set:
+    """Welke van deze kandidaten op de suppressielijst staan.
+
+    Bewust in Python en niet in SQL: core/privacy.py is de enige plek die
+    bepaalt hoe een adres tot een suppression_list-hash wordt (trim,
+    lower, sha256). Een tweede, met de hand nagebouwde sha256-expressie
+    in SQL zou stilletjes uit de pas kunnen lopen met die definitie, en
+    de fout zou eruitzien als "deze persoon staat er niet op" -- precies
+    de kant op die een mail stuurt naar iemand die STOP heeft gezegd.
+
+    Security-audit B8: de map gaat van id naar hash en niet andersom.
+    Als `{hash: id}` verloor hij stilletjes rijen zodra twee kandidaten
+    hetzelfde adres droegen (een gesourcete rij en een portaalrij die
+    WS-C.16's FK nooit heeft samengevoegd -- deze codebase heeft daar een
+    hele migratie aan besteed, dus het is geen theoretisch geval): de
+    tweede overschreef de eerste, en de overschreven rij kreeg zijn mail
+    gewoon. Precies dezelfde fout die dit hele hulpje moet voorkomen,
+    alleen in Python in plaats van in SQL."""
+    by_id = {r["id"]: privacy.email_hash(r["email"]) for r in rows if r["email"]}
+    if not by_id:
+        return set()
+    hits = await fetch_all(
+        "SELECT email_hash FROM suppression_list WHERE email_hash = ANY($1::text[])",
+        list(set(by_id.values())),
+    )
+    suppressed_hashes = {h["email_hash"] for h in hits}
+    return {cid for cid, h in by_id.items() if h in suppressed_hashes}
+
+
+async def job_alert_job() -> dict:
+    """Dagelijks (08:00, ná de matching van 07:00). Eén digest per
+    kandidaat met maximaal JOB_ALERT_MAX_JOBS vacatures, maximaal
+    JOB_ALERT_RUN_CAP kandidaten per run.
+
+    Twee schakelaars, allebei droog by default: de env-master
+    JOB_ALERTS_ENABLED (core/config.py) en de admin-bewerkbare DB-vlag
+    system_settings.job_alerts_enabled. Staat er één uit, dan selecteert
+    en telt deze job wel maar verstuurt hij niets, schrijft hij geen
+    job_alert_sends-rij en stempelt hij geen job_alert_last_sent_at --
+    een droogloop mag geen enkel spoor achterlaten dat een echte
+    verzending suggereert. Eén uitzondering, en met opzet: een kandidaat
+    op de blokkeerlijst wordt ook in droogloop afgehandeld (B5,
+    `job_alert_unsubscribed_at` plus een audit-regel
+    `job_alert_suppressed`) -- dat spoor zegt juist dat er niets is
+    verstuurd en nooit iets verstuurd zal worden, en zonder die stempel
+    houdt zo'n rij elke dag opnieuw een plek onder JOB_ALERT_RUN_CAP
+    bezet."""
+    from services.email_service import email_service
+
+    env_enabled = settings.job_alerts_enabled
+    db_enabled = await _flag_enabled("job_alerts_enabled")
+    enabled = env_enabled and db_enabled
+
+    candidates = await fetch_all(JOB_ALERT_CANDIDATE_SQL, JOB_ALERT_RUN_CAP)
+    suppressed_ids = await _job_alert_suppressed_ids(candidates)
+    matches_sql = job_alert_matches_sql()
+
+    considered = 0
+    sent = 0
+    suppressed = 0
+    for row in candidates:
+        if row["id"] in suppressed_ids:
+            # B5: overslaan is niet genoeg. `ORDER BY
+            # job_alert_last_sent_at ASC NULLS FIRST` zet een kandidaat
+            # die nog nooit een digest kreeg vooraan, en een geblokkeerde
+            # kandidaat krijgt er ook nooit een -- dus stond hij morgen
+            # weer vooraan en verbruikte hij permanent een plek onder
+            # JOB_ALERT_RUN_CAP. Een STOP IS een afmelding: de kolom mag
+            # dat gewoon zeggen, en dan verlaat de rij de selector.
+            # COALESCE zodat een eerdere, eigen afmelding zijn oudere
+            # tijdstip houdt.
+            await execute(
+                """UPDATE candidates
+                   SET job_alert_unsubscribed_at = COALESCE(job_alert_unsubscribed_at, NOW()),
+                       updated_at = NOW()
+                   WHERE id = $1""",
+                row["id"],
+            )
+            # Nooit het adres, alleen de sha256 (core/privacy.py).
+            # json.dumps, nooit een ruwe dict (commit 72b4bcd).
+            await execute(
+                "INSERT INTO audit_log (action, actor_id, target_type, target_id, changes) "
+                "VALUES ($1, NULL, $2, $3, $4::jsonb)",
+                "job_alert_suppressed", "candidate", row["id"],
+                json.dumps({
+                    "reason": "suppression_list",
+                    "email_hash": privacy.email_hash(row["email"]) if row["email"] else None,
+                }),
+            )
+            suppressed += 1
+            continue
+
+        jobs = await fetch_all(
+            matches_sql,
+            row["id"], MATCH_SUGGESTION_MIN_STORED_SCORE,
+            row["job_alert_last_sent_at"], JOB_ALERT_MAX_JOBS,
+        )
+        if not jobs:
+            continue
+        considered += 1
+
+        if not enabled:
+            continue
+
+        # Twee losse tokens per verzending (B1): het fragmenttoken voor de
+        # voettekstlink (de enige weg naar `scope=all`) en het
+        # one-click-token voor de List-Unsubscribe-header (altijd
+        # `alerts`, wat de aanroeper ook meestuurt). Zie
+        # _job_alert_unsubscribe_links hierboven.
+        token = secrets.token_urlsafe(32)
+        oneclick_token = secrets.token_urlsafe(32)
+        footer_link, one_click_url = _job_alert_unsubscribe_links(token, oneclick_token)
+
+        # Security-audit B7: eerst de tokenrij, dan pas verzenden. De
+        # omgekeerde volgorde leek voorzichtiger ("geen geldig token voor
+        # een mail die nooit aankwam") maar faalt de verkeerde kant op:
+        # deze twee statements zitten niet in één transactie met de
+        # verzending, dus als de INSERT struikelde nádat de mail de deur
+        # uit was, had de ontvanger een afmeldlink die niets doet -- en
+        # het endpoint antwoordt met opzet altijd hetzelfde, dus hij ziet
+        # precies niets van dat verschil. Bovendien bleef
+        # `job_alert_last_sent_at` dan ongestempeld en kreeg hij morgen
+        # dezelfde digest opnieuw.
+        #
+        # Andersom is elke uitkomst hanteerbaar: mislukt de INSERT, dan
+        # gaat er geen mail uit (we slaan deze kandidaat over); mislukt de
+        # verzending, dan halen we de rij weer weg en is er geen token
+        # zonder bericht. Blijft één restgeval: crasht het proces tussen
+        # de verzending en de DELETE, dan staat er een tokenrij voor een
+        # mail die niet aankwam. Dat token is dan hoogstens ongebruikt --
+        # niemand heeft hem ooit gezien -- en verloopt na 90 dagen
+        # (routers/public.py).
+        send_row = await fetch_one(
+            "INSERT INTO job_alert_sends (candidate_id, job_ids, token_hash, oneclick_token_hash) "
+            "VALUES ($1, $2::int[], $3, $4) RETURNING id",
+            row["id"], [j["id"] for j in jobs], hash_token(token), hash_token(oneclick_token),
+        )
+        if not send_row:
+            logger.warning("job_alert_job: could not record the unsubscribe token for candidate id=%s", row["id"])
+            continue
+
+        ok = await email_service.send_template(
+            "job_alert", row["email"],
+            {
+                "full_name": row.get("full_name") or "",
+                "jobs": [
+                    {
+                        "title": j["title"],
+                        "location": j["city"],
+                        "url": f"{settings.frontend_url}/vacature.html?id={j['id']}",
+                    }
+                    for j in jobs
+                ],
+                "unsubscribe_link": footer_link,
+            },
+            headers={
+                # RFC 8058: beide headers moeten aanwezig zijn wil een
+                # mailclient de one-click-knop tonen; alleen
+                # List-Unsubscribe zonder -Post levert een "weet je het
+                # zeker"-omweg op, of niets.
+                "List-Unsubscribe": f"<{one_click_url}>",
+                "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
+            },
+        )
+        if not ok:
+            # De rij weer weg: geen afmeldtoken voor een bericht dat niet
+            # is aangekomen.
+            await execute("DELETE FROM job_alert_sends WHERE id = $1", send_row["id"])
+            logger.warning("job_alert_job: failed to send digest to candidate id=%s", row["id"])
+            continue
+
+        # Pas ná een geslaagde verzending de stempel: anders zou
+        # job_alert_last_sent_at het venster van de volgende run
+        # dichtschuiven over matches die deze persoon nooit heeft gezien.
+        await execute(
+            "UPDATE candidates SET job_alert_last_sent_at = NOW() WHERE id = $1", row["id"],
+        )
+        sent += 1
+
+    status = "success" if enabled else "dry_run"
+    logger.info(
+        "job_alert_job: status=%s candidates_selected=%s with_matches=%s sent=%s suppressed=%s (env=%s db=%s)",
+        status, len(candidates), considered, sent, suppressed, env_enabled, db_enabled,
+    )
+    return {
+        "status": status,
+        "candidates_selected": len(candidates),
+        "with_matches": considered,
+        "sent": sent,
+        "suppressed": suppressed,
+    }
+
+
+# ── Bewaartermijn van het verzendlogboek (R1) ───────────────────────────
+#
+# `job_alert_sends` is een verzendlogboek met een kandidaat-id en een
+# tokenhash per verzonden digest, en had geen eigen bewaartermijn. "Volgt
+# de kandidaatrij" was daarvoor geen antwoord: `routers/gdpr.py`'s
+# erase_person() ANONIMISEERT een kandidaat (de rij blijft bestaan, het
+# adres verdwijnt), dus de `ON DELETE CASCADE` op `candidate_id` treedt
+# op het gewone wispad helemaal niet in werking en zou het logboek
+# onbeperkt laten groeien.
+#
+# 90 dagen, en dat getal is geen keuze maar een gevolg: het afmeldtoken
+# werkt precies zo lang (`routers/public.py unsubscribe()`), dus een
+# oudere rij kan niets meer doen wat een nieuwere niet doet. Gelijk aan de
+# bewaartermijn van email_log (migrations/040), dat over dezelfde
+# verzendingen gaat.
+JOB_ALERT_SENDS_RETENTION_DAYS = 90
+
+
+async def job_alert_sends_cleanup_job() -> dict:
+    """Dagelijks (04:20). Verwijdert `job_alert_sends`-rijen ouder dan
+    JOB_ALERT_SENDS_RETENTION_DAYS dagen.
+
+    Harde verwijdering en geen beoordelingslijst, om dezelfde reden als
+    talentpool_optin_requests_cleanup_job hierboven: er valt geen signaal
+    te missen. Zo'n rij is een verzendlogregel met een verlopen token; hij
+    draagt geen adres en geen ander gegeven waarover iemand een besluit
+    zou moeten nemen."""
+    # De termijn als parameter en niet als string in de SQL: dit is een
+    # DELETE, en de enige reden dat een getal hier veilig zou zijn is dat
+    # het vandaag een constante is. `DELETE ... RETURNING` en tellen in
+    # Python, dezelfde vorm als _purge_stale_talentpool_optin_requests
+    # hierboven -- geen CTE, want dan leest deze query als een verwijzing
+    # naar een tabel die geen enkele migratie aanmaakt
+    # (tests/test_baseline_schema.py).
+    purged = await fetch_all(
+        "DELETE FROM job_alert_sends WHERE sent_at < NOW() - ($1::int * INTERVAL '1 day') "
+        "RETURNING id",
+        JOB_ALERT_SENDS_RETENTION_DAYS,
+    )
+    count = len(purged)
+    if count:
+        await execute(
+            "INSERT INTO audit_log (action, actor_id, target_type, target_id, changes) "
+            "VALUES ($1, NULL, $2, NULL, $3::jsonb)",
+            "retention_purge", "job_alert_sends",
+            json.dumps({
+                "category": "job_alert_sends", "count": count, "action": "hard_delete",
+                "older_than_days": JOB_ALERT_SENDS_RETENTION_DAYS,
+            }),
+        )
+    logger.info("job_alert_sends_cleanup_job: purged=%s", count)
+    return {"status": "purged", "count": count}
+
+
+# ── Per-category live rows for the monthly review queue ─────────────────
+
+async def _live_rows_for_category(row: "retention.RetentionRow") -> list:
+    """Runs `row.selector_sql` generically against `row.selector_params` --
+    core/retention.py's RetentionRow already carries subject_table/
+    email_field (where to file the result in retention_review_items) and
+    selector_params (the query's own positional placeholders), so this is
+    the one place, per category, that reads who is due -- not a second,
+    independently-maintained copy of that lookup here.
+
+    leads_quiz is the one RETENTION_TABLE row this does NOT run this way:
+    its selector_sql documents two unrelated tables (quiz_submissions,
+    contact_submissions) joined with a literal "; " for display purposes
+    only, which asyncpg's single-statement fetch() cannot execute -- so it
+    runs each constant separately and returns the concatenation (used only
+    for a count here; generate_retention_review() below queues the two
+    tables separately so each row lands under its own subject_table).
+
+    Any other row reaching this function without a subject_table/
+    email_field (a RETENTION_TABLE addition that forgot to set them, or a
+    caller passing something malformed) raises rather than returning [] --
+    returning [] here would make generate_retention_review()'s
+    _retire_stale_pending() call for that category mark every currently-
+    pending item 'no_longer_eligible', which means "a protective signal
+    appeared", not "the query is broken"."""
+    if row.key == "leads_quiz":
+        quiz = await fetch_all(retention.LEADS_QUIZ_SQL)
+        contact = await fetch_all(retention.CONTACT_SUBMISSIONS_SQL)
+        return quiz + contact
+    if not row.subject_table or not row.email_field:
+        raise ValueError(
+            f"_live_rows_for_category: category {row.key!r} carries no subject_table/email_field"
+        )
+    return await fetch_all(row.selector_sql, *row.selector_params)
+
+
+async def _upsert_review_item(
+    category: str, subject_table: str, subject_id: int, email: Optional[str],
+    action: str, term_expired_at, signal_missing_nl: str,
+) -> None:
+    """Insert a fresh 'pending' review item, or reopen an existing
+    'rejected' one -- WS-E.10's "iemand die hij niet goedkeurt, moet niet
+    volgende maand opnieuw op de lijst staan zonder dat zichtbaar is dat
+    hij eerder is overgeslagen" requirement. A 'purged' item is left alone
+    (the person is gone, nothing to reopen); a 'no_longer_eligible' item
+    reopens the same way a 'rejected' one does -- both mean "not currently
+    being acted on", and this run's live selector just proved the subject
+    is due again. UNIQUE(category, subject_table, subject_id)
+    (migrations/036_retention_review_queue.py) is what makes this a
+    genuine upsert rather than ever inserting a second, indistinguishable
+    row for the same person."""
+    await execute(
+        """INSERT INTO retention_review_items
+             (category, subject_table, subject_id, email, action, term_expired_at, signal_missing_nl)
+           VALUES ($1, $2, $3, $4, $5, $6, $7)
+           ON CONFLICT (category, subject_table, subject_id) DO UPDATE SET
+             email = EXCLUDED.email,
+             action = EXCLUDED.action,
+             term_expired_at = EXCLUDED.term_expired_at,
+             signal_missing_nl = EXCLUDED.signal_missing_nl,
+             last_seen_at = NOW(),
+             status = CASE
+                 WHEN retention_review_items.status IN ('rejected', 'no_longer_eligible') THEN 'pending'
+                 ELSE retention_review_items.status
+             END,
+             reappeared_after_rejection_at = CASE
+                 WHEN retention_review_items.status = 'rejected'
+                 THEN COALESCE(retention_review_items.reappeared_after_rejection_at, NOW())
+                 ELSE retention_review_items.reappeared_after_rejection_at
+             END""",
+        category, subject_table, subject_id, email, action, term_expired_at, signal_missing_nl,
+    )
+
+
+async def _retire_stale_pending(category: str, subject_table: str, live_ids: list) -> None:
+    """Whatever was 'pending' for this category+table last run but isn't
+    in this run's live selector any more picked up a protective signal in
+    the meantime -- mark it 'no_longer_eligible' (kept, not deleted, for
+    the same visibility reason a rejection is kept) rather than silently
+    leaving a stale row an admin could still approve into a purge of
+    someone who is no longer actually due. H3 (security-audit round 5):
+    the e-mail column is nulled the moment a row leaves 'pending' -- data
+    minimisation for a row that no longer needs the address to be
+    actionable; a later run re-supplies it via _upsert_review_item()'s
+    ON CONFLICT DO UPDATE if the subject becomes due again."""
+    await execute(
+        """UPDATE retention_review_items SET status = 'no_longer_eligible', last_seen_at = NOW(), email = NULL
+           WHERE category = $1 AND subject_table = $2 AND status = 'pending'
+             AND NOT (subject_id = ANY($3::int[]))""",
+        category, subject_table, live_ids,
+    )
+
+
+async def generate_retention_review() -> dict:
+    """WS-E.10 monthly job. Walks core/retention.RETENTION_TABLE's seven
+    guarded, schema_ready anonymise/hard_delete categories (retain/
+    infra_only rows are never actionable at all; see core/retention.py),
+    plus leads_quiz (two tables, age-only) and apollo_pool_purge
+    (VERWERKINGSREGISTER.md §2.6/§5.7, folded into this same queue --
+    see routers/retention_admin.py's module docstring for why that used
+    to be its own direct-delete endpoint and no longer is), and queues
+    every row each one's selector currently returns into
+    retention_review_items. Never touches the GDPR erasure routine and
+    never deletes a candidate/prospect/user row -- read-only against
+    every table except retention_review_items itself.
+
+    Each category runs inside its own try/except: a selector that raises
+    (a bad join, a locked table, a soft-deleted FK target, ...) is recorded
+    as {"status": "error"} for that category in the returned summary and
+    its own _retire_stale_pending() call is skipped for this run, rather
+    than the whole job aborting halfway (losing every category that hadn't
+    run yet) or the exception being swallowed into an empty result that
+    would make _retire_stale_pending() mark every already-pending item in
+    that one category 'no_longer_eligible' -- a query failure must never
+    look like "everyone picked up a protective signal"."""
+    summary: dict = {}
+
+    for row in retention.RETENTION_TABLE:
+        if row.action not in ("anonymise", "hard_delete") or not row.schema_ready:
+            continue  # retain/infra_only, or schema_not_ready -- see core/retention.py
+        if row.key == "leads_quiz":
+            continue  # spans two subtables with no shared guard -- handled separately below
+        try:
+            live_rows = await _live_rows_for_category(row)
+            live_ids = [r["id"] for r in live_rows]
+            for r in live_rows:
+                await _upsert_review_item(
+                    row.key, row.subject_table, r["id"], r.get(row.email_field),
+                    row.action, r.get("term_expired_op"), row.signal_missing_nl,
+                )
+            await _retire_stale_pending(row.key, row.subject_table, live_ids)
+            summary[row.key] = {"queued": len(live_rows)}
+        except Exception:
+            logger.exception("generate_retention_review: category %s failed", row.key)
+            summary[row.key] = {"status": "error"}
+
+    # leads_quiz: two unrelated tables, hard_delete, no protective guard --
+    # purely an age cutoff, so there is no "signal_missing" beyond that.
+    try:
+        quiz_rows = await fetch_all(retention.LEADS_QUIZ_SQL)
+        contact_rows = await fetch_all(retention.CONTACT_SUBMISSIONS_SQL)
+        leads_quiz_row = retention.get_row("leads_quiz")
+        for subject_table, rows_ in (("quiz_submissions", quiz_rows), ("contact_submissions", contact_rows)):
+            for r in rows_:
+                await _upsert_review_item(
+                    "leads_quiz", subject_table, r["id"], None, "hard_delete",
+                    r["term_expired_op"], leads_quiz_row.signal_missing_nl,
+                )
+            await _retire_stale_pending("leads_quiz", subject_table, [r["id"] for r in rows_])
+        summary["leads_quiz"] = {"queued": len(quiz_rows) + len(contact_rows)}
+    except Exception:
+        logger.exception("generate_retention_review: category leads_quiz failed")
+        summary["leads_quiz"] = {"status": "error"}
+
+    # apollo_pool_purge (VERWERKINGSREGISTER.md §2.6/§5.7) -- not a
+    # RETENTION_TABLE row (a one-off historical pool, not an ongoing
+    # category), folded into this same queue since WS-E.10 instead of its
+    # own direct-delete endpoint. Action varies per row (anonymise with an
+    # e-mail, hard_delete without), unlike every other category here.
+    try:
+        apollo_rows = await fetch_all(retention.APOLLO_POOL_TARGET_SQL)
+        for r in apollo_rows:
+            action = "anonymise" if r["email"] else "hard_delete"
+            await _upsert_review_item(
+                "apollo_pool_purge", "candidates", r["id"], r["email"], action,
+                None, "n.v.t. -- eenmalige Apollo-poolopschoning, geen bewaartermijn-anker",
+            )
+        await _retire_stale_pending("apollo_pool_purge", "candidates", [r["id"] for r in apollo_rows])
+        summary["apollo_pool_purge"] = {"queued": len(apollo_rows)}
+    except Exception:
+        logger.exception("generate_retention_review: category apollo_pool_purge failed")
+        summary["apollo_pool_purge"] = {"status": "error"}
+
+    logger.info("generate_retention_review: summary=%s", summary)
+    return {"generated_at": datetime.now(timezone.utc).isoformat(), "categories": summary}
+
+
+async def retention_review_job() -> dict:
+    """Monthly cron entry point (1st of month, 04:00 Europe/Amsterdam).
+    Unconditional -- no env flag gates it the way RETENTION_PURGE_ENABLED
+    used to gate the old daily purge, because there is nothing left for a
+    flag to gate: populating an internal, admin-JWT-only review queue
+    deletes nothing (see generate_retention_review()'s own docstring)."""
+    return await generate_retention_review()
 
 
 # ── Scheduler lifecycle ──────────────────────────────────────────────────
@@ -725,11 +1389,11 @@ async def start_scheduler() -> None:
     apollo_jobs_registered = 0
     if settings.apollo_sync_enabled:
         scheduler.add_job(
-            apollo_search_and_sync, CronTrigger(hour=6, minute=0),
+            _tracked("apollo_search_and_sync", apollo_search_and_sync), CronTrigger(hour=6, minute=0),
             id="apollo_search_and_sync", replace_existing=True,
         )
         scheduler.add_job(
-            apollo_enrich_batch, CronTrigger(hour=6, minute=30),
+            _tracked("apollo_enrich_batch", apollo_enrich_batch), CronTrigger(hour=6, minute=30),
             id="apollo_enrich_batch", replace_existing=True,
         )
         apollo_jobs_registered = 2
@@ -737,30 +1401,63 @@ async def start_scheduler() -> None:
         logger.info("scheduler: apollo_sync_enabled=false, not registering Apollo jobs")
 
     scheduler.add_job(
-        matching, CronTrigger(hour=7, minute=0),
+        _tracked("matching", matching), CronTrigger(hour=7, minute=0),
         id="matching", replace_existing=True,
     )
     scheduler.add_job(
-        draft_outreach, CronTrigger(hour=7, minute=30),
+        _tracked("draft_outreach", draft_outreach), CronTrigger(hour=7, minute=30),
         id="draft_outreach", replace_existing=True,
     )
     scheduler.add_job(
-        draft_blog_post, CronTrigger(day_of_week="mon", hour=5, minute=0),
+        _tracked("draft_blog_post", draft_blog_post), CronTrigger(day_of_week="mon", hour=5, minute=0),
         id="draft_blog_post", replace_existing=True,
     )
     scheduler.add_job(
-        retention_purge_job, CronTrigger(hour=4, minute=0),
-        id="retention_purge", replace_existing=True,
+        _tracked("talentpool_optin_requests_cleanup", talentpool_optin_requests_cleanup_job),
+        CronTrigger(hour=4, minute=0),
+        id="talentpool_optin_requests_cleanup", replace_existing=True,
     )
     scheduler.add_job(
-        talentpool_reminder_job, CronTrigger(hour=4, minute=30),
+        _tracked("job_alert_sends_cleanup", job_alert_sends_cleanup_job), CronTrigger(hour=4, minute=20),
+        id="job_alert_sends_cleanup", replace_existing=True,
+    )
+    scheduler.add_job(
+        _tracked("talentpool_reminder", talentpool_reminder_job), CronTrigger(hour=4, minute=30),
         id="talentpool_reminder", replace_existing=True,
+    )
+    # WS3b/WS3c. Beide worden ALTIJD geregistreerd, ook met hun
+    # schakelaar uit -- anders dan de Apollo-jobs hierboven, die pas
+    # bestaan als APOLLO_SYNC_ENABLED aan staat. Het verschil is bewust:
+    # met de schakelaar uit verstuurt geen van deze twee jobs iets en
+    # schrijft geen van beide iets weg (zie hun docstrings), ze tellen
+    # alleen wie er aan de beurt zou zijn. Die droogloop in de logs is
+    # precies wat je wilt kunnen zien voordat je de schakelaar omzet, en
+    # is zelf geen verwerking richting een betrokkene.
+    #
+    # 04:45 zit na talentpool_reminder (04:30) en voor de matching;
+    # 08:00 zit na de matching van 07:00, zodat de digest van vandaag de
+    # matches van vanochtend meeneemt in plaats van die van gisteren.
+    scheduler.add_job(
+        _tracked("dormant_account_warning", dormant_account_warning_job), CronTrigger(hour=4, minute=45),
+        id="dormant_account_warning", replace_existing=True,
+    )
+    scheduler.add_job(
+        _tracked("job_alert", job_alert_job), CronTrigger(hour=8, minute=0),
+        id="job_alert", replace_existing=True,
+    )
+    # WS-E.10 (owner decision): monthly, not daily -- this job only ever
+    # queues people for human review (generate_retention_review()'s own
+    # docstring), never purges, so there is no HARD RULE left to re-check
+    # on every cron tick the way a daily purge job would have to.
+    scheduler.add_job(
+        _tracked("retention_review", retention_review_job), CronTrigger(day=1, hour=4, minute=0),
+        id="retention_review", replace_existing=True,
     )
 
     scheduler.start()
     logger.info(
-        "scheduler: started with %s daily jobs + 1 weekly job (Europe/Amsterdam)",
-        4 + apollo_jobs_registered,
+        "scheduler: started with %s daily jobs + 1 weekly job + 1 monthly job (Europe/Amsterdam)",
+        6 + apollo_jobs_registered,
     )
 
 
@@ -783,13 +1480,26 @@ async def shutdown_scheduler() -> None:
             _lock_conn = None
 
 
+# Manual runs of a cron routine are wrapped with the same routine name as
+# start_scheduler() uses, so a "run now" from the admin panel shows up in
+# routine_runs and on /api/v1/admin/health/routines like a scheduler tick.
 JOBS_BY_NAME = {
-    "sourcing": apollo_search_and_sync,
-    "enrich": apollo_enrich_batch,
-    "matching": matching,
-    "drafting": draft_outreach,
-    "blog": draft_blog_post,
-    "retention_purge": retention_purge_job,
+    "sourcing": _tracked("apollo_search_and_sync", apollo_search_and_sync),
+    "enrich": _tracked("apollo_enrich_batch", apollo_enrich_batch),
+    "matching": _tracked("matching", matching),
+    "drafting": _tracked("draft_outreach", draft_outreach),
+    "blog": _tracked("draft_blog_post", draft_blog_post),
+    "retention_review": _tracked("retention_review", retention_review_job),
+    "talentpool_optin_cleanup": _tracked("talentpool_optin_requests_cleanup", talentpool_optin_requests_cleanup_job),
+    # WS3b/WS3c: handmatig te draaien via POST /api/v1/admin/outreach/run/
+    # {job_name}, net als de andere jobs hier. Handmatig draaien omzeilt
+    # géén schakelaar: allebei lezen ze settings (en job_alert ook de
+    # DB-vlag) binnenin, dus een admin die dit aanroept met de
+    # schakelaars uit krijgt dezelfde droogloop als de cron -- dezelfde
+    # les als de security-audit-opmerking bij apollo_search_and_sync.
+    "dormant_warning": _tracked("dormant_account_warning", dormant_account_warning_job),
+    "job_alerts": _tracked("job_alert", job_alert_job),
+    "job_alert_sends_cleanup": _tracked("job_alert_sends_cleanup", job_alert_sends_cleanup_job),
     # Manual-trigger only — deliberately NOT added to start_scheduler()'s
     # cron jobs below. One-shot Apollo bulk-harvest (services/harvest.py)
     # and its outreach-draft catch-up, both run via routers/outreach.py's

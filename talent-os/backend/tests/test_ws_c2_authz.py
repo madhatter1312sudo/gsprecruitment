@@ -161,10 +161,14 @@ def test_public_job_columns_exclude_internal_fields():
 
 
 def test_public_job_columns_include_frontend_fields():
-    selected = {c.strip() for c in PUBLIC_JOB_COLUMNS.split(",")}
-    for field in ("id", "title", "description", "requirements", "location_type",
-                  "salary_min", "salary_max", "salary_currency", "created_at"):
-        assert field in selected
+    # WS-4: PUBLIC_JOB_COLUMNS now qualifies every job_orders column with
+    # the "j." alias (list_public_jobs/get_public_job join clients for
+    # anonymous_client), so a naive split(",") on the raw SQL fragment
+    # also cuts the COALESCE(...) expression in two -- match on
+    # substrings of the raw string instead of a comma-split set.
+    for field in ("j.id", "j.title", "j.description", "j.requirements", "j.location_type",
+                  "j.salary_min", "j.salary_max", "j.salary_currency", "j.created_at"):
+        assert field in PUBLIC_JOB_COLUMNS
 
 
 # ── Fix 5 (follow-up): create_client_job always inserts status='draft' ──

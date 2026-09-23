@@ -57,9 +57,31 @@
     .then(async (res) => {
       const data = await res.json().catch(() => ({}));
       if (res.ok) {
-        showResult(true,
-          'Your talent pool sign-up is confirmed. We will contact you about roles that fit.',
-          'Je talentpool-aanmelding is bevestigd. Wij nemen contact op bij passende rollen.');
+        // WS4: when the confirmed sign-up came from a vacancy's inline
+        // apply panel (talentpool-optin with job_id), the backend also
+        // registers the application and echoes it back as applied_job;
+        // without it (a plain talent-pool sign-up) behaviour is unchanged.
+        if (data.applied_job && data.applied_job.title) {
+          // Not routed through showResult(): that helper GSP.esc()'s the
+          // *whole* messageEn/messageNl string, which is right for its own
+          // fixed literals but would double-escape a real job title here
+          // (e.g. an apostrophe would render on screen as the literal text
+          // "&#39;" instead of "'"). Escape the title once, inline, and set
+          // .textContent directly -- .textContent never parses HTML, so
+          // this is exactly as safe as the double-escaped path, just legible.
+          const title = GSP.esc(String(data.applied_job.title));
+          pending.style.display = 'none';
+          resultBox.style.display = 'block';
+          resultIcon.className = 'verify-icon success';
+          resultIcon.innerHTML = '<i class="fas fa-circle-check"></i>';
+          const en = `Your application for ${title} has been registered.`;
+          const nl = `Je sollicitatie op ${title} is geregistreerd.`;
+          resultText.textContent = document.documentElement.dataset.lang === 'en' ? en : `${nl} / ${en}`;
+        } else {
+          showResult(true,
+            'Your talent pool sign-up is confirmed. We will contact you about roles that fit.',
+            'Je talentpool-aanmelding is bevestigd. Wij nemen contact op bij passende rollen.');
+        }
       } else {
         showResult(false,
           data.detail || 'This confirmation link is invalid or has expired.',

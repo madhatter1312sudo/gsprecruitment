@@ -155,13 +155,78 @@ def make_jobs(n=TOTAL_ROWS):
     } for i in range(1, n + 1)]
 
 
+def make_placements(n=TOTAL_ROWS):
+    statuses = ["concept", "actief", "beeindigd", "geannuleerd"]
+    types = ["werving_selectie", "detachering"]
+    return [{
+        "id": i,
+        # candidate_id oplopend per rij (in plaats van één vaste waarde):
+        # de generieke paginacheck vergelijkt de volledige rijtekst tussen
+        # pagina 1 en 2, en die moeten dus zichtbaar verschillen.
+        "candidate_id": 1000 + i,
+        "job_id": 1, "client_id": 1,
+        "placement_type": types[i % 2],
+        "start_date": "2026-01-01", "end_date": None,
+        "hourly_bill_rate": None, "monthly_purchase_price": None,
+        "eor_partner": None, "eor_cost_factor": None,
+        "billing_basis": None, "expected_billable_hours": None,
+        "fee_type": None, "fee_percentage": None, "fee_amount": None,
+        "one_off_costs": [], "status": statuses[i % 4], "notes": None,
+    } for i in range(1, n + 1)]
+
+
+# Bewaartermijnen (§7.3.1) pagineert op 50, niet op de 20 van de andere
+# secties, en de route heeft bewust geen default-limit. Deze fixture is
+# daarom ruim boven twee pagina's.
+RETENTION_PAGE_SIZE = 50
+RETENTION_ROWS = 120
+
+
+def make_retention(n=RETENTION_ROWS):
+    return [{
+        "id": i,
+        "category": "rejected_applicant",
+        "subject_table": "candidates",
+        "subject_id": 1000 + i,
+        "email": None,
+        "action": "anonymise",
+        "term_expired_at": "2026-08-12T00:00:00Z",
+        "signal_missing_nl": "geen nieuwe match, pipeline-activiteit of plaatsing sinds de afwijzing",
+        "status": "pending",
+        "first_seen_at": "2026-09-01T00:00:00Z",
+        "last_seen_at": "2026-09-03T00:00:00Z",
+        "reappeared_after_rejection_at": None,
+        "purged_at": None,
+    } for i in range(1, n + 1)]
+
+
+# AVG-suppressielijst (§7.3.5) pagineert op 100, niet op de 20 van de
+# andere secties (js/sections/gdpr.js SUPPRESSION_PAGE_SIZE) en de API
+# levert nooit een e-mailadres -- alleen hash, domein, reden en datum.
+GDPR_PAGE_SIZE = 100
+GDPR_ROWS = 120
+
+
+def make_gdpr_suppression(n=GDPR_ROWS):
+    return [{
+        "id": i,
+        "email_hash": f"{i:04d}" + ("0" * 30) + f"h{i % 1000:03d}",
+        "email_domain": f"voorbeeld{i}.nl",
+        "reason": "STOP" if i % 2 else "handmatig",
+        "created_at": f"2026-09-{(i % 27) + 1:02d}T00:00:00Z",
+    } for i in range(1, n + 1)]
+
+
 LIST_DATA = {
     "users": make_users(),
+    "retention": make_retention(),
     "candidates": make_candidates(),
     "outreach": make_outreach(),
     "blog": make_blog(),
     "audit": make_audit(),
     "jobs": make_jobs(),
+    "placements": make_placements(),
+    "gdpr": make_gdpr_suppression(),
 }
 
 # WS-B.2: id an admin_pagination_check DELETE request uses to exercise the
@@ -174,6 +239,18 @@ def paginate(items, qs):
     limit = int(qs.get("limit", [str(PAGE_SIZE)])[0])
     offset = int(qs.get("offset", ["0"])[0])
     return {"items": items[offset:offset + limit], "total": len(items)}
+
+
+def paginate_retention(items, qs):
+    """GET /retention/review heeft geen default-limit (WS5 BV6): zonder
+    limit komt de volledige set terug. Die eigenschap is precies wat de
+    categoriebrede goedkeuring nodig heeft, dus de stub bootst hem na in
+    plaats van er stilzwijgend een paginagrootte op te leggen."""
+    limit = qs.get("limit", [None])[0]
+    offset = int(qs.get("offset", ["0"])[0])
+    page = items[offset:offset + int(limit)] if limit else items[offset:]
+    return {"items": page, "total": len(items),
+            "limit": int(limit) if limit else None, "offset": offset}
 
 
 def route_admin_api(route, request):
@@ -203,6 +280,14 @@ def route_admin_api(route, request):
         return
     if path == "/api/v1/admin/users":
         json_response(paginate(LIST_DATA["users"], qs))
+        return
+    if path == "/api/v1/admin/retention/review":
+        json_response(paginate_retention(LIST_DATA["retention"], qs))
+        return
+    if path == "/api/v1/admin/retention/review/summary":
+        json_response({"pending_total": RETENTION_ROWS,
+                        "by_category": [{"category": "rejected_applicant", "status": "pending",
+                                         "n": RETENTION_ROWS}]})
         return
     if path == "/api/v1/admin/candidates":
         json_response(paginate(LIST_DATA["candidates"], qs))
@@ -246,6 +331,12 @@ def route_admin_api(route, request):
         body = json.loads(request.post_data or "{}")
         json_response({"id": job_id, "status": body.get("status", "open")})
         return
+    if path == "/api/v1/admin/placements":
+        json_response(paginate(LIST_DATA["placements"], qs))
+        return
+    if path == "/api/v1/admin/suppression" and request.method == "GET":
+        json_response(paginate(LIST_DATA["gdpr"], qs))
+        return
     if path == "/api/v1/admin/analytics":
         json_response({"job_fill_rate": 0, "client_retention_rate": 0, "candidate_satisfaction": 0, "user_growth": {}})
         return
@@ -268,7 +359,44 @@ SECTIONS = [
     ("blog", "#section-blog table tbody tr", "blogPagination"),
     ("audit", "#section-audit table tbody tr", "auditPagination"),
     ("jobs", "#section-jobs table tbody tr", "jobsPagination"),
+    ("placements", "#section-placements table tbody tr", "placementsPagination"),
 ]
+
+
+def wait_until(page, predicate, timeout=6000, step=50):
+    """Wacht op een voorwaarde in plaats van op een aantal milliseconden --
+    zelfde patroon als admin_sections_check.py's wait_until: een vaste
+    wait_for_timeout(900) na een sectiewissel klopt lokaal bijna altijd,
+    maar valt onder belasting (CI, meerdere checks na elkaar) soms net
+    buiten het venster, en levert dan geen duidelijke regel op, alleen een
+    assertie die faalt op een toevallig aantal rijen. Geeft True zodra de
+    voorwaarde geldt, anders False na `timeout`."""
+    waited = 0
+    while waited < timeout:
+        try:
+            if predicate():
+                return True
+        except Exception:
+            pass
+        page.wait_for_timeout(step)
+        waited += step
+    return False
+
+
+def click_or_fail(page, failures, selector, what, timeout=6000):
+    """Klikken met een genoemde faalregel in plaats van Playwrights eigen
+    standaard-timeout (30s) die de hele run met een traceback beëindigt
+    zodra het element er nog niet is -- zie admin_sections_check.py, dat
+    ditzelfde patroon al gebruikt voor elke sectiewissel."""
+    if page.query_selector(selector) is None:
+        failures.append(f"{what}: element niet gevonden ({selector})")
+        return False
+    try:
+        page.click(selector, timeout=timeout)
+    except Exception as exc:
+        failures.append(f"{what}: klikken op {selector} lukte niet binnen {timeout}ms ({exc})")
+        return False
+    return True
 
 
 def main():
@@ -401,6 +529,69 @@ def main():
         if not any("deleted" in t.lower() for t in last_200):
             failures.append(f"jobs delete (200): expected a 'Job deleted' success toast — got {last_200!r}")
 
+        # ---- Bewaartermijnen: pagineert op 50 (§7.3.1), niet op 20 ----
+        errors_before = len(console_errors)
+        page.click('.nav-link[data-section="retention"]')
+        page.wait_for_timeout(900)
+        rows_p1 = page.eval_on_selector_all('#retentionBody tr', "els => els.length")
+        texts_p1 = page.eval_on_selector_all('#retentionBody tr td:nth-child(3)',
+                                              "els => els.map(e => e.textContent.trim())")
+        if rows_p1 != RETENTION_PAGE_SIZE:
+            failures.append(f"retention: pagina 1 gaf {rows_p1} rijen, verwacht {RETENTION_PAGE_SIZE}")
+        btn = '#retentionPagination [data-action="page"][data-page="2"]'
+        if page.query_selector(btn) is None:
+            failures.append("retention: geen pagineerknop voor pagina 2 gevonden")
+        else:
+            page.click(btn)
+            page.wait_for_timeout(800)
+            rows_p2 = page.eval_on_selector_all('#retentionBody tr', "els => els.length")
+            texts_p2 = page.eval_on_selector_all('#retentionBody tr td:nth-child(3)',
+                                                  "els => els.map(e => e.textContent.trim())")
+            if rows_p2 != RETENTION_PAGE_SIZE:
+                failures.append(f"retention: pagina 2 gaf {rows_p2} rijen, verwacht {RETENTION_PAGE_SIZE}")
+            if texts_p1 and texts_p1 == texts_p2:
+                failures.append("retention: pagina 2 toonde dezelfde rijen als pagina 1")
+        new_errors = console_errors[errors_before:]
+        if new_errors:
+            failures.append(f"retention: {len(new_errors)} console error(s): {new_errors[:3]}")
+
+        # ---- AVG: suppressielijst pagineert op 100 (§7.3.5), niet op 20 --
+        errors_before = len(console_errors)
+        gdpr_row_sel = '#gdprSuppressionBody tr'
+        if click_or_fail(page, failures, '.nav-link[data-section="gdpr"]', "gdpr: sidebar-item AVG"):
+            if not wait_until(page, lambda: len(page.query_selector_all(gdpr_row_sel)) == GDPR_PAGE_SIZE):
+                failures.append(
+                    f"gdpr: pagina 1 laadde niet binnen 6000ms tot {GDPR_PAGE_SIZE} rijen -- "
+                    f"kreeg {len(page.query_selector_all(gdpr_row_sel))}"
+                )
+            rows_p1 = page.eval_on_selector_all(gdpr_row_sel, "els => els.length")
+            texts_p1 = page.eval_on_selector_all(gdpr_row_sel, "els => els.map(e => e.textContent.trim())")
+            if rows_p1 != GDPR_PAGE_SIZE:
+                failures.append(f"gdpr: pagina 1 gaf {rows_p1} rijen, verwacht {GDPR_PAGE_SIZE}")
+            btn = '#gdprSuppressionPagination [data-action="page"][data-page="2"]'
+            gdpr_p2_expected = GDPR_ROWS - GDPR_PAGE_SIZE
+            if click_or_fail(page, failures, btn, "gdpr: pagineerknop voor pagina 2"):
+                # Wachten op het exacte, verwachte rijenaantal in plaats van
+                # op "iets veranderde": een kale wait_for_timeout(800) zag
+                # soms een tussenstaat (de tabel al leeg, de nieuwe rijen nog
+                # niet gemount) en las die als "veranderd" af, wat een
+                # verkeerd rijenaantal verderop een verwarrende faalregel gaf
+                # in plaats van deze genoemde.
+                if not wait_until(page, lambda: len(page.query_selector_all(gdpr_row_sel)) == gdpr_p2_expected):
+                    failures.append(
+                        f"gdpr: pagina 2 laadde niet binnen 6000ms tot {gdpr_p2_expected} rijen -- "
+                        f"kreeg {len(page.query_selector_all(gdpr_row_sel))}"
+                    )
+                rows_p2 = page.eval_on_selector_all(gdpr_row_sel, "els => els.length")
+                texts_p2 = page.eval_on_selector_all(gdpr_row_sel, "els => els.map(e => e.textContent.trim())")
+                if rows_p2 != GDPR_ROWS - GDPR_PAGE_SIZE:
+                    failures.append(f"gdpr: pagina 2 gaf {rows_p2} rijen, verwacht {GDPR_ROWS - GDPR_PAGE_SIZE}")
+                if texts_p1 and texts_p1 == texts_p2:
+                    failures.append("gdpr: pagina 2 toonde dezelfde rijen als pagina 1")
+        new_errors = console_errors[errors_before:]
+        if new_errors:
+            failures.append(f"gdpr: {len(new_errors)} console error(s): {new_errors[:3]}")
+
         browser.close()
 
     if failures:
@@ -410,7 +601,8 @@ def main():
         sys.exit(1)
 
     print(f"PASS: page 2 rendered {PAGE_SIZE} rows with no console errors on all "
-          f"{len(SECTIONS)} sections ({', '.join(s for s, _, _ in SECTIONS)}).")
+          f"{len(SECTIONS)} sections ({', '.join(s for s, _, _ in SECTIONS)}), "
+          f"plus retention at {RETENTION_PAGE_SIZE} rows per page and gdpr at {GDPR_PAGE_SIZE} rows per page.")
     sys.exit(0)
 
 

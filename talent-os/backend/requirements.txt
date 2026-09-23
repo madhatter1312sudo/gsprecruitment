@@ -56,3 +56,9 @@ sentry-sdk[fastapi]==2.68.1
 # Testing (CI only, not needed at runtime)
 # >=9.0.3 for PYSEC-2026-1845.
 pytest>=9.0.3,<10.0.0
+# PyYAML: tests/test_ws3bc_deploy_flags_docs.py leest
+# .github/workflows/deploy.yml met een echte YAML-parser om te
+# bewaken dat de migraties vóór de nieuwe backend draaien. Alleen
+# voor die test; geen enkele runtime-module importeert yaml. Zelfde
+# versie als requirements.lock al pinde.
+PyYAML>=6.0,<7.0

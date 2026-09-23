@@ -112,16 +112,24 @@ async def update_candidate(candidate_id: int, updates: CandidateAdminUpdate):
     is excluded here even though allowed_fields never includes it: the
     explicit RETURNING column list means the database never hands the
     column to the application in the first place, so the response model is
-    a second layer rather than the only one."""
+    a second layer rather than the only one.
+
+    WS-E.8 follow-up (migrations/032_retention_anchor_columns.py): setting
+    status='rejected' here also stamps rejected_at=NOW() -- this endpoint
+    and routers/webhook.py's candidate_updated action are the only two
+    write paths onto candidates.status, and core/retention.py's
+    rejected_applicant row purges on rejected_at, so a rejection that
+    never stamps it would silently never be purged."""
     # Build dynamic SET clause safely
     allowed_fields = {
         "status", "screening_score", "screening_notes", "quality_score",
         "screened_by_agent", "strength_score", "switch_readiness", "tags",
     }
+    updates_dict = updates.model_dump(exclude_unset=True)
     set_parts = []
     values = []
     idx = 1
-    for key, val in updates.model_dump(exclude_unset=True).items():
+    for key, val in updates_dict.items():
         if key not in allowed_fields:
             continue
         set_parts.append(f"{key} = ${idx}")
@@ -130,6 +138,8 @@ async def update_candidate(candidate_id: int, updates: CandidateAdminUpdate):
     if not set_parts:
         raise HTTPException(status_code=400, detail="No valid fields to update")
 
+    if updates_dict.get("status") == "rejected":
+        set_parts.append("rejected_at = NOW()")
     set_parts.append(f"updated_at = NOW()")
     values.append(candidate_id)
     sql = (

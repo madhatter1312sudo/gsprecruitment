@@ -27,6 +27,7 @@ import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 
+from core import retention
 from core.database import fetch_one, execute
 from core.deps import get_current_user
 from core.mfa import (
@@ -255,6 +256,13 @@ async def mfa_verify(request: Request, data: MfaVerifyRequest):
 
     clear_pending_failures(user_id, iat)
     await _audit("mfa_login_verified", user_id, user_id, {})
+    # WS-E.8 follow-up (migrations/032_retention_anchor_columns.py) --
+    # see routers/auth.py login()'s comment: this completes a login that
+    # required a second factor, so it stamps last_login_at too.
+    # FIX (security-audit FIX FIRST, retention-kolommen branch, blocking
+    # point 7): no more try/except swallowing this -- see login()'s
+    # updated comment for why.
+    await execute(retention.LOGIN_STAMP_SQL, user_id)
 
     return _build_token_response(row)
 
@@ -290,5 +298,8 @@ async def mfa_recovery(request: Request, data: MfaRecoveryRequest):
     clear_pending_failures(user_id, iat)
     remaining = [h for h in (row["mfa_recovery_codes_hash"] or []) if h != target_hash]
     await _audit("mfa_recovery_code_used", user_id, user_id, {"codes_remaining": len(remaining)})
+    # WS-E.8 follow-up -- see mfa_verify() above (blocking point 7: no more
+    # try/except here either).
+    await execute(retention.LOGIN_STAMP_SQL, user_id)
 
     return _build_token_response(row)

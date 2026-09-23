@@ -10,8 +10,13 @@ Two routers:
   - `router` (admin, Bearer JWT): full CRUD under
     /api/v1/admin/clients/{client_id}/contacts.
   - `client_router` (client portal, Bearer JWT, role='client'/'admin'):
-    read-only, scoped to the calling client's own contacts only --
-    GET /api/v1/client/contacts.
+    full CRUD scoped to the calling client's own contacts only --
+    GET/POST /api/v1/client/contacts, PATCH/DELETE
+    /api/v1/client/contacts/{contact_id}. The client_id is always
+    resolved from the caller's own user_clients row, never taken from
+    the request; a contact belonging to another client 404s (never a
+    403 that would confirm it exists), same pattern as
+    routers/client.py's pipeline-entry scoping.
 """
 import json
 import logging
@@ -174,7 +179,18 @@ async def _demote_other_primaries(client_id: int, exclude_contact_id: Optional[i
         )
 
 
-# ── Client portal: read own contacts only ─────────────────────────────────
+# ── Client portal: own contacts only ───────────────────────────────────────
+
+async def _get_own_client(user_id: int) -> Optional[dict]:
+    """Resolve the caller's own client via user_clients -- client_id is
+    never taken from the request, same as routers/client.py's
+    _get_client_by_user."""
+    return await fetch_one(
+        "SELECT c.id FROM clients c JOIN user_clients uc ON uc.client_id = c.id "
+        "WHERE uc.user_id = $1",
+        user_id,
+    )
+
 
 @client_router.get("/contacts")
 async def list_own_client_contacts(
@@ -182,11 +198,7 @@ async def list_own_client_contacts(
 ):
     """A client sees only its own contacts -- client_id is resolved from
     the caller's own user_clients row, never taken from the request."""
-    client = await fetch_one(
-        "SELECT c.id FROM clients c JOIN user_clients uc ON uc.client_id = c.id "
-        "WHERE uc.user_id = $1",
-        current_user["id"],
-    )
+    client = await _get_own_client(current_user["id"])
     if not client:
         return {"items": [], "total": 0}
 
@@ -197,3 +209,105 @@ async def list_own_client_contacts(
         client["id"],
     )
     return {"items": rows, "total": len(rows)}
+
+
+@client_router.post("/contacts", status_code=201)
+async def create_own_client_contact(
+    payload: ClientContactCreate,
+    current_user: dict = Depends(require_verified_role("client", "admin")),
+):
+    """Create a contact for the caller's own client. Same validation and
+    audit trail as the admin create route."""
+    client = await _get_own_client(current_user["id"])
+    if not client:
+        raise HTTPException(status_code=404, detail="Client profile not found")
+
+    if payload.is_primary:
+        await _demote_other_primaries(client["id"], exclude_contact_id=None)
+
+    row = await fetch_one(
+        """INSERT INTO client_contacts
+           (client_id, full_name, email, phone, role, is_primary, lawful_basis)
+           VALUES ($1, $2, $3, $4, $5, $6, $7)
+           RETURNING *""",
+        client["id"], payload.full_name, payload.email, payload.phone,
+        payload.role, payload.is_primary, payload.lawful_basis,
+    )
+
+    await _audit("client_contact_create", current_user["id"], row["id"], payload.model_dump())
+    return row
+
+
+@client_router.patch("/contacts/{contact_id}")
+async def update_own_client_contact(
+    contact_id: int,
+    updates: ClientContactUpdate,
+    current_user: dict = Depends(require_verified_role("client", "admin")),
+):
+    """Edit a contact belonging to the caller's own client. A contact of
+    another client (or no client profile at all) 404s -- never a 403
+    that would confirm the contact exists."""
+    client = await _get_own_client(current_user["id"])
+    if not client:
+        raise HTTPException(status_code=404, detail="Contact not found")
+
+    existing = await fetch_one(
+        "SELECT id FROM client_contacts WHERE id = $1 AND client_id = $2 AND deleted_at IS NULL",
+        contact_id, client["id"],
+    )
+    if not existing:
+        raise HTTPException(status_code=404, detail="Contact not found")
+
+    update_dict = updates.model_dump(exclude_unset=True)
+    if not update_dict:
+        raise HTTPException(status_code=400, detail="No fields to update")
+
+    if update_dict.get("is_primary") is True:
+        await _demote_other_primaries(client["id"], exclude_contact_id=contact_id)
+
+    set_parts = []
+    values = []
+    idx = 1
+    for key, val in update_dict.items():
+        set_parts.append(f"{key} = ${idx}")
+        values.append(val)
+        idx += 1
+    set_parts.append("updated_at = NOW()")
+
+    values.extend([contact_id, client["id"]])
+    row = await fetch_one(
+        f"""UPDATE client_contacts SET {', '.join(set_parts)}
+            WHERE id = ${idx} AND client_id = ${idx + 1} AND deleted_at IS NULL
+            RETURNING *""",
+        *values,
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail="Contact not found")
+
+    await _audit("client_contact_update", current_user["id"], contact_id, update_dict)
+    return row
+
+
+@client_router.delete("/contacts/{contact_id}", status_code=204)
+async def delete_own_client_contact(
+    contact_id: int,
+    current_user: dict = Depends(require_verified_role("client", "admin")),
+):
+    """Soft delete -- sets deleted_at, never a real DELETE (same GDPR
+    provenance/audit-trail reasons as the admin route). Scoped to the
+    caller's own client; another client's contact 404s."""
+    client = await _get_own_client(current_user["id"])
+    if not client:
+        raise HTTPException(status_code=404, detail="Contact not found")
+
+    row = await fetch_one(
+        """UPDATE client_contacts SET deleted_at = NOW(), updated_at = NOW()
+           WHERE id = $1 AND client_id = $2 AND deleted_at IS NULL
+           RETURNING id""",
+        contact_id, client["id"],
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail="Contact not found")
+
+    await _audit("client_contact_delete", current_user["id"], contact_id, {})
+    return None

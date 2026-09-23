@@ -5,6 +5,7 @@ NO local models on VPS. All embedding calls go through OpenRouter.
 import httpx
 from typing import List, Dict, Any, Optional
 from core.config import settings
+from core.matching import MATCH_SUGGESTION_MIN_SCORE
 
 
 class EmbeddingMatcher:
@@ -55,13 +56,22 @@ class EmbeddingMatcher:
         self,
         job_text: str,
         candidates: List[Dict[str, Any]],
-        min_score: float = 0.3,
+        min_score: Optional[float] = None,
         top_k: int = 50,
     ) -> List[Dict[str, Any]]:
         """
         Match a job description against a list of candidates using cosine similarity
         on OpenRouter embeddings.
+
+        `min_score=None` means core/matching.py's
+        MATCH_SUGGESTION_MIN_SCORE -- the one definition of "good enough
+        to call a suggestion". A second literal `0.3` here would be a
+        silent second opinion that can drift away from that constant
+        without anything noticing.
         """
+        if min_score is None:
+            min_score = MATCH_SUGGESTION_MIN_SCORE
+
         if not candidates:
             return []
 

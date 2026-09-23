@@ -6,13 +6,17 @@ pipeline, analytics, messages, team management.
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from core.database import fetch_one, fetch_all, execute, fetch_val
 from core.deps import require_verified_role
+from core.pipeline import PIPELINE_ROW_SQL, project_pipeline_rows
+from core import privacy
 from core.security import hash_password, hash_token
+from core.sources import source_family
 from models.schemas import (
     ClientDashboard, ClientJobCreate, ClientJobUpdate, JobOrderResponse,
     CandidateSearchParams, PipelineAdd, ClientAnalytics, TeamInvite,
     MessageListResponse, MessageResponse, PipelineStageUpdate,
 )
 from services.email_service import email_service
+from services.notify import notify_owner
 from typing import Optional, List
 from pydantic import BaseModel
 import asyncio
@@ -48,7 +52,8 @@ async def _get_client_id(user_id: int) -> int:
             raise HTTPException(status_code=404, detail="User not found")
         client = await fetch_one(
             "INSERT INTO clients (company_name, domain) VALUES ($1, $2) RETURNING id",
-            user["full_name"], user["email"].split("@")[1] if "@" in user["email"] else "",
+            user["full_name"],
+            privacy.normalize_domain(user["email"].split("@")[1] if "@" in user["email"] else None),
         )
         await execute(
             "INSERT INTO user_clients (user_id, client_id) VALUES ($1, $2) ON CONFLICT DO NOTHING",
@@ -274,6 +279,12 @@ async def create_client_job(
         "client_job_create", current_user["id"], "job", job["id"],
         json.dumps({"client_id": client["id"], "title": data.title}),
     )
+
+    # WS3: best-effort owner notification -- see services/notify.py.
+    # Telegram gets only the event and a timestamp; the optional owner
+    # e-mail may also carry the vacancy title.
+    await notify_owner("client_job_created", {"job_title": data.title, "anchor": "leads"})
+
     return job
 
 
@@ -562,9 +573,15 @@ async def add_to_pipeline(
     if existing:
         raise HTTPException(status_code=409, detail="Candidate already in pipeline")
 
+    # WS-E.8 follow-up (security-audit FIX FIRST, retention-kolommen branch,
+    # blocking point 1): the stage-update endpoints below already stamp
+    # updated_at, but this creation INSERT never did -- a candidate
+    # re-piped for another role right after a rejection, before any stage
+    # change, still had a NULL updated_at and so wasn't visible to
+    # core/retention.py's rejected_applicant guard.
     entry = await fetch_one(
-        """INSERT INTO pipeline_entries (client_id, candidate_id, job_id, stage, notes)
-           VALUES ($1, $2, $3, $4, $5)
+        """INSERT INTO pipeline_entries (client_id, candidate_id, job_id, stage, notes, updated_at)
+           VALUES ($1, $2, $3, $4, $5, NOW())
            RETURNING *""",
         client["id"], data.candidate_id, data.job_id, data.stage, data.notes,
     )
@@ -615,41 +632,22 @@ async def get_pipeline(
 
     total = await fetch_val(f"SELECT COUNT(*) FROM pipeline_entries pe WHERE {where}", *params) or 0
     params_ext = params + [limit, offset]
+    # One shared SELECT list and one shared consent gate with the admin
+    # twin of this route (core/pipeline.py) -- only the WHERE differs.
     rows = await fetch_all(
-        f"""SELECT pe.*, c.full_name, c.current_title, c.current_company,
-                   c.location, c.skills, j.title AS job_title,
-                   c.consent_spec_presentation_at, c.consent_withdrawn_at
-            FROM pipeline_entries pe
-            JOIN candidates c ON c.id = pe.candidate_id
-            JOIN job_orders j ON j.id = pe.job_id
+        f"""{PIPELINE_ROW_SQL}
             WHERE {where}
             ORDER BY pe.created_at DESC
             LIMIT ${idx} OFFSET ${idx + 1}""",
         *params_ext,
     )
 
-    # FIX 1 (chief-of-staff, ai-pseudonimisering branch, ronde 5): same
-    # presentation-consent gate as _project_candidate_public -- a pipeline
-    # entry existing at all does not mean the candidate ever consented to
-    # be named to this client. Keep every pe.*/job_title field (this is
-    # the client's own pipeline, not a fresh anonymised listing); only
-    # full_name is conditional, and the two internal consent columns never
-    # leave this function.
-    items = []
-    for r in rows:
-        item = dict(r)
-        eligible = (
-            item.get("consent_spec_presentation_at")
-            and not item.get("consent_withdrawn_at")
-        )
-        item.pop("consent_spec_presentation_at", None)
-        item.pop("consent_withdrawn_at", None)
-        if not eligible:
-            item.pop("full_name", None)
-        item["skills"] = item.get("skills") or []
-        items.append(item)
-
-    return {"items": items, "total": total, "limit": limit, "offset": offset}
+    return {
+        # gate_name=True: the client may only see a name the candidate
+        # consented to being presented under (core/pipeline.py).
+        "items": project_pipeline_rows(rows, gate_name=True),
+        "total": total, "limit": limit, "offset": offset,
+    }
 
 
 @router.patch("/pipeline/{entry_id}/stage")
@@ -747,7 +745,10 @@ async def get_client_analytics(current_user: dict = Depends(require_verified_rol
     for s in stages:
         analytics.pipeline_funnel[s["stage"]] = s["count"]
 
-    # Source breakdown
+    # Source breakdown -- grouped by SOURCE_FAMILY (core/sources.py) so
+    # e.g. 'apollo' and 'apollo_bulk' (two write paths for the same
+    # vendor, see migrations/022_apollo_pool_flag.py) report as one
+    # 'apollo' bucket instead of two, each dwarfed by the other.
     analytics.source_breakdown = {}
     sources = await fetch_all(
         """SELECT c.source, COUNT(*) as count FROM matches m
@@ -757,7 +758,8 @@ async def get_client_analytics(current_user: dict = Depends(require_verified_rol
         cid,
     )
     for s in sources:
-        analytics.source_breakdown[s["source"]] = s["count"]
+        family = source_family(s["source"])
+        analytics.source_breakdown[family] = analytics.source_breakdown.get(family, 0) + s["count"]
 
     # Offer rate
     total_applied = await fetch_val(
@@ -768,7 +770,7 @@ async def get_client_analytics(current_user: dict = Depends(require_verified_rol
         "SELECT COUNT(*) FROM matches m JOIN job_orders j ON j.id = m.job_id WHERE j.client_id = $1 AND m.status = 'offered'",
         cid,
     ) or 0
-    analytics.offer_rate = round(total_offered / total_applied * 100, 1) if total_applied > 0 else 0
+    analytics.offer_rate = round(total_offered / total_applied * 100, 1) if total_applied > 0 else None
 
     # Cost-per-hire (placeholder - uses fee_value from job_orders)
     avg_cost = await fetch_val(
@@ -901,37 +903,13 @@ async def invite_team_member(
 
     set_password_link = f"https://gsprecruitment.nl/verify?token={set_password_token}&mode=set-password"
     inviter_company = client.get("company_name") or "GSP Recruitment"
-    email_sent = await email_service.send_email(
-        to_email=user["email"],
-        subject="Uitnodiging teamlid — GSP Recruitment",
-        body_text=f"""Beste {user['full_name']},
-
-Je bent uitgenodigd om je aan te sluiten bij het team van {inviter_company} op GSP Recruitment. Stel je wachtwoord in via onderstaande link om je account te activeren:
-{set_password_link}
-
-Deze link is 24 uur geldig.
-
-Als je deze uitnodiging niet verwachtte, kun je dit bericht negeren.
-
-Met vriendelijke groet,
-GSP Recruitment
-info@gsprecruitment.nl
-
----
-
-Dear {user['full_name']},
-
-You have been invited to join {inviter_company}'s team on GSP Recruitment. Set your password via the link below to activate your account:
-{set_password_link}
-
-This link is valid for 24 hours.
-
-If you did not expect this invitation, you can ignore this message.
-
-Kind regards,
-GSP Recruitment
-info@gsprecruitment.nl
-""",
+    # WS3: content moved into services/email_templates.py's
+    # "client_team_invite" template (same link, same promise as before
+    # this spoor) -- name matches the "client_team_invite" audit_log
+    # action just below.
+    email_sent = await email_service.send_template(
+        "client_team_invite", user["email"],
+        {"full_name": user["full_name"], "inviter_company": inviter_company, "link": set_password_link},
     )
     if not email_sent:
         logger.warning("Failed to send team-invite set-password e-mail to user_id=%s", user["id"])
@@ -979,10 +957,13 @@ async def update_client_profile(
     allowed = {"company_name", "industry", "location", "size_range"}
     update_dict = updates.model_dump(exclude_none=True)
 
-    # Map 'website' to 'domain' column
+    # Map 'website' to 'domain' column -- normalized (security-audit FIX
+    # FIRST, WS-E.8 retention-kolommen branch, blocking point 4): this
+    # free-text field can carry a scheme/www./path, unlike the
+    # e-mail-derived domain _get_client_id() above writes.
     if "website" in update_dict:
         set_parts.append(f"domain = ${idx}")
-        values.append(update_dict.pop("website"))
+        values.append(privacy.normalize_domain(update_dict.pop("website")))
         idx += 1
 
     for key, val in update_dict.items():

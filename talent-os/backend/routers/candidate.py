@@ -11,7 +11,7 @@ from models.schemas import (
     CandidatePortalProfile, CandidateProfileUpdate, CandidateMatchItem,
     ApplicationCreate, SavedJobCreate, CandidateDashboard,
     SalaryBenchmarkResponse, MessageListResponse, MessageResponse,
-    TalentpoolConsentUpdate,
+    TalentpoolConsentUpdate, CandidateJobAlertsUpdate,
 )
 from typing import Optional, List
 import asyncio
@@ -23,6 +23,12 @@ from datetime import datetime, timedelta, timezone
 
 from services import storage
 from services.candidate_link import get_or_create_candidate_id
+# De rest van de alert-selectie van services/scheduler.py's job_alert_job,
+# gedeeld en niet nagebouwd -- zie de portaalschakelaar verderop. De
+# constante staat in core/retention.py en niet in services/scheduler.py,
+# zodat deze router er niet de hele scheduler (APScheduler incluis) voor
+# hoeft te importeren.
+from core.retention import JOB_ALERT_ELIGIBILITY_SQL
 
 logger = logging.getLogger("talent_os.candidate_portal")
 
@@ -61,11 +67,26 @@ async def _attach_talentpool_consent(profile: dict, user_id: int) -> dict:
     profile["consent_talentpool_until"] = None
     profile["consent_scope"] = None
     profile["consent_source"] = None
+    # WS5 BV4: two more columns from the same row, same None default --
+    # see CandidatePortalProfile for why the job-alert switch needs them.
+    profile["consent_withdrawn_at"] = None
+    profile["lawful_basis"] = None
+    # WS5 issue #136 (SITE-DESIGN-SPEC.md §7.3.7): the job-alert switch on
+    # a fresh page load must show the actual saved state, not a guess --
+    # PUT /v1/candidate/job-alerts is a write, so it cannot double as the
+    # read. job_alert_eligible mirrors the PUT response's `eligible`
+    # field, computed from the exact same JOB_ALERT_ELIGIBILITY_SQL, so
+    # a GET and a PUT into the same state always agree.
+    profile["job_alert_optin_at"] = None
+    profile["job_alert_unsubscribed_at"] = None
+    profile["job_alert_eligible"] = False
     candidate_id = await _get_candidate_id(user_id)
     if candidate_id:
         consent = await fetch_one(
-            "SELECT consent_talentpool_at, consent_talentpool_until, consent_scope, consent_source "
-            "FROM candidates WHERE id = $1",
+            f"""SELECT consent_talentpool_at, consent_talentpool_until, consent_scope, consent_source,
+                       consent_withdrawn_at, lawful_basis, job_alert_optin_at, job_alert_unsubscribed_at,
+                       ({JOB_ALERT_ELIGIBILITY_SQL}) AS job_alert_eligible
+                  FROM candidates AS c WHERE c.id = $1""",
             candidate_id,
         )
         if consent:
@@ -252,6 +273,81 @@ async def update_talentpool_consent(
     )
 
     return row
+
+
+# ── Job-alerts (WS3c) ───────────────────────────────────────────────────
+#
+# Eén van de twee opt-in-routes voor vacature-alerts; de andere is het
+# `job_alerts`-vinkje op talentpool_optin_requests (migrations/037), dat
+# routers/public.py's talentpool_confirm() bij bevestiging overneemt.
+# Beide schrijven dezelfde kolom, candidates.job_alert_optin_at, die
+# services/scheduler.py's job_alert_job als enige selecteert.
+#
+# `enabled=false` hier is een gewone voorkeurswijziging in het portaal en
+# zet, net als de een-klik-afmeldlink in de mail zelf,
+# job_alert_unsubscribed_at -- zodat er precies één kolom bestaat die
+# "deze persoon wil geen alerts" betekent, ongeacht langs welke weg hij
+# dat zei. `enabled=true` is het omgekeerde: het wist die kolom weer. Dat
+# is de enige plek in de codebase die dat doet, en dat kan alleen de
+# persoon zelf, ingelogd -- een afmelding wordt nooit door een job, een
+# beheerder of een tweede talentpool-bevestiging ongedaan gemaakt.
+#
+# Raakt bewust geen enkele consent-kolom: alerts zijn een bezorgvoorkeur
+# binnen een bestaande relatie, niet de grondslag zelf. Iemand die zijn
+# talentpool-toestemming intrekt (consent_withdrawn_at) valt sowieso al
+# uit de selectie van job_alert_job, ook als deze schakelaar aan staat.
+
+@router.put("/job-alerts")
+async def update_job_alerts(
+    data: CandidateJobAlertsUpdate,
+    current_user: dict = Depends(get_verified_user),
+):
+    """Zet vacature-alerts aan of uit voor de ingelogde kandidaat."""
+    if current_user["role"] != "candidate":
+        raise HTTPException(status_code=403, detail="Only candidates can set job alerts")
+
+    candidate_id = await _get_candidate_id(current_user["id"])
+    if not candidate_id:
+        raise HTTPException(status_code=404, detail="No candidate record found for this account")
+
+    # CR R6: `eligible` is de rest van de selectie van
+    # services/scheduler.py's job_alert_job, letterlijk uit dezelfde
+    # constante (JOB_ALERT_ELIGIBILITY_SQL), zodat het portaal kan tonen
+    # wat er werkelijk gebeurt. Zonder dit kon deze endpoint `enabled:
+    # true` teruggeven aan iemand die die job nooit oppikt -- een
+    # gesourcete kandidaat zonder `consent_scope`, of iemand wiens
+    # talentpool-toestemming is verlopen -- en dan staat de schakelaar aan
+    # terwijl er nooit iets komt. Bewust een tweede veld en geen
+    # aanpassing van `enabled`: `enabled` is wat deze persoon heeft
+    # gevraagd (en dat blijft waar), `eligible` is of wij het vandaag ook
+    # kunnen doen. Alias `c` omdat de gedeelde constante die gebruikt.
+    optin_sql = (
+        "job_alert_optin_at = COALESCE(job_alert_optin_at, NOW()), job_alert_unsubscribed_at = NULL"
+        if data.enabled
+        else "job_alert_unsubscribed_at = COALESCE(job_alert_unsubscribed_at, NOW())"
+    )
+    row = await fetch_one(
+        f"""UPDATE candidates AS c
+               SET {optin_sql},
+                   updated_at = NOW()
+             WHERE c.id = $1
+         RETURNING c.id, c.job_alert_optin_at, c.job_alert_unsubscribed_at,
+                   ({JOB_ALERT_ELIGIBILITY_SQL}) AS eligible""",
+        candidate_id,
+    )
+
+    await execute(
+        "INSERT INTO audit_log (action, actor_id, target_type, target_id, changes) VALUES ($1, $2, $3, $4, $5::jsonb)",
+        "job_alerts_update", current_user["id"], "candidate", candidate_id,
+        json.dumps({"enabled": data.enabled, "source": "portal"}),
+    )
+
+    return {
+        "enabled": row["job_alert_optin_at"] is not None and row["job_alert_unsubscribed_at"] is None,
+        "eligible": bool(row["eligible"]),
+        "job_alert_optin_at": row["job_alert_optin_at"],
+        "job_alert_unsubscribed_at": row["job_alert_unsubscribed_at"],
+    }
 
 
 # ── CV Upload ───────────────────────────────────────────────────────────
@@ -467,9 +563,15 @@ async def apply_to_job(
     if existing:
         raise HTTPException(status_code=409, detail="You have already applied to this job")
 
+    # WS-E.8 follow-up (security-audit FIX FIRST, retention-kolommen branch,
+    # blocking point 1): a candidate applying to another role after being
+    # rejected elsewhere is exactly the "picked back up" scenario
+    # core/retention.py's rejected_applicant guard is meant to catch --
+    # updated_at must be stamped here too, not just on the matcher/agent
+    # write paths in routers/matches.py.
     match = await fetch_one(
-        """INSERT INTO matches (candidate_id, job_id, status)
-           VALUES ($1, $2, 'applied')
+        """INSERT INTO matches (candidate_id, job_id, status, updated_at)
+           VALUES ($1, $2, 'applied', NOW())
            RETURNING *""",
         candidate_id, data.job_id,
     )
@@ -498,7 +600,8 @@ async def get_saved_jobs(
     )
     rows = await fetch_all(
         """SELECT sj.*, j.title AS job_title, j.description, j.salary_min, j.salary_max,
-                  j.salary_currency, j.location_type, c.company_name
+                  j.salary_currency, j.location_type, j.city, c.company_name,
+                  COALESCE(c.is_internal, false) AS anonymous_client
            FROM saved_jobs sj
            JOIN job_orders j ON j.id = sj.job_id
            JOIN clients c ON c.id = j.client_id

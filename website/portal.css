@@ -51,6 +51,22 @@ body {
   border-color: rgba(74, 111, 159, 0.4);
 }
 
+/* ---- .btn-outline: same problem as .btn-ghost above -- styles.css:738
+   sets `color: var(--navy)` (dark navy text) on a light `--border`,
+   meant for the light public site. On the dark portal shell that reads
+   as unreadable navy-on-navy. Affects talentpoolConsentSaveBtn
+   (candidate/index.html), jobAlertsRetryBtn and the saved-jobs
+   "Verwijderen"/"Remove" button. ---- */
+.btn-outline {
+  color: var(--white, #FFFFFF);
+  border-color: var(--navy-400, #2A4A75);
+}
+.btn-outline:hover {
+  color: var(--white, #FFFFFF);
+  background: rgba(74, 111, 159, 0.12);
+  border-color: rgba(74, 111, 159, 0.5);
+}
+
 /* ---- Badges ---- */
 .badge {
   display: inline-flex;
@@ -302,5 +318,13 @@ body {
 }
 .toggle-switch input[type="checkbox"]:checked { background: var(--gold-500, #FAC800); }
 .toggle-switch input[type="checkbox"]:checked::before { transform: translateX(20px); }
+
+/* ---- Shared text utilities (SITE-DESIGN-SPEC.md §7.3.8): mono data
+   values and muted secondary text, named there for the kanban, analytics
+   and team-table work -- same semantics as the admin panel's .a-num/
+   .fs-xs/.a-soft (admin.css), reusing existing tokens only. ---- */
+.gsp-num { font-family: var(--font-mono, 'IBM Plex Mono', monospace); }
+.fs-xs { font-size: var(--font-size-xs, 0.75rem); }
+.a-soft { color: var(--navy-200, #7FA0C9); }
 
 .activity-content { flex: 1; }

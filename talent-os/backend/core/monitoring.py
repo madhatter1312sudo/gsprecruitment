@@ -73,6 +73,7 @@ def init_sentry(dsn: str, environment: str) -> None:
         environment=environment,
         integrations=[StarletteIntegration(), FastApiIntegration()],
         send_default_pii=False,
+        include_local_variables=False,
         before_send=_scrub_pii,
         traces_sample_rate=0.1,
     )

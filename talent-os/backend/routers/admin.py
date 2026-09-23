@@ -4,22 +4,33 @@ Endpoints for platform administration: dashboard, users, jobs, candidates,
 analytics, audit log, content management, system settings.
 """
 import json
+import logging
+import secrets
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from core.config import settings
 from core.database import fetch_one, fetch_all, execute, fetch_val
 from core.deps import get_current_user, require_role
-from core.security import create_access_token
+from core.listing import resolve_order_by, sort_key_for
+from core.pipeline import PIPELINE_ROW_SQL, project_pipeline_rows
+from core.security import create_access_token, hash_token
 from core import privacy
+from core.sources import PORTAL_REGISTRATION
 from models.schemas import (
     AdminDashboard, AdminUserUpdate, AdminJobUpdate, AdminJobCreate, AdminAnalytics,
     AuditLogEntry, ContentItem, ContentUpdate, SystemSettings, SystemSettingsUpdate,
     HealthResponse, PipelineStageUpdate, LeadReadUpdate, LEAD_INTEREST_TYPES,
-    AdminTalentpoolConsentUpdate,
+    AdminTalentpoolConsentUpdate, AdminSpecPresentationConsentUpdate,
+    AdminReferralCreate, RoutineHealth, RoutineHealthResponse, SchedulerHealthResponse,
 )
 from routers.health import get_health_detail
 from routers.client import _record_stage_change
+from services import scheduler as scheduler_service
+from services.email_service import email_service
 from typing import Optional, List
 from datetime import timedelta, timezone, datetime
 import asyncio
+
+logger = logging.getLogger("talent_os.admin")
 
 router = APIRouter(prefix="/api/v1/admin", tags=["admin-portal"])
 
@@ -34,6 +45,72 @@ async def get_admin_health(current_user: dict = Depends(require_role("admin"))):
     """Detailed health: database, OpenRouter/Apollo config status, and live
     row counts (candidates_count, open_jobs). Read-only, so not audit-logged."""
     return await get_health_detail()
+
+
+# ── Health (routines + scheduler) — issue #127 ───────────────────────────
+# Platform-side heartbeat so the platform lead reads routine health from
+# one admin route instead of scraping logs. Both routes are read-only
+# (not audit-logged, same as GET /health above) and return no personal
+# data: routine names, timestamps and Python exception class names only
+# -- never an exception message, which could carry an interpolated
+# candidate/client detail (see migrations/044_routine_runs.py).
+
+@router.get("/health/routines", response_model=RoutineHealthResponse)
+async def get_routine_health(current_user: dict = Depends(require_role("admin"))):
+    """Per-routine last success timestamp and last error class, from
+    routine_runs (services/scheduler.py's _tracked() wrapper writes one
+    row per scheduler tick). Lists every routine in
+    services/scheduler.ROUTINE_NAMES, including one that has never run --
+    it just reports None fields rather than being omitted."""
+    success_rows = await fetch_all(
+        """SELECT DISTINCT ON (routine_name) routine_name, ran_at
+           FROM routine_runs WHERE status = 'success'
+           ORDER BY routine_name, ran_at DESC"""
+    )
+    error_rows = await fetch_all(
+        """SELECT DISTINCT ON (routine_name) routine_name, ran_at, error_class
+           FROM routine_runs WHERE status = 'error'
+           ORDER BY routine_name, ran_at DESC"""
+    )
+    last_success = {r["routine_name"]: r["ran_at"] for r in success_rows}
+    last_error = {r["routine_name"]: (r["ran_at"], r["error_class"]) for r in error_rows}
+
+    routines = []
+    for name in scheduler_service.ROUTINE_NAMES:
+        error_at, error_class = last_error.get(name, (None, None))
+        routines.append(RoutineHealth(
+            name=name,
+            last_success_at=last_success.get(name),
+            last_error_at=error_at,
+            last_error_class=error_class,
+        ))
+    return RoutineHealthResponse(routines=routines)
+
+
+@router.get("/health/scheduler", response_model=SchedulerHealthResponse)
+async def get_scheduler_health(current_user: dict = Depends(require_role("admin"))):
+    """Whether the in-process APScheduler is running somewhere in this
+    app's worker pool, plus its registered routine names. `running` reads
+    the cross-worker Postgres advisory lock
+    (services/scheduler.SCHEDULER_LOCK_KEY) rather than this worker's own
+    `scheduler.running` flag -- uvicorn runs 4 workers and only the one
+    that won the lock ever calls scheduler.start() (services/scheduler.py
+    start_scheduler), so this request may well be answered by a worker
+    that never touched the scheduler at all. A single bigint advisory
+    lock key below 2^31 is stored in pg_locks with classid=0 and objid
+    equal to the key (Postgres splits the 64-bit key into the two
+    32-bit columns for the single-argument pg_try_advisory_lock form)."""
+    lock_held = await fetch_val(
+        "SELECT EXISTS (SELECT 1 FROM pg_locks WHERE locktype = 'advisory' "
+        "AND classid = 0 AND objid = $1 AND objsubid = 1)",
+        scheduler_service.SCHEDULER_LOCK_KEY,
+    )
+    return SchedulerHealthResponse(
+        running=bool(lock_held),
+        timezone=scheduler_service.TIMEZONE,
+        registered_routines=list(scheduler_service.ROUTINE_NAMES),
+        apollo_jobs_enabled=settings.apollo_sync_enabled,
+    )
 
 
 # ── Dashboard ───────────────────────────────────────────────────────────
@@ -63,6 +140,31 @@ async def get_admin_dashboard(current_user: dict = Depends(require_role("admin")
 
 # ── User Management ─────────────────────────────────────────────────────
 
+# WS5 BV10: sortable columns per list route. The key is what a client may
+# pass as `sort`; the value is the literal SQL fragment interpolated into
+# ORDER BY. Request input is only ever a key lookup here (core/listing.py).
+_USER_SORT_COLUMNS = {
+    "id": "id",
+    "email": "email",
+    "full_name": "full_name",
+    "role": "role",
+    "is_verified": "is_verified",
+    "created_at": "created_at",
+    "updated_at": "updated_at",
+    "locked_until": "locked_until",
+    "failed_login_count": "failed_login_count",
+}
+
+# WS5 BV2: failed_login_count and locked_until are what the user list's
+# "Vergrendeld" badge and the "Deblokkeren" row action read (§7.3.6a).
+# Both are plain lockout counters from migrations/020_login_lockout.py --
+# no personal data beyond what this admin-only route already returns.
+_USER_COLUMNS = (
+    "id, email, full_name, role, is_verified, created_at, updated_at, "
+    "failed_login_count, locked_until"
+)
+
+
 @router.get("/users")
 async def list_users(
     role: Optional[str] = Query(None),
@@ -70,9 +172,14 @@ async def list_users(
     search: Optional[str] = Query(None),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
+    sort: Optional[str] = Query(None, description="Sortable column (WS5 BV10); default created_at."),
+    order: Optional[str] = Query(None, description="'asc' or 'desc'; default 'desc'."),
     current_user: dict = Depends(require_role("admin")),
 ):
     """List all users with filters (role, status, search)."""
+    order_by = resolve_order_by(
+        sort, order, allowed=_USER_SORT_COLUMNS, default="created_at DESC", tiebreaker="id DESC",
+    )
     conditions = ["deleted_at IS NULL"]
     params = []
     idx = 1
@@ -95,7 +202,7 @@ async def list_users(
     total = await fetch_val(f"SELECT COUNT(*) FROM users WHERE {where}", *params) or 0
     params_ext = params + [limit, offset]
     rows = await fetch_all(
-        f"SELECT id, email, full_name, role, is_verified, created_at, updated_at FROM users WHERE {where} ORDER BY created_at DESC LIMIT ${idx} OFFSET ${idx + 1}",
+        f"SELECT {_USER_COLUMNS} FROM users WHERE {where} ORDER BY {order_by} LIMIT ${idx} OFFSET ${idx + 1}",
         *params_ext,
     )
 
@@ -109,7 +216,7 @@ async def get_user_detail(
 ):
     """Get detailed user info including profile data."""
     user = await fetch_one(
-        "SELECT id, email, full_name, role, is_verified, created_at, updated_at FROM users WHERE id = $1 AND deleted_at IS NULL",
+        f"SELECT {_USER_COLUMNS} FROM users WHERE id = $1 AND deleted_at IS NULL",
         user_id,
     )
     if not user:
@@ -300,6 +407,19 @@ def _escape_like(term: str) -> str:
     return term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 
+# WS5 BV10 (see _USER_SORT_COLUMNS): only these keys reach ORDER BY.
+_JOB_SORT_COLUMNS = {
+    "id": "j.id",
+    "title": "j.title",
+    "status": "j.status",
+    "created_at": "j.created_at",
+    "updated_at": "j.updated_at",
+    "salary_min": "j.salary_min",
+    "salary_max": "j.salary_max",
+    "company_name": "c.company_name",
+}
+
+
 @router.get("/jobs")
 async def list_all_jobs(
     status: Optional[str] = Query(None),
@@ -309,10 +429,15 @@ async def list_all_jobs(
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
     page: Optional[int] = Query(None, ge=1, description="1-based page number; overrides offset when given (offset = (page-1)*limit)."),
+    sort: Optional[str] = Query(None, description="Sortable column (WS5 BV10); default created_at."),
+    order: Optional[str] = Query(None, description="'asc' or 'desc'; default 'desc'."),
     current_user: dict = Depends(require_role("admin")),
 ):
     """List all jobs cross-client. Excludes is_demo jobs (migrations/012's
     6 seed vacancies) unless include_demo=true is explicitly passed."""
+    order_by = resolve_order_by(
+        sort, order, allowed=_JOB_SORT_COLUMNS, default="j.created_at DESC", tiebreaker="j.id DESC",
+    )
     if page is not None:
         offset = (page - 1) * limit
 
@@ -346,7 +471,7 @@ async def list_all_jobs(
             FROM job_orders j
             JOIN clients c ON c.id = j.client_id
             WHERE {where}
-            ORDER BY j.created_at DESC
+            ORDER BY {order_by}
             LIMIT ${idx} OFFSET ${idx + 1}""",
         *params_ext,
     )
@@ -507,6 +632,60 @@ def _unlinked_self_registered_applicable(status: Optional[str], source: Optional
     return True
 
 
+# WS5 BV10. This route merges two SQL branches in Python, so a sortable
+# column has to exist under the same alias in BOTH branch SELECTs below
+# (branch A reads `candidates`, branch B reads `candidate_profiles` +
+# `users`) -- otherwise the merge sort would compare a present value in
+# one branch against a missing key in the other. Every key here is
+# checked against both SELECT lists; `kind`, `match_count` and
+# `placement_count` are deliberately absent because branch B hardcodes
+# them and sorting on a constant would silently reorder nothing.
+_CANDIDATE_SORT_COLUMNS = {
+    "full_name": "full_name",
+    "email": "email",
+    "current_title": "current_title",
+    "current_company": "current_company",
+    "location": "location",
+    "years_experience": "years_experience",
+    "created_at": "created_at",
+    "updated_at": "updated_at",
+}
+
+
+# The tiebreaker for the two-branch merge below. It has to be a column
+# BOTH branch SELECTs produce, which rules out candidate_id (branch B
+# hardcodes it to NULL) and user_id (branch A leaves it NULL for a
+# candidate with no portal account), and leaves created_at.
+_CANDIDATE_TIEBREAKER = "created_at"
+
+
+def _merge_sort_key(row: dict, keys: tuple):
+    """Sort key for the Python-side merge of branch A and branch B, with
+    NULLs pushed to the end in both directions (asyncpg gives None for a
+    NULL column and None is not orderable against a str/date in Python).
+    Each key becomes (is_null, value) so a NULL always compares last on
+    asc; the caller flips both halves for desc by reversing the list.
+
+    `keys` mirrors the branch queries' own ORDER BY, tiebreaker included
+    (security-audit LOW #4): without one, a sort column with duplicates
+    let each branch cut its own top offset+limit on a tie order Postgres
+    picked arbitrarily, and a row could fall out of the page between the
+    two cuts. Sorting on the same pair in both places closes that.
+
+    What it does not close: Postgres orders text by the database
+    collation and Python by codepoint, so on an ICU collation the two can
+    still disagree about which rows belong in the fetch window at all.
+    Fixing that properly means ordering the whole thing in SQL (one UNION
+    ALL instead of two queries merged here), which is a rewrite of this
+    route rather than a guard on it -- noted for the PR, not done here.
+    """
+    parts = []
+    for key in keys:
+        value = row.get(key)
+        parts.append((value is None, value if value is not None else ""))
+    return tuple(parts)
+
+
 @router.get("/candidates")
 async def list_all_candidates(
     status: Optional[str] = Query(None),
@@ -515,6 +694,8 @@ async def list_all_candidates(
     search: Optional[str] = Query(None),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
+    sort: Optional[str] = Query(None, description="Sortable column (WS5 BV10); default created_at."),
+    order: Optional[str] = Query(None, description="'asc' or 'desc'; default 'desc'."),
     current_user: dict = Depends(require_role("admin")),
 ):
     """List all candidates across the platform -- sourced (candidates table)
@@ -525,11 +706,48 @@ async def list_all_candidates(
     `id` = candidate_id if present else user_id, for addressing the detail
     endpoint at GET /candidates/{kind}/{id}.
     """
+    # WS5 BV10: validate once, then apply the same column and direction to
+    # both branch queries and to the Python merge below, so a sorted page
+    # is the same page whichever branch a row came from.
+    # The allowlist values are bare output-column aliases, which both
+    # branch SELECTs below produce (c.full_name AS full_name, u.full_name
+    # AS full_name, ...), so one fragment orders both branches.
+    branch_order_by = resolve_order_by(
+        sort, order, allowed=_CANDIDATE_SORT_COLUMNS, default="created_at DESC",
+    )
+    sort_key = sort_key_for(sort, allowed=_CANDIDATE_SORT_COLUMNS, default_key="created_at")
+    descending = branch_order_by.endswith("DESC")
+    merge_keys = (sort_key,)
+    if sort_key != _CANDIDATE_TIEBREAKER:
+        branch_order_by = f"{branch_order_by}, {_CANDIDATE_TIEBREAKER} {'DESC' if descending else 'ASC'}"
+        merge_keys = (sort_key, _CANDIDATE_TIEBREAKER)
+
     # ── Branch A: candidates table (sourced, plus already-linked self-registered) ──
     a_conditions = ["c.deleted_at IS NULL"]
     a_params = []
     idx = 1
-    kind_sql = "CASE WHEN c.source = 'portal_registration' THEN 'self-registered' ELSE 'sourced' END"
+    # WS2: a linked candidate_profiles row (cp.user_id IS NOT NULL) is the
+    # stronger truth for "self-registered" -- a candidate can be sourced
+    # first (c.source stays whatever it originally was) and later create
+    # a portal account that WS-C.16's candidate_link.py links to this same
+    # candidates row, without c.source itself ever being rewritten. source
+    # keeps its original sourcing-provenance meaning (see core/sources.py);
+    # it's just no longer the only signal `kind` derives from.
+    #
+    # A third case (code-reviewer WS2 finding): an e-mail-matched candidate
+    # portal account whose candidate_profiles row is NOT linked yet
+    # (cp.candidate_id IS NULL) -- exactly the row branch B's NOT EXISTS
+    # guard below excludes, to avoid double-listing it. Without also
+    # counting it here, that person is neither branch A's self-registered
+    # nor branch B's -- they vanish from kind=self-registered entirely.
+    # The EXISTS keeps this in one CASE (no extra join needed) so it works
+    # in both the COUNT and the row query.
+    kind_sql = (
+        "CASE WHEN cp.user_id IS NOT NULL OR c.source = '{portal}' "
+        "OR EXISTS (SELECT 1 FROM users ux WHERE LOWER(ux.email) = LOWER(c.email) "
+        "AND ux.role = 'candidate' AND ux.deleted_at IS NULL) "
+        "THEN 'self-registered' ELSE 'sourced' END"
+    ).format(portal=PORTAL_REGISTRATION)
 
     if status:
         a_conditions.append(f"c.status = ${idx}")
@@ -551,7 +769,16 @@ async def list_all_candidates(
 
     fetch_cap = offset + limit  # enough rows from each branch to merge+slice correctly
 
-    a_total = await fetch_val(f"SELECT COUNT(*) FROM candidates c WHERE {a_where}", *a_params) or 0
+    # LEFT JOIN candidate_profiles here too: kind_sql (used in a_where
+    # whenever a `kind` filter is passed) references cp.user_id, so the
+    # count query needs the same join as the row query below or that
+    # reference would fail whenever a kind filter is active.
+    a_total = await fetch_val(
+        f"""SELECT COUNT(*) FROM candidates c
+            LEFT JOIN candidate_profiles cp ON cp.candidate_id = c.id
+            WHERE {a_where}""",
+        *a_params,
+    ) or 0
     a_rows = await fetch_all(
         f"""SELECT c.id AS candidate_id,
                    u.id AS user_id,
@@ -570,7 +797,7 @@ async def list_all_candidates(
             )
             {_MATCH_COUNTS_JOIN}
             WHERE {a_where}
-            ORDER BY c.created_at DESC
+            ORDER BY {branch_order_by}
             LIMIT ${idx}""",
         *a_params, fetch_cap,
     )
@@ -579,7 +806,18 @@ async def list_all_candidates(
     b_rows = []
     b_total = 0
     if _unlinked_self_registered_applicable(status, source, kind):
-        b_conditions = ["u.role = 'candidate'", "u.deleted_at IS NULL", "cp.candidate_id IS NULL"]
+        b_conditions = [
+            "u.role = 'candidate'", "u.deleted_at IS NULL", "cp.candidate_id IS NULL",
+            # WS2: cp.candidate_id IS NULL only means *this* candidate_profiles
+            # row has no FK link yet -- it does not mean no candidates row
+            # exists for the same person. Branch A's e-mail-fallback JOIN
+            # (LEFT JOIN users u ON u.id = COALESCE(cp.user_id, (SELECT id
+            # FROM users WHERE LOWER(email) = LOWER(c.email) ...))) already
+            # surfaces such a person there, so without this guard they'd be
+            # listed twice. Same case-insensitive match, scoped to
+            # non-deleted candidates rows.
+            "NOT EXISTS (SELECT 1 FROM candidates c2 WHERE LOWER(c2.email) = LOWER(u.email) AND c2.deleted_at IS NULL)",
+        ]
         b_params = []
         bidx = 1
         if search:
@@ -604,12 +842,17 @@ async def list_all_candidates(
                 FROM candidate_profiles cp
                 JOIN users u ON u.id = cp.user_id
                 WHERE {b_where}
-                ORDER BY cp.created_at DESC
+                ORDER BY {branch_order_by}
                 LIMIT ${bidx}""",
             *b_params, fetch_cap,
         )
 
-    combined = sorted(list(a_rows) + list(b_rows), key=lambda r: r["created_at"], reverse=True)
+    # Ascending first, then reversed for desc: that reproduces Postgres's
+    # own NULLS LAST on ASC / NULLS FIRST on DESC defaults, so the merged
+    # page orders NULLs the same way each branch query already did.
+    combined = sorted(list(a_rows) + list(b_rows), key=lambda r: _merge_sort_key(r, merge_keys))
+    if descending:
+        combined.reverse()
     page = combined[offset:offset + limit]
     items = [
         {**dict(row), "id": row["candidate_id"] if row["candidate_id"] is not None else row["user_id"]}
@@ -670,7 +913,14 @@ async def get_candidate_detail(
                 "SELECT id, is_verified FROM users WHERE LOWER(email) = LOWER($1) AND deleted_at IS NULL",
                 candidate["email"],
             )
-        candidate["kind"] = "self-registered" if candidate["source"] == "portal_registration" else "sourced"
+        # WS2: same stronger-truth rule as list's kind_sql above -- a
+        # linked candidate_profiles row means self-registered regardless
+        # of this row's original c.source, so the detail view's `kind`
+        # can't disagree with what GET /candidates just showed for the
+        # same person. `user` here already covers the third case
+        # (e-mail-matched account, cp row not linked yet) via the
+        # fallback lookup a few lines up -- no extra query needed.
+        candidate["kind"] = "self-registered" if (linked_profile or user or candidate["source"] == PORTAL_REGISTRATION) else "sourced"
         candidate["user_id"] = user["id"] if user else None
         candidate["is_verified"] = user["is_verified"] if user else None
         return candidate
@@ -793,6 +1043,248 @@ async def admin_update_talentpool_consent(
     return row
 
 
+# ── WS3b: referral vastleggen + bevestigingsmail ─────────────────────────
+#
+# SOP §1.3: een referral wordt door een mens aangedragen, met toestemming
+# van de betrokkene, vóór het eerste contact -- `lawful_basis =
+# 'toestemming_referral'`. Die toestemming is op dit moment nog een
+# mededeling van de referrer, niet van de persoon zelf, en art. 14 AVG
+# verplicht ons hem bij het eerste bericht te vertellen waar wij zijn
+# gegevens vandaan hebben. Dit endpoint doet precies die twee dingen in
+# één keer: het legt de referral vast, en het stuurt die ene, verplichte
+# kennisgeving met een bevestigingslink.
+#
+# Wat dit endpoint NIET is, en waarom dat hier expliciet staat: dit is
+# geen nieuw automatisch outreach-pad. Er gaat alleen een mail uit door
+# een handeling van een ingelogde beheerder, precies één per referral, en
+# de inhoud is de wettelijk verplichte kennisgeving plus een vraag om
+# bevestiging -- geen wervende tekst, geen vacature, geen vervolg. Elk
+# wervend bericht aan deze persoon blijft lopen via routers/outreach.py,
+# draft-only, met een mens die verstuurt. Klikt de betrokkene niet op de
+# link, dan gebeurt er niets en valt de rij na 3 maanden in de gewone
+# referral-bewaartermijn (core/retention.py REFERRAL_NO_RESPONSE_SQL).
+#
+# De bevestiging loopt bewust over dezelfde `talentpool_optin_requests`-
+# tabel en hetzelfde POST /api/public/talentpool-confirm als de publieke
+# dubbele-opt-in: één tokenmechanisme, één 24-uursvenster, één plek waar
+# een token wordt verbruikt (migrations/030 + 037, dat laatste verbreedde
+# de consent_source-CHECK al met 'referral' -- zie die migratie).
+
+REFERRAL_CONFIRM_TOKEN_TTL_HOURS = 24
+
+
+@router.post("/candidates/referral", status_code=201)
+async def admin_create_referral(
+    data: AdminReferralCreate,
+    current_user: dict = Depends(require_role("admin")),
+):
+    """Legt een aangedragen referral vast en stuurt de betrokkene één
+    bevestigingsmail (Art. 14-blok, referral-variant) met een
+    one-time-link.
+
+    Weigert in twee gevallen, allebei fail-closed:
+      - het adres staat op de suppressielijst (STOP ontvangen: nooit meer
+        mailen, op geen enkele grondslag -- SOP §3.3);
+      - er bestaat al een `candidates`-rij met dit adres. Dan is er al een
+        grondslag en een geschiedenis voor deze persoon, en die mag een
+        referral-invoer niet overschrijven (dezelfde redenering als
+        privacy.should_set_talentpool_lawful_basis(): een bestaande
+        grondslag wordt nooit stilletjes vervangen).
+
+    Anders dan de publieke opt-in geeft dit endpoint die twee gevallen wél
+    als fout terug: de aanroeper is een ingelogde beheerder die de
+    betreffende persoon zelf voor zich heeft, geen anonieme bezoeker, dus
+    er valt hier niets te enumereren wat hij niet al mag zien -- en een
+    stille 201 zou hem laten denken dat de mail eruit ging."""
+    email = data.email.lower().strip()
+
+    suppressed = await fetch_one(
+        "SELECT 1 FROM suppression_list WHERE email_hash = $1", privacy.email_hash(email),
+    )
+    # WS5 BV3: structured detail, same {"code", "message"} shape as
+    # routers/retention_admin.py and routers/gdpr.py already use, so the
+    # panel can tell the two 409s apart and offer "Kandidaat openen" on
+    # the second one instead of printing one English sentence for both.
+    if suppressed:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "referral_email_suppressed",
+                "message": (
+                    "This e-mail address is on the suppression list (STOP received) -- "
+                    "no message may be sent to it."
+                ),
+            },
+        )
+
+    existing = await fetch_one(
+        "SELECT id FROM candidates WHERE LOWER(email) = $1 AND deleted_at IS NULL", email,
+    )
+    if existing:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "referral_candidate_exists",
+                "candidate_id": existing["id"],
+                "message": (
+                    f"A candidate record already exists for this e-mail address (id {existing['id']})."
+                ),
+            },
+        )
+
+    candidate = await fetch_one(
+        """INSERT INTO candidates
+             (full_name, email, source, lawful_basis, date_found, referred_by,
+              consent_source, status)
+           VALUES ($1, $2, 'referral', 'toestemming_referral', CURRENT_DATE, $3, 'referral', 'sourced')
+           RETURNING id, full_name, email, source, lawful_basis, date_found, referred_by""",
+        data.full_name, email, data.referred_by,
+    )
+
+    token = secrets.token_urlsafe(32)
+    await execute(
+        """INSERT INTO talentpool_optin_requests (email, token_hash, scope, source)
+           VALUES ($1, $2, 'matching_and_contact', 'referral')""",
+        email, hash_token(token),
+    )
+
+    # Same fragment-not-query-string rule as the public talentpool link
+    # (routers/public.py _send_talentpool_confirm_email, security-audit
+    # H1): a #fragment never reaches the server, an access log or a
+    # Referer header. website/talentpool-confirm.js reads it from the
+    # hash and posts it to /api/public/talentpool-confirm.
+    link = f"{settings.frontend_url}/talentpool-confirm#token={token}"
+    sent = await email_service.send_template(
+        "referral_confirm", email,
+        {
+            "full_name": data.full_name,
+            "referred_by": data.referred_by,
+            "date_found": candidate["date_found"].isoformat(),
+            "link": link,
+            "ttl_hours": REFERRAL_CONFIRM_TOKEN_TTL_HOURS,
+        },
+    )
+    if not sent:
+        # Never log the address: services/email_service.py already wrote
+        # an email_log row keyed on privacy.email_hash() with the real
+        # error, redacted.
+        logger.warning("admin_create_referral: confirmation e-mail failed for candidate id=%s", candidate["id"])
+
+    # Audit trail with redacted evidence: `evidence` and `note` are free
+    # text an admin typed and can easily contain the referrer's or the
+    # candidate's own address -- same privacy.redact_emails() treatment as
+    # on the two consent endpoints above, and the candidate's own address is
+    # stored only as a hash here, never in plaintext in audit_log.changes
+    # (json.dumps'd, never a raw dict -- commit 72b4bcd).
+    await execute(
+        "INSERT INTO audit_log (action, actor_id, target_type, target_id, changes) VALUES ($1, $2, $3, $4, $5::jsonb)",
+        "admin_referral_create", current_user["id"], "candidate", candidate["id"],
+        json.dumps({
+            "source": "referral",
+            "lawful_basis": "toestemming_referral",
+            "referred_by": privacy.redact_emails(data.referred_by),
+            "evidence": privacy.redact_emails(data.evidence),
+            "note": privacy.redact_emails(data.note),
+            "email_hash": privacy.email_hash(email),
+            "confirmation_email_sent": sent,
+        }),
+    )
+
+    return {
+        "id": candidate["id"],
+        "full_name": candidate["full_name"],
+        "source": candidate["source"],
+        "lawful_basis": candidate["lawful_basis"],
+        "date_found": candidate["date_found"],
+        "referred_by": candidate["referred_by"],
+        "confirmation_email_sent": sent,
+    }
+
+
+# ── Spec-presentatietoestemming, admin-recorded ──────────────────────────
+# §6 punt 10, docs/VERWERKINGSREGISTER.md. `consent_spec_presentation_at`
+# (migrations/018) is what routers/client.py's `_project_candidate_public()`
+# gates a candidate's `full_name` on before showing them to a client, and
+# what routers/outreach.py's refusal logic requires before a spec/MPC draft
+# naming this candidate can be approved (SOP §5) -- until this endpoint,
+# nothing in the codebase ever wrote it, so no candidate's name was ever
+# shown. Human admin only (require_role("admin")), never the shared
+# X-API-Key: that key is also used by the external routines (PATCH
+# /api/candidates, routers/candidates.py), and a routine must never be able
+# to record consent on a human's behalf, without evidence and without an
+# audit trail -- see the deliberately absent `consent_spec_presentation_at`
+# in that endpoint's `allowed_fields` and
+# tests/test_ws_c17_talentpool_consent.py-style coverage in
+# tests/test_spec_presentation_consent.py.
+# `evidence` is mandatory (same reasoning as the talentpool-consent
+# endpoint above: this records consent an admin has evidence for, not a
+# live tick of the box) and `job_id` is mandatory when granting, so the
+# grant is always tied to the specific role privacy.html promises
+# ("toestemming voor een specifieke rol") -- see
+# migrations/035_spec_presentation_consent_job.py for why that is a single
+# nullable FK column rather than a per-client history table, and the
+# restrisico that choice still carries.
+
+@router.patch("/candidates/{candidate_id}/spec-presentation-consent")
+async def admin_update_spec_presentation_consent(
+    candidate_id: int,
+    data: AdminSpecPresentationConsentUpdate,
+    current_user: dict = Depends(require_role("admin")),
+):
+    candidate = await fetch_one(
+        "SELECT id, consent_withdrawn_at FROM candidates WHERE id = $1 AND deleted_at IS NULL",
+        candidate_id,
+    )
+    if not candidate:
+        raise HTTPException(status_code=404, detail="Candidate not found")
+    if candidate["consent_withdrawn_at"]:
+        raise HTTPException(
+            status_code=409,
+            detail="Candidate has withdrawn consent (consent_withdrawn_at set) -- "
+                   "cannot record spec-presentation consent for this candidate.",
+        )
+
+    if data.consent:
+        job = await fetch_one(
+            "SELECT id FROM job_orders WHERE id = $1 AND deleted_at IS NULL", data.job_id,
+        )
+        if not job:
+            raise HTTPException(status_code=422, detail="job_id does not reference an existing, non-deleted job order")
+
+        row = await fetch_one(
+            """UPDATE candidates
+               SET consent_spec_presentation_at = NOW(), consent_spec_presentation_job_id = $1,
+                   updated_at = NOW()
+               WHERE id = $2
+               RETURNING id, consent_spec_presentation_at, consent_spec_presentation_job_id""",
+            data.job_id, candidate_id,
+        )
+    else:
+        row = await fetch_one(
+            """UPDATE candidates
+               SET consent_spec_presentation_at = NULL, consent_spec_presentation_job_id = NULL,
+                   updated_at = NOW()
+               WHERE id = $1
+               RETURNING id, consent_spec_presentation_at, consent_spec_presentation_job_id""",
+            candidate_id,
+        )
+
+    # Same redaction as admin_update_talentpool_consent above: evidence is
+    # free text an admin typed -- redact any e-mail-looking substring
+    # before it lands in audit_log.changes, never the plaintext address.
+    await execute(
+        "INSERT INTO audit_log (action, actor_id, target_type, target_id, changes) VALUES ($1, $2, $3, $4, $5::jsonb)",
+        "admin_spec_presentation_consent_update", current_user["id"], "candidate", candidate_id,
+        json.dumps({
+            "consent": data.consent,
+            "job_id": data.job_id if data.consent else None,
+            "evidence": privacy.redact_emails(data.evidence),
+        }),
+    )
+
+    return row
+
+
 # ── Analytics ───────────────────────────────────────────────────────────
 
 @router.get("/analytics", response_model=AdminAnalytics)
@@ -800,6 +1292,12 @@ async def get_platform_analytics(current_user: dict = Depends(require_role("admi
     """Get platform-wide analytics data."""
     analytics = AdminAnalytics()
 
+    # WS-4 (migrations/037_pool_vacancies_consent_sources.py): job_fill_rate
+    # and client_retention_rate must not count GSP's own internal clients
+    # (the demo-vacatures client and the anonymous-opdrachtgever pool
+    # client, both is_internal = true) -- they are not real opdrachtgevers,
+    # and including them would inflate both rates with jobs/clients that
+    # were never actually won or retained.
     (
         user_growth_rows, total_jobs, filled_jobs, total_clients, repeat_clients,
     ) = await asyncio.gather(
@@ -808,14 +1306,21 @@ async def get_platform_analytics(current_user: dict = Depends(require_role("admi
                FROM users WHERE deleted_at IS NULL AND created_at >= NOW() - INTERVAL '12 months'
                GROUP BY month ORDER BY month""",
         ),
-        fetch_val("SELECT COUNT(*) FROM job_orders WHERE deleted_at IS NULL AND is_demo = false"),
-        fetch_val("SELECT COUNT(*) FROM job_orders WHERE filled_at IS NOT NULL AND deleted_at IS NULL AND is_demo = false"),
-        fetch_val("SELECT COUNT(*) FROM clients WHERE deleted_at IS NULL"),
+        fetch_val(
+            """SELECT COUNT(*) FROM job_orders j JOIN clients cl ON cl.id = j.client_id
+               WHERE j.deleted_at IS NULL AND j.is_demo = false AND cl.is_internal = false""",
+        ),
+        fetch_val(
+            """SELECT COUNT(*) FROM job_orders j JOIN clients cl ON cl.id = j.client_id
+               WHERE j.filled_at IS NOT NULL AND j.deleted_at IS NULL AND j.is_demo = false
+                 AND cl.is_internal = false""",
+        ),
+        fetch_val("SELECT COUNT(*) FROM clients WHERE deleted_at IS NULL AND is_internal = false"),
         fetch_val(
             """SELECT COUNT(*) FROM (
-                   SELECT client_id FROM job_orders
-                   WHERE filled_at IS NOT NULL AND deleted_at IS NULL
-                   GROUP BY client_id HAVING COUNT(*) > 1
+                   SELECT j.client_id FROM job_orders j JOIN clients cl ON cl.id = j.client_id
+                   WHERE j.filled_at IS NOT NULL AND j.deleted_at IS NULL AND cl.is_internal = false
+                   GROUP BY j.client_id HAVING COUNT(*) > 1
                ) repeat_client_groups""",
         ),
     )
@@ -879,6 +1384,13 @@ async def get_audit_log(
             LIMIT ${idx} OFFSET ${idx + 1}""",
         *params_ext,
     )
+
+    # `changes` is jsonb but asyncpg returns raw JSON text on this
+    # connection (no codec registered) -- same pattern as get_lead_detail.
+    for row in rows:
+        val = row.get("changes")
+        if isinstance(val, str):
+            row["changes"] = json.loads(val)
 
     return {"items": rows, "total": total, "limit": limit, "offset": offset}
 
@@ -1005,6 +1517,68 @@ async def approve_client(
 # Admin equivalent of routers/client.py's stage-update/history endpoints,
 # unscoped by client (an admin may act on any client's pipeline).
 
+@router.get("/pipeline")
+async def admin_list_pipeline(
+    candidate_id: Optional[int] = Query(None),
+    client_id: Optional[int] = Query(None),
+    job_id: Optional[int] = Query(None),
+    stage: Optional[str] = Query(None, description="Exact stage match, same filter as GET /api/v1/client/pipeline."),
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    current_user: dict = Depends(require_role("admin")),
+):
+    """WS5 BV1 (§7.3.4): the admin panel's pipeline tab needs an entry_id
+    before it can call PATCH .../{entry_id}/stage or GET .../history, and
+    until now no admin route listed pipeline entries at all -- the only
+    list route was GET /api/v1/client/pipeline, scoped to the client
+    behind the JWT and therefore unusable with an admin token.
+
+    Same row shape as that client route, literally: one shared SELECT
+    list and one shared projection in core/pipeline.py, so the two cannot
+    drift. `client_id` is part of that shape already (it comes out of
+    `pe.*`); what this route adds is that it can be filtered on,
+    alongside candidate_id, job_id and stage, instead of being pinned to
+    the caller's own client.
+
+    `full_name` is returned unconditionally here (gate_name=False), which
+    is a deliberate difference from the client route and a product
+    decision of the chief-of-staff. The presentation-consent gate is a
+    disclosure control aimed at an employer: it decides whether a
+    candidate may be NAMED TO A CLIENT for a role they agreed to. It is
+    not an internal access control, and applying it here withheld nothing
+    -- the same admin token reads full_name unconditionally from
+    GET /candidates and GET /candidates/{kind}/{id} -- while leaving the
+    panel's pipeline tab showing a blank where a name belongs. No new
+    category of personal data reaches an admin through this route that
+    VERWERKINGSREGISTER.md's admin-access rows do not already cover; the
+    client route keeps the gate, unchanged.
+    """
+    conditions = []
+    params: list = []
+    for column, value in (("pe.candidate_id", candidate_id), ("pe.client_id", client_id),
+                          ("pe.job_id", job_id), ("pe.stage", stage)):
+        if value is not None:
+            params.append(value)
+            conditions.append(f"{column} = ${len(params)}")
+    where = " AND ".join(conditions) if conditions else "TRUE"
+
+    total = await fetch_val(f"SELECT COUNT(*) FROM pipeline_entries pe WHERE {where}", *params) or 0
+    params_ext = params + [limit, offset]
+    rows = await fetch_all(
+        f"""{PIPELINE_ROW_SQL}
+            WHERE {where}
+            ORDER BY pe.created_at DESC, pe.id DESC
+            LIMIT ${len(params) + 1} OFFSET ${len(params) + 2}""",
+        *params_ext,
+    )
+
+    return {
+        # gate_name=False: see the docstring above and core/pipeline.py.
+        "items": project_pipeline_rows(rows, gate_name=False),
+        "total": total, "limit": limit, "offset": offset,
+    }
+
+
 @router.patch("/pipeline/{entry_id}/stage")
 async def admin_update_pipeline_stage(
     entry_id: int,
@@ -1042,26 +1616,93 @@ async def admin_get_pipeline_stage_history(
     if not entry:
         raise HTTPException(status_code=404, detail="Pipeline entry not found")
 
+    # WS5 BV7: LEFT JOIN users so the timeline can name the actor instead
+    # of rendering "Gebruiker #12". LEFT, not inner: a history row is
+    # append-only and outlives the account that wrote it (an erased or
+    # deleted admin), and losing the row because the actor is gone would
+    # be worse than showing changed_by_name = null. Only full_name is
+    # joined in -- no e-mail, no role.
     rows = await fetch_all(
-        "SELECT * FROM pipeline_stage_history WHERE pipeline_entry_id = $1 ORDER BY changed_at",
+        """SELECT h.*, u.full_name AS changed_by_name
+           FROM pipeline_stage_history h
+           LEFT JOIN users u ON u.id = h.changed_by
+           WHERE h.pipeline_entry_id = $1
+           ORDER BY h.changed_at""",
         entry_id,
     )
     return {"items": rows, "total": len(rows)}
 
 
-# ── Leads (WS-C.10) ───────────────────────────────────────────────────────
+# ── Leads (WS-C.10 / WS2) ─────────────────────────────────────────────────
 # Unified view over contact_submissions (the site contact/lead form) and
 # quiz_submissions (the public skill quiz) -- two physically separate
 # tables (migrations/002_portal_tables.py, migrations/012_mobile_growth.py)
 # with no shared id space, so "source" + the table's own id together
-# identify a row; PATCH takes both back. quiz_submissions has no
-# name/interest_type columns at all (it's the skill-quiz table, not a lead
-# form) -- NULL literals in its SELECT keep the unified query's column
-# count/types aligned with contact_submissions.
+# identify a row; PATCH/detail take both back. Neither table has every
+# column the other does (contact_submissions has no score/max_score/tier;
+# quiz_submissions has no name/company/phone/message/interest_type) --
+# typed NULL literals in each SELECT keep a real SQL UNION ALL's column
+# count/types aligned so Postgres can execute it as one query.
 #
 # Only these two literal table names are ever interpolated into SQL below
 # (never request input) -- ``source not in _LEAD_SOURCES`` gates every use.
 _LEAD_SOURCES = ("contact_submissions", "quiz_submissions")
+
+
+def _leads_union_sql(type: Optional[str], unread: Optional[bool]) -> tuple[str, list]:
+    """Build the WHERE-filtered `SELECT ... UNION ALL SELECT ...` over
+    contact_submissions + quiz_submissions, both sides aliased to the same
+    column names/types, and the positional params for it. Callers wrap this in
+    `SELECT ... FROM (<sql>) u` for both the COUNT(*) and the paginated
+    row fetch, so the two never drift apart -- same total the page was
+    sliced from.
+
+    `type` filters by interest_type -- contact_submissions only, since
+    quiz_submissions has no such column; passing a type currently drops
+    the quiz_submissions branch entirely (a type filter can never match a
+    quiz row, so there's nothing that branch could contribute).
+    `unread` filters by is_read on whichever table each row is from.
+    """
+    params: list = []
+    idx = 1
+
+    contact_conditions = []
+    if type is not None:
+        contact_conditions.append(f"interest_type = ${idx}")
+        params.append(type)
+        idx += 1
+    if unread is not None:
+        contact_conditions.append(f"is_read = ${idx}")
+        params.append(not unread)
+        idx += 1
+    contact_where = f"WHERE {' AND '.join(contact_conditions)}" if contact_conditions else ""
+
+    contact_select = f"""SELECT id, 'contact_submissions'::text AS source, name, email,
+               company, phone, message, interest_type,
+               NULL::int AS score, NULL::int AS max_score, NULL::text AS tier,
+               is_read, created_at, source_page, referrer_host
+        FROM contact_submissions {contact_where}"""
+
+    if type is not None:
+        # quiz_submissions has no interest_type -- a type filter never
+        # matches any quiz row, so skip that branch (and the union)
+        # entirely rather than emit a query that can never return one.
+        return contact_select, params
+
+    quiz_conditions = []
+    if unread is not None:
+        quiz_conditions.append(f"is_read = ${idx}")
+        params.append(not unread)
+        idx += 1
+    quiz_where = f"WHERE {' AND '.join(quiz_conditions)}" if quiz_conditions else ""
+
+    quiz_select = f"""SELECT id, 'quiz_submissions'::text AS source, NULL::text AS name, email,
+               NULL::text AS company, NULL::text AS phone, NULL::text AS message,
+               NULL::text AS interest_type, score, max_score, tier,
+               is_read, created_at, source_page, referrer_host
+        FROM quiz_submissions {quiz_where}"""
+
+    return f"{contact_select}\nUNION ALL\n{quiz_select}", params
 
 
 @router.get("/leads")
@@ -1072,59 +1713,54 @@ async def list_leads(
     offset: int = Query(0, ge=0),
     current_user: dict = Depends(require_role("admin")),
 ):
-    """Unified leads list across contact_submissions + quiz_submissions.
-    `type` filters by interest_type (contact_submissions only -- quiz_submissions
-    rows never match a type filter, since they have no interest_type column).
-    `unread` filters by is_read on whichever table each row is from."""
+    """Unified, paginated leads list across contact_submissions +
+    quiz_submissions -- a real SQL UNION ALL (ORDER BY/LIMIT/OFFSET applied
+    to the union as a whole) rather than fetching every matching row from
+    both tables and paginating in Python, so `total` and each page are
+    exact and consistent even as the underlying tables grow."""
     if type is not None and type not in LEAD_INTEREST_TYPES:
         raise HTTPException(status_code=400, detail=f"Invalid type. Must be one of: {', '.join(LEAD_INTEREST_TYPES)}")
 
-    contact_conditions = []
-    contact_params: list = []
-    idx = 1
-    if type is not None:
-        contact_conditions.append(f"interest_type = ${idx}")
-        contact_params.append(type)
-        idx += 1
-    if unread is not None:
-        contact_conditions.append(f"is_read = ${idx}")
-        contact_params.append(not unread)
-        idx += 1
-    contact_where = f"WHERE {' AND '.join(contact_conditions)}" if contact_conditions else ""
+    union_sql, params = _leads_union_sql(type, unread)
 
-    contact_rows = await fetch_all(
-        f"""SELECT id, 'contact_submissions'::text AS source, name, email,
-                   interest_type, is_read, created_at
-            FROM contact_submissions {contact_where}
-            ORDER BY created_at DESC""",
-        *contact_params,
+    total = await fetch_val(f"SELECT COUNT(*) FROM ({union_sql}) u", *params) or 0
+
+    limit_idx = len(params) + 1
+    offset_idx = len(params) + 2
+    items = await fetch_all(
+        f"SELECT * FROM ({union_sql}) u ORDER BY created_at DESC LIMIT ${limit_idx} OFFSET ${offset_idx}",
+        *params, limit, offset,
     )
 
-    quiz_rows = []
-    if type is None:
-        # quiz_submissions has no interest_type -- a type filter never
-        # matches any quiz row, so skip the query entirely in that case.
-        quiz_conditions = []
-        quiz_params: list = []
-        idx = 1
-        if unread is not None:
-            quiz_conditions.append(f"is_read = ${idx}")
-            quiz_params.append(not unread)
-            idx += 1
-        quiz_where = f"WHERE {' AND '.join(quiz_conditions)}" if quiz_conditions else ""
-        quiz_rows = await fetch_all(
-            f"""SELECT id, 'quiz_submissions'::text AS source, NULL::text AS name, email,
-                       NULL::text AS interest_type, is_read, created_at
-                FROM quiz_submissions {quiz_where}
-                ORDER BY created_at DESC""",
-            *quiz_params,
-        )
+    return {"items": items, "total": total, "limit": limit, "offset": offset}
 
-    items = sorted(contact_rows + quiz_rows, key=lambda r: r["created_at"], reverse=True)
-    total = len(items)
-    page = items[offset:offset + limit]
 
-    return {"items": page, "total": total, "limit": limit, "offset": offset}
+@router.get("/leads/{source}/{lead_id}")
+async def get_lead_detail(
+    source: str,
+    lead_id: int,
+    current_user: dict = Depends(require_role("admin")),
+):
+    """Full detail for one lead, addressed by the (source, id) pair GET
+    /leads returns. contact_submissions rows return every column on the
+    table; quiz_submissions rows additionally decode answers/domain_scores
+    -- jsonb columns asyncpg returns as raw JSON text on this connection
+    (no codec registered, same as routers/public.py's get_quiz())."""
+    if source not in _LEAD_SOURCES:
+        raise HTTPException(status_code=404, detail="Unknown lead source")
+
+    row = await fetch_one(f"SELECT * FROM {source} WHERE id = $1", lead_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="Lead not found")
+
+    if source == "quiz_submissions":
+        for col in ("answers", "domain_scores"):
+            val = row.get(col)
+            if isinstance(val, str):
+                row[col] = json.loads(val)
+
+    row["source"] = source
+    return row
 
 
 @router.patch("/leads/{source}/{lead_id}")

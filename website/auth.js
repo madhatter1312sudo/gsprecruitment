@@ -448,8 +448,60 @@ const Auth = {
     }
   },
 
+  /* ---- Consume a Google Sign-In success redirect (#google_auth=<jwt>) ----
+     routers/auth.py's google_callback() redirects a fresh sign-in straight
+     to the portal path (/candidate/ or /client/), not through a page that
+     loads script.js -- candidate/index.html and client/index.html load
+     only gsp-util.js, auth.js and app.js, so handleGoogleAuthCallback()
+     living solely in script.js never ran there. requireAuth() below found
+     no stored token yet, bounced the browser to '/' and threw the
+     fragment (and the JWT in it) away with it. Error codes
+     (?google_auth_error=...) always redirect to '/' server-side, never to
+     a portal path, so only the success token is handled here; script.js
+     still owns the bilingual error toast on the marketing pages.
+     Exchanges the token for the user profile exactly like a normal login,
+     stores both via setAuth(), then reloads so requireAuth() runs its
+     normal check against a token that is now actually in localStorage.
+     setAuth() returns false without writing anything when cookie consent
+     has not been granted -- the button that starts this flow (script.js)
+     grants it before redirecting to Google, but a visitor can still land
+     here without having gone through that button (a bookmarked link, a
+     stale tab, storage blocked by the browser), so this cannot assume
+     consent is present. Reloading anyway in that case would silently
+     bounce straight back out through requireAuth()'s "no token" branch,
+     which is exactly the stuck-logged-out failure this exists to avoid.
+     Returns true when a redirect/reload is in flight, so the caller must
+     stop rather than treat this pass as "not logged in". */
+  consumeGoogleAuthRedirect() {
+    const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ''));
+    const token = hashParams.get('google_auth');
+    if (!token) return false;
+
+    window.history.replaceState({}, document.title, window.location.pathname + window.location.search);
+
+    fetch(`${this.API}/auth/me`, { headers: { 'Authorization': `Bearer ${token}` } })
+      .then((res) => {
+        if (!res.ok) throw new Error('auth/me failed');
+        return res.json();
+      })
+      .then((user) => {
+        if (this.setAuth(token, user)) {
+          window.location.reload();
+        } else {
+          window.location.href = '/?google_auth_error=cookie_consent';
+        }
+      })
+      .catch(() => {
+        this.toast('Google sign-in failed. Please try again.', 'error');
+        window.location.href = '/';
+      });
+
+    return true;
+  },
+
   /* ---- Require auth (call on portal pages) ---- */
   requireAuth(allowedRoles = null) {
+    if (this.consumeGoogleAuthRedirect()) return null;
     if (!this.isLoggedIn() || this.isTokenExpired()) {
       this.clearAuth();
       window.location.href = '/';
@@ -463,39 +515,40 @@ const Auth = {
     return user;
   },
 
-  /* ---- OAuth Handlers ---- */
-  handleOAuthLogin(provider) {
-    if (String(provider).toLowerCase().includes('google')) {
-      window.location.href = `${this.API}/auth/google/login`;
-      return;
-    }
-    this.toast(`${provider} login is not available`, 'info');
-  },
-
   /* ---- Show toast notification ---- */
   toast(message, type = 'success') {
     let container = document.querySelector('.toast-container');
     if (!container) {
       container = document.createElement('div');
       container.className = 'toast-container';
+      // §7.2f: de container is een statusregio die de hele melding in één
+      // keer voorleest; alleen de foutvariant hieronder krijgt role="alert".
+      container.setAttribute('role', 'status');
       container.setAttribute('aria-live', 'polite');
+      container.setAttribute('aria-atomic', 'true');
       container.setAttribute('aria-label', 'Notifications');
       document.body.appendChild(container);
     }
 
+    // Font Awesome Free heeft van deze vier alleen circle-check en
+    // circle-xmark in de Regular-set; triangle-exclamation en circle-info
+    // bestaan daar niet en renderden als een leeg vierkant. Per icoon dus
+    // de stijl die het wél heeft.
     const icons = {
-      success: 'fa-circle-check',
-      error: 'fa-circle-xmark',
-      warning: 'fa-triangle-exclamation',
-      info: 'fa-circle-info'
+      success: 'fa-regular fa-circle-check',
+      error: 'fa-regular fa-circle-xmark',
+      warning: 'fa-solid fa-triangle-exclamation',
+      info: 'fa-solid fa-circle-info'
     };
 
     const iconClass = icons[type] || icons.success; // fixed local map, type is our own status keyword
     const toast = document.createElement('div');
     toast.className = `toast toast-${type}`;
-    toast.setAttribute('role', 'alert');
+    // Alleen een fout onderbreekt; de rest wordt door de statusregio van de
+    // container voorgelezen zodra de gebruiker toekomt aan luisteren.
+    if (type === 'error') toast.setAttribute('role', 'alert');
     toast.innerHTML = `
-      <span class="toast-icon"><i class="fa-regular ${iconClass}"></i></span>
+      <span class="toast-icon"><i class="${iconClass}"></i></span>
       <span></span>
     `;
     // Message text is set via textContent, not interpolated into the

@@ -1,8 +1,10 @@
 """Talent OS — Pydantic schemas for request/response models."""
-from pydantic import BaseModel, EmailStr, Field, field_validator
-from typing import Optional, List, Any, Literal
+from pydantic import BaseModel, EmailStr, Field, field_validator, model_validator
+from typing import Optional, List, Any, Literal, get_args
 from datetime import datetime, date
 from decimal import Decimal
+import re
+from urllib.parse import parse_qs
 
 
 # ── Auth / Users ─────────────────────────────────────────────────────────
@@ -94,14 +96,30 @@ class TalentpoolConsentUpdate(BaseModel):
 
 class TalentpoolOptinRequest(BaseModel):
     """Public: POST /api/public/talentpool-optin -- e-mail + consent tick
-    from website/kandidaten.html or website/blog/post.html's CTA. Does not
-    itself set anything on `candidates`; only issues a confirmation e-mail
+    from website/kandidaten.html, website/blog/post.html's CTA, or (WS-4,
+    migrations/037) a vacancy page's apply button. Does not itself set
+    anything on `candidates`; only issues a confirmation e-mail
     (routers/public.py talentpool_public_router). Consent only becomes
-    effective once the token is confirmed via talentpool-confirm."""
+    effective once the token is confirmed via talentpool-confirm.
+
+    job_id (WS-4): optional link to the job order the request came from --
+    only stored when it resolves to an open, non-demo, non-deleted job at
+    submit time (see talentpool_optin()); an unknown or non-public job_id
+    is silently ignored rather than rejected, same no-enumeration posture
+    as the rest of this endpoint. Bounded to postgres int4 (1..2^31-1) so
+    an out-of-range value 422s here, before the suppression-list check --
+    otherwise a value like 2**31 reaches the job lookup only when the
+    address is not suppressed, which would make the 500/202 split an
+    e-mail-enumeration oracle for suppression state. job_alerts: whether
+    the applicant also wants general vacancy alerts -- stored on
+    talentpool_optin_requests only, `candidates` has no job_alerts column
+    yet."""
     email: EmailStr
     consent: bool
     scope: str
     source: str
+    job_id: Optional[int] = Field(None, ge=1, le=2147483647)
+    job_alerts: bool = False
 
     @field_validator("scope")
     @classmethod
@@ -113,8 +131,8 @@ class TalentpoolOptinRequest(BaseModel):
     @field_validator("source")
     @classmethod
     def _source_in_set(cls, v):
-        if v not in ("kandidaten_page", "blog_cta"):
-            raise ValueError("source must be one of ('kandidaten_page', 'blog_cta')")
+        if v not in ("kandidaten_page", "blog_cta", "vacancy_apply"):
+            raise ValueError("source must be one of ('kandidaten_page', 'blog_cta', 'vacancy_apply')")
         return v
 
 
@@ -142,6 +160,104 @@ class AdminTalentpoolConsentUpdate(BaseModel):
         if v is not None and v not in TALENTPOOL_CONSENT_SCOPES:
             raise ValueError(f"scope must be one of {TALENTPOOL_CONSENT_SCOPES}")
         return v
+
+
+# ── WS3b referral-bevestiging (migrations/041) ───────────────────────────
+
+class AdminReferralCreate(BaseModel):
+    """Admin: POST /api/v1/admin/candidates/referral.
+
+    Legt een door een mens aangedragen referral vast (SOP §1.3,
+    `lawful_basis = 'toestemming_referral'`) en stuurt de betrokkene één
+    bevestigingsmail met het Art. 14-blok in de referral-variant. Er
+    gebeurt verder niets met de gegevens tot de persoon zelf bevestigt.
+
+    `referred_by` is intern: de naam of relatie van degene die aandroeg,
+    zoals het Art. 14-blok die noemt ("via een aanbeveling van ..."). Het
+    staat daarmee wél in de mail aan de betrokkene -- dat is de bedoeling
+    van art. 14 (de bron noemen) -- maar nergens in Telegram of een
+    logregel.
+
+    `evidence` is verplicht, net als bij AdminTalentpoolConsentUpdate en
+    AdminSpecPresentationConsentUpdate hierboven, en om een sterkere
+    reden dan daar (CR R8). Dit endpoint legt toestemming vast die een
+    DERDE namens de betrokkene claimt -- de referrer zegt dat hij die
+    heeft, de betrokkene zelf heeft op dit moment nog niets gezegd. Art.
+    7 lid 1 legt de bewijslast voor die toestemming bij ons, en het was
+    van de drie toestemmingsendpoints juist het enige waar een beheerder
+    niets hoefde op te schrijven. Kort volstaat ("mondeling bevestigd
+    door X op 3 september, hij heeft haar gevraagd"), zolang er íets
+    staat.
+
+    `evidence` en `note` zijn allebei vrije tekst van de beheerder en
+    gaan nooit ongefilterd het audit_log in: routers/admin.py haalt ze
+    eerst door privacy.redact_emails()."""
+    full_name: str = Field(..., min_length=1, max_length=200)
+    email: EmailStr
+    referred_by: str = Field(..., min_length=1, max_length=200)
+    evidence: str = Field(..., min_length=1, max_length=2000)
+    note: Optional[str] = Field(None, max_length=2000)
+
+
+# ── WS3c job-alerts (migrations/041) ─────────────────────────────────────
+
+UNSUBSCRIBE_SCOPES = ("alerts", "all")
+
+
+class CandidateJobAlertsUpdate(BaseModel):
+    """Candidate portal: PUT /api/v1/candidate/job-alerts."""
+    enabled: bool
+
+
+class UnsubscribeRequest(BaseModel):
+    """Public: POST /api/public/unsubscribe.
+
+    `token` is het ruwe, per verzending unieke een-klik-token uit de
+    voettekst en de List-Unsubscribe-header van een job-alert; alleen de
+    sha256 ervan staat in job_alert_sends.token_hash. Optioneel in de
+    body omdat een RFC 8058 one-click POST hem ook als query-parameter
+    mag meesturen -- routers/public.py accepteert beide en behandelt een
+    ontbrekend token exact als een onbekend token (zelfde antwoord,
+    zelfde statuscode)."""
+    token: Optional[str] = None
+    scope: str = "alerts"
+
+    @field_validator("scope")
+    @classmethod
+    def _scope_in_set(cls, v):
+        if v not in UNSUBSCRIBE_SCOPES:
+            raise ValueError(f"scope must be one of {UNSUBSCRIBE_SCOPES}")
+        return v
+
+
+# ── Spec-presentatietoestemming (migrations/018 + 035, §6 punt 10 van
+# docs/VERWERKINGSREGISTER.md) ────────────────────────────────────────────
+
+class AdminSpecPresentationConsentUpdate(BaseModel):
+    """Admin: PATCH /api/v1/admin/candidates/{id}/spec-presentation-consent.
+    Records (or withdraws) the candidate's consent for
+    `routers/client.py` to show their `full_name` to clients for one
+    specific role -- website/privacy.html's "toestemming voor een
+    specifieke rol". Modelled on AdminTalentpoolConsentUpdate above:
+    `evidence` is mandatory (this endpoint records consent an admin has
+    evidence for -- a signed form, an e-mail on file -- not a live tick
+    of a box), and `job_id` is mandatory when granting (consent=True) so
+    the grant is always tied to the role it was given for, per
+    migrations/035_spec_presentation_consent_job.py. `job_id` is ignored
+    (and cleared) on withdrawal (consent=False)."""
+    consent: bool
+    job_id: Optional[int] = None
+    evidence: str = Field(..., min_length=1, max_length=2000)
+
+    @model_validator(mode="after")
+    def _job_id_required_when_granting(self):
+        # field_validator would not fire on job_id's default (None) --
+        # pydantic v2 skips a validator on a field that was never passed
+        # unless validate_default=True -- so this check runs after the
+        # whole model is built instead, where self.job_id is always seen.
+        if self.consent and self.job_id is None:
+            raise ValueError("job_id is required when consent=true")
+        return self
 
 
 class RefreshRequest(BaseModel):
@@ -251,6 +367,21 @@ class CandidateCreate(BaseModel):
     @classmethod
     def _url_scheme_http_only(cls, v):
         return _normalize_http_url(v)
+
+    # chief-of-staff FIX FIRST (retention-kolommen branch, finding 3): a
+    # padded address ("' x@…'") stored via this, the main candidate insert
+    # path, is otherwise indistinguishable from a clean one until it
+    # meets a LOWER(TRIM(...)) comparison somewhere else in the codebase --
+    # stripping at the door means every downstream reader (including the
+    # erase_person() lookups in routers/gdpr.py) sees the same value a
+    # human typed, not a whitespace-padded variant of it.
+    @field_validator("email")
+    @classmethod
+    def _strip_email(cls, v):
+        if v is None:
+            return v
+        stripped = v.strip()
+        return stripped or None
 
     # DB rows (esp. the Apollo-bulk pool) store NULL for these array columns;
     # coerce NULL -> [] so ResponseValidationError isn't raised on read.
@@ -428,6 +559,22 @@ class CandidatePortalProfile(BaseModel):
     consent_talentpool_until: Optional[datetime] = None
     consent_scope: Optional[str] = None
     consent_source: Optional[str] = None
+    # WS5 BV4 (§7.3.7): the job-alert switch has a third reason for being
+    # off -- consent was withdrawn (a STOP, or an unsubscribe with
+    # scope=all) -- and the portal could not tell that apart from "never
+    # given" without these two. Same `candidates`-row origin and the same
+    # None-when-no-row-yet rule as the four above; `lawful_basis` is the
+    # column the retention and outreach guards read, so the portal states
+    # the ground it is actually processing on rather than guessing.
+    consent_withdrawn_at: Optional[datetime] = None
+    lawful_basis: Optional[str] = None
+    # WS5 issue #136 (§7.3.7): the job-alert switch's initial state, read
+    # once at page load rather than via the PUT-only /job-alerts endpoint.
+    # job_alert_eligible is the same JOB_ALERT_ELIGIBILITY_SQL computation
+    # the PUT response returns as `eligible`.
+    job_alert_optin_at: Optional[datetime] = None
+    job_alert_unsubscribed_at: Optional[datetime] = None
+    job_alert_eligible: bool = False
     created_at: datetime
     updated_at: Optional[datetime] = None
 
@@ -486,6 +633,28 @@ class JobOrderResponse(JobOrderCreate):
     model_config = {"from_attributes": True}
 
 
+# job_orders.status values actually written anywhere in this repo (WS-4):
+# 'draft'  -- default for an admin-phoned-in job (AdminJobCreate) and every
+#             client-created job (routers/client.py create_client_job,
+#             hardcoded, never client-settable to anything else on create);
+# 'open'   -- published to the public board (routers/jobs.py
+#             PUBLIC_JOB_COLUMNS query, migrations/000_baseline.py default);
+# 'paused' -- a client can pause their own posting
+#             (routers/client.py CLIENT_ALLOWED_STATUSES);
+# 'closed' -- client or admin closes a posting (routers/client.py
+#             CLIENT_ALLOWED_STATUSES, website/admin/index.html);
+# 'filled' -- job_orders tracks "filled" via the filled_at timestamp
+#             column, not this status column, but website/client/app.js's
+#             badge map already reserves and displays this status value,
+#             so it must keep validating rather than 422 the day something
+#             starts setting it;
+# 'deleted'-- soft-delete alongside deleted_at (routers/client.py
+#             delete_client_job).
+# An unknown status now 422s instead of silently writing an arbitrary
+# string to the column.
+JobOrderStatus = Literal["draft", "open", "paused", "closed", "filled", "deleted"]
+
+
 class JobOrderUpdate(BaseModel):
     title: Optional[str] = Field(None, min_length=1)
     department: Optional[str] = None
@@ -497,7 +666,7 @@ class JobOrderUpdate(BaseModel):
     description: Optional[str] = None
     requirements: Optional[str] = None
     nice_to_have: Optional[str] = None
-    status: Optional[str] = None
+    status: Optional[JobOrderStatus] = None
     urgency: Optional[str] = None
     city: Optional[str] = None
     company_display: Optional[str] = None
@@ -560,6 +729,45 @@ class HealthResponse(BaseModel):
     apollo: str = "unknown"
     candidates_count: Optional[int] = None
     open_jobs: Optional[int] = None
+    # WS2: count of candidate_id values in candidate_profiles that are
+    # linked from more than one profile row (see routers/health.py) --
+    # should always be 0; a nonzero count flags a data-integrity issue
+    # the admin.py candidates-list dedup (branch B NOT EXISTS) does not
+    # itself fix.
+    duplicate_profile_links: Optional[int] = None
+
+
+class RoutineHealth(BaseModel):
+    """One row per known scheduled routine (services/scheduler.ROUTINE_NAMES) --
+    GET /api/v1/admin/health/routines. Sourced from routine_runs
+    (migrations/044_routine_runs.py); a routine that has never run (or
+    never failed) reports None for the field(s) it has no row for yet.
+    No personal data -- a routine name, two timestamps and an exception
+    class name, nothing about a candidate/client/prospect."""
+    name: str
+    last_success_at: Optional[datetime] = None
+    last_error_at: Optional[datetime] = None
+    last_error_class: Optional[str] = None
+
+
+class RoutineHealthResponse(BaseModel):
+    """GET /api/v1/admin/health/routines -- admin-JWT only."""
+    routines: List[RoutineHealth]
+
+
+class SchedulerHealthResponse(BaseModel):
+    """GET /api/v1/admin/health/scheduler -- admin-JWT only. `running`
+    reflects the cross-worker Postgres advisory lock
+    (services/scheduler.SCHEDULER_LOCK_KEY), not this particular uvicorn
+    worker's own in-process state -- the app runs 4 workers and only the
+    one that won the lock actually starts APScheduler (see
+    services/scheduler.start_scheduler's docstring), so a request answered
+    by a different worker would otherwise misreport "not running" even
+    while the scheduler is alive elsewhere in the same process group."""
+    running: bool
+    timezone: str
+    registered_routines: List[str]
+    apollo_jobs_enabled: bool
 
 
 # ── Candidate Portal Schemas ────────────────────────────────────────────
@@ -657,10 +865,24 @@ class CandidateSearchParams(BaseModel):
     offset: int = 0
 
 
+# WS5 BV8 (SITE-DESIGN-SPEC.md §7.6 besluit 2): the canonical pipeline
+# stages, in the order the UI offers them. migrations/043 puts the same
+# seven behind a CHECK constraint on pipeline_entries.stage; this Literal
+# is the API-boundary half of that pair, so an unknown stage is a 422 that
+# names the allowed values rather than a 500 out of Postgres. Both the
+# admin panel's PATCH and the client portal's add/PATCH go through it --
+# the two write paths that exist.
+PipelineStage = Literal["sourced", "new", "screening", "interview", "offer", "placed", "rejected"]
+
+# Derived, never a second hand-written copy (code-review F4): two lists of
+# the same seven values is two places to forget when an eighth is added.
+PIPELINE_STAGES = get_args(PipelineStage)
+
+
 class PipelineAdd(BaseModel):
     candidate_id: int
     job_id: int
-    stage: str = "sourced"
+    stage: PipelineStage = "sourced"
     notes: Optional[str] = None
 
 
@@ -699,7 +921,7 @@ class AdminUserUpdate(BaseModel):
 
 
 class AdminJobUpdate(BaseModel):
-    status: Optional[str] = None
+    status: Optional[JobOrderStatus] = None  # see JobOrderStatus above
     title: Optional[str] = None
     department: Optional[str] = None
     seniority: Optional[str] = None
@@ -813,6 +1035,41 @@ _LEGACY_INTEREST_TYPE_MAP = {
 }
 
 
+# ── WS2 / migrations/038_leads_origin.py: shared source_page +
+# referrer_host validation for LeadSubmit and QuizSubmitRequest below.
+# source_page is a same-site path only (never a full URL/host) so it can
+# never carry an open-redirect-shaped or cross-site value into the DB;
+# its querystring -- if any -- may only carry the keys the site itself
+# actually appends (job-board 'type' filter, vacature 'job' id), never
+# arbitrary caller-supplied keys. referrer_host is a bare hostname only
+# (no scheme/path/port). Both are optional: a caller that omits them
+# simply gets NULL columns (migrations/038 adds no NOT NULL/DEFAULT), so
+# neither validator runs on an unsupplied default (no validate_default).
+_SOURCE_PAGE_ALLOWED_QUERY_KEYS = {"type", "job"}
+_REFERRER_HOST_RE = re.compile(r"^(?!-)[A-Za-z0-9-]{1,63}(?:\.(?!-)[A-Za-z0-9-]{1,63})*$")
+
+
+def _validate_source_page(v: Optional[str]) -> Optional[str]:
+    if v is None:
+        return None
+    if len(v) > 200 or not v.startswith("/"):
+        raise ValueError("source_page must start with '/' and be at most 200 characters")
+    _, _, query = v.partition("?")
+    if query:
+        keys = set(parse_qs(query, keep_blank_values=True).keys())
+        if not keys <= _SOURCE_PAGE_ALLOWED_QUERY_KEYS:
+            raise ValueError("source_page querystring may only contain 'type' and/or 'job'")
+    return v
+
+
+def _validate_referrer_host(v: Optional[str]) -> Optional[str]:
+    if v is None:
+        return None
+    if len(v) > 100 or not _REFERRER_HOST_RE.match(v):
+        raise ValueError("referrer_host must be a bare hostname, at most 100 characters")
+    return v
+
+
 class LeadSubmit(BaseModel):
     name: str = Field(..., min_length=1)
     email: EmailStr
@@ -824,6 +1081,10 @@ class LeadSubmit(BaseModel):
     # only when an explicit bad value is sent -- pydantic v2 skips
     # validators on unsupplied defaults otherwise.
     interest_type: Optional[str] = Field(None, validate_default=True)
+    # WS2: optional lead-origin fields, see migrations/038_leads_origin.py
+    # and the shared validators above.
+    source_page: Optional[str] = Field(None, max_length=200)
+    referrer_host: Optional[str] = Field(None, max_length=100)
 
     @field_validator("interest_type")
     @classmethod
@@ -840,6 +1101,16 @@ class LeadSubmit(BaseModel):
         if v is None or v.strip() == "" or v not in LEAD_INTEREST_TYPES:
             return "overig"
         return v
+
+    @field_validator("source_page")
+    @classmethod
+    def _check_source_page(cls, v):
+        return _validate_source_page(v)
+
+    @field_validator("referrer_host")
+    @classmethod
+    def _check_referrer_host(cls, v):
+        return _validate_referrer_host(v)
 
 
 # ── Generic Pagination ─────────────────────────────────────────────────
@@ -897,6 +1168,20 @@ class QuizAnswerItem(BaseModel):
 class QuizSubmitRequest(BaseModel):
     email: Optional[EmailStr] = None
     answers: List[QuizAnswerItem] = Field(..., min_length=1)
+    # WS2: optional lead-origin fields, see migrations/038_leads_origin.py
+    # and LeadSubmit's shared validators above.
+    source_page: Optional[str] = Field(None, max_length=200)
+    referrer_host: Optional[str] = Field(None, max_length=100)
+
+    @field_validator("source_page")
+    @classmethod
+    def _check_source_page(cls, v):
+        return _validate_source_page(v)
+
+    @field_validator("referrer_host")
+    @classmethod
+    def _check_referrer_host(cls, v):
+        return _validate_referrer_host(v)
 
 
 # ── WS-C.4: Client Contacts ──────────────────────────────────────────────
@@ -977,12 +1262,16 @@ class ClientAdminUpdate(BaseModel):
     industry: Optional[str] = Field(None, max_length=255)
     erkend_referent: Optional[str] = Field(None, pattern=r"^(ja|nee|onbekend)$")
     notes: Optional[str] = None
+    # security-audit FIX FIRST (WS-E.8 retention-kolommen branch, fourth
+    # round, blocking point 3): the closed value set migrations/034 also
+    # enforces at the DB level via a CHECK constraint.
+    account_status: Optional[str] = Field(None, pattern=r"^(lead|active|inactive)$")
 
 
 # ── WS-C.5: Pipeline Stage History ───────────────────────────────────────
 
 class PipelineStageUpdate(BaseModel):
-    stage: str = Field(..., min_length=1, max_length=50)
+    stage: PipelineStage
 
 
 class PipelineStageHistoryItem(BaseModel):
@@ -1054,7 +1343,12 @@ class OneOffCost(BaseModel):
     model_config = {"extra": "forbid"}
 
     label: str = Field(..., min_length=1, max_length=120)
-    amount: Decimal = Field(..., ge=0, decimal_places=2, allow_inf_nan=False)
+    # Same NUMERIC(10,2) cap as _money_field() (99999999.99): a one-off
+    # cost is a placement money field like the rest, so a typo with one
+    # extra integer digit is rejected at the API boundary, not stored.
+    amount: Decimal = Field(
+        ..., ge=0, le=Decimal("99999999.99"), decimal_places=2, allow_inf_nan=False,
+    )
 
 
 class PlacementCreate(BaseModel):

@@ -41,6 +41,12 @@ function jobPostingValidThrough(job) {
 }
 
 function buildJobPostingLd(job) {
+  // Vacancies whose client stays anonymous (see SITE-DESIGN-SPEC.md §3.7)
+  // never get JobPosting JSON-LD: a rich-results job card next to an
+  // anonymous employer reads as a listing for a job that doesn't concretely
+  // exist yet, which is the spookvacature risk the owner's sign-off (Wet
+  // OHP, ABU/NBBU-gedragscode) is conditional on avoiding.
+  if (job.anonymous_client === true) return null;
   const ld = {
     '@context': 'https://schema.org',
     '@type': 'JobPosting',
@@ -84,6 +90,115 @@ if (typeof module !== 'undefined' && module.exports) {
   module.exports = { buildJobPostingLd, jobPostingEmploymentType, jobPostingLocation, jobPostingValidThrough };
 }
 
+// ─── Anonymous-client apply panel (WS4) ────────────────────────────────
+// Renders once per page load (called at most once from the job-fetch IIFE
+// below), so the click listener it attaches to #vacancyOptinBtn can never
+// double-bind the way a re-render-on-every-keystroke handler would
+// (commit d0917af). Builds markup from fixed bilingual copy only -- no
+// job.* field is interpolated into the HTML string, so there is nothing
+// here that needs GSP.esc(); the one place a field is read (job.id) goes
+// straight into a JSON POST body, never into markup.
+function renderVacancyApplyPanel(job, lang) {
+  const panel = document.getElementById('vacancyApplyPanel');
+  if (!panel) return;
+  panel.style.display = 'flex';
+  const emailLabel = lang === 'nl' ? 'E-mailadres' : 'Email address';
+  panel.innerHTML = `
+    <div class="talentpool-optin-row">
+      <input type="email" id="vacancyOptinEmail" placeholder="${emailLabel}" data-lang-en="Email address" data-lang-nl="E-mailadres" aria-label="${emailLabel}">
+    </div>
+    <p class="lang-nl">Ja, neem mij op in de talentpool van GSP Recruitment voor passende rollen. Bewaartermijn 12 maanden; een maand voor het einde vragen wij per e-mail of je wilt verlengen. Zonder verlenging verwijderen wij je gegevens uit de talentpool. Intrekken kan altijd via info@gsprecruitment.nl.</p>
+    <p class="lang-en">Yes, add me to GSP Recruitment's talent pool for suitable roles. Retention period 12 months; one month before it ends we'll e-mail you to ask whether you want to renew. Without renewal we delete your data from the talent pool. You can withdraw at any time via info@gsprecruitment.nl.</p>
+    <label class="talentpool-optin-check" for="vacancyOptinAlerts">
+      <input type="checkbox" id="vacancyOptinAlerts">
+      <span class="lang-nl">Stuur mij passende vacatures per e-mail</span><span class="lang-en">Send me matching vacancies by e-mail</span>
+    </label>
+    <button type="button" id="vacancyOptinBtn" class="btn btn-gold" style="width:100%">
+      <span class="lang-nl">Solliciteer via de talentpool</span><span class="lang-en">Apply via the talent pool</span>
+    </button>
+    <div class="form-error" id="vacancyOptinError" role="alert" aria-live="polite"></div>
+    <div class="form-success" id="vacancyOptinSuccess" role="status" aria-live="polite"></div>
+  `;
+
+  const emailInput = document.getElementById('vacancyOptinEmail');
+  const alertsCheck = document.getElementById('vacancyOptinAlerts');
+  const btn = document.getElementById('vacancyOptinBtn');
+  const errEl = document.getElementById('vacancyOptinError');
+  const successEl = document.getElementById('vacancyOptinSuccess');
+  const originalBtnHtml = btn.innerHTML;
+
+  btn.addEventListener('click', async () => {
+    errEl.style.display = 'none';
+    successEl.style.display = 'none';
+
+    const email = emailInput.value.trim();
+    if (!email || !email.includes('@')) {
+      errEl.textContent = lang === 'nl' ? 'Voer een geldig e-mailadres in.' : 'Enter a valid email address.';
+      errEl.style.display = 'block';
+      return;
+    }
+
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 10000);
+      const res = await fetch('https://api.gsprecruitment.nl/api/public/talentpool-optin', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        signal: controller.signal,
+        body: JSON.stringify({
+          email,
+          consent: true,
+          scope: 'matching_and_contact',
+          source: 'vacancy_apply',
+          job_id: job.id,
+          job_alerts: !!alertsCheck.checked,
+        }),
+      });
+      clearTimeout(timeoutId);
+
+      if (res.ok) {
+        // Replace the whole panel with the confirmation copy -- built with
+        // createElement/textContent rather than innerHTML, so this stays
+        // safe even though nothing here is actually user-controlled.
+        panel.innerHTML = '';
+        const p = document.createElement('p');
+        const nl = document.createElement('span');
+        nl.className = 'lang-nl';
+        nl.textContent = 'Check je e-mail en bevestig je aanmelding; daarna is je sollicitatie geregistreerd.';
+        const en = document.createElement('span');
+        en.className = 'lang-en';
+        en.textContent = 'Check your e-mail and confirm your sign-up; your application will then be registered.';
+        p.appendChild(nl);
+        p.appendChild(en);
+        panel.appendChild(p);
+        return;
+      }
+
+      if (res.status === 429) {
+        errEl.textContent = lang === 'nl' ? 'Te veel pogingen. Probeer het later opnieuw.' : 'Too many attempts. Please try again later.';
+      } else {
+        const data = await res.json().catch(() => ({}));
+        errEl.textContent = data.detail || (lang === 'nl' ? 'Aanmelden mislukt. Probeer opnieuw.' : 'Sign-up failed. Please try again.');
+      }
+      errEl.style.display = 'block';
+      btn.disabled = false;
+      btn.innerHTML = originalBtnHtml;
+    } catch (_) {
+      errEl.textContent = lang === 'nl' ? 'Netwerkfout. Probeer het opnieuw.' : 'Network error. Please try again.';
+      errEl.style.display = 'block';
+      btn.disabled = false;
+      btn.innerHTML = originalBtnHtml;
+    }
+  });
+}
+
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports.renderVacancyApplyPanel = renderVacancyApplyPanel;
+}
+
 // Guarded so scripts/test_jobposting_ld.mjs can `require()` this file for
 // the pure builder functions above without running the page-fetch IIFE
 // below (there's no `window`/DOM in that Node context).
@@ -93,13 +208,29 @@ if (typeof window !== 'undefined') {
   const jobId = params.get('id') || params.get('slug');
   if (!jobId) { document.getElementById('loadingSpinner').style.display = 'none'; document.getElementById('jobNotFound').style.display = 'block'; return; }
   try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 10000);
-    const res = await fetch('https://api.gsprecruitment.nl/api/public/jobs', { signal: controller.signal });
-    clearTimeout(timeoutId);
-    if (!res.ok) throw new Error('API error');
-    const jobs = await res.json();
-    const job = Array.isArray(jobs) ? jobs.find(j => j.id == jobId || j.slug === jobId) : null;
+    // Prefer the single-job route: same public projection as a list item,
+    // one request instead of downloading the whole open-vacancies list.
+    // A miss here (job closed/demo/removed/unknown id, or the route not
+    // deployed yet) falls back to the list route below rather than failing
+    // the page outright -- this keeps vacature.html working through the
+    // deploy window where the site ships before the API does.
+    let job = null;
+    try {
+      const detailController = new AbortController();
+      const detailTimeoutId = setTimeout(() => detailController.abort(), 10000);
+      const detailRes = await fetch(`https://api.gsprecruitment.nl/api/public/jobs/${encodeURIComponent(jobId)}`, { signal: detailController.signal });
+      clearTimeout(detailTimeoutId);
+      if (detailRes.ok) job = await detailRes.json();
+    } catch (_) { /* network error on the detail route -- fall back below */ }
+    if (!job) {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 10000);
+      const res = await fetch('https://api.gsprecruitment.nl/api/public/jobs', { signal: controller.signal });
+      clearTimeout(timeoutId);
+      if (!res.ok) throw new Error('API error');
+      const jobs = await res.json();
+      job = Array.isArray(jobs) ? jobs.find(j => j.id == jobId || j.slug === jobId) : null;
+    }
     if (!job) throw new Error('Not found');
     document.getElementById('loadingSpinner').style.display = 'none';
     document.getElementById('jobDetail').style.display = 'block';
@@ -141,15 +272,36 @@ if (typeof window !== 'undefined') {
     // Inject JSON-LD for Google. jobDetailJsonLd is a <script type="application/ld+json">
     // (not a div): textContent is never HTML-parsed, so job.* values here
     // cannot break out into markup even though they are not esc()'d.
-    document.getElementById('jobDetailJsonLd').textContent = JSON.stringify(buildJobPostingLd(job));
+    // buildJobPostingLd() returns null for an anonymous-client vacancy --
+    // leave the element empty rather than writing the literal string "null".
+    const jobLd = buildJobPostingLd(job);
+    document.getElementById('jobDetailJsonLd').textContent = jobLd ? JSON.stringify(jobLd) : '';
 
-    // Smart apply: logged-in candidates apply in one click via the API;
-    // everyone else goes to the contact form with the job reference attached.
+    // Honest-paragraph line (SITE-DESIGN-SPEC.md §3.7): shown above the
+    // apply CTA only for an anonymous-client vacancy. The full disclosure
+    // already lives in job.description; this is the short, always-visible
+    // reminder the owner's spookvacature mitigation requires.
+    const anonNote = document.getElementById('anonClientNote');
+    if (anonNote) anonNote.style.display = job.anonymous_client === true ? 'block' : 'none';
+
+    // Smart apply: logged-in candidates apply in one click via the API,
+    // exactly as before -- including for an anonymous-client vacancy, since
+    // they already have an account relationship with us. Everyone else
+    // normally goes to the contact form with the job reference attached;
+    // for an anonymous-client vacancy that link is replaced with an inline
+    // talent-pool opt-in panel instead (renderVacancyApplyPanel below),
+    // since "contact us about this employer" doesn't fit when we can't
+    // name the employer yet.
     const applyBtn = document.getElementById('applyBtn');
-    if (applyBtn) {
+    const user = (typeof Auth !== 'undefined') && Auth.getUser && Auth.getUser();
+    const isLoggedInCandidate = !!(user && user.role === 'candidate');
+
+    if (job.anonymous_client === true && !isLoggedInCandidate) {
+      if (applyBtn) applyBtn.style.display = 'none';
+      renderVacancyApplyPanel(job, lang);
+    } else if (applyBtn) {
       applyBtn.href = `contact.html?job=${encodeURIComponent(job.id)}&title=${encodeURIComponent(job.title)}`;
-      const user = (typeof Auth !== 'undefined') && Auth.getUser && Auth.getUser();
-      if (user && user.role === 'candidate') {
+      if (isLoggedInCandidate) {
         applyBtn.addEventListener('click', async (e) => {
           e.preventDefault();
           applyBtn.style.pointerEvents = 'none';

@@ -12,13 +12,13 @@ const { html, raw, mount } = GSP;
 
 const Admin = {
   _data: {},
-  _currentPage: { users: 1, candidates: 1, audit: 1, outreach: 1, blog: 1, leads: 1, jobs: 1 },
+  _currentPage: { users: 1, candidates: 1, audit: 1, outreach: 1, blog: 1, leads: 1, jobs: 1, retention: 1, placements: 1, gdpr: 1 },
   // Filters passed to the load*() call that produced the currently-rendered
   // page, keyed the same as _currentPage — a data-page click re-derives the
   // page from here instead of needing a fresh closure per render.
   // `clients` isn't in _currentPage/goToPage's loaders map -- the roster
   // fetches a single limit=200 page (see loadClients()), no data-page UI.
-  _lastParams: { users: {}, candidates: {}, audit: {}, outreach: {}, blog: {}, leads: {}, jobs: {}, clients: {} },
+  _lastParams: { users: {}, candidates: {}, audit: {}, outreach: {}, blog: {}, leads: {}, jobs: {}, clients: {}, retention: {}, placements: {}, gdpr: {} },
   _pageSize: 20,
 
   /* ---- Init ---- */
@@ -32,8 +32,13 @@ const Admin = {
     document.getElementById('sidebarEmail').textContent = user.email || '';
     document.getElementById('sidebarAvatar').textContent = initials;
 
-    this.mfa.bindUI();
-    await this.mfa.loadStatus();
+    // mfa hangt aan Admin via js/sections/settings.js, dat vóór dit
+    // DOMContentLoaded-moment geladen is. De guard is er voor het geval
+    // die sectie ooit niet meegeladen wordt.
+    if (this.mfa) {
+      this.mfa.bindUI();
+      await this.mfa.loadStatus();
+    }
     await this.loadDashboard();
   },
 
@@ -53,11 +58,16 @@ const Admin = {
     return this.formatDate(d);
   },
   badge(status) {
-    const map = { active: 'green', open: 'green', placed: 'blue',
+    const map = { active: 'green', open: 'green', placed: 'green',
       pending: 'blue', suspended: 'red', closed: 'red',
       draft: 'blue', admin: 'red', candidate: 'gold', client: 'blue',
       sent: 'green', rejected: 'default', failed: 'red',
-      published: 'green', archived: 'default' };
+      published: 'green', archived: 'default',
+      // Candidate pipeline statuses (WS2) — the raw values GET
+      // /v1/admin/candidates actually returns, not the old active/
+      // placed/inactive guess.
+      sourced: 'default', new: 'gold', contacted: 'blue', screening: 'gold',
+      inactive: 'default' };
     const colors = { green: 'bg-green-lt', blue: 'bg-blue-lt', gold: 'bg-yellow-lt', red: 'bg-red-lt', default: 'bg-secondary-lt' };
     return `badge ${colors[map[status?.toLowerCase()] || 'default']}`;
   },
@@ -68,19 +78,37 @@ const Admin = {
   esc(s) {
     return GSP.esc(s);
   },
+  // Eén normalisatie van een 4xx/5xx-`detail` (SITE-DESIGN-SPEC.md §7.2f
+  // punt 4). Nieuwe endpoints geven `detail` als object met `code` en
+  // `message`; oudere geven een gewone string, en die wordt hier een
+  // `message` met een lege `code`. Elk aanroeppunt vertakt daarna op
+  // `code` en valt terug op `message` -- nooit op de tekst zelf om te
+  // vertakken. Neem het hele responsobject mee (of alleen de detail);
+  // beide werken. Extra velden van het detailobject (`allowed`,
+  // `candidate_id`) blijven onder `extra` beschikbaar.
+  // De retentiesectie is de eerste afnemer; de andere secties migreren
+  // hier later naartoe.
+  errorDetail(payload) {
+    const d = (payload && typeof payload === 'object' && 'detail' in payload) ? payload.detail : payload;
+    if (typeof d === 'string') return { code: '', message: d, extra: {} };
+    if (d && typeof d === 'object' && !Array.isArray(d)) {
+      return { code: d.code || '', message: d.message || '', extra: d };
+    }
+    return { code: '', message: '', extra: {} };
+  },
   safeUrl(s) {
     return GSP.safeUrl(s);
   },
   setLoading(tbodyId, cols) {
     const el = document.querySelector(tbodyId);
-    mount(el, html`<tr><td colspan="${cols}" style="text-align:center;padding:2rem;color:var(--navy-300);">
+    mount(el, html`<tr><td colspan="${cols}" class="a-state-cell">
       <i class="fa-solid fa-spinner fa-spin"></i> Loading…</td></tr>`);
   },
   // msg is always a literal called by our own code (never API/user text),
   // so it is passed through raw() rather than escaped a second time.
   setEmpty(tbodyId, cols, msg = 'No results') {
     const el = document.querySelector(tbodyId);
-    mount(el, html`<tr><td colspan="${cols}" style="text-align:center;padding:2rem;color:var(--navy-300);">${raw(msg)}</td></tr>`);
+    mount(el, html`<tr><td colspan="${cols}" class="a-state-cell">${raw(msg)}</td></tr>`);
   },
   // Table-row error state with a retry link — replaces an infinite spinner
   // when a fetch fails or times out.
@@ -88,8 +116,8 @@ const Admin = {
     const el = document.querySelector(tbodyId);
     if (!el) return;
     const id = '_retry_' + Math.random().toString(36).slice(2, 9);
-    mount(el, html`<tr><td colspan="${cols}" style="text-align:center;padding:2rem;color:var(--navy-300);">
-      <i class="fa-solid fa-triangle-exclamation"></i> Kon niet laden — <a href="#" id="${id}">probeer opnieuw</a>
+    mount(el, html`<tr><td colspan="${cols}" class="a-state-cell">
+      <i class="fa-solid fa-triangle-exclamation"></i> Kon niet laden, <a href="#" id="${id}">probeer opnieuw</a>
     </td></tr>`);
     document.getElementById(id)?.addEventListener('click', (e) => { e.preventDefault(); if (typeof retryFn === 'function') retryFn(); });
   },
@@ -97,8 +125,8 @@ const Admin = {
   setContainerLoadError(el, retryFn) {
     if (!el) return;
     const id = '_retry_' + Math.random().toString(36).slice(2, 9);
-    mount(el, html`<div style="color:var(--navy-300);font-size:var(--font-size-sm);padding:1rem 0;">
-      <i class="fa-solid fa-triangle-exclamation"></i> Kon niet laden — <a href="#" id="${id}">probeer opnieuw</a>
+    mount(el, html`<div class="a-state-block">
+      <i class="fa-solid fa-triangle-exclamation"></i> Kon niet laden, <a href="#" id="${id}">probeer opnieuw</a>
     </div>`);
     document.getElementById(id)?.addEventListener('click', (e) => { e.preventDefault(); if (typeof retryFn === 'function') retryFn(); });
   },
@@ -108,10 +136,17 @@ const Admin = {
      ============================================================ */
   async loadDashboard() {
     try {
-      const [dashRes, recentRes] = await Promise.all([
+      const [dashRes, recentRes, healthRes] = await Promise.all([
         Auth.fetch('/v1/admin/dashboard'),
         Auth.fetch('/v1/admin/audit-log?limit=8'),
+        Auth.fetch('/v1/admin/health'),
       ]);
+
+      if (healthRes?.ok) {
+        this.renderHealthCard(await healthRes.json());
+      } else {
+        this.setContainerLoadError(document.getElementById('healthCardBody'), () => this.loadDashboard());
+      }
 
       if (dashRes?.ok) {
         const d = await dashRes.json();
@@ -151,7 +186,46 @@ const Admin = {
       this.setContainerLoadError(document.getElementById('recentActivityList'), () => this.loadDashboard());
       this.setContainerLoadError(document.getElementById('pendingRegistrationsList'), () => this.loadDashboard());
       this.setContainerLoadError(document.getElementById('newRegistrationsList'), () => this.loadDashboard());
+      this.setContainerLoadError(document.getElementById('healthCardBody'), () => this.loadDashboard());
     }
+  },
+
+  // WS5 §7.3.6(d): GET /api/v1/admin/health -> vier regels met statusstip.
+  // duplicate_profile_links is de reden dat de kaart bestaat (hoort altijd
+  // 0 te zijn); boven 0 wordt de hele kaart een inline-melding van het
+  // type fout in plaats van de vierregelige lijst. candidates_count en
+  // open_jobs uit dezelfde respons komen hier niet terug -- die staan al
+  // in de KPI-rij (§7.3.6(d), laatste zin).
+  renderHealthCard(h) {
+    const el = document.getElementById('healthCardBody');
+    if (!el) return;
+    const dup = h.duplicate_profile_links;
+
+    if (typeof dup === 'number' && dup > 0) {
+      mount(el, html`
+        <div class="alert alert-danger mb-0" role="alert">
+          <i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i>
+          <span>${dup} dubbele profielkoppelingen. Dit hoort 0 te zijn.</span>
+          <div class="mt-2">
+            <button type="button" class="btn btn-sm btn-outline-secondary" data-action="navigate" data-section="candidates">Kandidaten openen</button>
+          </div>
+        </div>`);
+      return;
+    }
+
+    const dot = (ok) => raw(`<span class="status-dot ${ok ? 'bg-success' : 'bg-danger'} me-2" aria-hidden="true"></span>`);
+    const dbOk = h.database === 'connected';
+    const orOk = h.openrouter === 'configured';
+    const apOk = h.apollo === 'configured';
+    const dupLine = dup === 0
+      ? html`<span class="status-dot bg-success me-2" aria-hidden="true"></span><span><span class="a-num">0</span> dubbele profielkoppelingen</span>`
+      : html`<span class="status-dot bg-secondary me-2" aria-hidden="true"></span><span class="a-soft">Onbekend</span>`;
+
+    mount(el, html`
+      <div class="d-flex align-items-center mb-2">${dot(dbOk)}<span>Database: ${raw(dbOk ? 'verbonden' : 'niet verbonden')}</span></div>
+      <div class="d-flex align-items-center mb-2">${dot(orOk)}<span>OpenRouter: ${raw(orOk ? 'geconfigureerd' : 'niet geconfigureerd')}</span></div>
+      <div class="d-flex align-items-center mb-2">${dot(apOk)}<span>Apollo: ${raw(apOk ? 'geconfigureerd' : 'niet geconfigureerd')}</span></div>
+      <div class="d-flex align-items-center">${dupLine}</div>`);
   },
 
   renderNewRegistrations(items) {
@@ -160,23 +234,23 @@ const Admin = {
     if (badge) badge.textContent = items.length || '0';
     if (!el) return;
     if (!items.length) {
-      mount(el, html`<div style="color:var(--navy-300);font-size:var(--font-size-sm);padding:0.5rem 0;">
+      mount(el, html`<div class="a-state-block">
         Nog geen zelf geregistreerde kandidaten. Nieuwe registraties via het kandidatenportaal verschijnen hier automatisch.
       </div>`);
       return;
     }
     mount(el, html`${items.map(c => html`
       <div class="activity-item">
-        <div class="activity-icon" style="background:rgba(74,222,128,0.12);color:#4ade80;"><i class="fa-solid fa-user-plus"></i></div>
-        <div class="activity-content" style="flex:1;min-width:0;">
-          <div class="activity-text" style="font-weight:500;color:var(--white);">
+        <div class="activity-icon activity-icon--positive"><i class="fa-solid fa-user-plus"></i></div>
+        <div class="activity-content a-truncate-col">
+          <div class="activity-text a-cell-strong fw-medium">
             ${c.full_name || c.email || 'Onbekend'}
-            ${c.is_verified ? raw('<i class="fa-regular fa-circle-check ms-1" style="color:#4ade80;" title="Geverifieerd"></i>') : ''}
+            ${c.is_verified ? raw('<i class="fa-regular fa-circle-check ms-1 text-success-ink" title="Geverifieerd"></i>') : ''}
           </div>
-          <div class="activity-text" style="color:var(--navy-300);">${c.current_title || '—'}${c.location ? ' · ' + c.location : ''}</div>
+          <div class="activity-text a-soft">${c.current_title || '—'}${c.location ? ' · ' + c.location : ''}</div>
           <div class="activity-time">${this.timeAgo(c.created_at)}</div>
         </div>
-        <button class="btn btn-sm btn-ghost-secondary" data-action="view-candidate" data-kind="self-registered" data-id="${c.user_id ?? c.id}" style="flex-shrink:0;" title="Profiel bekijken">
+        <button class="btn btn-sm btn-ghost-secondary flex-shrink-0" data-action="view-candidate" data-kind="self-registered" data-id="${c.user_id ?? c.id}" title="Profiel bekijken">
           <i class="fa-regular fa-eye"></i>
         </button>
       </div>`)}`);
@@ -185,20 +259,23 @@ const Admin = {
   renderRecentActivity(items) {
     const el = document.getElementById('recentActivityList');
     if (!el) return;
-    if (!items.length) { mount(el, html`<div style="color:var(--navy-300);font-size:var(--font-size-sm);padding:1rem 0;">Nog geen activiteit.</div>`); return; }
+    if (!items.length) { mount(el, html`<div class="a-state-block">Nog geen activiteit.</div>`); return; }
     const icons = { user_update: 'fa-user-pen', user_delete: 'fa-user-xmark', impersonate: 'fa-mask',
       job_update: 'fa-briefcase', content_update: 'fa-newspaper', settings_update: 'fa-gear',
       placement: 'fa-calendar-check' };
-    mount(el, html`${items.map(e => html`
+    mount(el, html`${items.map(e => {
+      const changeKeys = (e.changes && typeof e.changes === 'object') ? Object.keys(e.changes).slice(0, 2) : [];
+      return html`
       <div class="activity-item">
-        <div class="activity-icon" style="background:rgba(250,200,0,0.1);color:var(--gold-400);">
+        <div class="activity-icon activity-icon--gold">
           <i class="fa-regular ${icons[e.action] || 'fa-circle-dot'}"></i>
         </div>
-        <div class="activity-content" style="flex:1;">
-          <div class="activity-text">${e.action?.replace(/_/g, ' ')} <span style="color:var(--navy-300);">by ${e.actor_email || 'system'}</span></div>
+        <div class="activity-content flex-fill">
+          <div class="activity-text">${e.action?.replace(/_/g, ' ')} <span class="a-soft">by ${e.actor_email || 'system'}</span>${changeKeys.length ? html` <span class="a-soft">(${changeKeys.join(', ')})</span>` : ''}</div>
           <div class="activity-time">${this.timeAgo(e.created_at)}</div>
         </div>
-      </div>`)}`);
+      </div>`;
+    })}`);
   },
 
   renderPendingRegistrations(items) {
@@ -206,15 +283,15 @@ const Admin = {
     const badge = document.getElementById('pendingBadge');
     if (badge) badge.textContent = items.length || '0';
     if (!el) return;
-    if (!items.length) { mount(el, html`<div style="color:var(--navy-300);font-size:var(--font-size-sm);padding:0.5rem 0;">Geen openstaande verificaties.</div>`); return; }
+    if (!items.length) { mount(el, html`<div class="a-state-block">Geen openstaande verificaties.</div>`); return; }
     mount(el, html`${items.map(u => html`
       <div class="activity-item">
-        <div class="activity-icon" style="background:rgba(250,200,0,0.1);color:var(--gold-500);"><i class="fa-solid fa-user-plus"></i></div>
-        <div class="activity-content" style="flex:1;">
-          <div class="activity-text">${u.full_name || u.email} — <span style="color:var(--gold-400);">${u.role}</span></div>
+        <div class="activity-icon activity-icon--gold"><i class="fa-solid fa-user-plus"></i></div>
+        <div class="activity-content flex-fill">
+          <div class="activity-text">${u.full_name || u.email} — <span class="a-accent">${u.role}</span></div>
           <div class="activity-time">${this.timeAgo(u.created_at)}</div>
         </div>
-        <button class="btn btn-sm btn-primary" data-action="verify-user" data-id="${u.id}" style="flex-shrink:0;">Verify</button>
+        <button class="btn btn-sm btn-primary flex-shrink-0" data-action="verify-user" data-id="${u.id}">Verify</button>
       </div>`)}`);
   },
 
@@ -237,1742 +314,49 @@ const Admin = {
       }
     } catch { Auth.toast('Network error', 'error'); if (btn) { btn.disabled = false; btn.textContent = 'Verify'; } }
   },
-
-  /* ============================================================
-     USERS
-     ============================================================ */
-  async loadUsers(params = {}) {
-    this._lastParams.users = params;
-    const qs = new URLSearchParams();
-    const limit = this._pageSize;
-    const offset = ((this._currentPage.users || 1) - 1) * limit;
-    if (params.role) qs.set('role', params.role);
-    if (params.status) qs.set('status', params.status);
-    if (params.search) qs.set('search', params.search);
-    qs.set('limit', limit);
-    qs.set('offset', offset);
-
-    this.setLoading('#section-users table tbody', 6);
-    try {
-      const res = await Auth.fetch(`/v1/admin/users?${qs}`);
-      if (!res) return;
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.detail);
-      this._data.users = data;
-      this.renderUsers(data);
-      this.renderPagination('usersPagination', data.total, limit, this._currentPage.users, 'users');
-    } catch (err) {
-      this.setEmpty('#section-users table tbody', 6, 'Failed to load users');
-      console.error(err);
-    }
-  },
-
-  renderUsers(data) {
-    const tbody = document.querySelector('#section-users table tbody');
-    if (!tbody) return;
-    const items = data.items || [];
-    if (!items.length) { this.setEmpty('#section-users table tbody', 6, 'Geen gebruikers gevonden voor deze filters.'); return; }
-    mount(tbody, html`${items.map(u => html`
-      <tr>
-        <td style="font-weight:600;color:var(--white);">${u.full_name || '—'}</td>
-        <td style="color:var(--navy-200);font-size:var(--font-size-xs);">${u.email}</td>
-        <td><span class="${this.badge(u.role)}">${u.role}</span></td>
-        <td><span class="${u.is_verified ? 'badge bg-green-lt' : 'badge bg-blue-lt'}">${u.is_verified ? 'Verified' : 'Pending'}</span></td>
-        <td style="font-size:var(--font-size-xs);color:var(--navy-300);">${this.timeAgo(u.created_at)}</td>
-        <td>
-          <div class="action-menu-wrap" style="position:relative;">
-            <button class="btn btn-sm btn-ghost-secondary" data-action="toggle-user-menu" data-id="${u.id}">
-              <i class="fa-solid fa-ellipsis-vertical"></i>
-            </button>
-            <div class="action-menu" id="user-menu-${u.id}" style="display:none;">
-              ${!u.is_verified ? html`<button data-action="verify-user" data-id="${u.id}"><i class="fa-regular fa-circle-check"></i> Verify</button>` : ''}
-              <button data-action="edit-user" data-id="${u.id}"><i class="fa-solid fa-pen"></i> Edit Role</button>
-              <button data-action="impersonate-user" data-id="${u.id}" data-email="${u.email}"><i class="fa-solid fa-mask"></i> Impersonate</button>
-              <button data-action="delete-user" data-id="${u.id}" data-email="${u.email}" style="color:#f87171;"><i class="fa-solid fa-trash"></i> Delete</button>
-            </div>
-          </div>
-        </td>
-      </tr>`)}`);
-  },
-
-  toggleUserMenu(id) {
-    // Fires from the delegated data-action click listener (bound after the
-    // document-level closeMenus() listener in bindUI()), so closeMenus() has
-    // already run for this same click by the time we get here -- no need
-    // for stopPropagation() to race a separate document click handler the
-    // way the old inline onclick= version did.
-    this.closeMenus();
-    const menu = document.getElementById(`user-menu-${id}`);
-    if (menu) menu.style.display = 'block';
-  },
   closeMenus() {
     document.querySelectorAll('.action-menu').forEach(m => m.style.display = 'none');
   },
 
-  openEditUserModal(userId) {
-    const user = (this._data.users?.items || []).find(u => u.id === userId);
-    if (!user) return;
-    this.openModal('editUserModal', html`
-      <h3 style="color:var(--white);margin-bottom:var(--space-lg);">Edit User: ${user.full_name || user.email}</h3>
-      <div class="form-group">
-        <label>Full Name</label>
-        <input type="text" id="editUserName" value="${user.full_name || ''}">
-      </div>
-      <div class="form-group">
-        <label>Role</label>
-        <select id="editUserRole">
-          <option value="candidate" ${raw(user.role === 'candidate' ? 'selected' : '')}>Candidate</option>
-          <option value="client" ${raw(user.role === 'client' ? 'selected' : '')}>Client</option>
-          <option value="admin" ${raw(user.role === 'admin' ? 'selected' : '')}>Admin</option>
-        </select>
-      </div>
-      <div class="form-group">
-        <label>Verified</label>
-        <select id="editUserVerified">
-          <option value="true" ${raw(user.is_verified ? 'selected' : '')}>Yes</option>
-          <option value="false" ${raw(!user.is_verified ? 'selected' : '')}>No</option>
-        </select>
-      </div>
-      <div style="display:flex;gap:var(--space-md);margin-top:var(--space-lg);">
-        <button class="btn btn-primary" data-action="save-user-edit" data-id="${userId}">Save Changes</button>
-        <button class="btn btn-ghost-secondary" data-action="close-modal">Cancel</button>
-      </div>
-    `);
-  },
-
-  async saveUserEdit(userId) {
-    const name = document.getElementById('editUserName')?.value?.trim();
-    const role = document.getElementById('editUserRole')?.value;
-    const verified = document.getElementById('editUserVerified')?.value === 'true';
-    const payload = {};
-    if (name) payload.full_name = name;
-    if (role) payload.role = role;
-    payload.is_verified = verified;
-
-    try {
-      const res = await Auth.fetch(`/v1/admin/users/${userId}`, {
-        method: 'PUT', body: JSON.stringify(payload),
-      });
-      if (res?.ok) {
-        Auth.toast('User updated', 'success');
-        this.closeModal();
-        await this.loadUsers();
-      } else {
-        const d = await res?.json();
-        Auth.toast(d?.detail || 'Update failed', 'error');
-      }
-    } catch { Auth.toast('Network error', 'error'); }
-  },
-
-  async impersonateUser(userId, email) {
-    if (!confirm(`Impersonate ${email}? You will get a 15-minute session token as this user.`)) return;
-    try {
-      const res = await Auth.fetch(`/v1/admin/users/${userId}/impersonate`, { method: 'POST' });
-      if (!res?.ok) { Auth.toast('Impersonation failed', 'error'); return; }
-      const data = await res.json();
-      const user = data.user;
-      // WS-B.2: park the admin's own token/user first so it's never left
-      // sitting in the normal (impersonated-session) token slot -- see
-      // Auth.startImpersonation() / restoreAdmin() in auth.js.
-      Auth.startImpersonation(data.access_token, user);
-      const dest = user.role === 'candidate' ? '/candidate/' : user.role === 'client' ? '/client/' : '/admin/';
-      window.location.href = dest;
-    } catch { Auth.toast('Network error', 'error'); }
-  },
-
-  confirmDeleteUser(userId, email) {
-    if (!confirm(`Permanently delete ${email}? This cannot be undone.`)) return;
-    this.deleteUser(userId, email);
-  },
-
-  async deleteUser(userId, email) {
-    try {
-      const res = await Auth.fetch(`/v1/admin/users/${userId}`, { method: 'DELETE' });
-      if (res?.ok) {
-        Auth.toast(`${email} deleted`, 'success');
-        await this.loadUsers();
-        await this.loadDashboard();
-      } else {
-        const d = await res?.json();
-        Auth.toast(d?.detail || 'Delete failed', 'error');
-      }
-    } catch { Auth.toast('Network error', 'error'); }
-  },
-
   /* ============================================================
-     JOBS
+     SECTIEREGISTRY
+
+     Elke sectiemodule (js/sections/*.js) roept registerSection() aan met:
+       id            de hash en het id-achtervoegsel van <section id="section-X">
+       title          de kop boven het paneel
+       loader         () => Promise, wordt eenmalig aangeroepen bij het
+                      eerste bezoek aan de sectie (nav.js cachet dat en
+                      ontcachet weer als de promise afwijst)
+       skeletonHtml   optioneel: () => html`` dat bij registratie in
+                      <section id="section-X"> wordt gezet. Secties die hun
+                      markup in index.html houden laten dit weg.
+       filters        lijst van { selector, event, debounce?, handler(el, e) }
+                      die nav.js precies één keer bindt -- filterbinding zat
+                      hiervoor verspreid over nav.js en admin.js
+       actions        map van data-action-waarde naar (el, e) => ..., voor de
+                      ene gedelegeerde click-listener hieronder
      ============================================================ */
-  async loadJobs(params = {}) {
-    this._lastParams.jobs = params;
-    const qs = new URLSearchParams();
-    const limit = this._pageSize;
-    const offset = ((this._currentPage.jobs || 1) - 1) * limit;
-    if (params.status) qs.set('status', params.status);
-    if (params.search) qs.set('search', params.search);
-    qs.set('limit', limit);
-    qs.set('offset', offset);
+  _sections: {},
+  _sectionOrder: [],
+  _actions: {},
 
-    this.setLoading('#section-jobs table tbody', 5);
-    try {
-      const res = await Auth.fetch(`/v1/admin/jobs?${qs}`);
-      if (!res) return;
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.detail);
-      this._data.jobs = data;
-      this.renderJobs(data);
-      this.renderPagination('jobsPagination', data.total, limit, this._currentPage.jobs, 'jobs');
-    } catch (err) {
-      this.setEmpty('#section-jobs table tbody', 5, 'Failed to load jobs');
+  registerSection(def) {
+    if (!def || !def.id) return null;
+    if (!this._sections[def.id]) this._sectionOrder.push(def.id);
+    this._sections[def.id] = def;
+    if (def.actions) this.registerActions(def.actions);
+    if (typeof def.skeletonHtml === 'function') {
+      mount(document.getElementById('section-' + def.id), def.skeletonHtml());
     }
+    return def;
   },
 
-  renderJobs(data) {
-    const tbody = document.querySelector('#section-jobs table tbody');
-    if (!tbody) return;
-    const items = data.items || [];
-    if (!items.length) { this.setEmpty('#section-jobs table tbody', 5, 'Nog geen vacatures. Vacatures die klanten aanleveren verschijnen hier voor goedkeuring.'); return; }
-    mount(tbody, html`${items.map(j => html`
-      <tr>
-        <td style="font-weight:600;color:var(--white);">${j.title || 'Untitled'}</td>
-        <td style="color:var(--navy-200);">${j.company_name || '—'}</td>
-        <td style="text-align:center;">${j.application_count ?? '—'}</td>
-        <td><span class="${this.badge(j.status)}">${j.status || 'draft'}</span></td>
-        <td>
-          ${(j.status === 'draft' || j.status === 'pending') ? html`
-            <button class="btn btn-sm btn-primary" data-action="set-job-status" data-id="${j.id}" data-status="open" title="Approve">
-              <i class="fa-regular fa-circle-check"></i> Approve
-            </button>` : ''}
-          ${j.status === 'open' ? html`
-            <button class="btn btn-sm btn-ghost-secondary" data-action="set-job-status" data-id="${j.id}" data-status="closed" title="Close" style="color:#f87171;">
-              <i class="fa-solid fa-xmark"></i> Close
-            </button>` : ''}
-          <button class="btn btn-sm btn-ghost-secondary" data-action="confirm-delete-job" data-id="${j.id}" title="Delete" style="color:#f87171;">
-            <i class="fa-solid fa-trash"></i>
-          </button>
-        </td>
-      </tr>`)}`);
+  registerActions(map) {
+    Object.assign(this._actions, map || {});
   },
 
-  async setJobStatus(jobId, status) {
-    try {
-      const res = await Auth.fetch(`/v1/admin/jobs/${jobId}`, {
-        method: 'PUT', body: JSON.stringify({ status }),
-      });
-      if (res?.ok) {
-        Auth.toast(`Job ${status === 'open' ? 'approved' : 'closed'}`, 'success');
-        await this.loadJobs(this._lastParams.jobs || {});
-      } else {
-        const d = await res?.json();
-        Auth.toast(d?.detail || 'Update failed', 'error');
-      }
-    } catch { Auth.toast('Network error', 'error'); }
-  },
-
-  confirmDeleteJob(jobId) {
-    if (!confirm('Delete this job? This action cannot be undone.')) return;
-    this.deleteJob(jobId);
-  },
-
-  async deleteJob(jobId) {
-    try {
-      const res = await Auth.fetch(`/v1/admin/jobs/${jobId}`, { method: 'DELETE' });
-      // Only a real 2xx counts as success -- a 404 (job already gone, or
-      // never existed) is an error the operator needs to see, not a
-      // silent success (this used to also accept status===404 as OK).
-      if (res?.ok) {
-        Auth.toast('Job deleted', 'success');
-        await this.loadJobs(this._lastParams.jobs || {});
-      } else {
-        const d = await res?.json().catch(() => null);
-        Auth.toast(d?.detail || 'Delete failed', 'error');
-      }
-    } catch { Auth.toast('Network error', 'error'); }
-  },
-
-  /* ---- "Nieuwe vacature" (WS-B.2) ----
-     Lets an admin record a job on a client's behalf -- e.g. a telephone
-     assignment -- without the client needing a portal login. The client
-     picker reads GET /v1/admin/clients (routers/clients_admin.py) --
-     every client row, one call, not scoped to accounts with a portal
-     login the way /users?role=client was. Cached in
-     this._data.clientOptions so reopening the modal doesn't re-fetch. */
-  async fetchClientOptions(force = false) {
-    if (!force && this._data.clientOptions) return this._data.clientOptions;
-    try {
-      const res = await Auth.fetch('/v1/admin/clients?limit=200');
-      if (!res?.ok) return this._data.clientOptions || [];
-      const data = await res.json();
-      this._data.clientOptions = (data.items || []).map(c => ({ id: c.id, company_name: c.company_name || 'Onbekend' }));
-    } catch {
-      this._data.clientOptions = this._data.clientOptions || [];
-    }
-    return this._data.clientOptions;
-  },
-
-  async openNewJobModal() {
-    const clients = await this.fetchClientOptions();
-    this.openModal('newJobModal', html`
-      <h3 style="color:var(--white);margin-bottom:var(--space-lg);">Nieuwe vacature</h3>
-      ${!clients.length ? html`
-        <div class="alert alert-warning" role="alert">Nog geen opdrachtgevers met een portal-account gevonden.</div>
-      ` : ''}
-      <div class="form-group">
-        <label>Opdrachtgever</label>
-        <select id="newJobClient" ${raw(!clients.length ? 'disabled' : '')}>
-          ${clients.map(c => html`<option value="${c.id}">${c.company_name}</option>`)}
-        </select>
-      </div>
-      <div class="form-group">
-        <label>Functietitel</label>
-        <input type="text" id="newJobTitle" placeholder="Bijv. Embedded software engineer">
-      </div>
-      <div class="form-group">
-        <label>Afdeling</label>
-        <input type="text" id="newJobDepartment">
-      </div>
-      <div class="form-group">
-        <label>Senioriteit</label>
-        <input type="text" id="newJobSeniority" placeholder="Bijv. medior">
-      </div>
-      <div class="form-group">
-        <label>Standplaats</label>
-        <input type="text" id="newJobCity">
-      </div>
-      <div class="form-group">
-        <label>Dienstverband</label>
-        <select id="newJobEmploymentType">
-          <option value="">— Kies —</option>
-          <option value="vast">Vast (werving en selectie)</option>
-          <option value="detachering">Detachering</option>
-          <option value="interim">Interim</option>
-        </select>
-      </div>
-      <div style="display:flex;gap:var(--space-md);">
-        <div class="form-group" style="flex:1;">
-          <label>Salaris min (EUR/mnd)</label>
-          <input type="number" id="newJobSalaryMin">
-        </div>
-        <div class="form-group" style="flex:1;">
-          <label>Salaris max (EUR/mnd)</label>
-          <input type="number" id="newJobSalaryMax">
-        </div>
-      </div>
-      <div class="form-group">
-        <label>Omschrijving</label>
-        <textarea id="newJobDescription" rows="4" style="width:100%;background:rgba(6,13,26,0.6);border:1px solid rgba(74,111,159,0.3);border-radius:var(--radius-md);color:var(--white);padding:0.75rem;font-family:var(--font-primary);font-size:var(--font-size-sm);resize:vertical;box-sizing:border-box;"></textarea>
-      </div>
-      <div class="form-group">
-        <label>Eisen</label>
-        <textarea id="newJobRequirements" rows="3" style="width:100%;background:rgba(6,13,26,0.6);border:1px solid rgba(74,111,159,0.3);border-radius:var(--radius-md);color:var(--white);padding:0.75rem;font-family:var(--font-primary);font-size:var(--font-size-sm);resize:vertical;box-sizing:border-box;"></textarea>
-      </div>
-      <div class="form-group">
-        <label style="display:flex;align-items:center;gap:0.5rem;font-weight:normal;">
-          <input type="checkbox" id="newJobSponsorship"> Sponsoring kennismigrant mogelijk
-        </label>
-      </div>
-      <div style="display:flex;gap:var(--space-md);margin-top:var(--space-lg);">
-        <button class="btn btn-primary" data-action="save-new-job" ${raw(!clients.length ? 'disabled' : '')}>Vacature aanmaken</button>
-        <button class="btn btn-ghost-secondary" data-action="close-modal">Annuleren</button>
-      </div>
-    `);
-  },
-
-  async saveNewJob() {
-    const clientId = Number(document.getElementById('newJobClient')?.value);
-    const title = document.getElementById('newJobTitle')?.value?.trim();
-    if (!clientId) { Auth.toast('Kies een opdrachtgever', 'error'); return; }
-    if (!title) { Auth.toast('Functietitel is verplicht', 'error'); return; }
-
-    const salaryMin = document.getElementById('newJobSalaryMin')?.value;
-    const salaryMax = document.getElementById('newJobSalaryMax')?.value;
-    const employmentType = document.getElementById('newJobEmploymentType')?.value;
-
-    const payload = {
-      client_id: clientId,
-      title,
-      department: document.getElementById('newJobDepartment')?.value?.trim() || null,
-      seniority: document.getElementById('newJobSeniority')?.value?.trim() || null,
-      city: document.getElementById('newJobCity')?.value?.trim() || null,
-      employment_type: employmentType || null,
-      salary_min: salaryMin ? Number(salaryMin) : null,
-      salary_max: salaryMax ? Number(salaryMax) : null,
-      description: document.getElementById('newJobDescription')?.value?.trim() || null,
-      requirements: document.getElementById('newJobRequirements')?.value?.trim() || null,
-      sponsorship_possible: !!document.getElementById('newJobSponsorship')?.checked,
-    };
-
-    try {
-      const res = await Auth.fetch('/v1/admin/jobs', { method: 'POST', body: JSON.stringify(payload) });
-      if (res?.ok) {
-        Auth.toast('Vacature aangemaakt', 'success');
-        this.closeModal();
-        this._currentPage.jobs = 1;
-        await this.loadJobs(this._lastParams.jobs || {});
-      } else {
-        const d = await res?.json().catch(() => null);
-        Auth.toast(d?.detail || 'Aanmaken mislukt', 'error');
-      }
-    } catch { Auth.toast('Netwerkfout', 'error'); }
-  },
-
-  /* ============================================================
-     CANDIDATES
-     ============================================================ */
-  async loadCandidates(params = {}) {
-    this._lastParams.candidates = params;
-    const qs = new URLSearchParams();
-    const limit = this._pageSize;
-    const offset = ((this._currentPage.candidates || 1) - 1) * limit;
-    if (params.search) qs.set('search', params.search);
-    if (params.status) qs.set('status', params.status);
-    if (params.kind) qs.set('kind', params.kind);
-    qs.set('limit', limit);
-    qs.set('offset', offset);
-
-    this.setLoading('#section-candidates table tbody', 8);
-    try {
-      const res = await Auth.fetch(`/v1/admin/candidates?${qs}`);
-      if (!res) return;
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.detail);
-      this._data.candidates = data;
-      this.renderCandidates(data);
-      this.renderPagination('candidatesPagination', data.total, limit, this._currentPage.candidates, 'candidates');
-    } catch (err) {
-      this.setLoadError('#section-candidates table tbody', 8, () => this.loadCandidates(params));
-    }
-  },
-
-  // "sourced" (blue) came in via our own search/outreach pipeline;
-  // "self-registered" (green) signed up on the candidate portal themselves.
-  kindBadge(kind) {
-    if (kind === 'self-registered') return { cls: 'badge bg-green-lt', label: 'Zelf geregistreerd' };
-    return { cls: 'badge bg-blue-lt', label: 'Gesourced' };
-  },
-
-  renderCandidates(data) {
-    const tbody = document.querySelector('#section-candidates table tbody');
-    if (!tbody) return;
-    const items = data.items || [];
-    if (!items.length) {
-      this.setEmpty('#section-candidates table tbody', 8,
-        'Geen kandidaten gevonden voor deze filters. Pas de zoekopdracht of het type-filter aan.');
-      return;
-    }
-    mount(tbody, html`${items.map(c => {
-      const kb = this.kindBadge(c.kind);
-      // A self-registered row without a resolved user_id (email-case edge) is
-      // really a candidates-table row: view it via the sourced detail path.
-      const effKind = (c.kind === 'self-registered' && c.user_id == null && c.candidate_id != null) ? 'sourced' : c.kind;
-      const itemId = effKind === 'self-registered' ? (c.user_id ?? c.id) : (c.candidate_id ?? c.id);
-      return html`
-      <tr>
-        <td style="font-weight:600;color:var(--white);">
-          ${c.full_name || '—'}
-          ${c.is_verified ? raw('<i class="fa-regular fa-circle-check ms-1" style="color:#4ade80;" title="Geverifieerd"></i>') : raw('<i class="fa-regular fa-circle ms-1" style="color:var(--navy-300);" title="Niet geverifieerd"></i>')}
-        </td>
-        <td style="color:var(--navy-200);font-size:var(--font-size-xs);">${c.email}</td>
-        <td>${c.current_title || '—'}</td>
-        <td style="text-align:center;">${c.years_experience ? c.years_experience + ' yrs' : '—'}</td>
-        <td style="text-align:center;">
-          <span title="Matches">${c.match_count ?? 0}</span>
-          ${c.placement_count ? html` / <span style="color:#4ade80;" title="Placed">${c.placement_count} placed</span>` : ''}
-        </td>
-        <td><span class="${kb.cls}" title="${c.source ? 'Bron: ' + c.source : ''}">${kb.label}</span></td>
-        <td>
-          <span class="${this.badge(c.status || 'active')}">${c.status || 'active'}</span>
-        </td>
-        <td>
-          <button class="btn btn-sm btn-ghost-secondary" data-action="view-candidate" data-kind="${effKind === 'self-registered' ? 'self-registered' : 'sourced'}" data-id="${itemId}" title="View profile">
-            <i class="fa-regular fa-eye"></i>
-          </button>
-        </td>
-      </tr>`;
-    })}`);
-  },
-
-  /* ---- Candidate detail modal (kind-aware) ---- */
-  async viewCandidate(kind, itemId) {
-    this.openModal('viewCandidateModal', html`
-      <div style="text-align:center;padding:2rem 0;color:var(--navy-300);">
-        <i class="fa-solid fa-spinner fa-spin"></i> Laden…
-      </div>`);
-    try {
-      const res = await Auth.fetch(`/v1/admin/candidates/${kind}/${itemId}`);
-      if (!res?.ok) {
-        const d = await res?.json().catch(() => null);
-        this.openModal('viewCandidateModal', html`
-          <h3 style="color:var(--white);margin-bottom:var(--space-md);">Kon profiel niet laden</h3>
-          <p style="color:var(--navy-300);">${d?.detail || 'Er ging iets mis bij het ophalen van dit profiel.'}</p>
-          <div style="display:flex;gap:var(--space-md);margin-top:var(--space-lg);">
-            <button class="btn btn-primary btn-sm" data-action="view-candidate" data-kind="${kind}" data-id="${itemId}">Opnieuw proberen</button>
-            <button class="btn btn-ghost-secondary btn-sm" data-action="close-modal">Sluiten</button>
-          </div>`);
-        return;
-      }
-      const detail = await res.json();
-      this.renderCandidateDetailModal(kind, itemId, detail);
-    } catch {
-      this.openModal('viewCandidateModal', html`
-        <h3 style="color:var(--white);margin-bottom:var(--space-md);">Netwerkfout</h3>
-        <p style="color:var(--navy-300);">Kon geen verbinding maken met de server.</p>
-        <div style="display:flex;gap:var(--space-md);margin-top:var(--space-lg);">
-          <button class="btn btn-primary btn-sm" data-action="view-candidate" data-kind="${kind}" data-id="${itemId}">Opnieuw proberen</button>
-          <button class="btn btn-ghost-secondary btn-sm" data-action="close-modal">Sluiten</button>
-        </div>`);
-    }
-  },
-
-  // The detail endpoint's exact response shape depends on kind (a user +
-  // candidate_profiles record for self-registered, a candidates row +
-  // linked user for sourced). Flatten every nested object we might get
-  // (user / profile / candidate_profile / candidate) onto one bag so the
-  // renderer below doesn't have to guess which container a field lives in.
-  _flattenDetail(detail) {
-    const merged = {};
-    const layer = (obj) => { if (obj && typeof obj === 'object') Object.assign(merged, obj); };
-    layer(detail);
-    layer(detail.user);
-    layer(detail.candidate);
-    layer(detail.candidate_profile);
-    layer(detail.profile);
-    return merged;
-  },
-
-  _pick(obj, ...keys) {
-    for (const k of keys) {
-      if (obj[k] !== undefined && obj[k] !== null && obj[k] !== '') return obj[k];
-    }
-    return null;
-  },
-
-  renderCandidateDetailModal(kind, itemId, detail) {
-    const d = this._flattenDetail(detail);
-    const p = this._pick.bind(this, d);
-
-    const fullName = p('full_name', 'name') || 'Onbekend';
-    const email = p('email');
-    const phone = p('phone', 'phone_number');
-    const linkedin = p('linkedin_url', 'linkedin');
-    const github = p('github_url', 'github');
-    const portfolio = p('portfolio_url', 'website_url', 'website', 'portfolio');
-    const skills = Array.isArray(d.skills) ? d.skills : (typeof d.skills === 'string' && d.skills ? d.skills.split(',').map(s => s.trim()) : []);
-    const languages = Array.isArray(d.languages) ? d.languages : (typeof d.languages === 'string' && d.languages ? d.languages.split(',').map(s => s.trim()) : []);
-    const salaryMin = p('salary_expectation_min', 'salary_min', 'desired_salary_min');
-    const salaryMax = p('salary_expectation_max', 'salary_max', 'desired_salary_max');
-    const salarySingle = p('salary_expectation', 'desired_salary');
-    const notice = p('notice_period_days', 'notice_period', 'notice_period_weeks');
-    const relocationRaw = this._pick(d, 'willing_to_relocate', 'relocation', 'relocation_willing', 'open_to_relocation');
-    const education = p('education', 'education_level');
-    const cvText = p('cv_text');
-    const cvFilePath = p('cv_file_path');
-    const kb = this.kindBadge(kind);
-
-    const chips = (arr, color) => arr.length
-      ? html`<div style="display:flex;flex-wrap:wrap;gap:6px;">${arr.map(s => html`<span class="badge" style="background:${color};color:var(--white);font-weight:500;">${s}</span>`)}</div>`
-      : html`<div style="color:var(--navy-300);">—</div>`;
-
-    const field = (label, value) => html`
-      <div><div style="font-size:var(--font-size-xs);color:var(--navy-300);margin-bottom:4px;">${label}</div><div>${value}</div></div>`;
-
-    let salaryDisplay = raw('—');
-    if (salaryMin || salaryMax) {
-      salaryDisplay = html`€${salaryMin ?? '?'} – €${salaryMax ?? '?'}`;
-    } else if (salarySingle) {
-      salaryDisplay = html`€${salarySingle}`;
-    }
-
-    let relocationDisplay = raw('—');
-    if (relocationRaw === true || relocationRaw === 'true' || relocationRaw === 'yes') relocationDisplay = raw('Ja');
-    else if (relocationRaw === false || relocationRaw === 'false' || relocationRaw === 'no') relocationDisplay = raw('Nee');
-    else if (relocationRaw) relocationDisplay = html`${relocationRaw}`;
-
-    const safeLinkedin = this.safeUrl(linkedin);
-    const safeGithub = this.safeUrl(github);
-    const safePortfolio = this.safeUrl(portfolio);
-    const contactLinks = raw([
-      email ? html`<a href="mailto:${email}" class="btn btn-sm btn-ghost-secondary"><i class="fa-regular fa-envelope me-1"></i>${email}</a>` : '',
-      safeLinkedin ? html`<a href="${safeLinkedin}" target="_blank" rel="noopener" class="btn btn-sm btn-ghost-secondary"><i class="fa-brands fa-linkedin me-1"></i>LinkedIn</a>` : '',
-      safeGithub ? html`<a href="${safeGithub}" target="_blank" rel="noopener" class="btn btn-sm btn-ghost-secondary"><i class="fa-brands fa-github me-1"></i>GitHub</a>` : '',
-      safePortfolio ? html`<a href="${safePortfolio}" target="_blank" rel="noopener" class="btn btn-sm btn-ghost-secondary"><i class="fa-solid fa-globe me-1"></i>Portfolio</a>` : '',
-    ].filter(Boolean));
-    const hasContactLinks = !!(email || safeLinkedin || safeGithub || safePortfolio);
-
-    this.openModal('viewCandidateModal', html`
-      <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:var(--space-md);margin-bottom:var(--space-md);">
-        <h3 style="color:var(--white);margin:0;">${fullName}</h3>
-        <span class="${kb.cls}">${kb.label}</span>
-      </div>
-      ${hasContactLinks ? html`<div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:var(--space-lg);">${contactLinks}</div>` : ''}
-
-      <div class="detail-grid">
-        ${field('Phone', phone || '—')}
-        ${field('Current Title', p('current_title') || '—')}
-        ${field('Company', p('current_company') || '—')}
-        ${field('Experience', p('years_experience') ? html`${p('years_experience')} years` : '—')}
-        ${field('Location', p('location') || '—')}
-        ${field('Source', p('source', 'candidate_source') || '—')}
-        ${field('Status', html`<span class="${this.badge(p('status') || p('candidate_status'))}">${p('status') || p('candidate_status') || (kind === 'self-registered' ? 'new' : 'active')}</span>`)}
-        ${field('Education', education || '—')}
-        ${field('Salary expectation', salaryDisplay)}
-        ${field('Notice period', notice ? html`${notice} days` : '—')}
-        ${field('Open to relocation', relocationDisplay)}
-        ${field('Registered', p('created_at') ? this.formatDate(p('created_at')) : '—')}
-      </div>
-
-      <div style="margin-bottom:var(--space-md);">
-        <div style="font-size:var(--font-size-xs);color:var(--navy-300);margin-bottom:6px;">Skills</div>
-        ${chips(skills, 'rgba(250,200,0,0.18)')}
-      </div>
-      <div style="margin-bottom:var(--space-lg);">
-        <div style="font-size:var(--font-size-xs);color:var(--navy-300);margin-bottom:6px;">Languages</div>
-        ${chips(languages, 'rgba(74,111,159,0.25)')}
-      </div>
-
-      <div style="margin-bottom:var(--space-lg);padding:var(--space-md);background:rgba(74,111,159,0.08);border:1px solid rgba(74,111,159,0.18);border-radius:var(--radius-md);">
-        <div style="font-size:var(--font-size-xs);color:var(--navy-300);margin-bottom:6px;"><i class="fa-regular fa-file-lines me-1"></i>CV</div>
-        ${cvFilePath
-          ? html`<div style="color:#4ade80;"><i class="fa-regular fa-circle-check me-1"></i>CV geüpload</div>
-             <div style="font-size:var(--font-size-xs);color:var(--navy-300);margin-top:4px;">
-               Het bestand zelf is nog niet downloadbaar vanuit dit paneel — alleen via de geauthenticeerde kandidaatroute.
-             </div>`
-          : html`<div style="color:var(--navy-300);">Geen CV geüpload</div>`}
-        ${cvText ? html`
-          <div style="margin-top:10px;font-size:var(--font-size-xs);color:var(--navy-300);margin-bottom:4px;">Preview (tekst uit CV)</div>
-          <div style="max-height:160px;overflow-y:auto;font-size:var(--font-size-sm);color:var(--navy-100);white-space:pre-wrap;background:rgba(6,13,26,0.5);border-radius:var(--radius-sm);padding:10px;">${cvText.slice(0, 2000)}${cvText.length > 2000 ? '…' : ''}</div>
-        ` : ''}
-      </div>
-
-      <div style="display:flex;gap:var(--space-md);flex-wrap:wrap;margin-bottom:var(--space-lg);">
-        <div style="background:rgba(74,111,159,0.1);border:1px solid rgba(74,111,159,0.2);border-radius:var(--radius-md);padding:var(--space-md) var(--space-lg);text-align:center;flex:1;">
-          <div style="font-size:var(--font-size-xl);font-weight:700;color:var(--gold-500);">${p('match_count') ?? 0}</div>
-          <div style="font-size:var(--font-size-xs);color:var(--navy-300);">Matches</div>
-        </div>
-        <div style="background:rgba(74,111,159,0.1);border:1px solid rgba(74,111,159,0.2);border-radius:var(--radius-md);padding:var(--space-md) var(--space-lg);text-align:center;flex:1;">
-          <div style="font-size:var(--font-size-xl);font-weight:700;color:#4ade80;">${p('placement_count') ?? 0}</div>
-          <div style="font-size:var(--font-size-xs);color:var(--navy-300);">Placed</div>
-        </div>
-      </div>
-      <div style="display:flex;gap:var(--space-md);">
-        <button class="btn btn-ghost-secondary btn-sm" data-action="close-modal">Close</button>
-      </div>
-    `);
-  },
-
-  /* ============================================================
-     OUTREACH
-     ============================================================ */
-  async loadOutreach(params = {}) {
-    this._lastParams.outreach = params;
-    const qs = new URLSearchParams();
-    const limit = this._pageSize;
-    const offset = ((this._currentPage.outreach || 1) - 1) * limit;
-    const statusFilter = document.getElementById('outreachStatusFilter');
-    const status = params.status !== undefined ? params.status : statusFilter?.value;
-    if (status) qs.set('status', status);
-    qs.set('limit', limit);
-    qs.set('offset', offset);
-
-    this.setLoading('#section-outreach table tbody', 8);
-    try {
-      const res = await Auth.fetch(`/v1/admin/outreach/drafts?${qs}`);
-      if (!res) return;
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.detail);
-      this._data.outreach = data;
-      this.renderOutreach(data);
-      this.renderPagination('outreachPagination', data.total, limit, this._currentPage.outreach, 'outreach');
-    } catch (err) {
-      this.setEmpty('#section-outreach table tbody', 8, 'Failed to load outreach drafts');
-      console.error(err);
-    }
-  },
-
-  renderOutreach(data) {
-    const tbody = document.querySelector('#section-outreach table tbody');
-    if (!tbody) return;
-    const items = data.items || [];
-    if (!items.length) { this.setEmpty('#section-outreach table tbody', 8, 'Nog geen outreach-concepten. Start een sourcing- of drafting-run hierboven om concepten te genereren.'); return; }
-    mount(tbody, html`${items.map(d => html`
-      <tr>
-        <td style="color:var(--navy-200);font-size:var(--font-size-xs);">${d.target_name || d.target_email || '—'}</td>
-        <td style="color:var(--navy-200);">${d.company || '—'}</td>
-        <td style="color:var(--white);">${d.subject || '—'}</td>
-        <td><span class="${this.badge(d.target_type)}">${d.target_type}</span></td>
-        <td style="font-size:var(--font-size-xs);color:var(--navy-300);">${d.ai_model || '—'}</td>
-        <td style="font-size:var(--font-size-xs);color:var(--navy-300);">${this.timeAgo(d.created_at)}</td>
-        <td><span class="${this.badge(d.status)}">${d.status}</span></td>
-        <td>
-          <button class="btn btn-sm btn-ghost-secondary" data-action="open-draft-modal" data-id="${d.id}" title="Review">
-            <i class="fa-regular fa-eye"></i>
-          </button>
-          ${d.status === 'draft' ? html`
-            <button class="btn btn-sm btn-ghost-secondary" data-action="approve-draft" data-id="${d.id}" title="Approve &amp; send" style="color:#4ade80;">
-              <i class="fa-regular fa-paper-plane"></i>
-            </button>
-            <button class="btn btn-sm btn-ghost-secondary" data-action="reject-draft" data-id="${d.id}" title="Reject" style="color:#f87171;">
-              <i class="fa-solid fa-xmark"></i>
-            </button>` : ''}
-        </td>
-      </tr>`)}`);
-  },
-
-  openDraftModal(id) {
-    const d = (this._data.outreach?.items || []).find(x => x.id === id);
-    if (!d) return;
-    const editable = d.status === 'draft';
-    this.openModal('outreachDraftModal', html`
-      <h3 style="color:var(--white);margin-bottom:var(--space-lg);">Outreach Draft</h3>
-      <div class="detail-grid">
-        <div><div style="font-size:var(--font-size-xs);color:var(--navy-300);margin-bottom:4px;">To</div><div>${d.target_name || '—'} &lt;${d.target_email || ''}&gt;</div></div>
-        <div><div style="font-size:var(--font-size-xs);color:var(--navy-300);margin-bottom:4px;">Company</div><div>${d.company || '—'}</div></div>
-        <div><div style="font-size:var(--font-size-xs);color:var(--navy-300);margin-bottom:4px;">Type</div><div><span class="${this.badge(d.target_type)}">${d.target_type}</span></div></div>
-        <div><div style="font-size:var(--font-size-xs);color:var(--navy-300);margin-bottom:4px;">Status</div><div><span class="${this.badge(d.status)}">${d.status}</span></div></div>
-        <div><div style="font-size:var(--font-size-xs);color:var(--navy-300);margin-bottom:4px;">Channel</div><div>${d.channel || '—'}</div></div>
-        <div><div style="font-size:var(--font-size-xs);color:var(--navy-300);margin-bottom:4px;">Language</div><div>${d.language || '—'}</div></div>
-        <div><div style="font-size:var(--font-size-xs);color:var(--navy-300);margin-bottom:4px;">AI Model</div><div>${d.ai_model || '—'}</div></div>
-        <div><div style="font-size:var(--font-size-xs);color:var(--navy-300);margin-bottom:4px;">Created</div><div>${this.formatDate(d.created_at)}</div></div>
-      </div>
-      <div class="form-group">
-        <label>Subject</label>
-        <input type="text" id="draftSubject" value="${d.subject || ''}" ${raw(editable ? '' : 'disabled')}>
-      </div>
-      <div class="form-group">
-        <label>Body</label>
-        <textarea id="draftBody" rows="10" style="width:100%;background:rgba(6,13,26,0.6);border:1px solid rgba(74,111,159,0.3);border-radius:var(--radius-md);color:var(--white);padding:0.75rem;font-family:var(--font-primary);font-size:var(--font-size-sm);resize:vertical;box-sizing:border-box;" ${raw(editable ? '' : 'disabled')}>${d.body || ''}</textarea>
-      </div>
-      <div style="display:flex;gap:var(--space-md);margin-top:var(--space-lg);flex-wrap:wrap;">
-        ${editable ? html`
-          <button class="btn btn-ghost-secondary" data-action="save-draft" data-id="${d.id}"><i class="fa-regular fa-floppy-disk"></i> Save</button>
-          <button class="btn btn-primary" data-action="approve-draft" data-id="${d.id}"><i class="fa-regular fa-paper-plane"></i> Approve &amp; Send</button>
-          <button class="btn btn-ghost-secondary" data-action="reject-draft" data-id="${d.id}" style="color:#f87171;"><i class="fa-solid fa-xmark"></i> Reject</button>` : ''}
-        <button class="btn btn-ghost-secondary" data-action="close-modal">Close</button>
-      </div>
-    `);
-  },
-
-  async saveDraft(id) {
-    const subject = document.getElementById('draftSubject')?.value;
-    const body = document.getElementById('draftBody')?.value;
-    try {
-      const res = await Auth.fetch(`/v1/admin/outreach/drafts/${id}`, {
-        method: 'PUT', body: JSON.stringify({ subject, body }),
-      });
-      if (res?.ok) {
-        Auth.toast('Draft saved', 'success');
-        this.closeModal();
-        await this.loadOutreach();
-      } else {
-        const d = await res?.json();
-        Auth.toast(d?.detail || 'Save failed', 'error');
-      }
-    } catch { Auth.toast('Network error', 'error'); }
-  },
-
-  async approveDraft(id) {
-    const d = (this._data.outreach?.items || []).find(x => x.id === id);
-    const who = d?.target_email || 'this recipient';
-    if (!confirm(`Send this email to ${who}?`)) return;
-    try {
-      const res = await Auth.fetch(`/v1/admin/outreach/drafts/${id}/approve`, { method: 'POST' });
-      if (res?.ok) {
-        Auth.toast('Email sent', 'success');
-        this.closeModal();
-        await this.loadOutreach();
-      } else {
-        const data = await res?.json();
-        Auth.toast(data?.detail || 'Failed to send', 'error');
-      }
-    } catch { Auth.toast('Network error', 'error'); }
-  },
-
-  async rejectDraft(id) {
-    if (!confirm('Reject this draft?')) return;
-    try {
-      const res = await Auth.fetch(`/v1/admin/outreach/drafts/${id}/reject`, { method: 'POST' });
-      if (res?.ok) {
-        Auth.toast('Draft rejected', 'success');
-        this.closeModal();
-        await this.loadOutreach();
-      } else {
-        const data = await res?.json();
-        Auth.toast(data?.detail || 'Reject failed', 'error');
-      }
-    } catch { Auth.toast('Network error', 'error'); }
-  },
-
-  async runOutreachJob(name, btn) {
-    if (btn) { btn.disabled = true; btn.dataset.origText = btn.innerHTML; btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>'; }
-    try {
-      const res = await Auth.fetch(`/v1/admin/outreach/run/${name}`, { method: 'POST' });
-      if (res?.ok || res?.status === 202) {
-        Auth.toast('Job started — refresh in a minute', 'success');
-      } else {
-        const data = await res?.json();
-        Auth.toast(data?.detail || 'Failed to start job', 'error');
-      }
-    } catch { Auth.toast('Network error', 'error'); }
-    finally { if (btn) { btn.disabled = false; btn.innerHTML = btn.dataset.origText || btn.innerHTML; } }
-  },
-
-  /* ============================================================
-     BLOG
-     ============================================================ */
-  async loadBlog(params = {}) {
-    this._lastParams.blog = params;
-    const qs = new URLSearchParams();
-    const limit = this._pageSize;
-    const offset = ((this._currentPage.blog || 1) - 1) * limit;
-    const statusFilter = document.getElementById('blogStatusFilter');
-    const status = params.status !== undefined ? params.status : statusFilter?.value;
-    if (status) qs.set('status', status);
-    qs.set('limit', limit);
-    qs.set('offset', offset);
-
-    this.setLoading('#section-blog table tbody', 6);
-    try {
-      const res = await Auth.fetch(`/v1/admin/blog/?${qs}`);
-      if (!res) return;
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.detail);
-      this._data.blog = data;
-      this.renderBlog(data);
-      this.renderPagination('blogPagination', data.total, limit, this._currentPage.blog, 'blog');
-    } catch (err) {
-      this.setEmpty('#section-blog table tbody', 6, 'Failed to load blog posts');
-      console.error(err);
-    }
-  },
-
-  renderBlog(data) {
-    const tbody = document.querySelector('#section-blog table tbody');
-    if (!tbody) return;
-    const items = data.items || [];
-    if (!items.length) { this.setEmpty('#section-blog table tbody', 6, 'Nog geen blogposts. Klik op "New post" of "Draft new post (AI)" hierboven om te beginnen.'); return; }
-    mount(tbody, html`${items.map(p => {
-      const tags = Array.isArray(p.tags) ? p.tags.join(', ') : (p.tags || '—');
-      return html`
-      <tr>
-        <td style="font-weight:600;color:var(--white);">${p.title_nl || '—'}</td>
-        <td style="color:var(--navy-200);font-size:var(--font-size-xs);">${p.slug}</td>
-        <td style="color:var(--navy-200);font-size:var(--font-size-xs);">${tags}</td>
-        <td><span class="${this.badge(p.status)}">${p.status}</span></td>
-        <td style="font-size:var(--font-size-xs);color:var(--navy-300);">${p.published_at ? this.formatDate(p.published_at) : '—'}</td>
-        <td>
-          <button class="btn btn-sm btn-ghost-secondary" data-action="open-blog-modal" data-id="${p.id}" title="Edit">
-            <i class="fa-solid fa-pen"></i>
-          </button>
-          ${p.status === 'draft' ? html`
-            <button class="btn btn-sm btn-ghost-secondary" data-action="publish-blog-post" data-id="${p.id}" title="Publish" style="color:#4ade80;">
-              <i class="fa-regular fa-circle-check"></i>
-            </button>` : ''}
-          ${p.status === 'published' ? html`
-            <button class="btn btn-sm btn-ghost-secondary" data-action="archive-blog-post" data-id="${p.id}" title="Archive" style="color:#f87171;">
-              <i class="fa-solid fa-box-archive"></i>
-            </button>` : ''}
-        </td>
-      </tr>`;
-    })}`);
-  },
-
-  openBlogModal(id) {
-    const p = id ? (this._data.blog?.items || []).find(x => x.id === id) : null;
-    this.openModal('blogModal', html`
-      <h3 style="color:var(--white);margin-bottom:var(--space-lg);">${p ? 'Edit Post' : 'New Post'}</h3>
-      <div class="form-group">
-        <label>Slug</label>
-        <input type="text" id="blogSlug" value="${p?.slug || ''}">
-      </div>
-      <div class="form-group">
-        <label>Title (NL)</label>
-        <input type="text" id="blogTitleNl" value="${p?.title_nl || ''}">
-      </div>
-      <div class="form-group">
-        <label>Title (EN)</label>
-        <input type="text" id="blogTitleEn" value="${p?.title_en || ''}">
-      </div>
-      <div class="form-group">
-        <label>Excerpt (NL)</label>
-        <textarea id="blogExcerptNl" rows="3" style="width:100%;background:rgba(6,13,26,0.6);border:1px solid rgba(74,111,159,0.3);border-radius:var(--radius-md);color:var(--white);padding:0.75rem;font-family:var(--font-primary);font-size:var(--font-size-sm);resize:vertical;box-sizing:border-box;">${p?.excerpt_nl || ''}</textarea>
-      </div>
-      <div class="form-group">
-        <label>Excerpt (EN)</label>
-        <textarea id="blogExcerptEn" rows="3" style="width:100%;background:rgba(6,13,26,0.6);border:1px solid rgba(74,111,159,0.3);border-radius:var(--radius-md);color:var(--white);padding:0.75rem;font-family:var(--font-primary);font-size:var(--font-size-sm);resize:vertical;box-sizing:border-box;">${p?.excerpt_en || ''}</textarea>
-      </div>
-      <div class="form-group">
-        <label>Body HTML (NL)</label>
-        <textarea id="blogBodyNl" rows="10" style="width:100%;background:rgba(6,13,26,0.6);border:1px solid rgba(74,111,159,0.3);border-radius:var(--radius-md);color:var(--white);padding:0.75rem;font-family:var(--font-primary);font-size:var(--font-size-sm);resize:vertical;box-sizing:border-box;">${p?.body_nl || ''}</textarea>
-      </div>
-      <div class="form-group">
-        <label>Body HTML (EN)</label>
-        <textarea id="blogBodyEn" rows="10" style="width:100%;background:rgba(6,13,26,0.6);border:1px solid rgba(74,111,159,0.3);border-radius:var(--radius-md);color:var(--white);padding:0.75rem;font-family:var(--font-primary);font-size:var(--font-size-sm);resize:vertical;box-sizing:border-box;">${p?.body_en || ''}</textarea>
-      </div>
-      <div class="form-group">
-        <label>Tags (comma-separated)</label>
-        <input type="text" id="blogTags" value="${Array.isArray(p?.tags) ? p.tags.join(', ') : (p?.tags || '')}">
-      </div>
-      <div class="form-group">
-        <label>Read time (min)</label>
-        <input type="number" id="blogReadTime" value="${p?.read_time_min ?? ''}">
-      </div>
-      <div style="display:flex;gap:var(--space-md);margin-top:var(--space-lg);">
-        <button class="btn btn-primary" data-action="save-blog-post" data-id="${p ? p.id : ''}">Save</button>
-        <button class="btn btn-ghost-secondary" data-action="close-modal">Cancel</button>
-      </div>
-    `);
-  },
-
-  async saveBlogPost(id) {
-    const payload = {
-      slug: document.getElementById('blogSlug')?.value?.trim(),
-      title_nl: document.getElementById('blogTitleNl')?.value?.trim(),
-      title_en: document.getElementById('blogTitleEn')?.value?.trim(),
-      excerpt_nl: document.getElementById('blogExcerptNl')?.value,
-      excerpt_en: document.getElementById('blogExcerptEn')?.value,
-      body_nl: document.getElementById('blogBodyNl')?.value,
-      body_en: document.getElementById('blogBodyEn')?.value,
-      tags: (document.getElementById('blogTags')?.value || '').split(',').map(t => t.trim()).filter(Boolean),
-      read_time_min: parseInt(document.getElementById('blogReadTime')?.value, 10) || null,
-    };
-    try {
-      const res = id
-        ? await Auth.fetch(`/v1/admin/blog/${id}`, { method: 'PUT', body: JSON.stringify(payload) })
-        : await Auth.fetch(`/v1/admin/blog/`, { method: 'POST', body: JSON.stringify(payload) });
-      if (res?.ok) {
-        Auth.toast(id ? 'Post updated' : 'Post created', 'success');
-        this.closeModal();
-        await this.loadBlog();
-      } else {
-        const d = await res?.json();
-        Auth.toast(d?.detail || 'Save failed', 'error');
-      }
-    } catch { Auth.toast('Network error', 'error'); }
-  },
-
-  async publishBlogPost(id) {
-    if (!confirm('Publish this post? It will become visible on the public blog.')) return;
-    try {
-      const res = await Auth.fetch(`/v1/admin/blog/${id}/publish`, { method: 'POST' });
-      if (res?.ok) {
-        Auth.toast('Post published', 'success');
-        await this.loadBlog();
-      } else {
-        const d = await res?.json();
-        Auth.toast(d?.detail || 'Publish failed', 'error');
-      }
-    } catch { Auth.toast('Network error', 'error'); }
-  },
-
-  async archiveBlogPost(id) {
-    if (!confirm('Archive this post? It will be removed from the public blog.')) return;
-    try {
-      const res = await Auth.fetch(`/v1/admin/blog/${id}/archive`, { method: 'POST' });
-      if (res?.ok) {
-        Auth.toast('Post archived', 'success');
-        await this.loadBlog();
-      } else {
-        const d = await res?.json();
-        Auth.toast(d?.detail || 'Archive failed', 'error');
-      }
-    } catch { Auth.toast('Network error', 'error'); }
-  },
-
-  /* ============================================================
-     ANALYTICS
-     ============================================================ */
-  async loadAnalytics() {
-    const container = document.getElementById('analyticsContent');
-    if (container) container.innerHTML = '<div style="text-align:center;padding:3rem;color:var(--navy-300);"><i class="fa-solid fa-spinner fa-spin"></i> Loading analytics…</div>';
-    try {
-      const res = await Auth.fetch('/v1/admin/analytics');
-      if (!res?.ok) throw new Error('Failed');
-      const data = await res.json();
-      this._data.analytics = data;
-      this.renderAnalytics(data);
-    } catch {
-      if (container) container.innerHTML = '<div style="text-align:center;padding:3rem;color:#f87171;">Failed to load analytics</div>';
-    }
-  },
-
-  renderAnalytics(data) {
-    document.getElementById('kpiJobFillRate').textContent = (data.job_fill_rate ?? 0) + '%';
-    document.getElementById('kpiClientRetention').textContent = (data.client_retention_rate ?? 0) + '%';
-    document.getElementById('kpiCandidatePlacement').textContent = (data.candidate_satisfaction ?? 0) + '%';
-
-    const growthEl = document.getElementById('userGrowthChart');
-    if (growthEl && data.user_growth) {
-      const entries = Object.entries(data.user_growth).sort(([a], [b]) => a.localeCompare(b));
-      if (!entries.length) { growthEl.innerHTML = '<div style="color:var(--navy-300);font-size:var(--font-size-sm);">No data yet</div>'; return; }
-
-      if (window.ApexCharts) {
-        growthEl.innerHTML = '';
-        growthEl.style.display = '';
-        const labels = entries.map(([month]) => new Date(month).toLocaleDateString('en-GB', { month: 'short' }));
-        const values = entries.map(([, count]) => count);
-        if (this._growthChart) { this._growthChart.destroy(); this._growthChart = null; }
-        this._growthChart = new ApexCharts(growthEl, {
-          chart: { type: 'bar', height: 200, background: 'transparent', toolbar: { show: false } },
-          series: [{ name: 'Users', data: values }],
-          xaxis: { categories: labels, axisBorder: { show: false }, axisTicks: { show: false } },
-          colors: ['#E8B400'],
-          plotOptions: { bar: { borderRadius: 4, columnWidth: '55%' } },
-          dataLabels: { enabled: false },
-          grid: { borderColor: 'rgba(255,255,255,0.06)' },
-          theme: { mode: 'dark' },
-        });
-        this._growthChart.render();
-      } else {
-        const max = Math.max(...entries.map(([, v]) => v), 1);
-        mount(growthEl, html`<div style="display:flex;align-items:flex-end;gap:6px;height:120px;width:100%;">
-          ${entries.map(([month, count]) => {
-            const h = Math.round((count / max) * 110);
-            const label = new Date(month).toLocaleDateString('en-GB', { month: 'short' });
-            return html`<div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:4px;">
-              <div style="font-size:9px;color:var(--navy-300);">${count}</div>
-              <div style="width:100%;border-radius:4px 4px 0 0;background:var(--gold-gradient);height:${h}px;"></div>
-              <div style="font-size:9px;color:var(--navy-300);">${label}</div>
-            </div>`;
-          })}
-        </div>`);
-      }
-    }
-  },
-
-  /* ============================================================
-     AUDIT LOG
-     ============================================================ */
-  async loadAuditLog(params = {}) {
-    this._lastParams.audit = params;
-    const qs = new URLSearchParams();
-    const limit = this._pageSize;
-    const offset = ((this._currentPage.audit || 1) - 1) * limit;
-    if (params.action) qs.set('action', params.action);
-    qs.set('limit', limit);
-    qs.set('offset', offset);
-
-    this.setLoading('#section-audit table tbody', 4);
-    try {
-      const res = await Auth.fetch(`/v1/admin/audit-log?${qs}`);
-      if (!res) return;
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.detail);
-      this._data.audit = data;
-      this.renderAuditLog(data);
-      this.renderPagination('auditPagination', data.total, limit, this._currentPage.audit, 'audit');
-    } catch {
-      this.setEmpty('#section-audit table tbody', 4, 'Failed to load audit log');
-    }
-  },
-
-  renderAuditLog(data) {
-    const tbody = document.querySelector('#section-audit table tbody');
-    if (!tbody) return;
-    const items = data.items || [];
-    if (!items.length) { this.setEmpty('#section-audit table tbody', 4, 'Nog geen audit-log entries voor dit filter.'); return; }
-    const colors = { user_delete: '#f87171', impersonate: '#fb923c', settings_update: '#a78bfa' };
-    mount(tbody, html`${items.map(e => html`
-      <tr>
-        <td style="font-size:var(--font-size-xs);color:var(--navy-300);white-space:nowrap;">${this.formatDate(e.created_at)}</td>
-        <td><span style="color:${colors[e.action] || 'var(--gold-400)'};">${e.action?.replace(/_/g, ' ')}</span></td>
-        <td style="font-size:var(--font-size-xs);color:var(--navy-200);">${e.actor_email || 'system'}</td>
-        <td style="font-size:var(--font-size-xs);color:var(--navy-300);">${e.target_type ? e.target_type + ' #' + e.target_id : '—'}</td>
-      </tr>`)}`);
-  },
-
-  /* ============================================================
-     SETTINGS
-     ============================================================ */
-  async loadSettings() {
-    await this.mfa.loadStatus();
-    try {
-      const res = await Auth.fetch('/v1/admin/settings');
-      if (!res?.ok) return;
-      const rows = await res.json();
-      this._data.settings = rows;
-      rows.forEach(s => {
-        const el = document.getElementById(`setting_${s.key}`);
-        if (el) {
-          if (el.type === 'checkbox') el.checked = s.value === 'true';
-          else el.value = s.value || '';
-        }
-      });
-    } catch { console.error('Settings load error'); }
-  },
-
-  async saveSettings() {
-    const btn = document.getElementById('saveSettingsBtn');
-    if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Saving…'; }
-    const settings = {};
-    document.querySelectorAll('[data-setting-key]').forEach(el => {
-      settings[el.dataset.settingKey] = el.type === 'checkbox' ? String(el.checked) : el.value;
-    });
-    try {
-      const res = await Auth.fetch('/v1/admin/settings', {
-        method: 'PUT', body: JSON.stringify({ settings }),
-      });
-      if (res?.ok) Auth.toast('Settings saved', 'success');
-      else Auth.toast('Failed to save settings', 'error');
-    } catch { Auth.toast('Network error', 'error'); }
-    finally { if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fa-regular fa-floppy-disk"></i> Save Settings'; } }
-  },
-
-  /* ============================================================
-     CONTENT CMS
-     ============================================================ */
-  async loadContent() {
-    try {
-      const res = await Auth.fetch('/v1/admin/content');
-      if (!res?.ok) return;
-      const rows = await res.json();
-      this._data.content = rows;
-      this.renderContent(rows);
-    } catch { console.error('Content load error'); }
-  },
-
-  renderContent(rows) {
-    const el = document.getElementById('contentList');
-    if (!el) return;
-    if (!rows.length) { mount(el, html`<div style="color:var(--navy-300);padding:1rem;">Nog geen content-items. Voeg ze toe via de API of database.</div>`); return; }
-    mount(el, html`${rows.map(item => html`
-      <div style="display:flex;align-items:center;gap:var(--space-md);padding:var(--space-md) 0;border-bottom:1px solid rgba(74,111,159,0.08);">
-        <div style="flex:1;">
-          <div style="font-size:var(--font-size-xs);color:var(--navy-300);">${item.section} / ${item.key}</div>
-          <div style="color:var(--navy-100);margin-top:2px;font-size:var(--font-size-sm);">${(item.value || '').slice(0, 80)}${(item.value || '').length > 80 ? '…' : ''}</div>
-        </div>
-        <button class="btn btn-sm btn-ghost-secondary" data-action="edit-content" data-id="${item.id}" data-key="${item.key}" data-value="${item.value || ''}">
-          <i class="fa-solid fa-pen"></i>
-        </button>
-      </div>`)}`);
-  },
-
-  editContent(id, key, value) {
-    this.openModal('editContentModal', html`
-      <h3 style="color:var(--white);margin-bottom:var(--space-lg);">Edit: ${key}</h3>
-      <div class="form-group">
-        <label>Value</label>
-        <textarea id="editContentValue" rows="5" style="width:100%;background:rgba(6,13,26,0.6);border:1px solid rgba(74,111,159,0.3);border-radius:var(--radius-md);color:var(--white);padding:0.75rem;font-family:var(--font-primary);font-size:var(--font-size-sm);resize:vertical;">${value}</textarea>
-      </div>
-      <div style="display:flex;gap:var(--space-md);margin-top:var(--space-lg);">
-        <button class="btn btn-primary" data-action="save-content" data-id="${id}">Save</button>
-        <button class="btn btn-ghost-secondary" data-action="close-modal">Cancel</button>
-      </div>
-    `);
-  },
-
-  async saveContent(id) {
-    const value = document.getElementById('editContentValue')?.value;
-    if (value == null) return;
-    try {
-      const res = await Auth.fetch(`/v1/admin/content/${id}`, {
-        method: 'PUT', body: JSON.stringify({ value }),
-      });
-      if (res?.ok) {
-        Auth.toast('Content updated', 'success');
-        this.closeModal();
-        await this.loadContent();
-      } else { Auth.toast('Update failed', 'error'); }
-    } catch { Auth.toast('Network error', 'error'); }
-  },
-
-  /* ============================================================
-     OPDRACHTGEVERS (WS-B.5 / WS-B.2 follow-up)
-
-     GET /v1/admin/clients (routers/clients_admin.py) returns
-     company_name/domain/erkend_referent/open_job_count/primary_contact
-     for the whole page in one query (LEFT JOIN LATERAL, no N+1) -- this
-     used to derive the roster from /users?role=client plus one detail
-     fetch per row plus one open-jobs-count fetch per row; both are gone.
-     ============================================================ */
-  async loadClients(params = {}) {
-    this._lastParams.clients = params;
-    const qs = new URLSearchParams();
-    if (params.search) qs.set('search', params.search);
-    qs.set('limit', 200);
-
-    this.setLoading('#section-clients table tbody', 6);
-    try {
-      const res = await Auth.fetch(`/v1/admin/clients?${qs}`);
-      if (!res) return;
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.detail);
-      this._data.clients = data.items || [];
-      this.renderClients(this._data.clients);
-    } catch (err) {
-      this.setLoadError('#section-clients table tbody', 6, () => this.loadClients(params));
-    }
-  },
-
-  erkendReferentLabel(value) {
-    const map = { ja: 'Ja', nee: 'Nee', onbekend: 'Onbekend' };
-    return map[value] || 'Onbekend';
-  },
-
-  erkendReferentBadgeClass(value) {
-    if (value === 'ja') return 'badge bg-green-lt';
-    if (value === 'nee') return 'badge bg-red-lt';
-    return 'badge bg-secondary-lt';
-  },
-
-  renderClients(clients) {
-    const tbody = document.querySelector('#section-clients table tbody');
-    if (!tbody) return;
-    if (!clients.length) { this.setEmpty('#section-clients table tbody', 6, 'Nog geen opdrachtgevers met een portal-account.'); return; }
-    mount(tbody, html`${clients.map(c => html`
-      <tr data-action="open-client" data-id="${c.id}" style="cursor:pointer;">
-        <td style="font-weight:600;color:var(--white);">${c.company_name || 'Onbekend'}</td>
-        <td style="color:var(--navy-200);">${c.domain || '—'}</td>
-        <td class="text-center">${c.open_job_count ?? 0}</td>
-        <td style="color:var(--navy-200);">${c.primary_contact?.full_name || c.primary_contact?.email || '—'}</td>
-        <td><span class="${this.erkendReferentBadgeClass(c.erkend_referent)}">${this.erkendReferentLabel(c.erkend_referent)}</span></td>
-        <td class="text-end"><i class="fa-solid fa-chevron-right text-secondary"></i></td>
-      </tr>`)}`);
-  },
-
-  roleLabel(role) {
-    const map = { hiring_manager: 'Hiring manager', finance: 'Financiën', tekenbevoegd: 'Tekenbevoegd', overig: 'Overig' };
-    return map[role] || '—';
-  },
-
-  openClientDrawer(clientId) {
-    const client = (this._data.clients || []).find(c => c.id === clientId);
-    const tabs = [
-      ['info', 'Info'], ['contacts', 'Contacten'], ['jobs', 'Vacatures'],
-      ['activity', 'Notities/Activiteit'], ['prospects', 'Prospects'],
-    ];
-    this.openModal('clientDrawer', html`
-      <h3 style="color:var(--white);margin-bottom:4px;">${client?.company_name || 'Opdrachtgever'}</h3>
-      <div style="color:var(--navy-300);font-size:var(--font-size-sm);margin-bottom:var(--space-lg);">${client?.domain || '—'}</div>
-      <div style="display:flex;gap:4px;flex-wrap:wrap;border-bottom:1px solid rgba(74,111,159,0.2);margin-bottom:var(--space-md);padding-bottom:var(--space-sm);">
-        ${tabs.map(([key, label]) => html`
-          <button class="btn btn-sm ${key === 'info' ? 'btn-primary' : 'btn-ghost-secondary'}"
-            data-action="client-tab" data-client-id="${clientId}" data-tab="${key}">${label}</button>`)}
-      </div>
-      <div id="clientDrawerTabContent" style="min-height:120px;"><i class="fa-solid fa-spinner fa-spin"></i></div>
-    `, { wide: true });
-    this.switchClientTab(clientId, 'info');
-  },
-
-  switchClientTab(clientId, tab) {
-    document.querySelectorAll('#adminModalOverlay [data-action="client-tab"]').forEach(btn => {
-      btn.classList.toggle('btn-primary', btn.dataset.tab === tab);
-      btn.classList.toggle('btn-ghost-secondary', btn.dataset.tab !== tab);
-    });
-    const loaders = {
-      info: () => this.loadClientInfoTab(clientId),
-      contacts: () => this.loadClientContacts(clientId),
-      jobs: () => this.loadClientJobsTab(clientId),
-      activity: () => this.loadClientActivityTab(clientId),
-      prospects: () => this.loadClientProspectsTab(clientId),
-    };
-    (loaders[tab] || loaders.info)();
-  },
-
-  /* ---- Info tab: erkend_referent + notes, PATCH /v1/admin/clients/{id} ---- */
-  async loadClientInfoTab(clientId) {
-    const el = document.getElementById('clientDrawerTabContent');
-    if (!el) return;
-    mount(el, html`<i class="fa-solid fa-spinner fa-spin"></i>`);
-    try {
-      const res = await Auth.fetch(`/v1/admin/clients/${clientId}`);
-      if (!res) return;
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.detail);
-      this._data.clientDetail = this._data.clientDetail || {};
-      this._data.clientDetail[clientId] = data;
-      this.renderClientInfoTab(clientId);
-    } catch {
-      this.setContainerLoadError(el, () => this.loadClientInfoTab(clientId));
-    }
-  },
-
-  renderClientInfoTab(clientId) {
-    const el = document.getElementById('clientDrawerTabContent');
-    if (!el) return;
-    const client = (this._data.clientDetail && this._data.clientDetail[clientId]) || {};
-    mount(el, html`
-      <div class="form-group">
-        <label>Erkend referent (IND)</label>
-        <select id="clientInfoErkendReferent">
-          <option value="onbekend" ${raw(client.erkend_referent === 'onbekend' || !client.erkend_referent ? 'selected' : '')}>Onbekend</option>
-          <option value="ja" ${raw(client.erkend_referent === 'ja' ? 'selected' : '')}>Ja</option>
-          <option value="nee" ${raw(client.erkend_referent === 'nee' ? 'selected' : '')}>Nee</option>
-        </select>
-      </div>
-      <div class="form-group">
-        <label>Notities</label>
-        <textarea id="clientInfoNotes" rows="5" style="width:100%;background:rgba(6,13,26,0.6);border:1px solid rgba(74,111,159,0.3);border-radius:var(--radius-md);color:var(--white);padding:0.75rem;font-family:var(--font-primary);font-size:var(--font-size-sm);resize:vertical;box-sizing:border-box;">${client.notes || ''}</textarea>
-      </div>
-      <div style="display:flex;gap:var(--space-md);margin-top:var(--space-lg);">
-        <button class="btn btn-primary" data-action="save-client-info" data-client-id="${clientId}">Opslaan</button>
-      </div>
-    `);
-  },
-
-  async saveClientInfo(clientId) {
-    const payload = {
-      erkend_referent: document.getElementById('clientInfoErkendReferent')?.value || 'onbekend',
-      notes: document.getElementById('clientInfoNotes')?.value ?? '',
-    };
-    try {
-      const res = await Auth.fetch(`/v1/admin/clients/${clientId}`, {
-        method: 'PATCH', body: JSON.stringify(payload),
-      });
-      if (res?.ok) {
-        Auth.toast('Opgeslagen', 'success');
-        const updated = await res.json();
-        this._data.clientDetail = this._data.clientDetail || {};
-        this._data.clientDetail[clientId] = { ...(this._data.clientDetail[clientId] || {}), ...updated };
-        // Keep the roster's badge in sync without a full reload.
-        const rosterRow = (this._data.clients || []).find(c => c.id === clientId);
-        if (rosterRow) {
-          rosterRow.erkend_referent = updated.erkend_referent;
-          this.renderClients(this._data.clients);
-        }
-      } else {
-        const d = await res?.json().catch(() => null);
-        Auth.toast(d?.detail || 'Opslaan mislukt', 'error');
-      }
-    } catch { Auth.toast('Netwerkfout', 'error'); }
-  },
-
-  /* ---- Contacts tab (WS-C.4 CRUD) ---- */
-  async loadClientContacts(clientId) {
-    const el = document.getElementById('clientDrawerTabContent');
-    if (!el) return;
-    mount(el, html`<i class="fa-solid fa-spinner fa-spin"></i>`);
-    try {
-      const res = await Auth.fetch(`/v1/admin/clients/${clientId}/contacts`);
-      if (!res) return;
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.detail);
-      this._data.clientContacts = this._data.clientContacts || {};
-      this._data.clientContacts[clientId] = data.items || [];
-      this.renderClientContacts(clientId);
-    } catch {
-      this.setContainerLoadError(el, () => this.loadClientContacts(clientId));
-    }
-  },
-
-  renderClientContacts(clientId) {
-    const el = document.getElementById('clientDrawerTabContent');
-    if (!el) return;
-    const items = (this._data.clientContacts && this._data.clientContacts[clientId]) || [];
-    mount(el, html`
-      <div style="display:flex;justify-content:flex-end;margin-bottom:var(--space-md);">
-        <button class="btn btn-sm btn-primary" data-action="client-contact-new" data-client-id="${clientId}">
-          <i class="fa-solid fa-plus"></i> Nieuw contact
-        </button>
-      </div>
-      <div id="clientContactForm"></div>
-      ${items.length ? html`
-        <div class="table-responsive">
-          <table class="table table-vcenter card-table">
-            <thead><tr><th>Naam</th><th>Rol</th><th>E-mail</th><th>Telefoon</th><th>Primair</th><th style="width:110px;">Acties</th></tr></thead>
-            <tbody>${items.map(c => html`
-              <tr>
-                <td style="color:var(--white);">${c.full_name}</td>
-                <td>${this.roleLabel(c.role)}</td>
-                <td style="color:var(--navy-200);">${c.email || '—'}</td>
-                <td style="color:var(--navy-200);">${c.phone || '—'}</td>
-                <td>${c.is_primary ? html`<span class="badge bg-yellow-lt">Primair</span>` : html`
-                  <button class="btn btn-sm btn-ghost-secondary" data-action="client-contact-make-primary" data-client-id="${clientId}" data-id="${c.id}">Maak primair</button>`}</td>
-                <td>
-                  <button class="btn btn-sm btn-ghost-secondary" data-action="client-contact-edit" data-client-id="${clientId}" data-id="${c.id}" title="Bewerken"><i class="fa-solid fa-pen"></i></button>
-                  <button class="btn btn-sm btn-ghost-secondary" data-action="client-contact-delete" data-client-id="${clientId}" data-id="${c.id}" title="Verwijderen" style="color:#f87171;"><i class="fa-solid fa-trash"></i></button>
-                </td>
-              </tr>`)}</tbody>
-          </table>
-        </div>` : html`<div style="color:var(--navy-300);padding:1rem 0;">Nog geen contacten voor deze opdrachtgever.</div>`}
-    `);
-  },
-
-  openClientContactForm(clientId, contactId) {
-    const contact = contactId
-      ? ((this._data.clientContacts?.[clientId] || []).find(c => c.id === contactId))
-      : null;
-    const formEl = document.getElementById('clientContactForm');
-    if (!formEl) return;
-    mount(formEl, html`
-      <div style="border:1px solid rgba(74,111,159,0.2);border-radius:var(--radius-md);padding:var(--space-md);margin-bottom:var(--space-md);">
-        <h4 style="color:var(--white);margin-bottom:var(--space-md);">${contact ? 'Contact bewerken' : 'Nieuw contact'}</h4>
-        <div class="form-group"><label>Naam</label><input type="text" id="ccFullName" value="${contact?.full_name || ''}"></div>
-        <div class="form-group"><label>E-mail</label><input type="email" id="ccEmail" value="${contact?.email || ''}"></div>
-        <div class="form-group"><label>Telefoon</label><input type="text" id="ccPhone" value="${contact?.phone || ''}"></div>
-        <div class="form-group">
-          <label>Rol</label>
-          <select id="ccRole">
-            <option value="">—</option>
-            ${['hiring_manager', 'finance', 'tekenbevoegd', 'overig'].map(r => html`
-              <option value="${r}" ${raw(contact?.role === r ? 'selected' : '')}>${this.roleLabel(r)}</option>`)}
-          </select>
-        </div>
-        <div class="form-group">
-          <label><input type="checkbox" id="ccPrimary" ${raw(contact?.is_primary ? 'checked' : '')}> Primair contact</label>
-        </div>
-        <div style="display:flex;gap:var(--space-md);margin-top:var(--space-md);">
-          <button class="btn btn-primary btn-sm" data-action="client-contact-save" data-client-id="${clientId}" data-id="${contactId || ''}">Opslaan</button>
-          <button class="btn btn-ghost-secondary btn-sm" data-action="client-contact-cancel" data-client-id="${clientId}">Annuleren</button>
-        </div>
-      </div>
-    `);
-  },
-
-  async saveClientContact(clientId, contactId) {
-    const payload = {
-      full_name: document.getElementById('ccFullName')?.value?.trim(),
-      email: document.getElementById('ccEmail')?.value?.trim() || null,
-      phone: document.getElementById('ccPhone')?.value?.trim() || null,
-      role: document.getElementById('ccRole')?.value || null,
-      is_primary: !!document.getElementById('ccPrimary')?.checked,
-    };
-    if (!payload.full_name) { Auth.toast('Naam is verplicht', 'error'); return; }
-    try {
-      const res = contactId
-        ? await Auth.fetch(`/v1/admin/clients/${clientId}/contacts/${contactId}`, { method: 'PUT', body: JSON.stringify(payload) })
-        : await Auth.fetch(`/v1/admin/clients/${clientId}/contacts`, { method: 'POST', body: JSON.stringify({ ...payload, lawful_basis: 'zakelijk_functioneel_adres' }) });
-      if (res?.ok) {
-        Auth.toast(contactId ? 'Contact bijgewerkt' : 'Contact toegevoegd', 'success');
-        document.getElementById('clientContactForm') && mount(document.getElementById('clientContactForm'), '');
-        await this.loadClientContacts(clientId);
-      } else {
-        const d = await res?.json().catch(() => null);
-        Auth.toast(d?.detail || 'Opslaan mislukt', 'error');
-      }
-    } catch { Auth.toast('Netwerkfout', 'error'); }
-  },
-
-  async makeClientContactPrimary(clientId, contactId) {
-    try {
-      const res = await Auth.fetch(`/v1/admin/clients/${clientId}/contacts/${contactId}`, {
-        method: 'PUT', body: JSON.stringify({ is_primary: true }),
-      });
-      if (res?.ok) { await this.loadClientContacts(clientId); }
-      else { Auth.toast('Bijwerken mislukt', 'error'); }
-    } catch { Auth.toast('Netwerkfout', 'error'); }
-  },
-
-  async deleteClientContact(clientId, contactId) {
-    if (!confirm('Dit contact verwijderen?')) return;
-    try {
-      const res = await Auth.fetch(`/v1/admin/clients/${clientId}/contacts/${contactId}`, { method: 'DELETE' });
-      if (res?.ok || res?.status === 204) {
-        Auth.toast('Contact verwijderd', 'success');
-        await this.loadClientContacts(clientId);
-      } else { Auth.toast('Verwijderen mislukt', 'error'); }
-    } catch { Auth.toast('Netwerkfout', 'error'); }
-  },
-
-  /* ---- Jobs tab (read-only, existing jobs endpoint filtered by client) ---- */
-  async loadClientJobsTab(clientId) {
-    const el = document.getElementById('clientDrawerTabContent');
-    if (!el) return;
-    mount(el, html`<i class="fa-solid fa-spinner fa-spin"></i>`);
-    try {
-      const res = await Auth.fetch(`/v1/admin/jobs?client_id=${clientId}&limit=50`);
-      if (!res) return;
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.detail);
-      const items = data.items || [];
-      mount(el, items.length ? html`
-        <div class="table-responsive">
-          <table class="table table-vcenter card-table">
-            <thead><tr><th>Titel</th><th>Type</th><th>Status</th><th>Sollicitaties</th></tr></thead>
-            <tbody>${items.map(j => html`
-              <tr>
-                <td style="color:var(--white);">${j.title || 'Untitled'}</td>
-                <td style="color:var(--navy-200);">${j.employment_type ? this.dienstlijnLabel(j.employment_type) : '—'}</td>
-                <td><span class="${this.badge(j.status)}">${j.status || 'draft'}</span></td>
-                <td class="text-center">${j.application_count ?? '—'}</td>
-              </tr>`)}</tbody>
-          </table>
-        </div>` : html`<div style="color:var(--navy-300);padding:1rem 0;">Nog geen vacatures voor deze opdrachtgever.</div>`);
-    } catch {
-      this.setContainerLoadError(el, () => this.loadClientJobsTab(clientId));
-    }
-  },
-
-  /* ---- Notities/Activiteit tab (WS-C.6) --
-     GET /v1/admin/activities?subject_type=client&subject_id=.. landed on
-     main after this feature was first built (migrations/028_activities.py,
-     routers/activities.py) -- read-only here, matching the task spec. */
-  activityTypeLabel(type) {
-    const map = { note: 'Notitie', call: 'Telefoongesprek', email: 'E-mail', meeting: 'Afspraak', task: 'Taak', status_change: 'Statuswijziging' };
-    return map[type] || type || '—';
-  },
-
-  async loadClientActivityTab(clientId) {
-    const el = document.getElementById('clientDrawerTabContent');
-    if (!el) return;
-    mount(el, html`<i class="fa-solid fa-spinner fa-spin"></i>`);
-    try {
-      const res = await Auth.fetch(`/v1/admin/activities?subject_type=client&subject_id=${clientId}&limit=50`);
-      if (!res) return;
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.detail);
-      const items = data.items || [];
-      mount(el, items.length ? html`
-        <div class="table-responsive">
-          <table class="table table-vcenter card-table">
-            <thead><tr><th>Type</th><th>Notitie</th><th>Datum</th><th>Status</th></tr></thead>
-            <tbody>${items.map(a => html`
-              <tr>
-                <td style="color:var(--white);">${this.activityTypeLabel(a.type)}</td>
-                <td style="color:var(--navy-200);">${a.body || '—'}</td>
-                <td style="color:var(--navy-200);">${this.formatDate(a.created_at)}</td>
-                <td>${a.completed_at ? html`<span class="badge bg-secondary-lt">Afgerond</span>` : (a.due_at ? html`<span class="badge bg-blue-lt">Open</span>` : '—')}</td>
-              </tr>`)}</tbody>
-          </table>
-        </div>` : html`<div style="color:var(--navy-300);padding:1rem 0;">Nog geen notities of activiteit voor deze opdrachtgever.</div>`);
-    } catch {
-      this.setContainerLoadError(el, () => this.loadClientActivityTab(clientId));
-    }
-  },
-
-  /* ---- Prospects tab (existing global prospects router, best-effort
-     matched to this client by company name -- client_prospects has no
-     client_id FK to `clients`, so this is a name search, not a join). ---- */
-  async loadClientProspectsTab(clientId) {
-    const el = document.getElementById('clientDrawerTabContent');
-    if (!el) return;
-    mount(el, html`<i class="fa-solid fa-spinner fa-spin"></i>`);
-    const client = (this._data.clients || []).find(c => c.id === clientId);
-    const search = client?.company_name || '';
-    try {
-      const qs = new URLSearchParams({ limit: '50' });
-      if (search) qs.set('search', search);
-      const res = await Auth.fetch(`/v1/admin/prospects?${qs}`);
-      if (!res) return;
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.detail);
-      const items = data.items || [];
-      mount(el, html`
-        <div style="color:var(--navy-300);font-size:var(--font-size-xs);margin-bottom:var(--space-sm);">
-          Gematcht op bedrijfsnaam (geen directe koppeling in de database).
-        </div>
-        ${items.length ? html`
-          <div class="table-responsive">
-            <table class="table table-vcenter card-table">
-              <thead><tr><th>Bedrijf</th><th>Contact</th><th>Functie</th><th>Status</th></tr></thead>
-              <tbody>${items.map(p => html`
-                <tr>
-                  <td style="color:var(--white);">${p.company_name || '—'}</td>
-                  <td style="color:var(--navy-200);">${p.contact_name || '—'}</td>
-                  <td style="color:var(--navy-200);">${p.contact_title || '—'}</td>
-                  <td><span class="${this.badge(p.status)}">${p.status || '—'}</span></td>
-                </tr>`)}</tbody>
-            </table>
-          </div>` : html`<div style="color:var(--navy-300);padding:1rem 0;">Geen prospects gevonden voor deze bedrijfsnaam.</div>`}
-      `);
-    } catch {
-      this.setContainerLoadError(el, () => this.loadClientProspectsTab(clientId));
-    }
-  },
-
-  /* ============================================================
-     LEADS (WS-C.10) — unified inbox: GET /v1/admin/leads across
-     contact_submissions + quiz_submissions, PATCH marks one row read.
-     ============================================================ */
-  async loadLeads(params = {}) {
-    this._lastParams.leads = params;
-    const qs = new URLSearchParams();
-    const limit = this._pageSize;
-    const offset = ((this._currentPage.leads || 1) - 1) * limit;
-    if (params.type) qs.set('type', params.type);
-    if (params.unread) qs.set('unread', 'true');
-    qs.set('limit', limit);
-    qs.set('offset', offset);
-
-    this.setLoading('#section-leads table tbody', 6);
-    try {
-      const res = await Auth.fetch(`/v1/admin/leads?${qs}`);
-      if (!res) return;
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.detail);
-      this._data.leads = data;
-      this.renderLeads(data);
-      this.renderPagination('leadsPagination', data.total, limit, this._currentPage.leads, 'leads');
-    } catch {
-      this.setLoadError('#section-leads table tbody', 6, () => this.loadLeads(params));
-    }
-  },
-
-  leadInterestLabel(type) {
-    const map = {
-      werving_selectie: 'Werving & selectie', detachering_internationaal: 'Detachering (internationaal)',
-      kandidaat: 'Kandidaat', overig: 'Overig',
-    };
-    return map[type] || '—';
-  },
-
-  // Dienstlijn label for a job's raw `employment_type` value -- used by the
-  // client drawer's Vacatures tab and the Rapportage breakdown so a raw
-  // enum string (or an unrecognised one) never renders straight into the
-  // UI. Unknown values fall back to the raw value itself (still escaped by
-  // html``, never raw()) rather than a silent "—", so a value this map
-  // hasn't caught up with is still visible instead of hidden.
-  dienstlijnLabel(type) {
-    const map = {
-      vast: 'Vast (werving en selectie)',
-      detachering: 'Detachering',
-      interim: 'Interim',
-      werving_selectie: 'Werving en selectie',
-      detachering_internationaal: 'Detachering (internationaal)',
-    };
-    return map[type] || type || 'onbekend';
-  },
-
-  renderLeads(data) {
-    const tbody = document.querySelector('#section-leads table tbody');
-    if (!tbody) return;
-    const items = data.items || [];
-    if (!items.length) { this.setEmpty('#section-leads table tbody', 6, 'Geen leads gevonden voor deze filters.'); return; }
-    mount(tbody, html`${items.map(l => html`
-      <tr data-action="toggle-lead-read" data-source="${l.source}" data-id="${l.id}" data-read="${l.is_read ? '1' : '0'}"
-        style="cursor:pointer;${raw(l.is_read ? '' : 'font-weight:600;')}">
-        <td><span class="badge ${l.source === 'quiz_submissions' ? 'bg-yellow-lt' : 'bg-blue-lt'}">${l.source === 'quiz_submissions' ? 'Quiz' : 'Contact'}</span></td>
-        <td style="color:var(--white);">${l.name || '—'}</td>
-        <td style="color:var(--navy-200);">${l.email || '—'}</td>
-        <td>${l.interest_type ? html`<span class="badge bg-secondary-lt">${this.leadInterestLabel(l.interest_type)}</span>` : '—'}</td>
-        <td style="color:var(--navy-200);">${this.formatDate(l.created_at)}</td>
-        <td>${l.is_read
-          ? html`<span class="badge bg-secondary-lt">Gelezen</span>`
-          : html`<span class="badge bg-green-lt">Ongelezen</span>`}</td>
-      </tr>`)}`);
-  },
-
-  async toggleLeadRead(source, leadId, currentlyRead) {
-    try {
-      const res = await Auth.fetch(`/v1/admin/leads/${source}/${leadId}`, {
-        method: 'PATCH', body: JSON.stringify({ is_read: !currentlyRead }),
-      });
-      if (res?.ok) {
-        await this.loadLeads(this._lastParams.leads || {});
-      } else {
-        Auth.toast('Bijwerken mislukt', 'error');
-      }
-    } catch { Auth.toast('Netwerkfout', 'error'); }
-  },
-
-  /* ============================================================
-     RAPPORTAGE — computed client-side from data the API already
-     returns (no invented KPIs): open jobs per dienstlijn
-     (employment_type, excluding is_demo -- the admin jobs endpoint
-     already excludes those unless include_demo=true), and leads per
-     category this week/month + total unread, from the most recent 200
-     leads (the leads endpoint has no date filter, so this is a sample,
-     called out in the UI caption rather than pretending it's exhaustive).
-     ============================================================ */
-  async loadReporting() {
-    const el = document.getElementById('reportingContent');
-    if (el) mount(el, html`<div style="text-align:center;padding:3rem;color:var(--navy-300);"><i class="fa-solid fa-spinner fa-spin"></i> Laden…</div>`);
-    try {
-      const [jobsRes, leadsRes, unreadRes] = await Promise.all([
-        Auth.fetch('/v1/admin/jobs?status=open&limit=200'),
-        Auth.fetch('/v1/admin/leads?limit=200'),
-        Auth.fetch('/v1/admin/leads?unread=true&limit=1'),
-      ]);
-      if (!jobsRes?.ok || !leadsRes?.ok) throw new Error('Failed');
-      const jobsData = await jobsRes.json();
-      const leadsData = await leadsRes.json();
-      const unreadData = unreadRes?.ok ? await unreadRes.json() : null;
-      this.renderReporting(jobsData, leadsData, unreadData);
-    } catch {
-      if (el) mount(el, html`<div style="text-align:center;padding:3rem;color:#f87171;">Rapportage kon niet geladen worden.</div>`);
-    }
-  },
-
-  renderReporting(jobsData, leadsData, unreadData) {
-    const el = document.getElementById('reportingContent');
-    if (!el) return;
-
-    const jobs = jobsData.items || [];
-    const byType = new Map();
-    jobs.forEach(j => {
-      const t = j.employment_type || 'onbekend';
-      byType.set(t, (byType.get(t) || 0) + 1);
-    });
-
-    const now = new Date();
-    const startOfWeek = new Date(now);
-    const dow = (startOfWeek.getDay() + 6) % 7; // Monday = 0
-    startOfWeek.setDate(startOfWeek.getDate() - dow);
-    startOfWeek.setHours(0, 0, 0, 0);
-    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-
-    const leads = leadsData.items || [];
-    const bucket = () => ({ werving_selectie: 0, detachering_internationaal: 0, kandidaat: 0, overig: 0, quiz: 0 });
-    const week = bucket();
-    const month = bucket();
-    leads.forEach(l => {
-      const created = new Date(l.created_at);
-      const key = l.interest_type || 'quiz';
-      if (created >= startOfWeek) week[key] = (week[key] || 0) + 1;
-      if (created >= startOfMonth) month[key] = (month[key] || 0) + 1;
-    });
-
-    const jobsCapNote = (jobsData.total || 0) > jobs.length ? html`<div style="color:var(--navy-300);font-size:var(--font-size-xs);margin-top:var(--space-sm);">Toont ${jobs.length} van ${jobsData.total} open vacatures.</div>` : '';
-    const leadsCapNote = (leadsData.total || 0) > leads.length ? html`<div style="color:var(--navy-300);font-size:var(--font-size-xs);margin-top:var(--space-sm);">Gebaseerd op de meest recente ${leads.length} van ${leadsData.total} leads.</div>` : '';
-
-    const rows = [
-      ['werving_selectie', 'Werving & selectie'], ['detachering_internationaal', 'Detachering (internationaal)'],
-      ['kandidaat', 'Kandidaat'], ['overig', 'Overig'], ['quiz', 'Quiz (geen categorie)'],
-    ];
-
-    mount(el, html`
-      <div class="row row-deck row-cards mb-4">
-        <div class="col-sm-4">
-          <div class="card card-sm"><div class="card-body">
-            <div class="subheader"><i class="fa-solid fa-briefcase me-1"></i>Open vacatures</div>
-            <div class="h1 mb-0">${jobs.length}</div>
-          </div></div>
-        </div>
-        <div class="col-sm-4">
-          <div class="card card-sm"><div class="card-body">
-            <div class="subheader"><i class="fa-solid fa-envelope me-1"></i>Leads ongelezen</div>
-            <div class="h1 mb-0">${unreadData ? (unreadData.total ?? 0) : '—'}</div>
-          </div></div>
-        </div>
-        <div class="col-sm-4">
-          <div class="card card-sm"><div class="card-body">
-            <div class="subheader"><i class="fa-regular fa-calendar me-1"></i>Leads deze week</div>
-            <div class="h1 mb-0">${Object.values(week).reduce((a, b) => a + b, 0)}</div>
-          </div></div>
-        </div>
-      </div>
-
-      <div class="row row-cards">
-        <div class="col-lg-6">
-          <div class="card">
-            <div class="card-header"><h3 class="card-title"><i class="fa-solid fa-layer-group text-primary me-2"></i>Open vacatures per dienstlijn</h3></div>
-            <div class="card-body">
-              ${byType.size ? html`<table class="table table-vcenter card-table">
-                <tbody>${Array.from(byType.entries()).map(([t, n]) => html`
-                  <tr><td style="color:var(--navy-200);">${this.dienstlijnLabel(t)}</td><td class="text-end" style="color:var(--white);font-weight:600;">${n}</td></tr>`)}</tbody>
-              </table>` : html`<div style="color:var(--navy-300);">Geen open vacatures.</div>`}
-              ${jobsCapNote}
-            </div>
-          </div>
-        </div>
-        <div class="col-lg-6">
-          <div class="card">
-            <div class="card-header"><h3 class="card-title"><i class="fa-solid fa-chart-column text-primary me-2"></i>Leads per categorie</h3></div>
-            <div class="card-body">
-              <table class="table table-vcenter card-table">
-                <thead><tr><th>Categorie</th><th class="text-end">Deze week</th><th class="text-end">Deze maand</th></tr></thead>
-                <tbody>${rows.map(([key, label]) => html`
-                  <tr>
-                    <td style="color:var(--navy-200);">${label}</td>
-                    <td class="text-end" style="color:var(--white);">${week[key] || 0}</td>
-                    <td class="text-end" style="color:var(--white);">${month[key] || 0}</td>
-                  </tr>`)}</tbody>
-              </table>
-              ${leadsCapNote}
-            </div>
-          </div>
-        </div>
-      </div>
-    `);
-  },
+  section(id) { return this._sections[id]; },
+  sections() { return this._sectionOrder.map(id => this._sections[id]); },
 
   /* ============================================================
      PAGINATION
@@ -2000,7 +384,7 @@ const Admin = {
         for (let i = 1; i <= Math.min(pages, 7); i++) nums.push(pageBtn(String(i), i, { active: i === current }));
         return nums;
       })()}
-      ${pages > 7 ? html`<span style="color:var(--navy-300);padding:0 4px;">…${pages}</span>` : ''}
+      ${pages > 7 ? html`<span class="pagination-ellipsis">…${pages}</span>` : ''}
       ${pageBtn('<i class="fa-solid fa-chevron-right"></i>', current + 1, { icon: true, disabled: current === pages })}
     `);
   },
@@ -2012,7 +396,8 @@ const Admin = {
     const loaders = {
       users: 'loadUsers', candidates: 'loadCandidates',
       outreach: 'loadOutreach', blog: 'loadBlog', audit: 'loadAuditLog',
-      leads: 'loadLeads', jobs: 'loadJobs',
+      leads: 'loadLeads', jobs: 'loadJobs', retention: 'loadRetentionReview',
+      placements: 'loadPlacements', gdpr: 'loadGdprSuppression',
     };
     const fn = loaders[section];
     if (!fn || !Number.isFinite(page) || page < 1) return;
@@ -2023,396 +408,622 @@ const Admin = {
   /* ============================================================
      MODAL
      ============================================================ */
-  // `bodyHtml` is always an html``/raw() RawHtml result from the caller —
-  // never renamed to `html`, which would shadow the module-level html``
-  // tag this method sits alongside.
-  // `opts.wide` widens the panel (760px vs the 520px default) for content
-  // that needs more room -- the client detail drawer's tabs (WS-B.5), which
-  // reuse this same modal overlay rather than a separate drawer component.
+  // De ad-hoc overlay die hier stond is vervangen door ui.modal (js/ui.js),
+  // dat op de Bootstrap 5 Modal van Tabler draait: focustrap, Escape,
+  // aria-modal/aria-labelledby en focus terug naar de opener zitten daar.
+  // Deze twee methodes blijven bestaan omdat elke sectie ze aanroept;
+  // `id` is historisch (een label, geen DOM-id) en wordt genegeerd: er is
+  // één overlay, #adminModalOverlay. `opts.wide` verbreedt het paneel naar
+  // 760px voor het opdrachtgeverspaneel met zijn tabbladen.
   openModal(id, bodyHtml, opts = {}) {
-    let overlay = document.getElementById('adminModalOverlay');
-    if (!overlay) {
-      overlay = document.createElement('div');
-      overlay.id = 'adminModalOverlay';
-      overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:999;display:flex;align-items:center;justify-content:center;padding:1rem;backdrop-filter:blur(4px);';
-      overlay.addEventListener('click', e => { if (e.target === overlay) this.closeModal(); });
-      document.body.appendChild(overlay);
-    }
-    const maxWidth = opts.wide ? '760px' : '520px';
-    mount(overlay, html`
-      <div style="background:var(--navy-900);border:1px solid rgba(74,111,159,0.2);border-radius:var(--radius-xl);padding:var(--space-2xl);max-width:${maxWidth};width:100%;max-height:80vh;overflow-y:auto;position:relative;">
-        <button data-action="close-modal" style="position:absolute;top:1rem;right:1rem;background:none;border:none;color:var(--navy-200);cursor:pointer;font-size:1.2rem;">
-          <i class="fa-solid fa-xmark"></i>
-        </button>
-        ${bodyHtml}
-      </div>`);
-    overlay.style.display = 'flex';
+    this._modal = ui.modal({
+      id: 'adminModalOverlay',
+      // opts.title vult aria-labelledby met de echte kop van het paneel;
+      // zonder titel valt ui.modal terug op een generiek aria-label.
+      title: opts.title,
+      body: bodyHtml,
+      wide: !!opts.wide,
+      ariaLabel: opts.ariaLabel || 'Detailpaneel',
+      onClose: () => { this._modal = null; },
+    });
+    return this._modal;
   },
 
+  // Sluit het bovenste open paneel: de modal, of de drawer van het
+  // Opdrachtgevers-detailpaneel als die erboven ligt.
   closeModal() {
-    const overlay = document.getElementById('adminModalOverlay');
-    if (overlay) overlay.style.display = 'none';
+    ui.closeTop();
   },
 
   /* ============================================================
-     SECTION FILTER BINDING
+     GLOBALE BINDINGEN
      ============================================================ */
-  bindFilters() {
-    // Users search is bound once in index.html's inline script (#userSearch) —
-    // binding it here too fired two loadUsers calls per keystroke.
-
-    const roleSelect = document.getElementById('userRoleFilter');
-    if (roleSelect) roleSelect.addEventListener('change', e => {
-      const v = e.target.value;
-      this.loadUsers({ role: ['candidate','client','admin'].includes(v) ? v : '' });
-    });
-
-    const statusSelect = document.getElementById('userStatusFilter');
-    if (statusSelect) statusSelect.addEventListener('change', e => {
-      const v = e.target.value;
-      this.loadUsers({ status: ['verified','unverified'].includes(v) ? v : '' });
-    });
-
-    // Debounced search keeps whatever status/kind filters are currently
-    // selected instead of silently resetting them on every keystroke.
-    const debouncedCandidates = debounce(val => this.loadCandidates({
-      search: val,
-      status: document.getElementById('candidateStatusFilter')?.value || undefined,
-      kind: document.getElementById('candidateKindFilter')?.value || undefined,
-    }), 400);
-    document.querySelectorAll('#section-candidates .search-bar input').forEach(el => {
-      el.addEventListener('input', e => debouncedCandidates(e.target.value));
-    });
-
-    const jobStatusFilter = document.getElementById('jobStatusFilter');
-    if (jobStatusFilter) jobStatusFilter.addEventListener('change', e => {
-      const v = e.target.value;
-      this._currentPage.jobs = 1;
-      this.loadJobs({
-        status: ['open','closed','draft'].includes(v) ? v : '',
-        search: document.getElementById('jobSearch')?.value?.trim() || undefined,
-      });
-    });
-
-    // Server-side search (WS-B.2): #jobSearch used to be disabled/inert.
-    const debouncedJobs = debounce(val => {
-      this._currentPage.jobs = 1;
-      this.loadJobs({
-        status: document.getElementById('jobStatusFilter')?.value || undefined,
-        search: val || undefined,
-      });
-    }, 400);
-    const jobSearch = document.getElementById('jobSearch');
-    if (jobSearch) jobSearch.addEventListener('input', e => debouncedJobs(e.target.value));
-
-    const leadTypeFilter = document.getElementById('leadTypeFilter');
-    if (leadTypeFilter) leadTypeFilter.addEventListener('change', e => {
-      this._currentPage.leads = 1;
-      this.loadLeads({
-        type: e.target.value || undefined,
-        unread: document.getElementById('leadUnreadFilter')?.checked || undefined,
-      });
-    });
-
-    const leadUnreadFilter = document.getElementById('leadUnreadFilter');
-    if (leadUnreadFilter) leadUnreadFilter.addEventListener('change', e => {
-      this._currentPage.leads = 1;
-      this.loadLeads({
-        type: document.getElementById('leadTypeFilter')?.value || undefined,
-        unread: e.target.checked || undefined,
-      });
-    });
-
+  bindGlobal() {
     document.addEventListener('click', () => this.closeMenus());
 
-    // Delegated handler for buttons rendered with data-action instead of an
-    // inline onclick — keeps user-derived strings (email, content values)
-    // out of interpolated JS/attribute string literals entirely. Bound
-    // once here rather than per-row.
+    // Eén gedelegeerde listener voor alle data-action-knoppen, één keer
+    // gebonden. Elke sectie levert zijn eigen handlers via de registry;
+    // user-afkomstige strings komen zo nooit in een JS-literal terecht.
     document.addEventListener('click', (e) => this.handleDataAction(e));
   },
 
   handleDataAction(e) {
     const el = e.target.closest('[data-action]');
     if (!el) return;
-    const action = el.dataset.action;
-    const id = el.dataset.id;
-    switch (action) {
-      case 'impersonate-user':
-        this.impersonateUser(Number(id), el.dataset.email || '');
-        this.closeMenus();
-        break;
-      case 'delete-user':
-        this.confirmDeleteUser(Number(id), el.dataset.email || '');
-        this.closeMenus();
-        break;
-      case 'edit-content':
-        this.editContent(Number(id), el.dataset.key || '', el.dataset.value || '');
-        break;
-      case 'navigate':
-        // navigateTo() is a page-level global defined in admin/js/nav.js.
-        if (typeof navigateTo === 'function') navigateTo(el.dataset.section);
-        break;
-      case 'view-candidate':
-        this.viewCandidate(el.dataset.kind || 'self-registered', Number(id));
-        break;
-      case 'verify-user':
-        this.verifyUser(Number(id), el);
-        this.closeMenus();
-        break;
-      case 'toggle-user-menu':
-        this.toggleUserMenu(Number(id));
-        break;
-      case 'edit-user':
-        this.openEditUserModal(Number(id));
-        this.closeMenus();
-        break;
-      case 'save-user-edit':
-        this.saveUserEdit(Number(id));
-        break;
-      case 'set-job-status':
-        this.setJobStatus(Number(id), el.dataset.status);
-        break;
-      case 'confirm-delete-job':
-        this.confirmDeleteJob(Number(id));
-        break;
-      case 'open-new-job-modal':
-        this.openNewJobModal();
-        break;
-      case 'save-new-job':
-        this.saveNewJob();
-        break;
-      case 'open-draft-modal':
-        this.openDraftModal(Number(id));
-        break;
-      case 'approve-draft':
-        this.approveDraft(Number(id));
-        break;
-      case 'reject-draft':
-        this.rejectDraft(Number(id));
-        break;
-      case 'save-draft':
-        this.saveDraft(Number(id));
-        break;
-      case 'open-blog-modal':
-        this.openBlogModal(id ? Number(id) : null);
-        break;
-      case 'publish-blog-post':
-        this.publishBlogPost(Number(id));
-        break;
-      case 'archive-blog-post':
-        this.archiveBlogPost(Number(id));
-        break;
-      case 'save-blog-post':
-        this.saveBlogPost(id ? Number(id) : null);
-        break;
-      case 'save-content':
-        this.saveContent(Number(id));
-        break;
-      case 'run-outreach-job':
-        this.runOutreachJob(el.dataset.jobName, el);
-        break;
-      case 'save-settings':
-        this.saveSettings();
-        break;
-      case 'page':
-        this.goToPage(el.dataset.section, Number(el.dataset.page));
-        break;
-      case 'close-modal':
-        this.closeModal();
-        break;
-      case 'open-client':
-        this.openClientDrawer(Number(id));
-        break;
-      case 'client-tab':
-        this.switchClientTab(Number(el.dataset.clientId), el.dataset.tab);
-        break;
-      case 'save-client-info':
-        this.saveClientInfo(Number(el.dataset.clientId));
-        break;
-      case 'client-contact-new':
-        this.openClientContactForm(Number(el.dataset.clientId), null);
-        break;
-      case 'client-contact-edit':
-        this.openClientContactForm(Number(el.dataset.clientId), Number(id));
-        break;
-      case 'client-contact-cancel': {
-        const formEl = document.getElementById('clientContactForm');
-        if (formEl) mount(formEl, '');
-        break;
-      }
-      case 'client-contact-save':
-        this.saveClientContact(Number(el.dataset.clientId), id ? Number(id) : null);
-        break;
-      case 'client-contact-make-primary':
-        this.makeClientContactPrimary(Number(el.dataset.clientId), Number(id));
-        break;
-      case 'client-contact-delete':
-        this.deleteClientContact(Number(el.dataset.clientId), Number(id));
-        break;
-      case 'toggle-lead-read':
-        this.toggleLeadRead(el.dataset.source, Number(id), el.dataset.read === '1');
-        break;
+    const fn = this._actions[el.dataset.action];
+    if (typeof fn === 'function') fn.call(this, el, e);
+  },
+};
+
+/* Paneelbrede acties die niet bij één sectie horen. */
+Admin.registerActions({
+  // navigateTo() is een page-level global uit admin/js/nav.js.
+  navigate: (el) => { if (typeof navigateTo === 'function') navigateTo(el.dataset.section); },
+  'close-modal': () => ui.closeTop(),
+  page: (el) => Admin.goToPage(el.dataset.section, Number(el.dataset.page)),
+  // §7.3.4: gedeeld tussen de tab Pipeline in de kandidaat- (candidates.js)
+  // en de klantdrawer (clients.js), dus hier geregistreerd in plaats van
+  // in een van beide sectiebestanden -- een tweede, identieke registratie
+  // vanuit de andere sectie zou hetzelfde effect hebben (Admin._actions is
+  // één globale kaart per data-action-waarde, geen per-sectie schil), maar
+  // dan staat dezelfde functie op twee plekken gedefinieerd.
+  'pipeline-change-stage': (el) => Admin.changePipelineStage(Number(el.dataset.entryId), el.closest('.a-tabpane')),
+  'pipeline-history-show-all': (el) => Admin.renderPipelineHistory(Number(el.dataset.entryId), true, el.closest('.a-tabpane')),
+});
+
+/* ============================================================
+   PIPELINE-TAB (§7.3.4): "Pipeline" in de kandidaat- en klantdrawer.
+   Vervangt de tab Matches in de kandidaatdrawer (§7.3.2 afwijking 4), die
+   dezelfde route (GET /admin/pipeline?candidate_id=) alleen liet zien; met
+   deze tab is er nog maar één plek die pipeline-entries toont.
+
+   Elke DOM-lookup hieronder gaat via een `root` (de `.a-tabpane` van de
+   drawer die de aanroep deed), nooit via het kale `document`: de
+   kandidaat- en de klantdrawer staan allebei permanent in de DOM (een
+   dichte drawer wordt verborgen, niet verwijderd, §7.2b), en een
+   pipeline-entry die in beide drawers voorkomt geeft dan twee elementen
+   met hetzelfde id (`pipelineStage_604` bijvoorbeeld). `document.
+   getElementById()` vindt dan de eerste, niet per se de zichtbare: na
+   "klantdrawer > Pipeline > sluiten > kandidaatdrawer > Pipeline" werkte
+   "Fase wijzigen" op de verborgen kopie in de klantdrawer, en de
+   kandidaatdrawer bleef op zijn onopgeslagen select-waarde staan
+   (code-reviewer, HIGH, claude/admin-pipeline). De twee panen zelf
+   (`#candidateDrawerTabContent`, `#clientDrawerTabContent`) hebben wel
+   allebei hun eigen, unieke id, dus `loadPipelineTab()`/`renderPipelineTab()`
+   mogen die nog via `document.getElementById(containerId)` opzoeken; alles
+   daaronder (`pipelineStage_<id>`, `pipelineHistoryWrap_<id>`,
+   `pipelineEntryAlert_<id>`) niet meer.
+
+   §7.6 besluit 2 / migratie 043 (BV8): de zeven canonieke fasen krijgen
+   pas een gesloten CHECK-constraint nadat VALIDATE CONSTRAINT op productie
+   is gedraaid. Migratie 043 zelf normaliseert echter al bij de deploy (elke
+   bestaande rij krijgt daar een van de zeven waarden, met een vangnet naar
+   'sourced'), en de CHECK staat vanaf diezelfde deploy als NOT VALID: dat
+   slaat alleen de eenmalige tabelscan over, niet de handhaving zelf, dus
+   elke INSERT en elke UPDATE op `stage` wordt al vanaf migratie 043
+   geweigerd als de waarde buiten de zeven valt (zie het bestand zelf voor
+   die redenering). Na migratie 043 kan `stage` op een bestaande rij dus
+   normaal gesproken geen onbekende waarde meer dragen -- de
+   "(bestaande waarde)"-klep in dit bestand is een vangnet, niet de
+   verwachte hoofdroute: hij vangt `stage: null` op (de kolom heeft geen
+   NOT NULL, dus een rij die nooit een schrijfactie via de geldige paden
+   doorliep kan hem nog missen) en een rij die buiten de applicatie om is
+   gewijzigd (een handmatige UPDATE, een toekomstige migratie die de
+   constraint weer aanpast). PIPELINE_STAGE_VALIDATED is de vlag die dat
+   vangnet aan of uit zet: false (nu) houdt de klep open, true (na
+   VALIDATE CONSTRAINT, handmatig om te zetten -- zie het draaiboek
+   onderaan migrations/043_pipeline_stage_check.py) sluit de select tot
+   precies de zeven opties.
+   ============================================================ */
+const PIPELINE_STAGE_VALIDATED = false;
+
+Object.assign(Admin, {
+  // Ook op Admin gezet (niet alleen als losse const hierboven), zodat
+  // scripts/admin_sections_check.py de klep voor een onbekende, niet-lege
+  // fase kan testen alsof VALIDATE CONSTRAINT al gedraaid is: Admin.
+  // PIPELINE_STAGE_VALIDATED = true; in een page.evaluate() zonder het
+  // bestand zelf aan te raken. pipelineStageOptions() hieronder leest
+  // altijd deze eigenschap, nooit de const rechtstreeks.
+  PIPELINE_STAGE_VALIDATED,
+
+  // filterKey is 'candidate_id' of 'client_id'; filterId het bijbehorende
+  // id. opts.showCandidateName: de klantdrawer toont meerdere kandidaten
+  // door elkaar (één client_id, veel candidate_id's), dus die zet dit aan;
+  // de kandidaatdrawer laat het weg -- de kaart staat al in het dossier
+  // van die ene kandidaat, dus de eigen naam nog eens tonen voegt niets
+  // toe (§7.3.4 zelf noemt de naam alleen in de context van de
+  // dataherkomst, niet als vast onderdeel van de kaart).
+  async loadPipelineTab(containerId, filterKey, filterId, opts = {}) {
+    const el = document.getElementById(containerId);
+    if (!el) return;
+    mount(el, html`${[0, 1, 2].map(() => html`<div class="a-skel-block"></div>`)}`);
+    try {
+      const qs = new URLSearchParams();
+      qs.set(filterKey, filterId);
+      qs.set('limit', 200);
+      const res = await Auth.fetch(`/v1/admin/pipeline?${qs}`);
+      if (!res) return;
+      const data = await res.json();
+      if (!res.ok) throw new Error();
+      this.renderPipelineTab(containerId, data.items || [], opts);
+    } catch {
+      this.setContainerLoadError(el, () => this.loadPipelineTab(containerId, filterKey, filterId, opts));
     }
   },
 
-  /* ============================================================
-     MFA (WS-E.12) — settings-section setup/enable/disable + the
-     persistent "Zet tweestapsverificatie aan" banner. No inline
-     onclick handlers here (CSP) -- everything is wired via
-     addEventListener in bindUI(), called once from Admin.init().
-     ============================================================ */
-  mfa: {
-    _enabled: false,
-
-    async loadStatus() {
-      try {
-        const res = await Auth.fetch('/auth/mfa/status');
-        if (!res?.ok) return;
-        const data = await res.json();
-        this._enabled = !!data.mfa_enabled;
-        this.render();
-      } catch { /* banner just stays hidden on a transient failure */ }
-    },
-
-    render() {
-      const banner = document.getElementById('mfaBanner');
-      if (banner) banner.hidden = this._enabled;
-
-      const off = document.getElementById('mfaStateOff');
-      const on = document.getElementById('mfaStateOn');
-      const setup = document.getElementById('mfaSetupPanel');
-      const recovery = document.getElementById('mfaRecoveryPanel');
-      if (off) off.hidden = this._enabled;
-      if (on) on.hidden = !this._enabled;
-      if (setup) setup.hidden = true;
-      if (recovery) recovery.hidden = true;
-    },
-
-    bindUI() {
-      document.getElementById('mfaBannerSetupBtn')?.addEventListener('click', () => {
-        document.querySelector('.nav-link[data-section="settings"]')?.click();
-        document.getElementById('mfaStartSetupBtn')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      });
-
-      document.getElementById('mfaStartSetupBtn')?.addEventListener('click', () => this.startSetup());
-      document.getElementById('mfaCancelSetupBtn')?.addEventListener('click', () => this.render());
-      document.getElementById('mfaConfirmEnableBtn')?.addEventListener('click', () => this.confirmEnable());
-      document.getElementById('mfaRecoveryDoneBtn')?.addEventListener('click', () => this.loadStatus());
-      document.getElementById('mfaCopyRecoveryBtn')?.addEventListener('click', () => this.copyRecoveryCodes());
-      document.getElementById('mfaDisableBtn')?.addEventListener('click', () => this.disable());
-    },
-
-    async startSetup() {
-      const errEl = document.getElementById('mfaSetupError');
-      if (errEl) errEl.hidden = true;
-      try {
-        const res = await Auth.fetch('/auth/mfa/setup', { method: 'POST' });
-        const data = await res?.json();
-        if (!res?.ok) {
-          Auth.toast(data?.detail || 'Kon MFA-setup niet starten', 'error');
-          return;
-        }
-        document.getElementById('mfaStateOff').hidden = true;
-        document.getElementById('mfaSetupPanel').hidden = false;
-        document.getElementById('mfaManualSecret').textContent = data.secret || '';
-        const holder = document.getElementById('mfaQrHolder');
-        // data.qr_svg is server-generated markup (core/mfa.py build_otpauth_svg,
-        // fixed <rect>/<svg> structure, no user input interpolated into it) --
-        // still routed through a DOMParser round-trip rather than a raw
-        // innerHTML assignment, same defense-in-depth posture as
-        // GSP.sanitizeHtml for any other server-supplied markup.
-        if (holder) {
-          holder.innerHTML = '';
-          const doc = new DOMParser().parseFromString(data.qr_svg || '', 'image/svg+xml');
-          const svg = doc.querySelector('svg');
-          if (svg && !doc.querySelector('parsererror')) holder.appendChild(svg);
-        }
-        const codeInput = document.getElementById('mfaEnableCode');
-        if (codeInput) { codeInput.value = ''; codeInput.focus(); }
-      } catch {
-        Auth.toast('Netwerkfout. Probeer het opnieuw.', 'error');
-      }
-    },
-
-    async confirmEnable() {
-      const errEl = document.getElementById('mfaSetupError');
-      const code = document.getElementById('mfaEnableCode')?.value?.trim();
-      if (!code) {
-        if (errEl) { errEl.textContent = 'Voer de code uit je authenticator-app in.'; errEl.hidden = false; }
-        return;
-      }
-      const btn = document.getElementById('mfaConfirmEnableBtn');
-      if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Bezig…'; }
-      try {
-        const res = await Auth.fetch('/auth/mfa/enable', {
-          method: 'POST', body: JSON.stringify({ code }),
-        });
-        const data = await res?.json();
-        if (!res?.ok) {
-          if (errEl) { errEl.textContent = data?.detail || 'Ongeldige code.'; errEl.hidden = false; }
-          return;
-        }
-        this._enabled = true;
-        document.getElementById('mfaSetupPanel').hidden = true;
-        document.getElementById('mfaRecoveryPanel').hidden = false;
-        document.getElementById('mfaRecoveryCodes').textContent = (data.recovery_codes || []).join('\n');
-        document.getElementById('mfaBanner').hidden = true;
-        Auth.toast('Tweestapsverificatie ingeschakeld', 'success');
-      } catch {
-        Auth.toast('Netwerkfout. Probeer het opnieuw.', 'error');
-      } finally {
-        if (btn) { btn.disabled = false; btn.textContent = 'Bevestigen en inschakelen'; }
-      }
-    },
-
-    async copyRecoveryCodes() {
-      const text = document.getElementById('mfaRecoveryCodes')?.textContent || '';
-      try {
-        await navigator.clipboard.writeText(text);
-        Auth.toast('Herstelcodes gekopieerd', 'success');
-      } catch {
-        Auth.toast('Kopiëren mislukt, selecteer en kopieer de codes handmatig', 'warning');
-      }
-    },
-
-    async disable() {
-      const errEl = document.getElementById('mfaDisableError');
-      const code = document.getElementById('mfaDisableCode')?.value?.trim();
-      if (errEl) errEl.hidden = true;
-      if (!code) {
-        if (errEl) { errEl.textContent = 'Voer een code uit je authenticator-app in.'; errEl.hidden = false; }
-        return;
-      }
-      const btn = document.getElementById('mfaDisableBtn');
-      if (btn) { btn.disabled = true; }
-      try {
-        const res = await Auth.fetch('/auth/mfa/disable', {
-          method: 'POST', body: JSON.stringify({ code }),
-        });
-        const data = await res?.json();
-        if (!res?.ok) {
-          if (errEl) { errEl.textContent = data?.detail || 'Ongeldige code.'; errEl.hidden = false; }
-          return;
-        }
-        this._enabled = false;
-        Auth.toast('Tweestapsverificatie uitgeschakeld', 'success');
-        this.render();
-      } catch {
-        Auth.toast('Netwerkfout. Probeer het opnieuw.', 'error');
-      } finally {
-        if (btn) btn.disabled = false;
-      }
-    },
+  // De <select> biedt de zeven canonieke fasen aan, in spec-volgorde
+  // (AdminLabels.pipelineStages). Een fase daarbuiten (mogelijk zolang
+  // PIPELINE_STAGE_VALIDATED false is) komt er als achtste, geselecteerde
+  // optie bij, met het achtervoegsel "(bestaande waarde)": de select
+  // verbergt hem niet en kiest ook niet in zijn plaats een van de zeven.
+  // security-auditor LOW op claude/admin-pipeline: currentStage null (de
+  // kolom heeft geen NOT NULL) sloeg deze klep vroeger over, dus de
+  // browser koos zelf stil de eerste optie ('sourced') en "Fase wijzigen"
+  // zou zonder enige keuze een PATCH sturen. Een lege waarde krijgt nu
+  // dezelfde klep, met "(leeg)" in plaats van de rauwe waarde als label.
+  // code-reviewer LOW (herchecks op 3951578): dat geldt ook wanneer
+  // PIPELINE_STAGE_VALIDATED ooit op true gaat -- de CHECK-constraint uit
+  // migratie 043 laat NULL gewoon door (een CHECK slaat NULL altijd over,
+  // dat is SQL-standaardgedrag), dus VALIDATE CONSTRAINT bewijst niets
+  // over een lege `stage`. De klep voor een lege waarde blijft daarom
+  // onvoorwaardelijk aan, los van de vlag; alleen de klep voor een
+  // ONBEKENDE, niet-lege waarde vervalt na VALIDATE.
+  pipelineStageOptions(currentStage) {
+    const stages = AdminLabels.pipelineStages || [];
+    const known = stages.includes(currentStage);
+    const opts = stages.map(s => html`
+      <option value="${s}" ${raw(s === currentStage ? 'selected' : '')}>${AdminLabels.label('pipelinefase', s)}</option>`);
+    if (!known && (!this.PIPELINE_STAGE_VALIDATED || currentStage == null)) {
+      const value = currentStage ?? '';
+      const label = currentStage ?? '(leeg)';
+      opts.push(html`<option value="${value}" selected>${label} (bestaande waarde)</option>`);
+    }
+    return opts;
   },
-};
+
+  renderPipelineTab(containerId, items, opts = {}) {
+    const el = document.getElementById(containerId);
+    if (!el) return;
+    if (!items.length) {
+      mount(el, html`<div class="a-state-block">Nog geen pipeline-entries.</div>`);
+      return;
+    }
+    // §7.3.4: "bij meer dan drie entries een accordeon met alleen de
+    // nieuwste opengeklapt". GET /admin/pipeline sorteert al
+    // ORDER BY pe.created_at DESC, pe.id DESC (routers/admin.py), dus
+    // items[0] is de nieuwste zonder dat dit bestand opnieuw hoeft te
+    // sorteren.
+    const useAccordion = items.length > 3;
+    mount(el, html`${items.map((entry, i) => {
+      const jobLabel = entry.job_title
+        ? html`${entry.job_title} <span class="a-soft">(#${entry.job_id})</span>`
+        : html`Vacature #${entry.job_id}`;
+      const heading = opts.showCandidateName
+        ? html`${entry.full_name || 'Onbekende kandidaat'} <span class="a-soft">· ${jobLabel}</span>`
+        : html`Vacature: ${jobLabel}`;
+      const body = this.pipelineEntryBody(entry);
+      if (useAccordion) {
+        return html`<details class="card mb-3 a-disclosure" id="pipelineEntry_${entry.id}" ${raw(i === 0 ? 'open' : '')}>
+          <summary>${heading}</summary>
+          <div class="card-body">${body}</div>
+        </details>`;
+      }
+      return html`<div class="a-panel mb-3" id="pipelineEntry_${entry.id}"><h4 class="a-cell-strong mb-2">${heading}</h4>${body}</div>`;
+    })}`);
+    if (useAccordion) {
+      // code-reviewer LOW op claude/admin-pipeline: een dichtgeklapte kaart
+      // hoeft zijn historie niet meteen op te halen. De nieuwste (open bij
+      // render, i === 0 hierboven) laadt meteen; de rest pas op het eigen
+      // toggle-event van zijn <details>, één keer (zoals
+      // #retentionTableDetails in retention.js dat al doet).
+      this.loadPipelineHistory(items[0].id, el);
+      items.slice(1).forEach((entry) => {
+        const node = el.querySelector(`#pipelineEntry_${entry.id}`);
+        if (!node) return;
+        node.addEventListener('toggle', () => {
+          if (node.open && node.dataset.gspHistoryLoaded !== '1') {
+            node.dataset.gspHistoryLoaded = '1';
+            this.loadPipelineHistory(entry.id, el);
+          }
+        });
+      });
+    } else {
+      items.forEach(entry => this.loadPipelineHistory(entry.id, el));
+    }
+  },
+
+  // code-reviewer LOW op claude/admin-pipeline: de oude tab Matches toonde
+  // `updated_at` ("Bijgewerkt"). De tab Pipeline haalt "Laatst gewijzigd"
+  // in plaats daarvan uit de historie, en die kan ontbreken (geen historie,
+  // of een historiefout) -- dan stond er nergens meer een datum bij een
+  // kaart die er toch echt een heeft. `updated_at` staat er daarom altijd,
+  // onafhankelijk van de historie.
+  pipelineEntryBody(entry) {
+    return html`
+      <div id="pipelineEntryAlert_${entry.id}"></div>
+      <div class="a-pipeline-controls">
+        <div class="form-group mb-0">
+          <label class="form-label" for="pipelineStage_${entry.id}">Huidige fase</label>
+          <select class="form-select" id="pipelineStage_${entry.id}" data-original-stage="${entry.stage ?? ''}">${this.pipelineStageOptions(entry.stage)}</select>
+        </div>
+        <button type="button" class="btn btn-primary" data-action="pipeline-change-stage"
+          data-entry-id="${entry.id}">Fase wijzigen</button>
+      </div>
+      <div class="a-meta mb-2">Bijgewerkt: ${this.retentionDate(entry.updated_at)}</div>
+      <div id="pipelineHistoryWrap_${entry.id}">
+        ${[0, 1, 2].map(() => html`<div class="a-skel-block"></div>`)}
+      </div>
+    `;
+  },
+
+  // §7.3.4 "Fase wijzigen": geen automatische opslag bij het wisselen van
+  // de select (de <select> zelf toont de gekozen waarde al -- dat IS de
+  // optimistische update), pas bij deze klik gaat de PATCH eruit. Bij een
+  // 4xx/5xx draait dit de select terug naar de laatst bevestigde waarde
+  // (data-original-stage) en toont een inline-melding boven de kaart; bij
+  // succes wordt alleen de historie van deze entry opnieuw opgehaald, niet
+  // lokaal aangevuld. `root` is de `.a-tabpane` van de drawer die de klik
+  // deed (zie de moduledoc hierboven) -- nooit weglaten voor een geopende
+  // drawer.
+  async changePipelineStage(entryId, root) {
+    const scope = root || document;
+    const selectEl = scope.querySelector(`#pipelineStage_${entryId}`);
+    const btnEl = scope.querySelector(`[data-action="pipeline-change-stage"][data-entry-id="${entryId}"]`);
+    if (!selectEl || !btnEl || btnEl.disabled) return;
+    this.pipelineEntryAlert(entryId, '', root);
+    const newStage = selectEl.value;
+    const stages = AdminLabels.pipelineStages || [];
+    // De ontsnappingsklep-optie mag nooit verzonden worden, ook niet
+    // wanneer ze toevallig de geselecteerde waarde is gebleven (§7.3.4:
+    // "de UI schrijft nooit stilzwijgend een onbekende fase weg").
+    if (!stages.includes(newStage)) {
+      this.pipelineEntryAlert(entryId, 'Kies een van de zeven fasen om op te slaan; de huidige waarde is alleen ter informatie te zien.', root);
+      return;
+    }
+    const originalStage = selectEl.dataset.originalStage;
+    if (newStage === originalStage) return; // geen wijziging, niets te bewaren.
+
+    btnEl.disabled = true;
+    selectEl.disabled = true;
+    const prevLabel = btnEl.innerHTML;
+    mount(btnEl, html`<i class="fa-solid fa-spinner fa-spin"></i> Fase wijzigen`);
+    try {
+      const res = await Auth.fetch(`/v1/admin/pipeline/${entryId}/stage`, {
+        method: 'PATCH', body: JSON.stringify({ stage: newStage }),
+      });
+      const data = res ? await res.json().catch(() => null) : null;
+      if (res && res.ok) {
+        selectEl.dataset.originalStage = newStage;
+        Auth.toast('Fase bijgewerkt', 'success');
+        await this.loadPipelineHistory(entryId, root);
+        btnEl.disabled = false;
+        selectEl.disabled = false;
+        mount(btnEl, raw(prevLabel));
+        return;
+      }
+      selectEl.value = originalStage;
+      this.pipelineEntryAlert(entryId, this.pipelineStageErrorText(data, res && res.status), root);
+    } catch {
+      selectEl.value = originalStage;
+      this.pipelineEntryAlert(entryId, 'Netwerkfout, probeer het opnieuw.', root);
+    }
+    btnEl.disabled = false;
+    selectEl.disabled = false;
+    mount(btnEl, raw(prevLabel));
+  },
+
+  pipelineStageErrorText(data, status) {
+    if (status === 401 || status === 403) return 'Je hebt geen rechten voor deze handeling.';
+    if (status === 404) return 'Deze pipeline-entry bestaat niet meer. Ververs de pagina.';
+    if (status === 422) return 'Deze fase is ongeldig. Kies een van de zeven fasen.';
+    const d = this.errorDetail(data);
+    if (d.message) return d.message;
+    return 'Er ging iets mis, probeer het opnieuw.';
+  },
+
+  pipelineEntryAlert(entryId, text, root) {
+    const el = (root || document).querySelector(`#pipelineEntryAlert_${entryId}`);
+    if (!el) return;
+    if (!text) { mount(el, ''); return; }
+    mount(el, html`
+      <div class="alert alert-danger" role="alert">
+        <i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i>
+        <span>${text}</span>
+      </div>`);
+  },
+
+  // security-auditor LOW op claude/admin-pipeline (herchecks op 3951578):
+  // twee aanroepen voor dezelfde entry kunnen overlappen (een trage
+  // initiële GET terwijl een geslaagde PATCH meteen zijn eigen herlading
+  // start), en zonder volgnummer wint welke respons dan ook het laatst
+  // binnenkomt -- een trage eerste GET zou de verse herlading na de PATCH
+  // zo kunnen overschrijven met de OUDE fase. `wrap._pipelineHistorySeq`
+  // is het volgnummer van de laatst GESTARTE aanroep voor deze wrap; een
+  // respons die niet meer de nieuwste aanroep is (seq komt niet meer
+  // overeen) wordt genegeerd, in zowel het succes- als het foutpad.
+  async loadPipelineHistory(entryId, root) {
+    const wrap = (root || document).querySelector(`#pipelineHistoryWrap_${entryId}`);
+    if (!wrap) return;
+    const seq = wrap._pipelineHistorySeq = (wrap._pipelineHistorySeq || 0) + 1;
+    mount(wrap, html`${[0, 1, 2].map(() => html`<div class="a-skel-block"></div>`)}`);
+    try {
+      const res = await Auth.fetch(`/v1/admin/pipeline/${entryId}/history`);
+      if (!res) return;
+      const data = await res.json();
+      if (seq !== wrap._pipelineHistorySeq) return; // een nieuwere aanroep won al
+      if (!res.ok) throw new Error();
+      // §7.3.4: de route sorteert ORDER BY h.changed_at (oplopend, append-
+      // only logboek); de tijdlijn toont nieuwste boven, dus hier
+      // aflopend, met id als tiebreak bij een gelijke timestamp.
+      wrap._pipelineHistoryItems = (data.items || []).slice().sort((a, b) => {
+        const diff = new Date(b.changed_at) - new Date(a.changed_at);
+        return diff !== 0 ? diff : (b.id || 0) - (a.id || 0);
+      });
+      this.renderPipelineHistory(entryId, false, root);
+    } catch {
+      if (seq !== wrap._pipelineHistorySeq) return;
+      this.setContainerLoadError(wrap, () => this.loadPipelineHistory(entryId, root));
+    }
+  },
+
+  pipelineActorLabel(item) {
+    if (item.changed_by_name) return item.changed_by_name;
+    if (item.changed_by != null) return `Gebruiker #${item.changed_by}`;
+    return 'Onbekend';
+  },
+
+  // "<van> → <naar>" (§7.3.4): een rechterpijl (U+2192), geen streepje en
+  // geen em-dash. from_stage: null toont als "(nieuw)"; elke waarde gaat
+  // door dezelfde labelmap als de select, met de ruwe waarde als terugval.
+  pipelineStageChangeLabel(item) {
+    const from = item.from_stage == null
+      ? '(nieuw)'
+      : AdminLabels.label('pipelinefase', item.from_stage, item.from_stage);
+    const to = AdminLabels.label('pipelinefase', item.to_stage, item.to_stage);
+    return html`${from} → ${to}`;
+  },
+
+  pipelineDateTime(d) {
+    if (!d) return '—';
+    const dt = new Date(d);
+    if (isNaN(dt.getTime())) return '—';
+    const date = dt.toLocaleDateString('nl-NL', { day: 'numeric', month: 'short', year: 'numeric' });
+    const time = dt.toLocaleTimeString('nl-NL', { hour: '2-digit', minute: '2-digit' });
+    return `${date} ${time}`;
+  },
+
+  // showAll: true toont alle items (na een klik op "Toon alles"), anders
+  // de eerste tien (§7.3.4: "Maximaal tien items zichtbaar, daarna 'Toon
+  // alles'"). Leest wrap._pipelineHistoryItems, gezet door
+  // loadPipelineHistory hierboven -- dat veld overleeft deze functie's
+  // eigen mount() omdat die alleen de innerHTML van wrap vervangt, niet
+  // wrap zelf.
+  renderPipelineHistory(entryId, showAll, root) {
+    const wrap = (root || document).querySelector(`#pipelineHistoryWrap_${entryId}`);
+    if (!wrap) return;
+    const sorted = wrap._pipelineHistoryItems || [];
+    if (!sorted.length) {
+      mount(wrap, html`<div class="a-state-block">Nog geen fasewijzigingen vastgelegd.</div>`);
+      return;
+    }
+    const last = sorted[0];
+    const MAX_VISIBLE = 10;
+    const visible = showAll ? sorted : sorted.slice(0, MAX_VISIBLE);
+    const hasMore = !showAll && sorted.length > MAX_VISIBLE;
+    mount(wrap, html`
+      <div class="a-meta mb-2">Laatst gewijzigd: ${this.retentionDate(last.changed_at)} door ${this.pipelineActorLabel(last)}</div>
+      <ul class="a-timeline">
+        ${visible.map((it, i) => html`
+          <li class="a-timeline__item${raw(i === 0 ? ' a-timeline__item--newest' : '')}">
+            <div class="a-num fs-xs">${this.pipelineDateTime(it.changed_at)}</div>
+            <div>${this.pipelineStageChangeLabel(it)}</div>
+            <div class="a-soft fs-xs">${this.pipelineActorLabel(it)}</div>
+          </li>`)}
+      </ul>
+      ${hasMore ? html`<button type="button" class="btn btn-sm btn-ghost-secondary" data-action="pipeline-history-show-all" data-entry-id="${entryId}">Toon alles</button>` : ''}
+    `);
+  },
+});
+
+/* ============================================================
+   ACTIVITEITENTAB (§7.3.6(b)): "Activiteit" in de kandidaat- (candidates.js,
+   verving daar de eigen platte tabel) en de klantdrawer (clients.js,
+   verving daar "Notities/Activiteit"). Eén gedeelde implementatie, net als
+   de tab Pipeline hierboven: `loadActivityTab()`/`renderActivityTab()`
+   lezen en schrijven altijd via `containerId`
+   (`candidateDrawerTabContent` / `clientDrawerTabContent`), niet via een
+   losstaand element-id, dus er is geen kans op de kruisdrawer-botsing die
+   de Pipeline-tab wel kende (elke pipeline-entry kan in beide drawers
+   voorkomen met hetzelfde id; een activiteit hoort altijd bij precies één
+   subject, dus dat risico bestaat hier niet, maar de state leeft toch aan
+   het containerelement zelf -- `el._activity*` -- in plaats van in een
+   module-brede variabele, om twee gelijktijdig geopende drawers met
+   allebei een open formulier niet met elkaar te laten overschrijven).
+
+   GET/POST /api/v1/admin/activities geven geen naam bij `created_by`
+   (alleen het user-id, anders dan BV7's `changed_by_name` voor de
+   pipeline-historie): `activityActorLabel()` valt daarom terug op
+   "Gebruiker #<id>", dezelfde vorm als `pipelineActorLabel()` zonder
+   naam.
+   ============================================================ */
+Object.assign(Admin, {
+  activityActorLabel(a) {
+    if (a.created_by != null) return `Gebruiker #${a.created_by}`;
+    return 'Onbekend';
+  },
+
+  async loadActivityTab(containerId, subjectType, subjectId) {
+    const el = document.getElementById(containerId);
+    if (!el) return;
+    mount(el, html`${[0, 1, 2].map(() => html`<div class="a-skel-block"></div>`)}`);
+    try {
+      const qs = new URLSearchParams({ subject_type: subjectType, subject_id: subjectId, limit: 50 });
+      const res = await Auth.fetch(`/v1/admin/activities?${qs}`);
+      if (!res) return;
+      const data = await res.json();
+      if (!res.ok) throw new Error();
+      el._activitySubjectType = subjectType;
+      el._activitySubjectId = subjectId;
+      el._activityItems = (data.items || []).slice().sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+      el._activityFormOpen = false;
+      this.renderActivityTab(containerId);
+    } catch {
+      this.setContainerLoadError(el, () => this.loadActivityTab(containerId, subjectType, subjectId));
+    }
+  },
+
+  toggleActivityForm(containerId) {
+    const el = document.getElementById(containerId);
+    if (!el) return;
+    el._activityFormOpen = !el._activityFormOpen;
+    this.renderActivityTab(containerId);
+  },
+
+  renderActivityTab(containerId) {
+    const el = document.getElementById(containerId);
+    if (!el) return;
+    const items = el._activityItems || [];
+    const formOpen = !!el._activityFormOpen;
+    const subjectType = el._activitySubjectType;
+    const subjectId = el._activitySubjectId;
+    const types = Object.keys(AdminLabels.maps.activiteit);
+
+    const list = items.length ? html`
+      <ul class="a-timeline">
+        ${items.map(a => html`
+          <li class="a-timeline__item">
+            <div class="d-flex align-items-center gap-2 flex-wrap">
+              <span class="${this.badge(a.type)}">${this.activityTypeLabel(a.type)}</span>
+              <span class="a-num fs-xs">${this.pipelineDateTime(a.created_at)}</span>
+            </div>
+            ${a.type === 'task' ? html`
+              <label class="form-check mt-1 mb-0">
+                <input class="form-check-input" type="checkbox" data-action="activity-toggle-task"
+                  data-id="${a.id}" data-container="${containerId}" ${raw(a.completed_at ? 'checked' : '')}>
+                <span class="form-check-label">${a.body || '—'}</span>
+              </label>
+            ` : html`<div class="mt-1">${a.body || '—'}</div>`}
+            <div class="a-soft fs-xs mt-1">${this.activityActorLabel(a)}</div>
+          </li>`)}
+      </ul>` : html`<div class="a-state-block">Nog geen activiteiten vastgelegd.</div>`;
+
+    mount(el, html`
+      <div class="mb-3">
+        <button type="button" class="btn btn-sm btn-ghost-secondary" data-action="activity-toggle-form" data-container="${containerId}">
+          <i class="fa-solid fa-plus me-1" aria-hidden="true"></i>Activiteit toevoegen
+        </button>
+      </div>
+      ${formOpen ? html`
+        <div class="a-panel mb-3">
+          <div class="form-group mb-2">
+            <label class="form-label" for="${containerId}_activityType">Type</label>
+            <select class="form-select" id="${containerId}_activityType">
+              ${types.map(t => html`<option value="${t}">${AdminLabels.label('activiteit', t)}</option>`)}
+            </select>
+          </div>
+          <div class="form-group mb-2">
+            <label class="form-label" for="${containerId}_activityBody">Notitie</label>
+            <textarea class="a-textarea" id="${containerId}_activityBody" rows="3"></textarea>
+          </div>
+          <div id="${containerId}_activityAlert"></div>
+          <button type="button" class="btn btn-primary btn-sm" data-action="activity-submit"
+            data-container="${containerId}" data-subject-type="${subjectType}" data-subject-id="${subjectId}">Vastleggen</button>
+        </div>
+      ` : ''}
+      ${list}
+    `);
+  },
+
+  activityAlert(elId, text) {
+    const el = document.getElementById(elId);
+    if (!el) return;
+    if (!text) { mount(el, ''); return; }
+    mount(el, html`
+      <div class="alert alert-danger" role="alert">
+        <i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i>
+        <span>${text}</span>
+      </div>`);
+  },
+
+  async submitActivity(containerId, subjectType, subjectId) {
+    const alertId = `${containerId}_activityAlert`;
+    this.activityAlert(alertId, '');
+    const typeEl = document.getElementById(`${containerId}_activityType`);
+    const bodyEl = document.getElementById(`${containerId}_activityBody`);
+    const type = typeEl?.value;
+    if (!type) return;
+    const body = (bodyEl?.value || '').trim();
+    const btn = document.querySelector(`[data-action="activity-submit"][data-container="${containerId}"]`);
+    if (btn) btn.disabled = true;
+    try {
+      const res = await Auth.fetch('/v1/admin/activities', {
+        method: 'POST',
+        body: JSON.stringify({ subject_type: subjectType, subject_id: Number(subjectId), type, body: body || null }),
+      });
+      const data = res ? await res.json().catch(() => null) : null;
+      if (res && res.ok) {
+        Auth.toast('Activiteit vastgelegd', 'success');
+        await this.loadActivityTab(containerId, subjectType, Number(subjectId));
+        return;
+      }
+      this.activityAlert(alertId, this.errorDetail(data).message || 'Vastleggen mislukt, probeer het opnieuw.');
+    } catch {
+      this.activityAlert(alertId, 'Netwerkfout, probeer het opnieuw.');
+    }
+    if (btn) btn.disabled = false;
+  },
+
+  // Optimistisch: de checkbox staat al om (het click-event vuurt na de
+  // browsereigen toggle), dus alleen bij een mislukte PATCH draait dit
+  // terug. Geen volledige herrender: dat zou een tegelijk openstaand
+  // formulier of een andere aangevinkte taak resetten.
+  async toggleActivityTask(containerId, activityId, nowChecked) {
+    const el = document.getElementById(containerId);
+    const checkboxEl = document.querySelector(
+      `[data-action="activity-toggle-task"][data-id="${activityId}"][data-container="${containerId}"]`);
+    try {
+      const res = await Auth.fetch(`/v1/admin/activities/${activityId}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ completed_at: nowChecked ? new Date().toISOString() : null }),
+      });
+      const data = res ? await res.json().catch(() => null) : null;
+      if (res && res.ok) {
+        const item = (el?._activityItems || []).find(a => a.id === activityId);
+        if (item) item.completed_at = (data && 'completed_at' in data) ? data.completed_at : (nowChecked ? new Date().toISOString() : null);
+        Auth.toast('Taak bijgewerkt', 'success');
+        return;
+      }
+      if (checkboxEl) checkboxEl.checked = !nowChecked;
+      Auth.toast('Bijwerken mislukt', 'error');
+    } catch {
+      if (checkboxEl) checkboxEl.checked = !nowChecked;
+      Auth.toast('Netwerkfout', 'error');
+    }
+  },
+});
+
+Admin.registerActions({
+  'activity-toggle-form': (el) => Admin.toggleActivityForm(el.dataset.container),
+  'activity-submit': (el) => Admin.submitActivity(el.dataset.container, el.dataset.subjectType, el.dataset.subjectId),
+  'activity-toggle-task': (el) => Admin.toggleActivityTask(el.dataset.container, Number(el.dataset.id), el.checked),
+});
+
+/* Het dashboard blijft in de kern (Admin.init() laadt het zelf al), maar
+   staat wel in dezelfde registry zodat nav.js één bron heeft. */
+Admin.registerSection({
+  id: 'dashboard',
+  title: 'Dashboard',
+  loader: () => Admin.loadDashboard(),
+  filters: [],
+});
 
 function debounce(fn, delay) {
   let t;
   return (...args) => { clearTimeout(t); t = setTimeout(() => fn(...args), delay); };
 }
+Admin.debounce = debounce;
 
 document.addEventListener('DOMContentLoaded', () => {
   Admin.init();
-  Admin.bindFilters();
+  Admin.bindGlobal();
 });

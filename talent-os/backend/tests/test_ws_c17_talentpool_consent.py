@@ -19,12 +19,15 @@ from starlette.requests import Request
 from core.security import hash_token
 
 
-def _fake_request() -> Request:
+def _fake_request(ip: str = "9.9.9.9") -> Request:
     """Bare starlette Request -- slowapi's @limiter.limit decorator reads
     request.headers/request.client to key the limit, same helper as
-    tests/test_ws_e4_ratelimit_lockout.py._make_request."""
+    tests/test_ws_e4_ratelimit_lockout.py._make_request. `ip` is
+    overridable (WS-4 tests use their own) so every module-level test
+    sharing the default "9.9.9.9" doesn't collide against
+    talentpool_optin's 5/minute limit purely from test-suite volume."""
     scope = {
-        "type": "http", "headers": [], "client": ("9.9.9.9", 12345),
+        "type": "http", "headers": [], "client": (ip, 12345),
         "method": "POST", "path": "/",
     }
     return Request(scope)
@@ -278,14 +281,105 @@ def test_profile_get_has_no_consent_when_never_recorded(patch_profile_router):
     assert result["consent_talentpool_until"] is None
 
 
+# ── WS5 issue #136: GET /profile carries the job-alert switch's state ────
+# The switch (§7.3.7) can only ever be safe to show on page load if it
+# comes from a GET, since PUT /v1/candidate/job-alerts is a write and
+# would risk flipping real consent if used as a "read". These three
+# fields ride the same _attach_talentpool_consent SELECT tested above.
+
+def test_profile_get_includes_job_alert_fields(patch_profile_router):
+    optin_at = datetime(2026, 9, 3, tzinfo=timezone.utc)
+    db = _ProfileDB(
+        profile_row=_profile_row(), candidate_id=42,
+        consent_row={
+            "consent_talentpool_at": None, "consent_talentpool_until": None,
+            "consent_scope": None, "consent_source": None,
+            "consent_withdrawn_at": None, "lawful_basis": "portal_registratie",
+            "job_alert_optin_at": optin_at, "job_alert_unsubscribed_at": None,
+            "job_alert_eligible": True,
+        },
+    )
+    router = patch_profile_router(db)
+    result = asyncio.run(router.get_candidate_profile(current_user=_user()))
+    assert result["job_alert_optin_at"] == optin_at
+    assert result["job_alert_unsubscribed_at"] is None
+    assert result["job_alert_eligible"] is True
+
+
+def test_profile_get_job_alert_fields_default_when_never_set(patch_profile_router):
+    """No candidates row (or one that never touched job-alerts) must
+    default to the same "off, not eligible" state the switch's HTML
+    treats as its unloaded/unknown baseline -- never a guessed True."""
+    db = _ProfileDB(profile_row=_profile_row(), candidate_id=42, consent_row=None)
+    router = patch_profile_router(db)
+    result = asyncio.run(router.get_candidate_profile(current_user=_user()))
+    assert result["job_alert_optin_at"] is None
+    assert result["job_alert_unsubscribed_at"] is None
+    assert result["job_alert_eligible"] is False
+
+
+def test_profile_get_and_job_alerts_put_agree_on_eligibility(patch_profile_router, monkeypatch):
+    """The GET's job_alert_eligible and the PUT's `eligible` must never
+    disagree for the same underlying state -- both are computed from the
+    exact same JOB_ALERT_ELIGIBILITY_SQL constant (core/retention.py),
+    so a candidate who reloads the page never sees the switch's warning
+    flicker between two different answers to the same question."""
+    from models.schemas import CandidateJobAlertsUpdate
+    import routers.candidate as candidate_router
+
+    for eligible in (True, False):
+        get_db = _ProfileDB(
+            profile_row=_profile_row(), candidate_id=42,
+            consent_row={
+                "consent_talentpool_at": None, "consent_talentpool_until": None,
+                "consent_scope": None, "consent_source": None,
+                "consent_withdrawn_at": None, "lawful_basis": "portal_registratie",
+                "job_alert_optin_at": "now", "job_alert_unsubscribed_at": None,
+                "job_alert_eligible": eligible,
+            },
+        )
+        get_router = patch_profile_router(get_db)
+        get_result = asyncio.run(get_router.get_candidate_profile(current_user=_user()))
+
+        async def _fake_get_candidate_id(user_id):
+            return 42
+
+        async def _fake_fetch_one(sql, *args, _eligible=eligible):
+            return {
+                "id": 42, "job_alert_optin_at": "now",
+                "job_alert_unsubscribed_at": None, "eligible": _eligible,
+            }
+
+        async def _fake_execute(sql, *args):
+            return "INSERT 1"
+
+        monkeypatch.setattr(candidate_router, "_get_candidate_id", _fake_get_candidate_id)
+        monkeypatch.setattr(candidate_router, "fetch_one", _fake_fetch_one)
+        monkeypatch.setattr(candidate_router, "execute", _fake_execute)
+        put_result = asyncio.run(
+            candidate_router.update_job_alerts(
+                CandidateJobAlertsUpdate(enabled=True),
+                current_user={"id": 1, "role": "candidate", "email": "k@example.com"},
+            )
+        )
+        assert get_result["job_alert_eligible"] == put_result["eligible"] == eligible
+
+
 # ── Public: POST /api/public/talentpool-optin + /talentpool-confirm ──────
 
 class _PublicDB:
-    def __init__(self, pending_row=None, existing_candidate=None, suppressed=False, recent_pending=False):
+    def __init__(self, pending_row=None, existing_candidate=None, suppressed=False,
+                 recent_pending=False, job_row=None):
         self.pending_row = pending_row
         self.existing_candidate = existing_candidate
         self.suppressed = suppressed
         self.recent_pending = recent_pending
+        # WS-4 (migrations/037): the job_orders lookup used both by
+        # talentpool_optin() (validating an incoming job_id) and
+        # talentpool_confirm() (re-checking it's still open at confirm
+        # time) -- a dict with at least {"id", "title"}, or None to
+        # simulate "no such open/non-demo/non-deleted job".
+        self.job_row = job_row
         self.executed = []
         self.inserted_token_hash = None
 
@@ -298,6 +392,9 @@ class _PublicDB:
         if "FROM talentpool_optin_requests" in sql:
             # talentpool_confirm()'s token lookup
             return self.pending_row
+        if "FROM job_orders" in sql:
+            # WS-4: job_id validation (optin) / re-check (confirm)
+            return self.job_row
         if "FROM candidates WHERE LOWER(email)" in sql:
             return self.existing_candidate
         if sql.strip().startswith("UPDATE candidates") or sql.strip().startswith("INSERT INTO candidates"):
@@ -321,9 +418,14 @@ def patch_public_router(monkeypatch):
         monkeypatch.setattr(public_router, "fetch_one", db.fetch_one)
         monkeypatch.setattr(public_router, "execute", db.execute)
 
-        async def _fake_send_email(**kwargs):
+        # WS3: _send_talentpool_confirm_email() now renders through
+        # send_template() (services/email_templates.py's
+        # "talentpool_confirm") instead of building its own body_text and
+        # calling send_email() directly -- patch the method actually
+        # called.
+        async def _fake_send_template(name, to_email, ctx, lang="nl"):
             return send_ok
-        monkeypatch.setattr(public_router.email_service, "send_email", _fake_send_email)
+        monkeypatch.setattr(public_router.email_service, "send_template", _fake_send_template)
         return public_router
     return _patch
 
@@ -340,12 +442,88 @@ def test_talentpool_optin_with_consent_stores_only_the_token_hash(patch_public_r
     insert_calls = [c for c in db.executed if "INSERT INTO talentpool_optin_requests" in c[0]]
     assert len(insert_calls) == 1
     _, args = insert_calls[0]
-    email, token_hash, scope, source = args
+    email, token_hash, scope, source, job_id, job_alerts = args
     assert email == "jane@example.com"
     assert scope == "matching_only" and source == "kandidaten_page"
+    # no job_id/job_alerts given -- WS-4 fields default to "not linked"
+    assert job_id is None
+    assert job_alerts is False
     # only a sha256 hex digest is stored, never a raw token
     assert len(token_hash) == 64
     assert all(c in "0123456789abcdef" for c in token_hash)
+
+
+# ── WS-4 (migrations/037): job_id / job_alerts on the talentpool opt-in ──
+
+def test_talentpool_optin_with_valid_job_id_stores_it_and_names_the_job_in_the_email(monkeypatch):
+    from models.schemas import TalentpoolOptinRequest
+    import routers.public as public_router
+
+    db = _PublicDB(job_row={"id": 55, "title": "Senior Embedded C++ Engineer"})
+    monkeypatch.setattr(public_router, "fetch_one", db.fetch_one)
+    monkeypatch.setattr(public_router, "execute", db.execute)
+
+    sent = []
+
+    # WS3: same rename as patch_public_router above -- the job title now
+    # travels as ctx["job_title"] into send_template(), not as a rendered
+    # body_text string.
+    async def _fake_send_template(name, to_email, ctx, lang="nl"):
+        sent.append({"name": name, "to_email": to_email, "ctx": ctx, "lang": lang})
+        return True
+    monkeypatch.setattr(public_router.email_service, "send_template", _fake_send_template)
+
+    data = TalentpoolOptinRequest(
+        email="applicant@example.com", consent=True, scope="matching_only",
+        source="vacancy_apply", job_id=55, job_alerts=True,
+    )
+    asyncio.run(public_router.talentpool_optin(request=_fake_request(ip="9.9.9.10"), data=data))
+    insert_calls = [c for c in db.executed if "INSERT INTO talentpool_optin_requests" in c[0]]
+    _, args = insert_calls[0]
+    email, token_hash, scope, source, job_id, job_alerts = args
+    assert job_id == 55
+    assert job_alerts is True
+    assert source == "vacancy_apply"
+    assert len(sent) == 1
+    assert sent[0]["name"] == "talentpool_confirm"
+    assert sent[0]["to_email"] == "applicant@example.com"
+    assert sent[0]["ctx"]["job_title"] == "Senior Embedded C++ Engineer"
+
+
+def test_talentpool_optin_with_unknown_job_id_stores_no_job_id(patch_public_router):
+    """An id that doesn't resolve to an open/non-demo/non-deleted job is
+    silently ignored -- the row is still created, just without a job_id,
+    same no-enumeration posture as the rest of this endpoint."""
+    from models.schemas import TalentpoolOptinRequest
+    db = _PublicDB(job_row=None)  # simulates closed/demo/deleted/unknown job_id
+    router = patch_public_router(db)
+    data = TalentpoolOptinRequest(
+        email="applicant@example.com", consent=True, scope="matching_only",
+        source="vacancy_apply", job_id=999999,
+    )
+    result = asyncio.run(router.talentpool_optin(request=_fake_request(ip="9.9.9.11"), data=data))
+    assert "message" in result  # same generic 202 body
+    insert_calls = [c for c in db.executed if "INSERT INTO talentpool_optin_requests" in c[0]]
+    _, args = insert_calls[0]
+    email, token_hash, scope, source, job_id, job_alerts = args
+    assert job_id is None
+
+
+def test_talentpool_optin_source_accepts_vacancy_apply():
+    from models.schemas import TalentpoolOptinRequest
+    req = TalentpoolOptinRequest(
+        email="a@example.com", consent=True, scope="matching_only", source="vacancy_apply",
+    )
+    assert req.source == "vacancy_apply"
+
+
+def test_talentpool_optin_source_still_rejects_an_unknown_value():
+    from pydantic import ValidationError
+    from models.schemas import TalentpoolOptinRequest
+    with pytest.raises(ValidationError):
+        TalentpoolOptinRequest(
+            email="a@example.com", consent=True, scope="matching_only", source="not_a_real_source",
+        )
 
 
 def test_talentpool_optin_without_consent_is_a_noop(patch_public_router):
@@ -390,6 +568,91 @@ def test_talentpool_optin_skips_sending_when_a_recent_unconfirmed_request_exists
     assert db.executed == []
 
 
+class _StatefulOptinDB:
+    """Chief-of-staff FIX FIRST regression: unlike _PublicDB's canned
+    `recent_pending` flag, this fake actually implements the guard's SQL
+    semantics (a per-(email, job_id) lookup against previously inserted
+    rows) so the (email, job_id) key change can be proven end to end
+    instead of just exercised query-string-first."""
+
+    def __init__(self, job_rows=None):
+        self.job_rows = job_rows or {}  # job_id -> {"id", "title"}
+        self.rows = []  # inserted talentpool_optin_requests rows
+
+    async def fetch_one(self, sql, *args):
+        if "FROM suppression_list" in sql:
+            return None
+        if "FROM job_orders" in sql:
+            return self.job_rows.get(args[0])
+        if "FROM talentpool_optin_requests" in sql and "LOWER(email)" in sql:
+            email, job_id = args
+            for row in self.rows:
+                if row["email"] == email and row["job_id"] == job_id and not row["confirmed"]:
+                    return {"id": row["id"]}
+            return None
+        return None
+
+    async def execute(self, sql, *args):
+        if "INSERT INTO talentpool_optin_requests" in sql:
+            email, token_hash, scope, source, job_id, job_alerts = args
+            self.rows.append({"id": len(self.rows) + 1, "email": email, "job_id": job_id, "confirmed": False})
+        return "OK"
+
+
+def test_talentpool_optin_second_role_within_ten_minutes_gets_its_own_row(monkeypatch):
+    """Chief-of-staff FIX FIRST: the repeated-click guard used to key
+    only on e-mail, so a candidate applying to a second role shortly
+    after the first (e.g. the junior/medior/senior variants of the same
+    title) got the same generic 202 back but no second row, no second
+    job_id and no confirmation e-mail -- the application looked accepted
+    and silently wasn't. The guard now keys on (email, job_id): a
+    different job_id is a different application and gets its own row and
+    e-mail, while a genuine repeat click on the SAME job is still
+    deduped."""
+    from models.schemas import TalentpoolOptinRequest
+    import routers.public as public_router
+
+    db = _StatefulOptinDB(job_rows={
+        55: {"id": 55, "title": "RTOS-software engineer (junior)"},
+        56: {"id": 56, "title": "RTOS-software engineer (medior)"},
+    })
+    monkeypatch.setattr(public_router, "fetch_one", db.fetch_one)
+    monkeypatch.setattr(public_router, "execute", db.execute)
+
+    sent = []
+
+    # WS3: send_template(), not send_email() -- see patch_public_router above.
+    async def _fake_send_template(name, to_email, ctx, lang="nl"):
+        sent.append({"name": name, "to_email": to_email, "ctx": ctx})
+        return True
+    monkeypatch.setattr(public_router.email_service, "send_template", _fake_send_template)
+
+    data1 = TalentpoolOptinRequest(
+        email="dubbel@example.com", consent=True, scope="matching_only",
+        source="vacancy_apply", job_id=55,
+    )
+    data2 = TalentpoolOptinRequest(
+        email="dubbel@example.com", consent=True, scope="matching_only",
+        source="vacancy_apply", job_id=56,
+    )
+    asyncio.run(public_router.talentpool_optin(request=_fake_request(ip="9.9.9.20"), data=data1))
+    asyncio.run(public_router.talentpool_optin(request=_fake_request(ip="9.9.9.20"), data=data2))
+
+    assert len(db.rows) == 2
+    assert {r["job_id"] for r in db.rows} == {55, 56}
+    assert len(sent) == 2
+
+    # A genuine repeat submit for the SAME job within ten minutes is
+    # still deduped -- the guard isn't disabled, only correctly scoped.
+    data3 = TalentpoolOptinRequest(
+        email="dubbel@example.com", consent=True, scope="matching_only",
+        source="vacancy_apply", job_id=55,
+    )
+    asyncio.run(public_router.talentpool_optin(request=_fake_request(ip="9.9.9.20"), data=data3))
+    assert len(db.rows) == 2
+    assert len(sent) == 2
+
+
 def test_talentpool_confirm_rejects_invalid_or_expired_token(patch_public_router):
     from fastapi import HTTPException
     from models.schemas import TalentpoolConfirmRequest
@@ -404,7 +667,8 @@ def test_talentpool_confirm_creates_new_candidate_with_no_source_url(patch_publi
     """SOP §1.5: the talentpool checkbox itself is the source -- no
     source_url required for candidates created via this channel."""
     from models.schemas import TalentpoolConfirmRequest
-    pending = {"id": 1, "email": "new@example.com", "scope": "matching_and_contact", "source": "blog_cta"}
+    pending = {"id": 1, "email": "new@example.com", "scope": "matching_and_contact",
+               "source": "blog_cta", "job_id": None, "job_alerts": False}
     db = _PublicDB(pending_row=pending, existing_candidate=None)
     router = patch_public_router(db)
     result = asyncio.run(router.talentpool_confirm(request=_fake_request(), data=TalentpoolConfirmRequest(token="tok")))
@@ -422,7 +686,8 @@ def test_talentpool_confirm_updates_existing_candidate_preserving_other_basis(pa
     confirms the public talentpool opt-in keeps that basis (never
     silently overwritten) but still gets the consent columns recorded."""
     from models.schemas import TalentpoolConfirmRequest
-    pending = {"id": 1, "email": "existing@example.com", "scope": "matching_only", "source": "kandidaten_page"}
+    pending = {"id": 1, "email": "existing@example.com", "scope": "matching_only",
+               "source": "kandidaten_page", "job_id": None, "job_alerts": False}
     db = _PublicDB(
         pending_row=pending,
         existing_candidate={"id": 99, "lawful_basis": "gerechtvaardigd_belang"},
@@ -434,7 +699,14 @@ def test_talentpool_confirm_updates_existing_candidate_preserving_other_basis(pa
     _, args = update_calls[0]
     # args: now, until, scope, source, set_lawful_basis, candidate_id
     assert args[4] is False  # set_lawful_basis=False -- existing basis untouched
-    assert args[5] == 99
+    # WS3c (migrations/041) inserted two parameters between set_lawful_basis
+    # and the candidate id: $6 is_referral and $7 wants_alerts. The
+    # candidate id is the LAST positional argument either way, so assert on
+    # that rather than on a fixed index that moves whenever the SET list
+    # grows.
+    assert args[5] is False   # is_referral -- source is 'kandidaten_page'
+    assert args[6] is False   # wants_alerts -- job_alerts was not ticked
+    assert args[-1] == 99
 
 
 def test_talentpool_confirm_never_flips_portal_registratie_lawful_basis(patch_public_router):
@@ -442,7 +714,8 @@ def test_talentpool_confirm_never_flips_portal_registratie_lawful_basis(patch_pu
     separately confirms the public talentpool opt-in keeps that basis --
     same rule as the portal endpoint, not just 'any other basis'."""
     from models.schemas import TalentpoolConfirmRequest
-    pending = {"id": 2, "email": "portal@example.com", "scope": "matching_only", "source": "kandidaten_page"}
+    pending = {"id": 2, "email": "portal@example.com", "scope": "matching_only",
+               "source": "kandidaten_page", "job_id": None, "job_alerts": False}
     db = _PublicDB(
         pending_row=pending,
         existing_candidate={"id": 100, "lawful_basis": "portal_registratie"},
@@ -457,7 +730,8 @@ def test_talentpool_confirm_never_flips_portal_registratie_lawful_basis(patch_pu
 
 def test_talentpool_confirm_marks_the_pending_request_confirmed(patch_public_router):
     from models.schemas import TalentpoolConfirmRequest
-    pending = {"id": 5, "email": "new2@example.com", "scope": "matching_only", "source": "kandidaten_page"}
+    pending = {"id": 5, "email": "new2@example.com", "scope": "matching_only",
+               "source": "kandidaten_page", "job_id": None, "job_alerts": False}
     db = _PublicDB(pending_row=pending, existing_candidate=None)
     router = patch_public_router(db)
     asyncio.run(router.talentpool_confirm(request=_fake_request(), data=TalentpoolConfirmRequest(token="tok")))
@@ -467,6 +741,60 @@ def test_talentpool_confirm_marks_the_pending_request_confirmed(patch_public_rou
     ]
     assert len(confirm_calls) == 1
     assert confirm_calls[0][1] == (5,)
+
+
+# ── WS-4 (migrations/037): talentpool-confirm records the application ────
+
+def test_talentpool_confirm_with_still_open_job_creates_match_and_returns_applied_job(patch_public_router):
+    from models.schemas import TalentpoolConfirmRequest
+    pending = {"id": 6, "email": "applicant@example.com", "scope": "matching_only",
+               "source": "vacancy_apply", "job_id": 55, "job_alerts": False}
+    db = _PublicDB(
+        pending_row=pending, existing_candidate=None,
+        job_row={"id": 55, "title": "Senior Embedded C++ Engineer"},
+    )
+    router = patch_public_router(db)
+    result = asyncio.run(
+        router.talentpool_confirm(request=_fake_request(), data=TalentpoolConfirmRequest(token="tok"))
+    )
+    assert result["applied_job"] == {"id": 55, "title": "Senior Embedded C++ Engineer"}
+    match_calls = [c for c in db.executed if c[0].strip().startswith("INSERT INTO matches")]
+    assert len(match_calls) == 1
+    match_sql, match_args = match_calls[0]
+    assert "ON CONFLICT (candidate_id, job_id)" in match_sql
+    assert "'applied'" in match_sql
+    assert match_args == (1, 55)  # candidate_id from the INSERT INTO candidates RETURNING id
+
+
+def test_talentpool_confirm_with_no_job_id_returns_applied_job_none(patch_public_router):
+    from models.schemas import TalentpoolConfirmRequest
+    pending = {"id": 7, "email": "plain@example.com", "scope": "matching_only",
+               "source": "kandidaten_page", "job_id": None, "job_alerts": False}
+    db = _PublicDB(pending_row=pending, existing_candidate=None)
+    router = patch_public_router(db)
+    result = asyncio.run(
+        router.talentpool_confirm(request=_fake_request(), data=TalentpoolConfirmRequest(token="tok"))
+    )
+    assert result["applied_job"] is None
+    match_calls = [c for c in db.executed if c[0].strip().startswith("INSERT INTO matches")]
+    assert match_calls == []
+
+
+def test_talentpool_confirm_with_job_closed_since_optin_returns_applied_job_none(patch_public_router):
+    """The job was open when the applicant opted in, but has since closed
+    -- confirm must not create a match for a job that is no longer
+    eligible, and must say so via applied_job=None rather than an error."""
+    from models.schemas import TalentpoolConfirmRequest
+    pending = {"id": 8, "email": "late@example.com", "scope": "matching_only",
+               "source": "vacancy_apply", "job_id": 55, "job_alerts": False}
+    db = _PublicDB(pending_row=pending, existing_candidate=None, job_row=None)
+    router = patch_public_router(db)
+    result = asyncio.run(
+        router.talentpool_confirm(request=_fake_request(), data=TalentpoolConfirmRequest(token="tok"))
+    )
+    assert result["applied_job"] is None
+    match_calls = [c for c in db.executed if c[0].strip().startswith("INSERT INTO matches")]
+    assert match_calls == []
 
 
 # ── Admin: PATCH /api/v1/admin/candidates/{id}/talentpool-consent ────────
@@ -658,17 +986,22 @@ def test_talentpool_reminder_job_sends_one_email_and_stamps_reminder_sent_at(mon
 
     sent_calls = []
 
-    async def _fake_send_email(**kwargs):
-        sent_calls.append(kwargs)
+    # WS3: talentpool_reminder_job() now calls send_template() (the
+    # "talentpool_reminder" template) instead of building its own
+    # body_text and calling send_email() directly.
+    async def _fake_send_template(name, to_email, ctx, lang="nl"):
+        sent_calls.append({"name": name, "to_email": to_email, "ctx": ctx})
         return True
 
     import services.email_service as email_service_module
-    monkeypatch.setattr(email_service_module.email_service, "send_email", _fake_send_email)
+    monkeypatch.setattr(email_service_module.email_service, "send_template", _fake_send_template)
 
     result = asyncio.run(scheduler.talentpool_reminder_job())
     assert result == {"candidates_due": 1, "sent": 1}
     assert len(sent_calls) == 1
+    assert sent_calls[0]["name"] == "talentpool_reminder"
     assert sent_calls[0]["to_email"] == "due@example.com"
+    assert sent_calls[0]["ctx"]["full_name"] == "Jane Doe"
     stamp_calls = [c for c in db.executed if "consent_reminder_sent_at = NOW()" in c[0]]
     assert len(stamp_calls) == 1
     assert stamp_calls[0][1] == (1,)
@@ -681,11 +1014,11 @@ def test_talentpool_reminder_job_does_not_stamp_when_send_fails(monkeypatch):
     monkeypatch.setattr(scheduler, "fetch_all", db.fetch_all)
     monkeypatch.setattr(scheduler, "execute", db.execute)
 
-    async def _fake_send_email(**kwargs):
+    async def _fake_send_template(name, to_email, ctx, lang="nl"):
         return False
 
     import services.email_service as email_service_module
-    monkeypatch.setattr(email_service_module.email_service, "send_email", _fake_send_email)
+    monkeypatch.setattr(email_service_module.email_service, "send_template", _fake_send_template)
 
     result = asyncio.run(scheduler.talentpool_reminder_job())
     assert result == {"candidates_due": 1, "sent": 0}
@@ -719,31 +1052,20 @@ class _OptinRetentionRecorder:
         return "OK"
 
 
-def test_run_retention_purge_dry_run_counts_stale_optin_requests_without_deleting(monkeypatch):
-    import services.scheduler as scheduler
-    rec = _OptinRetentionRecorder(stale_rows=[{"id": 1}, {"id": 2}])
-    monkeypatch.setattr(scheduler, "fetch_all", rec.fetch_all)
-    monkeypatch.setattr(scheduler, "execute", rec.execute)
-
-    result = asyncio.run(scheduler.run_retention_purge(dry_run=True))
-    assert result["talentpool_optin_requests_purge"] == {"status": "counted", "count": 2}
-    assert rec.execute_calls == []  # dry run never writes
-
-
-def test_run_retention_purge_real_run_deletes_stale_optin_requests_and_audits(monkeypatch):
+def test_talentpool_optin_requests_cleanup_job_deletes_stale_rows_and_audits(monkeypatch):
+    """WS-E.10 (retention-kolommen branch, fifth round): the old
+    run_retention_purge(dry_run=...) single entry point is gone --
+    talentpool_optin_requests cleanup (not one of the ten guarded
+    RETENTION_TABLE categories the owner moved to monthly human review;
+    see services/scheduler.py's own docstring on that job) now has its
+    own small, unconditional daily job."""
     import services.scheduler as scheduler
     rec = _OptinRetentionRecorder(stale_rows=[{"id": 5}])
-
-    async def _fake_erase_person(email, actor_id=None, reason="manual"):
-        return {"status": "complete"}
-
-    import routers.gdpr as gdpr
-    monkeypatch.setattr(gdpr, "erase_person", _fake_erase_person)
     monkeypatch.setattr(scheduler, "fetch_all", rec.fetch_all)
     monkeypatch.setattr(scheduler, "execute", rec.execute)
 
-    result = asyncio.run(scheduler.run_retention_purge(dry_run=False))
-    assert result["talentpool_optin_requests_purge"] == {"status": "purged", "count": 1}
+    result = asyncio.run(scheduler.talentpool_optin_requests_cleanup_job())
+    assert result == {"status": "purged", "count": 1}
     delete_calls = [c for c in rec.execute_calls if c[0].strip().startswith("DELETE FROM talentpool_optin_requests")]
     assert len(delete_calls) == 1
     assert delete_calls[0][1] == ([5],)
@@ -752,6 +1074,17 @@ def test_run_retention_purge_real_run_deletes_stale_optin_requests_and_audits(mo
         if c[0].startswith("INSERT INTO audit_log") and c[1][1] == "talentpool_optin_requests"
     ]
     assert len(audit_calls) == 1
+
+
+def test_talentpool_optin_requests_cleanup_job_writes_no_audit_row_when_nothing_is_stale(monkeypatch):
+    import services.scheduler as scheduler
+    rec = _OptinRetentionRecorder(stale_rows=[])
+    monkeypatch.setattr(scheduler, "fetch_all", rec.fetch_all)
+    monkeypatch.setattr(scheduler, "execute", rec.execute)
+
+    result = asyncio.run(scheduler.talentpool_optin_requests_cleanup_job())
+    assert result == {"status": "purged", "count": 0}
+    assert rec.execute_calls == []
 
 
 def test_talentpool_optin_requests_stale_sql_uses_a_7_day_window():
