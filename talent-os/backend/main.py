@@ -10,7 +10,9 @@ API key authentication on all data endpoints.
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, Request
+from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.docs import get_redoc_html, get_swagger_ui_html
 from fastapi.responses import JSONResponse
@@ -96,6 +98,35 @@ app = FastAPI(
 # per-worker in-memory caveat (production runs 4 uvicorn workers).
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+# Validation errors (issue #178) — FastAPI's default handler echoes the
+# submitted value back under detail[].input, so a password that fails
+# min_length or the 72-byte cap (see verify_password / hash_password in
+# core/security.py) is returned to the client verbatim and can end up in
+# proxy logs or a browser network export. Drop `input` for any field whose
+# loc contains password/new_password/current_password, and strip pydantic's
+# "Value error, " prefix from msg for a clean, Dutch-first message. Every
+# other field of FastAPI's default {"detail": [...]} body is kept as-is so
+# existing callers (incl. the admin panel's error path) keep working.
+_PASSWORD_FIELDS = {"password", "new_password", "current_password"}
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    errors = []
+    for error in exc.errors():
+        error = dict(error)
+        loc = error.get("loc", ())
+        if any(str(part) in _PASSWORD_FIELDS for part in loc):
+            error.pop("input", None)
+        msg = error.get("msg")
+        if isinstance(msg, str) and msg.startswith("Value error, "):
+            error["msg"] = msg[len("Value error, "):]
+        errors.append(error)
+    return JSONResponse(
+        status_code=422,
+        content=jsonable_encoder({"detail": errors}),
+    )
 
 # CORS — restricted to dashboard origins only (NOT wildcard)
 app.add_middleware(
