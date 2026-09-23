@@ -617,6 +617,13 @@ class JobOrderCreate(BaseModel):
     description: Optional[str] = None
     requirements: Optional[str] = None
     nice_to_have: Optional[str] = None
+    # issue #153 (migrations/046): nullable English twin of the three text
+    # fields above. Never required -- all 27 pool vacancies (and every
+    # other job order today) carry NL text only, and this issue does not
+    # write any English copy itself.
+    description_en: Optional[str] = None
+    requirements_en: Optional[str] = None
+    nice_to_have_en: Optional[str] = None
     urgency: str = "normal"
     city: Optional[str] = None
     company_display: Optional[str] = None
@@ -666,6 +673,9 @@ class JobOrderUpdate(BaseModel):
     description: Optional[str] = None
     requirements: Optional[str] = None
     nice_to_have: Optional[str] = None
+    description_en: Optional[str] = None
+    requirements_en: Optional[str] = None
+    nice_to_have_en: Optional[str] = None
     status: Optional[JobOrderStatus] = None
     urgency: Optional[str] = None
     city: Optional[str] = None
@@ -833,6 +843,9 @@ class ClientJobCreate(BaseModel):
     description: Optional[str] = None
     requirements: Optional[str] = None
     nice_to_have: Optional[str] = None
+    description_en: Optional[str] = None
+    requirements_en: Optional[str] = None
+    nice_to_have_en: Optional[str] = None
     urgency: str = "normal"
 
 
@@ -847,6 +860,9 @@ class ClientJobUpdate(BaseModel):
     description: Optional[str] = None
     requirements: Optional[str] = None
     nice_to_have: Optional[str] = None
+    description_en: Optional[str] = None
+    requirements_en: Optional[str] = None
+    nice_to_have_en: Optional[str] = None
     status: Optional[str] = None
     urgency: Optional[str] = None
 
@@ -927,6 +943,10 @@ class AdminJobUpdate(BaseModel):
     seniority: Optional[str] = None
     description: Optional[str] = None
     requirements: Optional[str] = None
+    nice_to_have: Optional[str] = None
+    description_en: Optional[str] = None
+    requirements_en: Optional[str] = None
+    nice_to_have_en: Optional[str] = None
     fee_percentage: Optional[float] = None
     urgency: Optional[str] = None
     # WS-C.15 / WS-A.5 (migrations/016_job_orders_columns.py). employment_type
@@ -956,6 +976,10 @@ class AdminJobCreate(BaseModel):
     salary_max: Optional[int] = None
     description: Optional[str] = None
     requirements: Optional[str] = None
+    nice_to_have: Optional[str] = None
+    description_en: Optional[str] = None
+    requirements_en: Optional[str] = None
+    nice_to_have_en: Optional[str] = None
     employment_type: Optional[Literal["vast", "detachering", "interim"]] = None
     sponsorship_possible: bool = False
     # security-auditor LOW finding: was a bare `str`, letting the caller

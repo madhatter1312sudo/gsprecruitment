@@ -264,13 +264,15 @@ async def create_client_job(
     job = await fetch_one(
         """INSERT INTO job_orders
            (client_id, title, department, seniority, location_type,
-            salary_min, salary_max, salary_currency, description, requirements, nice_to_have, urgency, status)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'draft')
+            salary_min, salary_max, salary_currency, description, requirements, nice_to_have,
+            description_en, requirements_en, nice_to_have_en, urgency, status)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,'draft')
            RETURNING *""",
         client["id"], data.title, data.department, data.seniority,
         data.location_type, data.salary_min, data.salary_max,
         data.salary_currency, data.description, data.requirements,
-        data.nice_to_have, data.urgency,
+        data.nice_to_have, data.description_en, data.requirements_en,
+        data.nice_to_have_en, data.urgency,
     )
 
     await execute(
@@ -332,7 +334,9 @@ async def update_client_job(
     allowed = {
         "title", "department", "seniority", "location_type",
         "salary_min", "salary_max", "salary_currency",
-        "description", "requirements", "nice_to_have", "status", "urgency",
+        "description", "requirements", "nice_to_have",
+        "description_en", "requirements_en", "nice_to_have_en",
+        "status", "urgency",
     }
     # Stored-XSS / unauthorized-publish fix (WS-C.2): a client may move their
     # own job between draft/paused/closed, but publishing to the public job
