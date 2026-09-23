@@ -2192,14 +2192,20 @@ html[data-lang="en"] .lang-nl { display: none; }
 @media (max-width: 600px) { .landing-crosslinks { grid-template-columns: 1fr; gap: var(--space-lg); } }
 
 /* ── Batch 2: salary guide table (design-spec-batch.md #7) ──────────── */
+/* Scoped under .salary-table-wrap (salarisgids.html only) throughout --
+   kandidaten.html has its own, older .salary-table inside
+   .salary-table-wrapper (note "-wrapper", a different class) with no
+   data-label attributes on its cells; an unscoped rule here previously
+   collapsed that table's header row and left every cell reading a bare
+   ": value" on mobile. Never drop the .salary-table-wrap prefix below. */
 .salary-table-wrap { overflow-x: auto; margin-top: var(--space-lg); }
-.salary-table {
+.salary-table-wrap .salary-table {
   width: 100%;
   border-collapse: collapse;
   font-family: var(--font-mono);
   font-size: var(--font-size-sm);
 }
-.salary-table th {
+.salary-table-wrap .salary-table th {
   text-align: left;
   font-weight: 600;
   text-transform: uppercase;
@@ -2209,21 +2215,24 @@ html[data-lang="en"] .lang-nl { display: none; }
   padding: var(--space-sm) var(--space-md);
   border-bottom: 2px solid var(--border-strong);
 }
-.salary-table td {
+.salary-table-wrap .salary-table td {
   padding: var(--space-sm) var(--space-md);
   border-bottom: 1px solid var(--border-light);
   color: var(--text);
 }
-.salary-table tbody tr:hover { background: var(--bg-alt); }
-.salary-table td:nth-child(2) { color: var(--gold-ink); font-weight: 500; } /* the range itself is the scannable value */
+.salary-table-wrap .salary-table tbody tr:hover { background: var(--bg-alt); }
+.salary-table-wrap .salary-table td:nth-child(2) { color: var(--gold-ink); font-weight: 500; } /* the range itself is the scannable value */
 .salary-table-note { font-size: var(--font-size-sm); color: var(--text-muted); margin-top: var(--space-sm); }
 
 @media (max-width: 640px) {
-  .salary-table thead { display: none; }
-  .salary-table, .salary-table tbody, .salary-table tr, .salary-table td { display: block; width: 100%; }
-  .salary-table tr { border-bottom: 1px solid var(--border-strong); padding: var(--space-sm) 0; }
-  .salary-table td { border-bottom: none; padding: 4px var(--space-md); }
-  .salary-table td::before {
+  .salary-table-wrap .salary-table thead { display: none; }
+  .salary-table-wrap .salary-table,
+  .salary-table-wrap .salary-table tbody,
+  .salary-table-wrap .salary-table tr,
+  .salary-table-wrap .salary-table td { display: block; width: 100%; }
+  .salary-table-wrap .salary-table tr { border-bottom: 1px solid var(--border-strong); padding: var(--space-sm) 0; }
+  .salary-table-wrap .salary-table td { border-bottom: none; padding: 4px var(--space-md); }
+  .salary-table-wrap .salary-table td::before {
     content: attr(data-label) ": ";
     font-weight: 600;
     color: var(--text-muted);

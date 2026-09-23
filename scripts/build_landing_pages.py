@@ -135,7 +135,7 @@ def footer_block() -> str:
       <div><h4><span class="lang-en">Legal</span><span class="lang-nl">Juridisch</span></h4>
         <ul class="footer-links">
           <li><a href="../../privacy.html"><span class="lang-en">Privacy Policy</span><span class="lang-nl">Privacybeleid</span></a></li>
-          <li><span class="lang-en">Terms and conditions — available on request</span><span class="lang-nl">Algemene voorwaarden — op aanvraag</span></li>
+          <li><span class="lang-en">Terms and conditions, available on request</span><span class="lang-nl">Algemene voorwaarden, op aanvraag</span></li>
           <li><span class="lang-en">We process personal data in compliance with GDPR.</span><span class="lang-nl">Wij verwerken persoonsgegevens conform de AVG.</span></li>
         </ul></div>
     </div>
@@ -291,8 +291,8 @@ def render_page(city_slug: str, disc_slug: str, data: dict) -> str:
     <div class="cta-band">
       <h2 class="lang-en">Not the right role yet?</h2>
       <h2 class="lang-nl">Nog niet de juiste rol?</h2>
-      <p class="lang-en">Send your CV. We'll keep you in mind and reach out the moment something fits — no spam, no pressure.</p>
-      <p class="lang-nl">Stuur je CV in. We houden je in gedachten en nemen contact op zodra er iets past — geen spam, geen druk.</p>
+      <p class="lang-en">Send your CV. We'll keep you in mind and reach out the moment something fits, no spam, no pressure.</p>
+      <p class="lang-nl">Stuur je CV in. We houden je in gedachten en nemen contact op zodra er iets past, geen spam, geen druk.</p>
       <div class="hero-actions">
         <a href="../../contact.html" class="btn btn-gold"><i class="fas fa-paper-plane"></i> <span class="lang-en">Submit your CV</span><span class="lang-nl">Stuur je CV in</span></a>
       </div>
