@@ -1,0 +1,1015 @@
+/* ==========================================================================
+   GSP Recruitment — admin.css
+   De schil van het adminpaneel. Geladen na ../theme.css (die de tokens uit
+   SITE-DESIGN-SPEC.md §1 levert) en na de gevendorde Tabler 1.4-CSS.
+
+   Dit bestand doet drie dingen, en verder niets:
+     1. Tabler op de merktokens zetten (--tblr-* -> navy/goud uit theme.css).
+     2. De compatibiliteitsklassen leveren die de door JS gegenereerde
+        markup gebruikt (.portal-section, .action-menu, .form-group, ...).
+     3. De utilityklassen leveren die de inline style="..."-attributen in
+        js/admin.js en js/sections/*.js vervangen.
+
+   Regels voor dit bestand:
+     - Geen hardcoded navy- of goudwaarde. Alles via var(--navy-*),
+       var(--gold-*) uit theme.css. scripts/css_tokens_check.py bewaakt dat.
+     - Geometrie (marges, flexrichting, kolommen) komt uit de al geladen
+       Bootstrap 5-utilities van Tabler; hier staan alleen klassen waar een
+       merktoken of een paneelspecifiek patroon in zit.
+
+   ──────────────────────────────────────────────────────────────────────────
+   Utilityklassen, semantisch benoemd (geen kloon van een Bootstrap-utility):
+
+     .a-cell-name     identiteitskolom van een tabelrij (naam, titel, bedrijf)
+     .a-cell-strong   waarde met nadruk binnen een rij of paneel
+     .a-soft          secundaire tekst (e-mail, domein, omschrijving, hint)
+     .a-meta          metadata: tijdstempel, herkomst, aantallen, bijschrift
+     .a-field-label   labeltekst boven een waarde in een detailpaneel
+     .a-state-cell    laad-, leeg- of foutregel binnen een tabelcel (colspan)
+     .a-state-block   dezelfde drie toestanden buiten een tabel
+     .a-actions       knoppenrij onderaan een paneel of formulier
+     .a-textarea      meerregelig invoerveld (concepttekst, notities, body)
+     .a-chips         wrapper om een rij chips
+     .a-chip          chip zelf; --skill en --lang zijn de twee varianten
+     .a-panel         omkaderd subpaneel binnen een paneel (CV-blok, formulier)
+     .a-stat          telkaartje (matches, plaatsingen) met __value en __label
+     .a-metric-row    label/waarde-regel met onderlijn (Platform Summary)
+     .a-listrow       rij in een lijst die geen tabel is (CMS-content)
+     .a-scrollbox     scrollbaar tekstblok (CV-preview, JSON in de audit-log)
+     .a-inline-list   compacte ul in een tabelcel (audit-log, domeinscores)
+     .a-truncate-col  flexkolom die mag afkappen naast een vaste knop
+     .a-tabbar        tabstrip bovenin een drawer, .a-tabpane is het paneel
+     .a-clickable     hele rij of samenvatting is aanklikbaar
+     .a-row-unread    ongelezen rij in de leadsinbox
+     .a-barchart      fallback-staafdiagram als ApexCharts ontbreekt
+     .a-eyebrow       mono kapitaalregel boven een waarde (KPI-tegel, §7.2g)
+     .a-num           datawaarde in mono; --xl is de KPI-maat (32px)
+     .a-wide-only     alleen op breed scherm; verdwijnt onder 600px (§7.6-1)
+     .a-bulkbar       balk met de acties op de rijselectie (§7.2a)
+     .a-cardlist      tabel die onder 768px een kaartlijst wordt (§7.2a)
+     .a-clamp         tekstblok op twee regels, --open toont alles
+     .a-disclosure    in- en uitklapbare kaart (<details>)
+     .a-col-check     selectievakjeskolom (36px)
+     .a-col-actions   actiekolom rechts, zonder koptekst
+     .a-col-cat       categoriekolom, één regel met ellipsis (volledige naam in title=)
+     .a-col-status    statuskolom; op een telefoon naast de identiteit bovenin de kaart
+     .a-row-selected  geselecteerde rij: eigen vlak plus gouden linkerrand
+     .a-tap           label om een selectievakje, 44px tikdoel op een telefoon
+     .a-confirm-mismatch  "Komt niet overeen" onder het bevestigingsveld
+     .a-skel-block    vlak laadblok in een drawertab (§7.2b, §7.3.2), geen shimmer
+     .a-notes         vrije tekst met regeleindes in een detailpaneel (§7.3.3), zonder inline style=
+     .a-hide-cardlist verbergt een kolom of knop onder 768px (§7.3.3, sectie-eigen: alleen
+                      deze kaartlijst toont op 390px minder kolommen dan op desktop)
+     .a-timeline      verticale historietijdlijn, __item is één regel (§7.3.4)
+     .a-pipeline-controls  select + knop op de kaart Pipeline (§7.3.4)
+     .text-success-ink .text-danger-ink .text-warning-ink .text-info-ink
+                      de vier semantische tekstkleuren uit §7.1.3, op de
+                      --ink-*-tokens uit §7.1.2
+     .a-accent        het goudaccent (geen semantische familie, §7.2e)
+   Panelen (ui.js): .a-modal (+ --wide, __title, __subtitle, __close), .a-drawer
+   (+ __grip, --bottom: sleepgreep en offcanvas-bottom-variant op 390px, §7.3.3),
+   .a-panel-footer (voettekst van een modal of drawer, buiten de scrollende
+   inhoud -- een broer van .modal-body/.offcanvas-body, §7.3.3), .a-backdrop,
+   .a-confirm-hint, .a-sortable (kolomkop met aria-sort), .a-nav-caption (sidebarkopje).
+   Samen 48 klassenamen: de 29 uit §7.1.3, de veertien die de sectie
+   Bewaartermijnen (§7.3.1) nodig had (.a-eyebrow, .a-num, .a-wide-only,
+   .a-bulkbar, .a-cardlist, .a-clamp, .a-disclosure, .a-col-check,
+   .a-col-actions, .a-col-cat, .a-col-status, .a-row-selected, .a-tap,
+   .a-confirm-mismatch), .a-skel-block die Toestemmingen (§7.3.2) als
+   eerste afnemer nodig had voor de "drie vlakke blokken"-laadstaat van een
+   drawertab (§7.2b) -- die staat stond nog nergens in dit bestand --, de
+   twee die Plaatsingen (§7.3.3) toevoegde (.a-notes en .a-hide-cardlist),
+   en de twee die de tab Pipeline (§7.3.4) erbij bracht: .a-timeline
+   (hergebruikt .a-disclosure voor de accordeon en .a-skel-block voor de
+   laadstaat, dus geen eigen klasse nodig voor die twee) en
+   .a-pipeline-controls.
+   Modifiers tellen niet als eigen naam: .a-num--xl,
+   --date, --loading en --tab, .a-clamp--open, .a-cardlist--compact,
+   .a-scrollbox--rows en .a-modal__title--danger horen bij hun basisklasse.
+   De panelklassen (.a-modal, .a-drawer, .a-panel-footer, .a-backdrop, ...)
+   tellen apart mee, niet in de 48 -- dezelfde afspraak als hierboven.
+   Die veertien horen bij de componenten van §7.2: .a-eyebrow en .a-num
+   zijn de `gsp-eyebrow`/`gsp-num` uit §7.1.3 met de .a-prefix die
+   diezelfde subsectie voorschrijft, .a-cardlist is de `gsp-cardlist` uit
+   §7.2a, en .a-bulkbar is de bulkbalk uit dezelfde subsectie. Die
+   publiceert zijn eigen hoogte als --a-bulkbar-h zodat de toast eronder
+   vandaan schuift (§7.2f; de spec noemt dat token --gsp-bulkbar-h, hier
+   met dezelfde a-prefix als --a-bar-h).
+
+   De destructieve outline-knop staat paneelbreed op --ink-error
+   (.portal-section .btn-outline-danger, naast .a-modal en .a-drawer):
+   Tablers eigen danger-outline haalt 4,17:1 op --navy-900 en zakt daarmee
+   onder de tekstvloer, en dat geldt in elke sectie, niet alleen in deze.
+
+   Geometrie zonder merkbetekenis (mb-3, d-flex, gap-2, text-center,
+   flex-fill, text-nowrap) komt uit Bootstrap 5 en staat hier niet.
+   ========================================================================== */
+
+:root,
+[data-bs-theme="dark"] {
+  /* Gedempte tekst in het paneel is --navy-200, niet --navy-300.
+     --navy-300 (#4A6F9F) haalt 3,51:1 op --navy-800 en 3,26:1 op
+     --navy-700, en zakt daarmee onder de AA-ondergrens van 4,5:1 voor
+     kleine tekst; --navy-200 (#7FA0C9) haalt 6,6:1 op --navy-800. Bewuste
+     afwijking van de "muted text"-omschrijving bij --navy-300 in
+     SITE-DESIGN-SPEC.md §1.2, gemeld voor de componentspec §7.
+     --navy-300 blijft in gebruik voor niet-tekst (hairlines, iconen). */
+  --admin-muted: var(--navy-200);
+  --admin-hairline: var(--navy-600);
+
+  /* Semantische inkt, letterlijk de vier tokens uit SITE-DESIGN-SPEC.md
+     §7.1.2, met de contrastwaarden die daar berekend staan. Ze horen in
+     dit bestand en niet in theme.css: §7.1.2 noemt ze "vier eigen
+     inkttokens" van het paneel, en de publieke site heeft er geen. */
+  --ink-success: #4ADE80;   /* 10,41:1 op --navy-800, 9,66:1 op --navy-700 */
+  --ink-error:   #F87171;   /*  6,56:1 op --navy-800, 6,09:1 op --navy-700 */
+  --ink-warning: #FBBF24;   /* 10,86:1 op --navy-800, 10,08:1 op --navy-700 */
+  --ink-info:    #7DD3FC;   /* 10,87:1 op --navy-800, 10,10:1 op --navy-700 */
+
+  /* ==== Tabler 1.4 op de merktokens (SITE-DESIGN-SPEC.md §7.1.2) ==== */
+  --tblr-body-bg: var(--navy-800);
+  --tblr-bg-surface: var(--navy-700);
+  --tblr-bg-surface-secondary: var(--navy-800);
+  --tblr-bg-surface-tertiary: var(--navy-600);
+  --tblr-bg-surface-dark: var(--navy-900);
+  --tblr-body-color: var(--navy-100);
+  --tblr-secondary: var(--navy-200);
+  --tblr-primary: var(--gold-500);
+  --tblr-primary-fg: var(--navy-900);
+  --tblr-border-radius: var(--radius);
+  --tblr-border-radius-sm: var(--radius);
+  --tblr-border-radius-lg: var(--radius);
+  --tblr-font-sans-serif: var(--font-primary);
+  --tblr-font-monospace: var(--font-mono);
+  --tblr-focus-ring-color: var(--gold-500);
+  --tblr-focus-ring-width: 2px;
+  --tblr-focus-ring-opacity: 1;
+
+  /* Afwijking van het codeblok in §7.1.2, dat hier --navy-600 zet: de
+     contrastvloertabel in diezelfde subsectie zegt dat een dragende rand op
+     --navy-700 minstens --navy-500 moet zijn. De kaartrand is dragend (op
+     navy dragen de schaduwen nauwelijks), dus --navy-500. */
+  --tblr-border-color: var(--navy-500);
+  --tblr-border-color-translucent: var(--navy-500);
+  --tblr-card-bg: var(--navy-700);
+  --tblr-card-border-color: var(--navy-500);
+
+  /* De vier kleuren waar Tabler zijn badge-, alert- en tekstvarianten uit
+     afleidt (§7.1.2, §7.2e). Zonder deze regels blijven .bg-blue-lt en
+     .bg-red-lt op hun lichte-thema-waarden en halen ze de tekstvloer niet
+     op navy: 3,96:1 respectievelijk 4,24:1. */
+  --tblr-blue: var(--ink-info);
+  --tblr-red: var(--ink-error);
+  --tblr-green: var(--ink-success);
+  --tblr-yellow: var(--ink-warning);
+
+  /* §7.2d: .invalid-feedback en .is-invalid komen uit de gevendorde
+     Tabler-CSS met een hardcoded #d63939 (niet afgeleid van --tblr-red
+     hierboven), dus zonder deze twee regels blijft de validatiekleur van
+     elk formulier in dit paneel buiten de merktokens om. Zelfde kleur als
+     --ink-error, dus dezelfde 6,09:1 op --navy-700 (§7.1.2). */
+  --tblr-form-invalid-color: var(--ink-error);
+  --tblr-form-invalid-border-color: var(--ink-error);
+
+  /* css-tokens-check: rgb-triple -- Tabler bouwt hier zelf
+     rgba(var(--x-rgb), a) mee voor tinten, randen en de focusring. Een
+     triple kan niet uit een kleur-var komen, dus deze vijf regels moeten
+     letterlijk zijn; ze horen bij de kleur direct erboven. */
+  --tblr-primary-rgb: 250, 200, 0;
+  --tblr-secondary-rgb: 127, 160, 201;
+  --tblr-blue-rgb: 125, 211, 252;
+  --tblr-red-rgb: 248, 113, 113;
+  --tblr-green-rgb: 74, 222, 128;
+  --tblr-yellow-rgb: 251, 191, 36;
+}
+
+/* ==== Focusindicator ====
+   Tabler zet :focus{box-shadow:none} op formuliervelden en ghost-knoppen,
+   waardoor er met het toetsenbord niets zichtbaar is. Eén regel voor alle
+   vier de plekken waar dat opgaat. */
+.btn:focus-visible,
+.btn-ghost-secondary:focus-visible,
+.form-control:focus-visible,
+.form-select:focus-visible {
+  outline: 2px solid var(--gold-500);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 4px var(--gold-glow);
+}
+
+/* ==== Typografie (SITE-DESIGN-SPEC.md §1.3) ==== */
+body,
+.page { font-family: var(--font-primary); }
+.navbar-brand img { height: 28px; width: auto; }
+h1, h2, h3, h4,
+.navbar-brand,
+.page-title,
+.card-title {
+  font-family: var(--font-display);
+  font-weight: 500;
+  letter-spacing: 0;
+}
+/* Eyebrow-achtige kleine kopjes staan in mono, net als op de publieke site. */
+.text-uppercase { font-family: var(--font-mono); }
+/* KPI-tegels: het getal in mono, zoals de salaris-/datachips elders. */
+.card .h1,
+.card .display-6,
+.card [class*="fs-"].fw-bold,
+.subheader + .h1 {
+  font-family: var(--font-mono);
+  font-weight: 500;
+}
+
+/* ==== Toast (auth.js Auth.toast): het paneel laadt styles.css niet ==== */
+.toast-container { position: fixed; bottom: 24px; right: 24px; z-index: 9998; display: flex; flex-direction: column; gap: 8px; }
+/* Tabler draagt `.toast:not(.show){display:none}` (0,2,0) en dat won van
+   de losse `.toast`-regel hieronder (0,1,0): elke toast van Auth.toast()
+   stond dus op display:none, in het hele paneel. Die markup gebruikt
+   .toast-visible en niet Bootstraps .show, dus de zichtbaarheid komt van
+   deze regel, met gelijke specificiteit en later in de cascade. */
+.toast-container .toast { display: flex; }
+/* §7.2f: één vlak voor alle vier de varianten (--navy-900), een 1px rand
+   en een 3px linkerrand in de inktkleur van de variant. De volvlakke
+   #065f46/#991b1b/#78350f die hier stonden trokken meer aandacht dan de
+   mededeling waard is en botsten met de navy schil; ze stonden bovendien
+   buiten de tokenlaag. Radius --radius (3px), niet --radius-sm uit de oude
+   shim. */
+.toast {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 20px;
+  border-radius: var(--radius);
+  font-size: .88rem;
+  font-weight: 500;
+  box-shadow: var(--shadow-lg);
+  max-width: 360px;
+  opacity: 0;
+  transform: translateY(16px);
+  transition: opacity var(--transition-base), transform var(--transition-base);
+  background: var(--navy-900);
+  color: var(--white);
+  border: 1px solid var(--navy-500);
+  border-left: 3px solid var(--navy-500);
+}
+.toast-visible { opacity: 1; transform: translateY(0); }
+.toast-removing { opacity: 0; transform: translateX(40px); }
+.toast-success { border-left-color: var(--ink-success); }
+.toast-error { border-left-color: var(--ink-error); }
+.toast-warning { border-left-color: var(--ink-warning); }
+.toast-info { border-left-color: var(--ink-info); }
+/* Het pictogram draagt de kleur van de variant; de tekst blijft --white,
+   want die moet op elke variant even goed leesbaar zijn. */
+.toast-success .toast-icon { color: var(--ink-success); }
+.toast-error .toast-icon { color: var(--ink-error); }
+.toast-warning .toast-icon { color: var(--ink-warning); }
+.toast-info .toast-icon { color: var(--ink-info); }
+.toast-icon { font-size: 1.1rem; line-height: 1; }
+
+/* ==== Compatibiliteitsklassen voor door JS gegenereerde markup ==== */
+/* Kopje boven een groep sidebarlinks. Stond zes keer als
+   style="font-size:10px;letter-spacing:.1em" in index.html, buiten de
+   typeschaal van §1.3. */
+.a-nav-caption {
+  font-size: var(--font-size-xs);
+  letter-spacing: .1em;
+}
+.portal-section { display: none; }
+.portal-section.active { display: block; }
+.action-menu-wrap { position: relative; display: inline-block; }
+.action-menu { position: absolute; right: 0; top: 100%; background: var(--tblr-bg-surface); border: 1px solid var(--tblr-border-color); border-radius: var(--radius); box-shadow: var(--shadow-md); z-index: 200; min-width: 160px; overflow: hidden; }
+.action-menu button { display: flex; align-items: center; gap: 8px; padding: .65rem 1rem; font-size: var(--font-size-sm); background: none; border: none; width: 100%; text-align: left; cursor: pointer; font-family: var(--font-primary); color: var(--navy-100); }
+.action-menu button:hover { background: var(--tblr-bg-surface-tertiary); }
+.activity-item { display: flex; align-items: flex-start; gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--admin-hairline); }
+.activity-item:last-child { border-bottom: none; }
+.activity-icon { width: 34px; height: 34px; border-radius: var(--radius-full); display: flex; align-items: center; justify-content: center; flex-shrink: 0; font-size: .8rem; }
+/* De twee varianten die de dashboardwidgets gebruiken, in plaats van een
+   inline background/color per icoon. */
+.activity-icon--gold { background: color-mix(in srgb, var(--gold-500) 10%, transparent); color: var(--gold-400); }
+.activity-icon--positive { background: color-mix(in srgb, var(--ink-success) 12%, transparent); color: var(--ink-success); }
+.activity-text { font-size: var(--font-size-sm); }
+.activity-time { font-size: 11px; color: var(--admin-muted); margin-top: 2px; }
+.form-group { margin-bottom: var(--space-lg); }
+/* design-reviewer op b9d5b21 (§7.3.2): zonder de twee :not()-uitsluitingen
+   hieronder pakt deze regel ook een <input type="radio"|"checkbox"> en zijn
+   .form-check-label, en dat maakt van een radiogroep in een <fieldset
+   class="form-group"> (de Toestemming-keuze Vastleggen/Intrekken in de
+   drie modals van §7.3.2) twee liggende ellipsen van de volle
+   modalbreedte, met de labeltekst als losse hoofdletterregel eronder. Een
+   .form-check-label hoort bij het bekende Bootstrap-formcheckpatroon, niet
+   bij dit paneel-eigen label, en krijgt daarom zijn eigen regel eronder. */
+/* §7.2d regel 617: Plex Sans, --font-size-sm, gewicht 500, --navy-100 --
+   niet meer de uppercase mono die lange labels slecht leesbaar maakte
+   (design-reviewer op 1212e07). Gemeten op "Nieuwe vacature": vóór deze
+   pas 11px hoofdletters met 0.06em spatiëring in --navy-200; erna 13px
+   Plex Sans gewicht 500 in --navy-100, zoals de rest van de paneeltekst. */
+.form-group label:not(.form-check-label) { display: block; font-size: var(--font-size-sm); font-weight: 500; color: var(--navy-100); margin-bottom: .4rem; }
+.form-group .form-check-label { display: inline-block; font-size: var(--font-size-sm); color: var(--navy-100); margin-bottom: 0; }
+.form-group input:not([type="checkbox"]):not([type="radio"]), .form-group select, .form-group textarea { width: 100%; background: var(--tblr-body-bg); border: 1px solid var(--tblr-border-color); border-radius: var(--radius); color: var(--white); padding: .65rem 1rem; font-family: var(--font-primary); font-size: var(--font-size-sm); outline: none; box-sizing: border-box; }
+.form-group input:focus, .form-group select:focus, .form-group textarea:focus { border-color: var(--tblr-primary); box-shadow: 0 0 0 3px var(--gold-glow); }
+.pagination-wrap { display: flex; gap: 6px; flex-wrap: wrap; }
+.pagination-wrap button { min-width: 32px; height: 32px; padding: 0 8px; background: var(--tblr-bg-surface-tertiary); border: 1px solid var(--tblr-border-color); border-radius: var(--radius-sm); color: var(--navy-200); font-family: var(--font-primary); font-size: var(--font-size-xs); cursor: pointer; }
+.pagination-wrap button.active { background: var(--tblr-primary); color: var(--navy-900); border-color: var(--tblr-primary); font-weight: 700; }
+.pagination-wrap button:hover:not(.active):not(:disabled) { border-color: var(--tblr-primary); color: var(--tblr-primary); }
+.pagination-wrap button:disabled { opacity: .35; cursor: not-allowed; }
+.pagination-ellipsis { color: var(--admin-muted); padding: 0 4px; }
+/* Veldenraster in een detailpaneel: twee kolommen, één op een telefoon. */
+.detail-grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-md); margin-bottom: var(--space-lg); }
+@media (max-width: 576px) { .detail-grid { grid-template-columns: 1fr; } }
+/* Brede tabellen scrollen in hun eigen container; de scrollbar blijft
+   zichtbaar als affordance in plaats van kolommen stil af te knippen. */
+.table-responsive { overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: thin; }
+.table-responsive::-webkit-scrollbar { height: 6px; }
+.table-responsive::-webkit-scrollbar-thumb { background: var(--navy-400); border-radius: var(--radius-sm); }
+
+/* ==========================================================================
+   Utilityklassen (zie de tabel bovenaan dit bestand)
+   ========================================================================== */
+
+/* Op een <td> wint Tablers `.table > :not(caption) > * > *` (0,1,1) van een
+   losse klasse (0,1,0), en dat zet de cel terug op --tblr-table-color. Naast
+   `color` zetten deze vier daarom ook die custom property op de cel zelf, dan
+   lost Tablers eigen regel de goede kleur op. Zonder dat viel de nadruk in
+   twaalf naamkolommen en de demping in eenendertig metakolommen weg.
+   scripts/admin_ui_check.py meet de computed kleur, zodat dit niet terugkomt. */
+.a-cell-name { font-weight: 600; color: var(--white); --tblr-table-color: var(--white); }
+.a-cell-strong { color: var(--white); --tblr-table-color: var(--white); }
+.a-soft { color: var(--admin-muted); --tblr-table-color: var(--admin-muted); }
+.a-meta { font-size: var(--font-size-xs); color: var(--admin-muted); --tblr-table-color: var(--admin-muted); }
+.a-inline-list { margin: 0; padding-left: 1.1em; }
+.a-truncate-col { flex: 1; min-width: 0; }
+
+.a-field-label { font-size: var(--font-size-xs); color: var(--admin-muted); margin-bottom: 4px; }
+
+.a-state-cell { text-align: center; padding: var(--space-xl) var(--space-md); color: var(--admin-muted); --tblr-table-color: var(--admin-muted); }
+.a-state-block { color: var(--admin-muted); font-size: var(--font-size-sm); padding: var(--space-md) 0; }
+
+.a-actions { display: flex; flex-wrap: wrap; gap: var(--space-md); margin-top: var(--space-lg); }
+
+.a-textarea {
+  width: 100%;
+  background: var(--navy-900);
+  border: 1px solid var(--tblr-border-color);
+  border-radius: var(--radius);
+  color: var(--white);
+  padding: .75rem;
+  font-family: var(--font-primary);
+  font-size: var(--font-size-sm);
+  resize: vertical;
+  box-sizing: border-box;
+}
+.a-textarea:focus { outline: none; border-color: var(--tblr-primary); box-shadow: 0 0 0 3px var(--gold-glow); }
+
+.a-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.a-chip { color: var(--white); font-weight: 500; }
+.a-chip--skill { background: color-mix(in srgb, var(--gold-500) 18%, transparent); }
+.a-chip--lang { background: color-mix(in srgb, var(--navy-300) 25%, transparent); }
+
+.a-panel {
+  border: 1px solid var(--admin-hairline);
+  border-radius: var(--radius);
+  padding: var(--space-md);
+  margin-bottom: var(--space-md);
+  background: color-mix(in srgb, var(--navy-300) 8%, transparent);
+}
+
+.a-stat {
+  flex: 1;
+  text-align: center;
+  padding: var(--space-md) var(--space-lg);
+  border: 1px solid var(--admin-hairline);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--navy-300) 10%, transparent);
+}
+.a-stat__value { font-size: var(--font-size-xl); font-weight: 700; font-family: var(--font-mono); color: var(--gold-500); }
+.a-stat__value--positive { color: var(--ink-success); }
+.a-stat__label { font-size: var(--font-size-xs); color: var(--admin-muted); }
+
+.a-metric-row { display: flex; justify-content: space-between; gap: var(--space-md); padding: 6px 0; border-bottom: 1px solid var(--admin-hairline); }
+
+/* §7.3.3 Plaatsingen: bedragen en andere tabelwaarden lijnen uit op hun
+   cijfers (.a-num zet al de mono lettertype; dit voegt alleen de
+   uitlijning toe, apart van .a-num--date dat een andere leesmaat is). */
+.a-num--tab { font-variant-numeric: tabular-nums; }
+/* Notities in de plaatsingsdrawer: vrije tekst met regeleindes, geen
+   opgemaakte HTML (html`` escapet de tekst toch al). */
+.a-notes { white-space: pre-wrap; }
+
+.a-listrow { display: flex; align-items: center; gap: var(--space-md); padding: var(--space-md) 0; border-bottom: 1px solid var(--admin-hairline); }
+.a-listrow:last-child { border-bottom: none; }
+
+.a-scrollbox {
+  max-height: 160px;
+  overflow-y: auto;
+  font-size: var(--font-size-sm);
+  color: var(--navy-100);
+  white-space: pre-wrap;
+  word-break: break-word;
+  background: var(--navy-900);
+  border-radius: var(--radius-sm);
+  padding: 10px;
+  margin: 4px 0 0;
+}
+
+.a-tabbar .btn {
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+}
+.a-tabbar {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+  border-bottom: 1px solid var(--admin-hairline);
+  margin-bottom: var(--space-md);
+  padding-bottom: var(--space-sm);
+}
+.a-tabpane { min-height: 120px; }
+/* §7.2b drawer-laadstaat: "drie vlakke --navy-700-blokken op de plaats van
+   de velden, geen shimmer". Eerste afnemer: de tab Toestemmingen (§7.3.2),
+   drie kaarten dus drie blokken. --navy-600 omdat de kaart zelf al op
+   --navy-700 staat (zelfde redenering als .a-num--loading hierboven). */
+.a-skel-block {
+  height: 88px;
+  border-radius: var(--radius);
+  background: var(--navy-600);
+  margin-bottom: var(--space-md);
+}
+.a-skel-block:last-child { margin-bottom: 0; }
+
+/* §7.3.4: select + knop op de kaart Pipeline. Naast elkaar op breed
+   scherm; op 390px gestapeld, allebei volle breedte (de select mag niet
+   smaller worden dan het label eronder toestaat). */
+.a-pipeline-controls {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--space-md);
+  flex-wrap: wrap;
+  margin-bottom: var(--space-md);
+}
+.a-pipeline-controls .form-group { flex: 1 1 220px; min-width: 0; }
+@media (max-width: 600px) {
+  .a-pipeline-controls { flex-direction: column; align-items: stretch; }
+  /* design-reviewer FIX FIRST op claude/admin-pipeline: flex: 1 1 220px
+     hierboven is een breedtebasis voor de rijrichting op breed scherm; in
+     flex-direction: column wordt diezelfde 220px een HOOGTEbasis, en dus
+     165px lege ruimte tussen select en knop. flex: 0 0 auto laat het
+     formuliergroepje zijn eigen (veld)hoogte houden. */
+  .a-pipeline-controls .form-group { flex: 0 0 auto; }
+  .a-pipeline-controls .btn { width: 100%; }
+}
+
+/* §7.3.4 "Historie": verticale tijdlijn. 2px --navy-600-lijn links, 8px
+   stip per item in --navy-300, --gold-500 voor het nieuwste (het eerste
+   item -- de lijst komt hier al nieuwste-eerst binnen, admin.js sorteert
+   dat vóór het renderen). Hergebruikt door §7.3.6(b) (Activiteitentab). */
+.a-timeline {
+  list-style: none;
+  margin: 0;
+  padding: 0 0 0 24px;
+  position: relative;
+}
+.a-timeline::before {
+  content: "";
+  position: absolute;
+  left: 7px;
+  top: .3em;
+  bottom: .3em;
+  width: 2px;
+  background: var(--navy-600);
+}
+.a-timeline__item {
+  position: relative;
+  padding-bottom: var(--space-md);
+}
+.a-timeline__item:last-child { padding-bottom: 0; }
+.a-timeline__item::before {
+  content: "";
+  position: absolute;
+  left: -21px;
+  top: .3em;
+  width: 8px;
+  height: 8px;
+  border-radius: var(--radius-full);
+  background: var(--navy-300);
+}
+.a-timeline__item--newest::before { background: var(--gold-500); }
+
+.a-clickable { cursor: pointer; }
+/* Geselecteerde rij (§7.2a): eigen vlak plus een gouden linkerrand op de
+   eerste cel. Geen aria-selected: dat attribuut geldt alleen binnen
+   role="grid" en dit is een gewone tabel; het checked-vakje draagt de
+   staat al voor een schermlezer. */
+.a-row-selected > td { background: var(--navy-600); --tblr-table-bg: var(--navy-600); }
+.a-row-selected > td:first-child { box-shadow: inset 2px 0 0 0 var(--gold-500); }
+.a-row-unread { font-weight: 600; }
+
+.a-barchart { display: flex; align-items: flex-end; gap: 6px; height: 120px; width: 100%; }
+.a-barchart__col { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 4px; }
+.a-barchart__cap { font-size: 9px; color: var(--admin-muted); }
+/* De hoogte is data en komt per staaf mee als --a-bar-h; alleen die ene
+   waarde staat nog in een style-attribuut, de rest is deze klasse. */
+/* Vlakke vulling, geen --gold-gradient: decoratieve gradients zijn
+   sitebreed verboden (§8.x.6) en een grafiekbalk is data, geen decoratie
+   (§7.1.1 punt 4). Daarmee gebruikt het paneel --gold-gradient nergens
+   meer. */
+.a-barchart__bar { width: 100%; border-radius: var(--radius-sm) var(--radius-sm) 0 0; background: var(--gold-500); height: var(--a-bar-h, 0); }
+
+/* De vier semantische tekstklassen heten zoals §7.1.3 ze noemt. .a-accent
+   is geen semantische familie maar het goudaccent (§7.2e: goud is geen
+   badgekleur, wel de accentkleur van het paneel). */
+.text-success-ink { color: var(--ink-success); }
+.text-danger-ink { color: var(--ink-error); }
+.text-warning-ink { color: var(--ink-warning); }
+.text-info-ink { color: var(--ink-info); }
+.a-accent { color: var(--gold-400); }
+
+/* ==========================================================================
+   ui.js: modal en drawer bovenop de Bootstrap 5-componenten van Tabler
+   ========================================================================== */
+.a-modal { z-index: 1055; }
+/* Eigen backdrop voor het geval Bootstrap-JS ontbreekt (zie ui.js). Met
+   Bootstrap maakt die zijn eigen backdrop en is deze klasse er niet. */
+/* Bootstraps eigen backdrop draagt alleen .modal-backdrop /
+   .offcanvas-backdrop, nooit .a-backdrop (die klasse zet alleen het eigen
+   vangnet in fallbackShow() hieronder als Bootstrap-JS ontbreekt). Op de
+   gekwalificeerde selector alleen bleef de merkkleur dode code voor elke
+   echte Bootstrap-backdrop: gemeten opacity .24 (Tablers eigen
+   backdrop-opacity) in plaats van de bedoelde .72 (design-reviewer op
+   1212e07). Kleur geldt op de kale klasse (wint op ladingsvolgorde, gelijke
+   specificiteit); opacity moet ook op `.show` staan, want Tabler zet die
+   zelf op .modal-backdrop.show / .offcanvas-backdrop.show (specificiteit
+   0,2,0) -- een losse `.modal-backdrop{opacity:...}` (0,1,0) verliest daar
+   altijd tegen, ongeacht ladingsvolgorde. */
+.modal-backdrop,
+.offcanvas-backdrop { background: var(--navy-950); }
+.modal-backdrop.show,
+.offcanvas-backdrop.show { opacity: .72; }
+/* Het eigen vangnet heeft geen ingebouwde fixed/inset-positionering zoals
+   Bootstraps klasse die wel meebrengt, dus die twee blijven aan
+   .a-backdrop hangen. */
+.modal-backdrop.a-backdrop,
+.offcanvas-backdrop.a-backdrop { position: fixed; inset: 0; z-index: 1050; }
+.a-modal .modal-content,
+.a-drawer.offcanvas {
+  background: var(--navy-900);
+  border: 1px solid var(--admin-hairline);
+  border-radius: var(--radius);
+  color: var(--navy-100);
+}
+.a-modal .modal-body { padding: var(--space-2xl); }
+.a-modal .modal-dialog { max-width: 520px; }
+.a-modal--wide .modal-dialog { max-width: 760px; }
+.a-modal__close {
+  position: absolute;
+  top: var(--space-md);
+  right: var(--space-md);
+  background: none;
+  border: none;
+  color: var(--navy-200);
+  cursor: pointer;
+  font-size: 1.2rem;
+  z-index: 2;
+  /* Aanraakvlak van 44px, met negatieve marge zodat het optisch even
+     groot blijft als voorheen. */
+  min-width: 44px;
+  min-height: 44px;
+  margin: -0.5rem;
+}
+.a-modal__close:hover,
+.a-modal__close:focus-visible { color: var(--gold-400); }
+.a-modal__title { color: var(--white); font-size: var(--font-size-xl); margin: 0 var(--space-xl) var(--space-sm) 0; }
+.a-modal__title--danger { display: flex; align-items: baseline; gap: var(--space-sm); }
+.a-modal__subtitle { margin-bottom: var(--space-lg); font-size: var(--font-size-sm); }
+.a-drawer.offcanvas {
+  width: min(760px, 100vw);
+  /* Boven de backdrop (1050). Tablers offcanvas erft 1045 en verdween
+     anders achter zijn eigen verduistering. */
+  z-index: 1055;
+}
+.a-drawer .offcanvas-body { padding: var(--space-xl); }
+
+/* §7.2b regel 589: op 390px is een drawer offcanvas-bottom, geen
+   offcanvas-end (design-reviewer op 1212e07). Bootstraps eigen
+   .offcanvas-bottom zet height op --bs-offcanvas-height (default 30vh);
+   de tweede klasse hier wint op specificiteit en zet dat op 92vh. */
+.offcanvas-bottom.a-drawer--bottom {
+  height: 92vh;
+  max-height: 92vh;
+  border-radius: var(--radius) var(--radius) 0 0;
+}
+/* Puur decoratieve sleepgreep (aria-hidden, geen interactie): een balkje
+   boven de sluitknop, zoals een van-onder-inschuivend paneel hoort. */
+.a-drawer__grip {
+  width: 40px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--navy-500);
+  margin: 0 auto var(--space-md);
+}
+
+/* §7.2b/§7.2c: het bevestigingsblok en de knoppenrij staan in een eigen
+   voettekst BUITEN de scrollende inhoud (chief-of-staff op 09e99cc): een
+   broer van .modal-body binnen .modal-content, respectievelijk van
+   .offcanvas-body binnen .offcanvas. Beide ouders zijn al een flexkolom
+   (Bootstrap: .modal-content en .offcanvas zetten zelf
+   display:flex;flex-direction:column, en modal-dialog-scrollable geeft
+   .modal-content een max-height terwijl .modal-body en .offcanvas-body
+   zelf al flex:1 1 auto/flex-grow:1 plus overflow-y:auto hebben), dus
+   flexbox houdt deze footer vanzelf op zijn plek: geen position:sticky,
+   geen gemeten padding, geen resize-listener. Twee eerdere pogingen
+   loste dit niet op (1212e07: sticky binnen de scrollcontainer bleef bij
+   scrollTop 0 over de eerste velden liggen; ece9d6d: een gemeten
+   padding-bottom raakte na tabwissels en resizes uit de pas, met een
+   lege band of alsnog overlap als gevolg). flex-shrink:0 voorkomt dat de
+   footer inkrimpt als de inhoud erboven veel ruimte claimt (zelfde
+   conventie als Bootstraps eigen .modal-footer). */
+.a-panel-footer {
+  flex-shrink: 0;
+  background: var(--navy-900);
+  border-top: 1px solid var(--navy-600);
+  padding: var(--space-md) var(--space-2xl);
+}
+.a-drawer .a-panel-footer { padding: var(--space-md) var(--space-xl); }
+.a-panel-footer .a-actions,
+.a-panel-footer .a-panel { margin-top: 0; }
+/* Drawervoettekst (ui.drawer's `footer`-optie): maximaal twee acties,
+   secundair links en primair rechts, in plaats van naast elkaar
+   geclusterd zoals een modal dat al deed en blijft doen (§7.2c-modals
+   veranderen hier bewust niet in uiterlijk). Op 390px staan de acties
+   net als bij een modal gestapeld en op volle breedte (§7.2b, dezelfde
+   regel als hieronder voor .a-modal .a-actions). */
+.a-drawer .a-panel-footer .a-actions { justify-content: space-between; }
+@media (max-width: 576px) {
+  .a-drawer .a-panel-footer .a-actions { flex-direction: column-reverse; }
+  .a-drawer .a-panel-footer .a-actions .btn { width: 100%; }
+}
+
+/* Op een telefoon is de modal fullscreen (§7.2c) en staan de knoppen
+   gestapeld en op volle breedte, met de primaire of destructieve knop
+   bovenaan. De DOM-volgorde is secundair, destructief, primair, dus
+   column-reverse zet de handelende knop boven. */
+@media (max-width: 576px) {
+  .a-modal .a-actions { flex-direction: column-reverse; }
+  .a-modal .a-actions .btn { width: 100%; }
+}
+
+/* Getypte bevestiging voor destructieve acties. */
+.a-confirm-hint { color: var(--admin-muted); font-size: var(--font-size-sm); margin-bottom: var(--space-sm); }
+/* Tablers danger-outline is op navy-900 4,17:1; --ink-error haalt 6,56:1. */
+.a-modal .btn-outline-danger,
+.a-drawer .btn-outline-danger,
+.portal-section .btn-outline-danger {
+  --tblr-btn-color: var(--ink-error);
+  --tblr-btn-border-color: var(--ink-error);
+  --tblr-btn-hover-bg: var(--ink-error);
+  --tblr-btn-hover-color: var(--navy-900);
+}
+.a-confirm-hint code { color: var(--gold-400); }
+/* "Komt niet overeen", leeg tot er iets fout getypt is. */
+.a-confirm-mismatch { font-size: var(--font-size-xs); min-height: 1.2em; margin-top: 4px; }
+
+/* Sorteerbare kolomkoppen (ui.table). aria-sort is de bron van waarheid;
+   het pijltje is puur decoratief. */
+.a-sortable { cursor: pointer; user-select: none; white-space: nowrap; }
+.a-sortable::after { content: "\2195"; opacity: .35; margin-left: .4em; font-size: .85em; }
+.a-sortable[aria-sort="ascending"]::after { content: "\2191"; opacity: 1; color: var(--gold-400); }
+.a-sortable[aria-sort="descending"]::after { content: "\2193"; opacity: 1; color: var(--gold-400); }
+.a-sortable:focus-visible { outline: 2px solid var(--gold-500); outline-offset: -2px; }
+
+/* Tablers eigen focusring op een selectievakje is goud op 25% dekking en
+   haalt 1,8:1; de vloer voor een niet-tekstuele grens is 3:1 (§7.1.2). */
+.form-check-input:focus-visible {
+  outline: 2px solid var(--gold-500);
+  outline-offset: 2px;
+}
+
+/* ==========================================================================
+   Sectie Bewaartermijnen (§7.3.1) en de componenten die zij als eerste
+   nodig had: KPI-tegel (§7.2g), bulkbalk en kaartlijst (§7.2a).
+   ========================================================================== */
+
+/* Mono kapitaalregel boven een waarde. Zet zelf font-family: mono, en hangt
+   dus niet aan .text-uppercase -- die klasse betekent "hoofdletters", niet
+   "mono" (§7.1.4). */
+.a-eyebrow {
+  font-family: var(--font-mono);
+  text-transform: uppercase;
+  letter-spacing: .1em;
+  font-size: var(--font-size-xs);
+  color: var(--admin-muted);
+}
+/* Datawaarden: cijfers, bedragen, tellingen, ID's (§7.1.4). */
+.a-num { font-family: var(--font-mono); }
+.a-num--xl {
+  font-size: var(--font-size-3xl);
+  font-weight: 700;
+  color: var(--white);
+  line-height: 1.15;
+}
+/* Een datum of "n.v.t." op de waardepositie van een KPI-tegel: wel de
+   tegelpositie, niet de cijfermaat van 32px. */
+.a-num--date { font-size: var(--font-size-lg); font-weight: 500; }
+/* Laadstaat van een KPI-waarde (§7.2g): een vlak blok op de plek van het
+   getal, geen spinner en geen 0 die daarna verspringt. --navy-600 omdat de
+   tegel zelf al op --navy-700 staat. */
+.a-num--loading {
+  display: inline-block;
+  width: 3ch;
+  height: 1em;
+  vertical-align: -0.1em;
+  background: var(--navy-600);
+  border-radius: var(--radius-sm);
+}
+
+/* Besluit 1 uit §7.6: categoriebreed goedkeuren wordt op een telefoon niet
+   aangeboden. display:none haalt de knop ook uit de tabvolgorde, dus hij is
+   daar ook met een toetsenbord niet te bereiken. */
+@media (max-width: 600px) {
+  .a-wide-only { display: none !important; }
+}
+
+.a-bulkbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-md);
+  padding: var(--space-md) var(--space-lg);
+  background: var(--navy-700);
+  border-bottom: 1px solid var(--admin-hairline);
+}
+@media (max-width: 600px) {
+  /* Plakt onderaan het scherm, zonder --fixed-stack-offset: dat token zet
+     website/script.js en het paneel laadt dat bestand niet (§7.2a). */
+  /* fixed, niet sticky: sticky binnen een lange tabelkaart scrollt met de
+     kaart mee het beeld uit, en dan is de balk juist weg op het moment dat
+     je hem nodig hebt. De hoogte gaat als --a-bulkbar-h naar de toast. */
+  .a-bulkbar {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 1040;
+    border-top: 1px solid var(--admin-hairline);
+  }
+  /* Een vaste balk dekt af wat eronder ligt: de sectie houdt onderaan
+     evenveel ruimte vrij als de balk hoog is, zodat de laatste rij en de
+     pagineerfooter bereikbaar blijven. */
+  #section-retention { padding-bottom: var(--a-bulkbar-h, 0px); }
+  /* De toast schuift omhoog zolang de bulkbalk staat; de balk zet
+     --a-bulkbar-h zelf op zijn eigen hoogte en weer op 0px bij verdwijnen. */
+  .toast-container {
+    left: var(--space-md);
+    right: var(--space-md);
+    bottom: calc(var(--space-md) + var(--a-bulkbar-h, 0px));
+  }
+  .toast { max-width: none; }
+}
+
+.a-col-check { width: 36px; }
+.a-col-actions { width: 104px; text-align: right; white-space: nowrap; }
+/* Categoriekolom op één regel: een categorienaam van vier woorden maakte
+   de rij anders drie regels hoog. De volledige naam staat in title= en
+   in de kaartweergave onder 768px staat hij alsnog voluit. */
+.a-col-cat {
+  max-width: 12rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Scrollbox met echte regels in plaats van voorgevormde tekst. */
+.a-scrollbox--rows { max-height: 40vh; white-space: normal; padding: 0 10px; }
+.a-scrollbox--rows .a-listrow { padding: var(--space-sm) 0; font-size: var(--font-size-sm); }
+
+.a-clamp {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.a-clamp--open {
+  display: block;
+  overflow: visible;
+}
+
+/* In- en uitklapbare kaart. <details> in plaats van een Collapse-instantie:
+   het werkt zonder JavaScript, is uit zichzelf toetsenbordbereikbaar en is
+   niet afhankelijk van het moment waarop de Tabler-bundel binnen is. */
+.a-disclosure > summary {
+  cursor: pointer;
+  list-style: none;
+  padding: var(--space-md) var(--space-lg);
+  color: var(--white);
+  font-family: var(--font-display);
+  font-size: var(--font-size-lg);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-md);
+  min-height: 44px;
+}
+.a-disclosure > summary::-webkit-details-marker { display: none; }
+.a-disclosure > summary::after {
+  content: "\25BE";
+  color: var(--admin-muted);
+}
+.a-disclosure[open] > summary::after { content: "\25B4"; }
+.a-disclosure > summary:focus-visible {
+  outline: 2px solid var(--gold-500);
+  outline-offset: -2px;
+}
+
+/* Onder 768px is een datatabel geen tabel meer maar een kaartlijst (§7.2a):
+   per record één kaart met de kolomnaam als label boven elke waarde. Eén
+   renderer, één markup; alleen data-label per cel komt erbij. */
+@media (max-width: 767.98px) {
+  .a-cardlist,
+  .a-cardlist tbody,
+  .a-cardlist td {
+    display: block;
+    width: 100%;
+  }
+  .a-cardlist thead { display: none; }
+  /* Kaart: één <tr> is één kaart, en de cellen erin liggen als flexregels
+     (zie de kaartanatomie verderop in dit blok). */
+  .a-cardlist tr {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    column-gap: var(--space-sm);
+    width: 100%;
+    border: 1px solid var(--admin-hairline);
+    border-radius: var(--radius);
+    background: var(--navy-700);
+    padding: var(--space-md);
+    margin-bottom: var(--space-sm);
+  }
+  .a-cardlist td {
+    border: 0;
+    padding: 4px 0;
+  }
+  .a-cardlist td[data-label]::before {
+    content: attr(data-label);
+    display: block;
+    font-family: var(--font-mono);
+    text-transform: uppercase;
+    letter-spacing: .08em;
+    font-size: var(--font-size-xs);
+    color: var(--admin-muted);
+  }
+  .a-cardlist td.a-col-actions {
+    width: 100%;
+    text-align: left;
+    white-space: normal;
+  }
+  .a-cardlist td.a-col-check { width: auto; text-align: left; }
+  /* Kaartanatomie (§7.3.1 390): bovenin de identiteit plus de statusbadge,
+     daaronder onderwerp, termijn en signaal in leesvolgorde, en onderin de
+     knoppen. Flex met order, zodat het dezelfde markup blijft. */
+  .a-cardlist td { order: 5; }
+  .a-cardlist td.a-col-check { order: 1; flex: 0 0 auto; padding-left: 0; padding-right: 0; }
+  .a-cardlist td.a-col-cat {
+    order: 2;
+    /* basis 0 en mag krimpen: de categorie neemt de ruimte die overblijft
+       naast het selectievakje en de statusbadge, en breekt af op twee
+       regels in plaats van de badge naar de volgende regel te duwen */
+    flex: 1 1 8rem;
+    min-width: 0;
+    width: auto;
+    max-width: none;
+    white-space: normal;
+    font-size: var(--font-size-base, 1rem);
+  }
+  .a-cardlist td.a-col-status { order: 3; flex: 0 0 auto; width: auto; margin-left: auto; text-align: right; }
+  .a-cardlist td.a-col-cat::before,
+  .a-cardlist td.a-col-status::before { display: none; }
+  .a-cardlist td.a-col-actions { order: 9; }
+  /* Regel twee van de kaart: onderwerp, verlopen termijn en handeling op
+     één regel in plaats van drie label-waardeparen onder elkaar. De
+     selector hangt aan data-label, hetzelfde haakje waar de kaartlijst
+     zijn labels al uit haalt; alleen de reviewtabel draagt deze drie. */
+  .a-cardlist td[data-label="Onderwerp"],
+  .a-cardlist td[data-label="Termijn verlopen"],
+  .a-cardlist td[data-label="Actie"] {
+    order: 4;
+    flex: 0 0 auto;
+    width: auto;
+    font-size: var(--font-size-sm);
+  }
+  .a-cardlist td[data-label="Onderwerp"]::before,
+  .a-cardlist td[data-label="Actie"]::before { display: none; }
+  .a-cardlist td[data-label="Termijn verlopen"]::before {
+    content: "·";
+    display: inline;
+    margin-right: 4px;
+    color: var(--admin-muted);
+    letter-spacing: 0;
+  }
+  .a-cardlist td[data-label="Ontbrekend signaal"] {
+    order: 6;
+    flex: 0 0 100%;
+    font-size: var(--font-size-sm);
+  }
+  .a-cardlist td[data-label="Ontbrekend signaal"]::before { display: none; }
+
+  /* AVG-suppressielijst (§7.3.5): .a-num--date is de leesmaat voor een
+     datum die de kaart draagt als enige inhoud van die cel (font-size-lg,
+     zie hierboven) -- naast het domein en de reden op dezelfde kaart oogt
+     dat te zwaar. Andere kolommen met een datum verbergen zich onder
+     768px (.a-hide-cardlist, Plaatsingen) of staan alleen als stat-tile
+     (Bewaartermijnen); de suppressielijst toont deze datum juist wel op de
+     kaart, dus dit verkleint hem in plaats van hem te verbergen. */
+  .a-cardlist td[data-label="Toegevoegd op"] {
+    font-size: var(--font-size-sm);
+    font-weight: 400;
+  }
+
+  /* Variant voor een tabel die alleen tellingen draagt (de categoriekaart):
+     label en waarde op één regel naast elkaar, anders wordt elke categorie
+     een kaart van vier regels en staat de lijst eronder van het scherm af. */
+  .a-cardlist--compact td {
+    display: inline-block;
+    width: auto;
+    order: 5;
+    margin-right: var(--space-md);
+  }
+  .a-cardlist--compact td[data-label]::before {
+    display: inline;
+    margin-right: 4px;
+  }
+  .a-cardlist--compact td.a-cell-name {
+    display: block;
+    width: 100%;
+    margin-right: 0;
+  }
+  .a-cardlist td.a-col-actions .btn {
+    width: 100%;
+    margin-top: var(--space-sm);
+  }
+  /* §7.3.3 Plaatsingen, 390: de kaart toont alleen kandidaat, opdracht-
+     gever, type en status plus "Openen" (de spec noemt vacature/start/
+     einde niet en de rijverwijderknop niet). Eigen klasse in plaats van
+     retentie's data-label-aanpak: deze tabel heeft geen kolom met
+     meerdere regels tekst die op één kaartregel moet samenkomen.
+     ".a-cardlist td" hierboven zet zelf al display:block met dezelfde
+     specificiteit (1 klasse + 1 element); ".a-cardlist td.a-hide-cardlist"
+     moet daarom net zo specifiek zijn om te winnen. */
+  .a-cardlist td.a-hide-cardlist,
+  .a-hide-cardlist { display: none; }
+}
+
+/* 44px-tikdoel (§8.x.0). Sectiebreed voor #section-retention en
+   #section-candidates (die twee secties zijn tot nu toe door deze pas
+   gegaan), en breed voor .offcanvas/.modal: elke drawer en elke modal in
+   het paneel deelt dezelfde knop- en veldmaten (§7.2b/§7.2c), dus die twee
+   horen bij de gedeelde componentklasse en niet bij één sectie. Andere
+   secties krijgen dit bij hun eigen §8.x.0-pas. Een selectievakje wordt
+   niet zelf 44px groot -- dat levert een enorm vierkant op -- maar krijgt
+   zijn tikdoel van het label eromheen (.a-tap).
+   §7.3.4: de fasewisselaar in de tab Pipeline staat in de offcanvas zelf,
+   niet in een modal -- .modal .form-select/.form-control dekte dat niet,
+   dus .offcanvas krijgt dezelfde twee regels. */
+@media (max-width: 600px) {
+  #section-retention .btn,
+  #section-candidates .btn,
+  #section-placements .btn,
+  #section-gdpr .btn,
+  .offcanvas .btn,
+  .modal .btn,
+  .offcanvas .form-select,
+  .offcanvas .form-control,
+  .modal .form-select,
+  .modal .form-control {
+    min-height: 44px;
+    min-width: 44px;
+  }
+  /* design-reviewer op 2e47403: de radiolabel zelf (.form-check-label,
+     "Vastleggen"/"Intrekken" in de drie modals van §7.3.2) is een korte
+     tekstregel, geen 44px hoog. De ellips-bug verborg dit eerder, want
+     toen was de hele rij toch al 390px breed. flex + min-height zet het
+     tikdoel op de hele rij (label plus radio), niet alleen op de tekst. */
+  .modal .form-check,
+  .offcanvas .form-check {
+    min-height: 44px;
+    display: flex;
+    align-items: center;
+  }
+  .a-tap {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 44px;
+    min-height: 44px;
+  }
+}
+
+/* ==== Bewegingsvoorkeur ==== */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}

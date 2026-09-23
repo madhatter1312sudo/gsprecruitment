@@ -23,6 +23,7 @@ rather than weakened or silently passed.
 import importlib
 import inspect
 import logging
+import os
 import pathlib
 import re
 from datetime import datetime, timezone
@@ -542,6 +543,19 @@ _GENERIC_CTX = {
     "event_label": "Testmelding",
     "detail": "Detail met <b>opmaak</b> & een teken",
     "deeplink": "https://gsprecruitment.nl/admin/#leads",
+    # WS3b/WS3c: de drie nieuwe templates. Deze dict is bewust de UNIE van
+    # alles wat elke template kan vragen -- render() gooit een KeyError bij
+    # een ontbrekend veld (dat is zijn contract), dus een nieuwe template
+    # die hier niet in staat laat deze test terecht falen in plaats van
+    # stilletjes ongecontroleerd te blijven.
+    "referred_by": "Voorbeeld & Collega",
+    "date_found": "2026-09-11",
+    "deadline": "2026-10-11",
+    "unsubscribe_link": "https://gsprecruitment.nl/unsubscribe#token=abc",
+    "jobs": [
+        {"title": "Embedded Software Engineer <script>alert(1)</script>",
+         "location": "Eindhoven", "url": "https://gsprecruitment.nl/vacature.html?id=1"},
+    ],
 }
 
 
@@ -553,17 +567,47 @@ def test_verify_email_template_escapes_html_in_full_name():
     assert "<b>x</b>" not in html
 
 
+# Eén uitzondering op het gedachtestreepjesverbod, en precies één: het
+# Art. 14-blok van `referral_confirm` citeert de vaste tekst uit
+# docs/SOURCING-SOP.md §3.2 woordelijk, en §6 punt 3 verbiedt elke
+# afwijking buiten de vierkante haken -- ook een "--" waar de SOP een
+# "—" schrijft. De uitzondering wordt hieronder niet als kopie
+# opgeschreven maar uit de SOP zelf gelezen, zodat zij niet breder kan
+# worden dan wat daar staat.
+_SOP_PATH = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))),
+    "docs", "SOURCING-SOP.md",
+)
+
+
+def _sop_quoted_sentences_with_an_em_dash(lang):
+    """De zinnen uit het §3.2-blok die zelf een em-dash dragen."""
+    with open(_SOP_PATH, encoding="utf-8") as f:
+        lines = f.read().splitlines()
+    marker = "**NL:**" if lang == "nl" else "**EN:**"
+    start = next(i for i, line in enumerate(lines) if line.strip() == marker)
+    quote = next(line for line in lines[start:start + 4] if line.startswith("> *"))
+    block = quote[len("> *"):].rstrip().rstrip("*")
+    return [part for part in block.split(". ") if "\u2014" in part]
+
+
 @_skip_no_040
 @pytest.mark.parametrize("lang", ["nl", "en"])
 def test_every_template_has_nonempty_subject_kvk_footer_and_no_em_dash(lang):
     names = sorted(email_templates._RENDERERS.keys())
     assert names, "services/email_templates.py registers no templates at all"
+    allowed = _sop_quoted_sentences_with_an_em_dash(lang)
+    assert allowed, "de SOP-tekst met de em-dash is niet gevonden"
     for name in names:
         subject, text, html = email_templates.render(name, dict(_GENERIC_CTX), lang)
         assert subject.strip(), f"{name}/{lang} has an empty subject"
         assert "KvK 75545586" in html, f"{name}/{lang} html is missing the shared footer"
         for label, value in (("subject", subject), ("text", text), ("html", html)):
-            assert "\u2014" not in value, f"{name}/{lang} {label} contains an em dash (U+2014): {value!r}"
+            stripped = value
+            if name == "referral_confirm":
+                for sentence in allowed:
+                    stripped = stripped.replace(sentence, "")
+            assert "\u2014" not in stripped, f"{name}/{lang} {label} contains an em dash (U+2014): {value!r}"
 
 
 @_skip_no_040
@@ -593,6 +637,34 @@ _ALLOWED_SEND_CALL_SITES = {
     ("services.scheduler", "talentpool_reminder_job"),
     ("services.notify", "_notify_owner_email"),
     ("routers.outreach", "approve_draft"),
+    # WS3b/WS3c -- alle drie beoordeeld tegen de regel hierboven:
+    #
+    # admin_create_referral verstuurt wél naar een candidates.email-rij,
+    # maar precies één keer, op de handeling van een ingelogde beheerder
+    # (require_role("admin")), en de inhoud is de wettelijk verplichte
+    # Art. 14-kennisgeving met een bevestigingsvraag -- geen wervend
+    # bericht. Het endpoint weigert een adres op de suppressielijst en
+    # weigert een adres dat al een candidates-rij heeft. De menselijke
+    # goedkeuringsstap is de beheerder die dit endpoint aanroept; er is
+    # geen job, routine of cron die het kan triggeren.
+    ("routers.admin", "admin_create_referral"),
+    #
+    # dormant_account_warning_job mailt naar users.email (een eigen
+    # portaalaccount), nooit naar een gesourcete candidates-rij, en zegt
+    # alleen dat een ongebruikt account op een beoordelingslijst komt.
+    ("services.scheduler", "dormant_account_warning_job"),
+    #
+    # job_alert_job mailt wél naar candidates.email, maar uitsluitend naar
+    # rijen met job_alert_optin_at gezet. Die kolom kent precies twee
+    # schrijvers, allebei een eigen handeling van de betrokkene zelf: de
+    # portaalschakelaar PUT /api/v1/candidate/job-alerts (ingelogd) en het
+    # per e-mail bevestigde job_alerts-vinkje op talentpool_optin_requests.
+    # Geen sourcing-pad, import, beheerder of routine kan hem vullen; de
+    # selectie eist daarnaast geen consent_withdrawn_at, geen
+    # job_alert_unsubscribed_at en afwezigheid op de suppressielijst, en
+    # elk bericht draagt een een-klik-afmeldlink. Zie de uitgebreide
+    # toelichting boven JOB_ALERT_CANDIDATE_SQL in services/scheduler.py.
+    ("services.scheduler", "job_alert_job"),
 }
 
 

@@ -1,0 +1,70 @@
+name: Seed vacatures (handmatig)
+
+# Laadt de 27 poolvacatures uit talent-os/backend/data/pool_vacancies.json
+# in de productiedatabase, via dezelfde SSH-verbinding als deploy.yml.
+# Bewust niet gekoppeld aan een push: het is data, geen schema. De eigenaar
+# start deze workflow zelf (Actions > Seed vacatures > Run workflow), eerst
+# als droogloop, daarna met apply=true. Het script is idempotent op
+# (client_id, title, seniority); nogmaals draaien voegt niets dubbel toe.
+# Terugdraaien: zie de docstring van scripts/seed_pool_vacancies.py.
+#
+# Er wordt niets uitgecheckt: alles draait over SSH op de code die de laatste
+# deploy naar de VPS heeft gezet. De gekozen ref bij "Run workflow" maakt dus
+# niet uit; wat telt is wat er op main is gedeployd.
+
+on:
+  workflow_dispatch:
+    inputs:
+      apply:
+        description: "Echt invoeren (false = alleen droogloop)"
+        type: boolean
+        default: false
+
+# Eigen groep, niet deploy-production: GitHub houdt per groep maar één
+# wachtende run vast, dus een gedeelde groep zou een wachtende deploy kunnen
+# annuleren. De seed doet alleen `run --rm` en raakt de draaiende containers
+# niet, dus samenloop met een deploy is onschadelijk.
+concurrency:
+  group: seed-vacatures
+  cancel-in-progress: false
+
+jobs:
+  seed:
+    runs-on: ubuntu-latest
+    # Zelfde variabelen en terugvalwaarden als deploy.yml; houd ze gelijk.
+    env:
+      VPS_HOST: ${{ vars.VPS_HOST || '188.245.254.248' }}
+      VPS_USER: ${{ vars.VPS_USER || 'gsp' }}
+      VPS_PATH: ${{ vars.VPS_PATH || '/home/gsp/projects/gsp-recruitment' }}
+    steps:
+      - name: Setup SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.VPS_SSH_PRIVATE_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -H "$VPS_HOST" >> ~/.ssh/known_hosts
+
+      - name: Droogloop (altijd)
+        run: |
+          ssh "${VPS_USER}@${VPS_HOST}" "
+            cd ${VPS_PATH} && \
+            docker compose run --rm -T backend python scripts/seed_pool_vacancies.py
+          "
+
+      - name: Invoeren (alleen bij apply=true)
+        if: ${{ inputs.apply }}
+        run: |
+          ssh "${VPS_USER}@${VPS_HOST}" "
+            cd ${VPS_PATH} && \
+            docker compose run --rm -T backend python scripts/seed_pool_vacancies.py --apply
+          "
+
+      - name: Controle publieke vacaturelijst (alleen bij apply=true)
+        if: ${{ inputs.apply }}
+        run: |
+          count=$(curl -fsS --retry 3 --retry-all-errors -H "User-Agent: gsp-ops" https://api.gsprecruitment.nl/api/public/jobs | python3 -c 'import json,sys; d=json.load(sys.stdin); print(sum(1 for j in d if j.get("anonymous_client") is True) if isinstance(d, list) else -1)')
+          echo "Poolvacatures (anonieme opdrachtgever) op productie: ${count}"
+          if [ "${count}" -lt 27 ]; then
+            echo "Verwacht minstens 27 na apply, gevonden ${count}" >&2
+            exit 1
+          fi
