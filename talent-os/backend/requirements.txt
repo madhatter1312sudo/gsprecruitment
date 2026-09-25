@@ -11,7 +11,7 @@ pydantic-settings>=2.15.0,<3.0.0
 asyncpg>=0.31.0,<1.0.0
 
 # HTTP client (Apollo.io integration, OpenRouter calls)
-httpx>=0.26.0,<1.0.0
+httpx>=0.28.1,<1.0.0
 
 # Auth
 # passlib[bcrypt] removed (WS-E.9): core/security.py hashes directly with
