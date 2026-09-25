@@ -51,7 +51,7 @@ google-auth-oauthlib>=1.4.1,<2.0.0
 # SENTRY_DSN is set (core/monitoring.py) -- when it is, send_default_pii is
 # forced off and candidate/client PII is scrubbed via a before_send hook.
 # See core/config.py / .env.example.
-sentry-sdk[fastapi]==2.68.1
+sentry-sdk[fastapi]==2.69.2
 
 # Testing (CI only, not needed at runtime)
 # >=9.0.3 for PYSEC-2026-1845.
