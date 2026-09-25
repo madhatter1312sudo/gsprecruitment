@@ -6,4 +6,4 @@
 # Install alongside requirements.txt for local dev:
 #   pip install -r requirements.txt -r requirements-dev.txt
 
-pip-audit>=2.7.0,<3.0.0
+pip-audit>=2.10.1,<3.0.0
