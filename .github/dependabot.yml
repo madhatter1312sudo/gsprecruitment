@@ -16,10 +16,27 @@ updates:
           - "patch"
 
   # Mobile app (Expo/React Native, app/package.json).
+  # Packages whose version is set by the Expo SDK (expo@<sdk>'s
+  # bundledNativeModules.json) are ignored here: they move together in one
+  # deliberate SDK-upgrade PR via `npx expo install --fix`, never one at a
+  # time. Bumping them alone (expo-router 58 on SDK 57, react-native 0.87 on
+  # a 0.86 SDK) passes tsc and jest but breaks the native build.
   - package-ecosystem: "npm"
     directory: "/app"
     schedule:
       interval: "weekly"
+    ignore:
+      - dependency-name: "expo"
+      - dependency-name: "expo-*"
+      - dependency-name: "@expo/*"
+      - dependency-name: "jest-expo"
+      - dependency-name: "react"
+      - dependency-name: "react-dom"
+      - dependency-name: "react-test-renderer"
+      - dependency-name: "@types/react"
+      - dependency-name: "react-native"
+      - dependency-name: "react-native-*"
+      - dependency-name: "@react-native/*"
     groups:
       minor-and-patch:
         update-types:
