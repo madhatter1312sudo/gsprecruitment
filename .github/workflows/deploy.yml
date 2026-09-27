@@ -75,8 +75,9 @@ jobs:
 
       - name: Sync website (frontend) to Cloudflare via git push
         run: |
-          # The frontend is on Cloudflare Pages, which auto-deploys from this repo
-          echo "Frontend is auto-deployed by Cloudflare Pages from this repository"
+          # The frontend is the Cloudflare Worker "gsprecruitment" serving website/
+          # as static assets (wrangler.jsonc); Cloudflare builds it from this repo.
+          echo "Frontend is auto-deployed by the Cloudflare Worker gsprecruitment from this repository"
 
       - name: Tag current image for rollback before replacing it
         run: |
