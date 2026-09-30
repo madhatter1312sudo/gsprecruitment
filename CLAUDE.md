@@ -6,7 +6,7 @@ GSP is geen IND-erkend referent; sponsorschap van kennismigranten loopt via een 
 
 ## Map
 - `talent-os/backend` — FastAPI + PostgreSQL API (production: api.gsprecruitment.nl). Routers per domain, SQL migrations in `migrations/`.
-- `website/` — public site + blog + candidate/client portals; `website/admin/` is the Tabler 1.4 admin panel (dark navy/gold).
+- `website/` — public site + blog + candidate/client portals; `website/admin/` is the Tabler 1.4 admin panel (dark navy/gold). Hosted as the Cloudflare Worker `gsprecruitment` with static assets (`wrangler.jsonc`), not Cloudflare Pages; custom domains and redirects are set on that Worker.
 - `app/` — Expo SDK 57 / React Native candidate app (see `app/CLAUDE.md`).
 - `talent-os/docker-compose.yml`, `nginx.conf`, `scripts/deploy.sh` — infra.
 - `SITE-DESIGN-SPEC.md`, `ENTERPRISE-ARCHITECTURE-SPEC.md`, `GSP-PROFITABILITY-PLAN-2026.md` — living specs.

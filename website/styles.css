@@ -507,7 +507,7 @@ body:not(.portal) .card > .mark:first-child, .service-card > .mark:first-child,
    Never --gold-600/700 as text, never a filled --gold-300 background. */
 .mark.code { color: var(--gold-ink); }
 /* On dark surfaces (page-hero, trust strip in the hero) */
-.page-hero .trust-badge { border-color: var(--navy-500); }
+.page-hero .trust-badge { border-color: var(--navy-500); color: var(--navy-100); }
 .trust-strip .ts-item { color: var(--navy-100); }
 .trust-strip--light .ts-item { color: var(--gray-500); }
 
@@ -892,7 +892,7 @@ section { padding: 100px 0; }
   display: block;
   width: 22px;
   height: 2px;
-  background: var(--text);
+  background: #fff;
   border-radius: 2px;
   transition: var(--transition);
 }
@@ -1514,26 +1514,6 @@ section { padding: 100px 0; }
 .form-error { color: #dc2626; font-size: 0.85rem; text-align: center; display: none; }
 .form-success { color: #16a34a; font-size: 0.92rem; text-align: center; display: none; padding: 14px; background: rgba(22, 163, 74, 0.08); border-radius: var(--radius-sm); }
 
-/* ── Preloader ──────────────────────────────────────────── */
-#preloader {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: var(--bg);
-  z-index: 9999;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-direction: column;
-  gap: 24px;
-  transition: opacity 0.2s ease;
-}
-#preloader.hidden { opacity: 0; pointer-events: none; }
-#preloader img { height: 42px; width: auto; }
-.preloader-bar { width: 200px; height: 3px; background: var(--bg-alt); border-radius: 2px; overflow: hidden; }
-.preloader-fill { height: 100%; width: 0%; background: linear-gradient(90deg, var(--gold), var(--gold-dark)); border-radius: 2px; transition: width 0.15s linear; }
 
 /* ── Animations ─────────────────────────────────────────── */
 @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
@@ -1688,7 +1668,6 @@ section { padding: 100px 0; }
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
   }
-  #preloader { transition-duration: 0.01ms !important; }
   .range-fill { transition-duration: 0.01ms !important; }
 }
 
@@ -1769,7 +1748,7 @@ input[type="checkbox"] { accent-color: var(--gold); }
 /* ── Print ──────────────────────────────────────────────── */
 @media print {
   body { background: #fff; color: #000; font-size: 11pt; }
-  .header, .hamburger, .lang-btn, .modal-overlay, #preloader,
+  .header, .hamburger, .lang-btn, .modal-overlay,
   .btn, .hero-actions, .jobs-filters, .quiz-lead-form { display: none !important; }
   section { padding: 20px 0; page-break-inside: avoid; }
   .container { max-width: 100%; padding: 0; }

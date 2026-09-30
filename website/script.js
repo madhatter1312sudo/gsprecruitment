@@ -4,7 +4,7 @@ const GSP_WHATSAPP = '31617913965';
 
 /* ==========================================================================
    GSP Recruitment — Main Application Script
-   All features: preloader, lang toggle, hamburger, scroll animations, FAQ,
+   All features: lang toggle, hamburger, scroll animations, FAQ,
    auth modal, job board, salary calculator, match quiz, contact form, live stats,
    testimonials carousel, cookie consent, back-to-top
    ========================================================================== */
@@ -141,57 +141,6 @@ const GSP_WHATSAPP = '31617913965';
       const isBackForward = navEntry ? navEntry.type === 'back_forward' : false;
       if (target && !isBackForward) target.scrollIntoView();
     }
-  }
-
-  // ── Preloader ──────────────────────────────────────────
-  function initPreloader() {
-    const preloader = $('preloader');
-    const fill = $('preloaderFill');
-    if (!preloader) return;
-
-    let progress = 0;
-    let interval = setInterval(() => {
-      progress += Math.random() * 8 + 2;
-      if (progress >= 95) {
-        progress = 95;
-        clearInterval(interval);
-      }
-      if (fill) fill.style.width = progress + '%';
-    }, 120);
-
-    let dismissed = false;
-    const dismiss = () => {
-      if (dismissed) return;
-      dismissed = true;
-      clearInterval(interval);
-      if (fill) fill.style.width = '100%';
-      setTimeout(() => preloader.classList.add('hidden'), 200);
-    };
-
-    window.addEventListener('load', () => {
-      clearInterval(interval);
-      const finish = () => {
-        if (fill) fill.style.width = '100%';
-        setTimeout(() => { dismissed = true; preloader.classList.add('hidden'); }, 300);
-      };
-      if (progress >= 90) {
-        finish();
-      } else {
-        const finInterval = setInterval(() => {
-          progress += Math.random() * 5 + 2;
-          if (progress >= 100) {
-            clearInterval(finInterval);
-            finish();
-          }
-          if (fill) fill.style.width = progress + '%';
-        }, 80);
-      }
-    });
-
-    // Never let the preloader sit on top of content: dismiss unconditionally
-    // if resources stall or a script errors before 'load' fires.
-    window.addEventListener('error', dismiss);
-    setTimeout(dismiss, 2500);
   }
 
   // ── Hamburger Menu ─────────────────────────────────────
@@ -734,8 +683,7 @@ const GSP_WHATSAPP = '31617913965';
   }
 
   // Empty state (§8.x.5): a real, current state — not a hypothetical
-  // placeholder — shown both when #jobsGrid has zero live vacancies and
-  // when #homeVacanciesGrid's fetch resolves to an empty list.
+  // placeholder — shown when #jobsGrid has zero live vacancies.
   function jobCardEmpty(ctaClass) {
     return `
       <div class="card-data card-data--empty" style="grid-column:1/-1;max-width:420px;margin-inline:auto">
@@ -969,12 +917,9 @@ const GSP_WHATSAPP = '31617913965';
   }
 
   // ── Homepage Vacancy Module ─────────────────────────────
-  // §8.x.1 archetype 3 / §8.x.5: on an empty list the section now shows
-  // the same compact empty-state datacard as #jobsGrid (talentpool CTA)
-  // instead of hiding — a homepage never silently drops a conversion
-  // chance. A fetch error keeps the existing behavior (hide the section):
-  // this band is supplementary, vacatures.html is the primary listing and
-  // is where the error state must be visible instead.
+  // Shows up to three live roles. On an empty list or a fetch error the
+  // section stays hidden: this band is supplementary, vacatures.html is
+  // the primary listing and shows the empty and error states.
   function initHomeVacancies() {
     const section = $('homeVacancies');
     const grid = $('homeVacanciesGrid');
@@ -986,9 +931,11 @@ const GSP_WHATSAPP = '31617913965';
         return res.json();
       })
       .then(data => {
+        // Zero live roles: keep the band hidden. An empty board on the
+        // homepage tells a visiting hiring manager the agency has no work;
+        // vacatures.html still shows the empty state to candidates.
         if (!Array.isArray(data) || data.length === 0) {
-          grid.innerHTML = jobCardEmpty('vac-link');
-          section.style.display = '';
+          section.style.display = 'none';
           return;
         }
         const jobs = data.slice(0, 3);
@@ -1764,7 +1711,6 @@ const GSP_WHATSAPP = '31617913965';
   document.addEventListener('DOMContentLoaded', () => {
     handleGoogleAuthCallback();
     initLang();
-    initPreloader();
     initHamburger();
     initHeaderScroll();
     initScrollAnimations();
