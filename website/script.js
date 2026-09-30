@@ -1550,9 +1550,9 @@ const GSP_WHATSAPP = '31617913965';
     // page's primary content at first paint, for example the vacatures
     // filter bar or the contact form heading, which both sit close to the
     // fold on a 1440x900 first view. The text itself is one ellipsized
-    // line (full copy in the title attribute), but the card is not one
-    // row: at 390px the flex row wraps into three (text, privacy link,
-    // accept button) and the card measures 358x144. That height is what
+    // line (full copy in the title attribute). Under 480px styles.css
+    // keeps it one slim row: the text wraps to two lines beside the
+    // button and the privacy link is hidden. The card's height is what
     // applyBodyOffset() below publishes as --fixed-stack-offset, so the
     // contact rail, the back-to-top button and the toast container move
     // up by exactly that much while the banner stands.
