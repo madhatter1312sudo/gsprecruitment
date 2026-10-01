@@ -61,4 +61,4 @@ pytest>=9.1.1,<10.0.0
 # bewaken dat de migraties vóór de nieuwe backend draaien. Alleen
 # voor die test; geen enkele runtime-module importeert yaml. Zelfde
 # versie als requirements.lock al pinde.
-PyYAML>=6.0,<7.0
+PyYAML>=6.0.3,<7.0
